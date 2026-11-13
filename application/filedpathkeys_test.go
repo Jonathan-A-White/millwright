@@ -159,3 +159,28 @@ func TestAStoryFiledFromATestersFindingCarriesNoCallersOK(t *testing.T) {
 	}
 	noneOfTheSourcesKeys(t, story.Merged())
 }
+
+func TestACodemapTrimBugCarriesNoHostWhy(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", theSourceStory())
+	report, err := closeOutWithMap(t, tracker, "mw-x.1", 0, &aCodemapGate{runs: []application.Checked{passingGate, overTheCap(10300)}})
+	if err != nil || !report.Landed {
+		t.Fatalf("expected the story landed, got %v and %+v", err, report)
+	}
+	bugs := trimBugs(t, tracker)
+	if len(bugs) != 1 {
+		t.Fatalf("expected one trim bug, got %+v", bugs)
+	}
+	path := bugs[0].Merged()
+	if path.HostWhy != "" {
+		t.Errorf("expected no host_why copied from the source, got %q", path.HostWhy)
+	}
+	if path.CallersOK != "" || path.Bump != "" || path.MaxTurns != "" {
+		t.Errorf("expected none of the source's callers_ok, bump or max_turns, got %+v", path)
+	}
+	// The trim bug sets its own files and size.
+	if path.Files != "docs/codemap.md" || path.Size != domain.SizeXS {
+		t.Errorf("expected the map as the trim bug's files and size XS, got %q and %q", path.Files, path.Size)
+	}
+}
