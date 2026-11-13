@@ -66,3 +66,34 @@ Feature: A story whose acceptance changed after its claim is handed back
       """
     When mw closes out "mw-gq6.1"
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
+
+  Scenario: A story the Mayor re-scoped after the work was done lands on his word
+    Given the story "mw-gq6.1" was claimed with the acceptance:
+      """
+      1. The first thing works.
+      2. go test ./... passes.
+      """
+    And the acceptance of "mw-gq6.1" now reads:
+      """
+      1. The first thing works.
+      2. go test ./... passes, headless.
+      """
+    And the Mayor wrote a closing comment on "mw-gq6.1" after its newest commit
+    And mw next is run with --rescoped-by-mayor "AC 2 reworded after the headless artefact"
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" carries a comment quoting: RESCOPED-BY-MAYOR: AC 2 reworded after the headless artefact
+
+  Scenario: A re-scope with no closing comment of the Mayor's after it is still refused
+    Given the story "mw-gq6.1" was claimed with the acceptance:
+      """
+      1. The first thing works.
+      """
+    And the acceptance of "mw-gq6.1" now reads:
+      """
+      1. The first thing works, differently.
+      """
+    And mw next is run with --rescoped-by-mayor "reworded"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the report says it stopped for "acceptance-changed"

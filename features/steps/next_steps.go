@@ -32,9 +32,12 @@ import (
 // worktrees and the ledger are all real; nothing here touches the factory's own
 // vault, rigs, beads database, terminal or remote.
 type nextContext struct {
-	root  string // holds the origin, both clones and the vault
-	vault string
-	rig   string
+	// rescopedBy is the why of mw next --rescoped-by-mayor, empty without the
+	// flag (features/acceptance_changed.feature).
+	rescopedBy string
+	root       string // holds the origin, both clones and the vault
+	vault      string
+	rig        string
 	// rigName is what the rig is called, as the scenario named it; empty is
 	// "millwright" (rigKey).
 	rigName string
@@ -1163,6 +1166,7 @@ func (c *nextContext) nextUseCase() application.Next {
 
 		RetryFromBranch: !c.fromMain,
 		HasGristTestKey: c.hostGristKey(),
+		RescopedByMayor: c.rescopedBy,
 		Now:             func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
 		Out:             &c.printed,
 		Err:             &c.stderr,

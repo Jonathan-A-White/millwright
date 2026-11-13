@@ -1,10 +1,12 @@
 package application
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // AcceptanceAtClaimField is the metadata a story carries to say what its
@@ -100,5 +102,120 @@ func acceptanceChangedRefusal(c *closeOut) (Refusal, bool) {
 		said += fmt.Sprintf("\n%d line(s) the claim had were taken out or changed.", change.Dropped)
 	}
 	said += "\nThe claim is given back and the branch kept: the next session works the whole acceptance."
+	said += "\nIf the Mayor re-scoped it on purpose and wrote a closing comment after the change, " + RescopeRecipe(c.id) + " lands it without a fresh session."
 	return Refusal{ReasonAcceptanceChanged, "the acceptance changed after the claim of " + c.id, said}, true
+}
+
+// RescopedMark opens the comment that records a Mayor's re-scope of a story
+// whose work is done (mw-gq6.1147): who wrote it and when are the comment's
+// own, and the why follows the mark. RescopedAcceptanceLine, on the next line,
+// pins the acceptance it answers, so that a change made after it is not
+// answered by it.
+const (
+	RescopedMark           = "RESCOPED-BY-MAYOR:"
+	RescopedAcceptanceLine = "acceptance now: "
+)
+
+// RescopeRecipe is the one line that lands a handed-back story the Mayor has
+// re-scoped: the Mayor rewords the criteria and writes a closing comment of his
+// own, then runs this.
+func RescopeRecipe(id string) string {
+	return "mw next " + id + ` --no-dispatch --rescoped-by-mayor "<why>"`
+}
+
+// builderAuthor says a comment was written by a Builder session rather than by
+// the Mayor or the Governor: its author is builder@<host>.
+func builderAuthor(author string) bool {
+	return strings.HasPrefix(strings.TrimSpace(author), "builder@")
+}
+
+// rescopeHash is the acceptance a RESCOPED-BY-MAYOR: comment pins, "" when the
+// comment is not one or pins none.
+func rescopeHash(comment Comment) string {
+	text := strings.TrimSpace(comment.Text)
+	if !strings.HasPrefix(text, RescopedMark) {
+		return ""
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if rest, found := strings.CutPrefix(strings.TrimSpace(line), RescopedAcceptanceLine); found {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+// newestCommit is when the story's branch was last committed to; zero when the
+// commits cannot be read.
+func (n Next) newestCommit(ctx context.Context, c *closeOut, base string) time.Time {
+	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, base)
+	if err != nil {
+		return time.Time{}
+	}
+	var newest time.Time
+	for _, commit := range commits {
+		if commit.Committed.After(newest) {
+			newest = commit.Committed
+		}
+	}
+	return newest
+}
+
+// acceptanceRescoped says the Mayor answered the change of the story's
+// acceptance since the claim (mw-gq6.1147): the bead holds a RESCOPED-BY-MAYOR:
+// comment pinning the acceptance it holds now, and a closing comment not
+// written by a Builder, after the branch's newest commit. It reads, and
+// anything it cannot read counts as no.
+func (n Next) acceptanceRescoped(ctx context.Context, c *closeOut, base string) bool {
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return false
+	}
+	now := AcceptanceAtClaim(c.detail.Acceptance)
+	pinned := false
+	for _, comment := range comments {
+		if hash := rescopeHash(comment); hash != "" {
+			pinned = hash == now
+		}
+	}
+	if !pinned {
+		return false
+	}
+	committed := n.newestCommit(ctx, c, base)
+	for _, comment := range comments {
+		if comment.Created.After(committed) && !builderAuthor(comment.Author) && isClosingComment(comment.Text) {
+			return true
+		}
+	}
+	return false
+}
+
+// recordRescope writes the RESCOPED-BY-MAYOR: comment a --rescoped-by-mayor
+// flag asks for, when the acceptance did change since the claim and the bead
+// does not already hold one for this acceptance. Who and when are the
+// comment's own.
+func (n Next) recordRescope(ctx context.Context, c *closeOut, report *NextReport) error {
+	if strings.TrimSpace(n.RescopedByMayor) == "" {
+		return nil
+	}
+	if _, changed := AcceptanceChangedSince(c.detail.AcceptanceAtClaim, c.detail.Acceptance); !changed {
+		report.Notes = append(report.Notes, "--rescoped-by-mayor: the acceptance of "+c.id+" has not changed since the claim, so nothing was recorded")
+		return nil
+	}
+	now := AcceptanceAtClaim(c.detail.Acceptance)
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return fmt.Errorf("recording the re-scope of %s: the comments could not be read: %w", c.id, err)
+	}
+	for _, comment := range comments {
+		if rescopeHash(comment) == now {
+			return nil
+		}
+	}
+	text := RescopedMark + " " + oneLine(n.RescopedByMayor) + "\n" + RescopedAcceptanceLine + now +
+		"\n(mw next wrote this on the Mayor's word: the acceptance changed after the claim, and his closing comment answers it.)"
+	if err := n.Tracker.CommentOnStory(ctx, c.id, text); err != nil {
+		return fmt.Errorf("recording the re-scope of %s: %w", c.id, err)
+	}
+	report.Notes = append(report.Notes, "recorded the Mayor's re-scope of "+c.id+" on the bead: "+oneLine(n.RescopedByMayor))
+	return nil
 }
