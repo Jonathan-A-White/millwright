@@ -1232,3 +1232,45 @@ func TestSyncLeavesACloudFileBesideOtherDirtyFilesAlone(t *testing.T) {
 		t.Fatalf("expected the cloud file alone committed, got %+v", commits)
 	}
 }
+
+// A rebase stopped in the vault with nothing listed as changed (the status is
+// clean) is damage all the same: the sync names it and does not pull onto the
+// half-way checkout (mw-gq6.1206).
+func TestASyncOnAStoppedRebaseWithACleanStatusNamesItAndDoesNotPull(t *testing.T) {
+	sync, files, _ := syncing(t)
+	files.Damaged = application.VaultDamage{Rebasing: true}
+	files.Incoming = 2
+
+	report, err := sync.Run(context.Background())
+	blocked, ok := application.Blocked(err)
+	if !ok {
+		t.Fatalf("expected the vault to be blocked, got %v", err)
+	}
+	if !report.Damage.Rebasing || !blocked.Damage.Rebasing {
+		t.Errorf("expected the stopped rebase on the report and the refusal, got %+v / %+v", report.Damage, blocked.Damage)
+	}
+	if files.PullTries() != 0 {
+		t.Errorf("expected no pull onto a stopped rebase, got %d", files.PullTries())
+	}
+	if report.Quiet() {
+		t.Errorf("a sync that found a stopped rebase is not quiet: %s", report)
+	}
+	if got := err.Error(); !strings.Contains(got, "rebase") || strings.Contains(got, "0 files") {
+		t.Errorf("expected the refusal to name the rebase and no files, got %q", got)
+	}
+	if got := report.String(); !strings.Contains(got, "rebase") || strings.Contains(got, "0 files") {
+		t.Errorf("expected the report to name the rebase and no files, got %q", got)
+	}
+}
+
+// A vault whose damage cannot be read is judged sound, as before.
+func TestASyncWhoseDamageCannotBeReadGoesOnToPull(t *testing.T) {
+	sync, files, _ := syncing(t)
+	files.DamageErr = errors.New("git is slow")
+	files.Incoming = 1
+
+	report, err := sync.Run(context.Background())
+	if err != nil || report.Pulled != 1 {
+		t.Fatalf("expected a pull, got %+v / %v", report, err)
+	}
+}

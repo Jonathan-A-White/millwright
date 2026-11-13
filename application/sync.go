@@ -608,9 +608,24 @@ type VaultDamageReader interface {
 	Damage(ctx context.Context) (VaultDamage, error)
 }
 
+// VaultRebaseReader is the optional, cheap half of a VaultDamageReader: it says
+// only whether a rebase stopped in the vault and was never ended, which is a
+// look at the git directory and not a check of every object. A sync whose status
+// is clean asks it on every run, where Damage (which checks the object store)
+// would be too much to ask each tick; a vault that cannot say it more cheaply is
+// asked Damage.
+type VaultRebaseReader interface {
+	StoppedRebase(ctx context.Context) (bool, error)
+}
+
 // Error is the one line a person, or a timer's log, reads: which host, which
 // files, and what mw did and did not do about them.
 func (b *VaultBlocked) Error() string {
+	if b.Damage.Any() && len(b.Files) == 0 {
+		return fmt.Sprintf("%s: %s, so the vault was left alone: nothing was pulled, nothing was pushed; "+
+			"beads were synced all the same; git lists no file as changed: %s",
+			b.Host, b.Damage.Sentence(), b.Damage.Cure("", b.Host))
+	}
 	if b.Damage.Any() {
 		return fmt.Sprintf("%s: %s, so the vault was left alone: nothing was pulled, nothing was pushed; "+
 			"beads were synced all the same. Do not commit the %d files git lists: %s",
@@ -773,7 +788,7 @@ type SyncReport struct {
 // to pull and nothing to push. A sync the vault blocked is not quiet — it has
 // something to say, even though nothing moved.
 func (r SyncReport) Quiet() bool {
-	return !r.Marked && r.Pulled == 0 && r.Pushed == 0 && len(r.Blocked) == 0
+	return !r.Marked && r.Pulled == 0 && r.Pushed == 0 && len(r.Blocked) == 0 && !r.Damage.Any()
 }
 
 // String is the one line mw prints when a sync finishes.
@@ -781,6 +796,8 @@ func (r SyncReport) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: ", r.Host)
 	switch {
+	case len(r.Blocked) == 0 && r.Damage.Any():
+		fmt.Fprintf(&b, "the vault was left alone, %s (git lists no file as changed): %s", r.Damage.Sentence(), r.Damage.Cure("", r.Host))
 	case len(r.Blocked) > 0:
 		if r.Damage.Any() {
 			fmt.Fprintf(&b, "the vault was left alone, %s (git lists %d files as changed, and they are not work to commit): %s",
@@ -1063,7 +1080,16 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	report.Blocked = s.commitRunRecords(ctx, dirty, &report)
 	report.Blocked = s.commitCloudFilesOffHome(ctx, report.Blocked, &report)
 
+	// A status with nothing listed is no proof of a sound repository: a rebase
+	// stopped in the vault leaves it clean, and a pull onto it would run into the
+	// half-way checkout. So the damage is read before the vault is touched, and
+	// what is found stops the vault half like files in the way (mw-gq6.1206).
 	if len(report.Blocked) == 0 {
+		s.readStoppedRebase(ctx, &report)
+	}
+	damaged := report.Damage.Any()
+
+	if len(report.Blocked) == 0 && !damaged {
 		if report.Marked, err = s.Vault.MarkLedgers(ctx); err != nil {
 			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
 		}
@@ -1098,8 +1124,10 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	//
 	// On the host that holds the one database the beads half is its backup,
 	// run if it is due; on a host whose database is another's, there is none.
-	if len(report.Blocked) > 0 {
-		s.readDamage(ctx, &report)
+	if len(report.Blocked) > 0 || damaged {
+		if !damaged {
+			s.readDamage(ctx, &report)
+		}
 		switch mode {
 		case BeadsSyncBackup:
 			s.backupIfDue(ctx, &report)
@@ -1179,6 +1207,19 @@ func (s Sync) readDamage(ctx context.Context, report *SyncReport) {
 	if damage, err := reader.Damage(ctx); err == nil {
 		report.Damage = damage
 	}
+}
+
+// readStoppedRebase is readDamage for a vault whose status is clean, run on
+// every sync: it asks only whether a rebase stopped when the vault can say that
+// without checking the object store, and the whole damage when it cannot.
+func (s Sync) readStoppedRebase(ctx context.Context, report *SyncReport) {
+	if reader, ok := s.Vault.(VaultRebaseReader); ok {
+		if rebasing, err := reader.StoppedRebase(ctx); err == nil && rebasing {
+			report.Damage = VaultDamage{Rebasing: true}
+		}
+		return
+	}
+	s.readDamage(ctx, report)
 }
 
 // siblingWriteWaits are the pauses before each retry of a pull or push that git
