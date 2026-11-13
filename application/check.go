@@ -363,16 +363,15 @@ func (l *keptLog) addQuietly(text string) {
 	l.buf.WriteString(text)
 }
 
-// begin names the attempt the check is of and writes the log with the line that
-// says the check started; nothing printed before it is lost.
-func (l *keptLog) begin(attempt int, first string) {
+// begin names the attempt the check is of and writes the log, so that what was
+// printed before it is not lost and what follows is written as it is printed.
+func (l *keptLog) begin(attempt int) {
 	if l == nil {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.attempt = attempt
-	l.buf.WriteString(first)
 	l.flush()
 }
 
@@ -411,8 +410,12 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	}
 	report.Title = detail.Story.Title
 	report.Attempt = max(detail.Attempts, 1)
-	k.kept.begin(report.Attempt, fmt.Sprintf("check of %s (attempt %d) began on %s at %s; this log is written as the check goes, and its verdict is the last lines of it\n",
-		storyID, report.Attempt, k.Host, k.began.UTC().Format("15:04:05Z")))
+	// Said to the Builder too, so that the log holds what the check printed.
+	if k.Out != nil {
+		fmt.Fprintf(k.Out, "check of %s (attempt %d) began on %s at %s; its log is written as the check goes\n",
+			storyID, report.Attempt, k.Host, k.began.UTC().Format("15:04:05Z"))
+	}
+	k.kept.begin(report.Attempt)
 	if detail.Closed() {
 		return report, fmt.Errorf("checking %s: it is closed already, so there is nothing left to land", storyID)
 	}
