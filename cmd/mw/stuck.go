@@ -42,10 +42,6 @@ func newStuckCmd() *cobra.Command {
 			"no alarm tripped it prints a single line saying so. It reads and writes nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			gateway, err := beads.FromConfig()
-			if err != nil {
-				return err
-			}
 			if dampers {
 				dir, err := config.Vault()
 				if err != nil {
@@ -55,7 +51,12 @@ func newStuckCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				survey, err := damperSurvey(gateway, dir, host)
+				// The alarms read the list of every bead for the work in hand, the
+				// graph and the stuck check: the status tracker keeps it, so bd is
+				// asked for it once (mw-6ww.175.30).
+				tracker, stop := keptStatusTracker(dir, host, cmd.ErrOrStderr())
+				defer stop()
+				survey, err := damperSurvey(tracker, dir, host)
 				if err != nil {
 					return err
 				}
@@ -65,6 +66,10 @@ func newStuckCmd() *cobra.Command {
 				}
 				fmt.Fprint(cmd.OutOrStdout(), report.FullList())
 				return nil
+			}
+			gateway, err := beads.FromConfig()
+			if err != nil {
+				return err
 			}
 			if inversions {
 				list, err := application.InversionLister{Graph: gateway}.List(cmd.Context())
