@@ -650,7 +650,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.dropStale(ctx)
 	p.seeSlowMakes(ctx)
 	p.seeDispatch(ctx)
-	p.dropUndispatched(ctx)
+	p.dropUndispatched(ctx, work)
 	p.markIdle(work)
 	p.setCaps(ctx)
 	p.setPaces(ctx)
@@ -1182,13 +1182,19 @@ func (p *cloudPass) seeDispatch(ctx context.Context) {
 // worktrees could not be asked) kept it up and billed (mw-gq6.1143). A
 // replacement may be made, the same check, when stories still wait. It needs
 // Notes, as seeDispatch does: without them no box is known to have dispatched.
-func (p *cloudPass) dropUndispatched(ctx context.Context) {
+// A box with a story claimed on it is left alone.
+func (p *cloudPass) dropUndispatched(ctx context.Context, work WorkInHand) {
 	if p.check.Notes == nil {
 		return
 	}
 	limit := p.check.Plan.NoDispatchLimit()
 	for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
 		if box.Making || box.Restoring || !box.Dispatched.IsZero() || p.unread[box.Name] || p.now.Sub(box.made()) < limit {
+			continue
+		}
+		// A story claimed on the box says it has dispatched, whatever the book
+		// kept (a book written before it kept Dispatched): it is not the box seen.
+		if claimedOnBox(work, box.Name) {
 			continue
 		}
 		why := fmt.Sprintf("no dispatch of %s has reached the beads server in %s since it was made", box.Name, Clock(p.now.Sub(box.made())))
@@ -1222,15 +1228,30 @@ func (p *cloudPass) nothingToSave(ctx context.Context, box CloudBox) (string, bo
 	if err != nil {
 		return "", false
 	}
-	holders := []string{SeatIdentity(MwSeat, box.Name), SeatIdentity("builder", box.Name)}
+	if claimedOnBox(work, box.Name) {
+		return "", false
+	}
+	return fmt.Sprintf("%s is not a peer of the hub (no address) and no story is claimed on it by %s or %s: nothing on it needed saving", box.Name, boxHolders(box.Name)[0], boxHolders(box.Name)[1]), true
+}
+
+// boxHolders are the assignees a claim made on a box is held under: mw@<box>,
+// the dispatch's, and builder@<box>.
+func boxHolders(box string) []string {
+	return []string{SeatIdentity(MwSeat, box), SeatIdentity("builder", box)}
+}
+
+// claimedOnBox says a story is claimed on the box, in progress, open and still
+// assigned, or held, by either of its holders.
+func claimedOnBox(work WorkInHand, box string) bool {
+	holders := boxHolders(box)
 	for _, list := range [][]StoryDetail{work.Running, work.OpenClaimed, work.Held} {
 		for _, d := range list {
 			if slices.Contains(holders, d.Assignee) {
-				return "", false
+				return true
 			}
 		}
 	}
-	return fmt.Sprintf("%s is not a peer of the hub (no address) and no story is claimed on it by %s: nothing on it needed saving", box.Name, strings.Join(holders, " or ")), true
+	return false
 }
 
 func (p *cloudPass) markIdle(work WorkInHand) {

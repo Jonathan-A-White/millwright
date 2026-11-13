@@ -204,3 +204,14 @@ func TestAPlansNoDispatchMinutesMovesWhenTheCheckDestroysAnUndispatchedBox(t *te
 		}
 	}
 }
+
+func TestABoxWithAStoryClaimedOnItIsNotDestroyedForNotDispatchingWhateverTheBookKept(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	r, tracker := aBoxWithNoAddress(t, madeAt(now, 100*time.Minute))
+	r.provider.Unreachable = nil
+	claimOnBox(t, tracker, "mw-n.1", "mw@cloud1")
+	_, _ = r.check.Run(context.Background())
+	if slices.Contains(r.provider.Calls(), "down cloud1") {
+		t.Errorf("expected a box holding a claim kept, calls %v", r.provider.Calls())
+	}
+}
