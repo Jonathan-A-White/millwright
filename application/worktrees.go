@@ -127,3 +127,13 @@ type AddedFile struct {
 	Size       int64
 	Executable bool
 }
+
+// WorktreeSetup is what a Worktrees adapter may also offer: it sets a fresh
+// worktree up beyond cutting it (a node rig's packages installed, mw-gq6.1126),
+// and says what it did, so that the run's notes can say so too. An adapter that
+// does no such thing need not have it.
+type WorktreeSetup interface {
+	// SetupNote is what the last Add of the worktree at dir did beyond cutting
+	// it, as a phrase for a run's notes, or "" when it did nothing.
+	SetupNote(dir string) string
+}

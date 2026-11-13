@@ -2170,6 +2170,11 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	if said := started.handedSaid(); said != "" {
 		where += ", " + said
 	}
+	if setup, ok := d.Worktrees.(WorktreeSetup); ok {
+		if said := setup.SetupNote(started.Worktree); said != "" {
+			where += ", " + said
+		}
+	}
 	if molecule := started.Molecule; molecule.Poured() {
 		if started.Reused {
 			where += fmt.Sprintf(", working %s again (%d steps still open)", molecule.RootID, len(molecule.Steps))
