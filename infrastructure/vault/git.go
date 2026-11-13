@@ -106,14 +106,21 @@ func (v *Vault) Uncommitted(ctx context.Context) ([]string, error) {
 var _ application.VaultDamageReader = (*Vault)(nil)
 
 // Damage implements application.VaultDamageReader: it tells a repository that is
-// broken from one that merely holds edits (mw-gq6.1167). It asks two cheap
-// things only, since it is asked of a vault that is already refusing every tick:
-// whether HEAD's tree can be read (a corrupt pack leaves it unreadable, and
-// then every tracked file reads as a staged addition), and whether a rebase
-// stopped and was never ended (rebase-merge or rebase-apply in the git dir).
+// broken from one that merely holds edits (mw-gq6.1167). It asks three things,
+// since it is asked of a vault that is already refusing every tick: whether
+// HEAD's tree can be read (a corrupt pack leaves it unreadable, and then every
+// tracked file reads as a staged addition), whether the rest of the object
+// store is whole (git fsck, for a pack corrupt elsewhere than HEAD's tree,
+// mw-gq6.1182), and whether a rebase stopped and was never ended (rebase-merge
+// or rebase-apply in the git dir).
 func (v *Vault) Damage(ctx context.Context) (application.VaultDamage, error) {
 	var damage application.VaultDamage
 	if _, err := v.git(ctx, "cat-file", "-p", "HEAD^{tree}"); err != nil {
+		if ctx.Err() != nil {
+			return damage, err
+		}
+		damage.Corrupt = oneLineOf(err.Error())
+	} else if _, err := v.git(ctx, "fsck", "--no-dangling", "--no-progress"); err != nil {
 		if ctx.Err() != nil {
 			return damage, err
 		}
