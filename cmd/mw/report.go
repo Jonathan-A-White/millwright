@@ -110,6 +110,11 @@ func newReportCmd() *cobra.Command {
 					factoryDir = rigs[application.FactoryRig]
 				}
 			}
+			// SHAPE reads the checkout of the one rig asked for, if this host has it.
+			var shapeDirs map[string]string
+			if rigName != "" {
+				shapeDirs, _ = config.Rigs()
+			}
 			share, shareMin, shareMax, err := investShareSettings()
 			if err != nil {
 				return err
@@ -140,6 +145,8 @@ func newReportCmd() *cobra.Command {
 				Around:       around,
 				Commits:      rig.New(),
 				FactoryDir:   factoryDir,
+				Shape:        rig.Shape{},
+				RigDirs:      shapeDirs,
 				Investments:  files,
 				InvestShare:  share, InvestShareMin: shareMin, InvestShareMax: shareMax,
 				Rig:  rigName,
