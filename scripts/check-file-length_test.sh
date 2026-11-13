@@ -20,12 +20,14 @@ fail() {
 	fails=$((fails + 1))
 }
 
-# lines <file> <n> writes a Go file of exactly n lines.
+# lines <file> <n> writes a Go file of exactly n lines, gofmt-clean (the gate
+# runs gofmt too).
 lines() {
 	mkdir -p "$(dirname "$1")"
 	{
 		echo "package x"
-		i=1
+		echo
+		i=2
 		while [ "$i" -lt "$2" ]; do
 			echo "// line $i"
 			i=$((i + 1))
@@ -102,11 +104,31 @@ sed '/^[a-z/]*\.go [0-9]*$/d' "$CHECK" >"$GATE/scripts/check-file-length.sh"
 chmod +x "$GATE/scripts/check-file-length.sh"
 printf '#!/bin/sh\nexit 0\n' >"$GATE/contrib/scorer/test.sh"
 chmod +x "$GATE/contrib/scorer/test.sh"
+cp "$HERE/check-gofmt.sh" "$GATE/scripts/check-gofmt.sh"
+for s in $(sed -n '/^test:/,/^$/p' "$GATE/Makefile" | grep -o 'scripts/check-[a-z_-]*\.sh' | sort -u); do
+	if [ ! -e "$GATE/$s" ]; then
+		printf '#!/bin/sh\nexit 0\n' >"$GATE/$s"
+		chmod +x "$GATE/$s"
+	fi
+done
 lines "$GATE/application/short.go" 2500
 expect "gate on a short tree" ok make -C "$GATE" test GO=true
 lines "$GATE/application/big.go" 2501
 expect "gate on a file over the ceiling" refuse make -C "$GATE" test GO=true
 if ! grep -q "application/big.go" "$TMP/out"; then fail "the gate's refusal does not name the file: $(cat "$TMP/out")"; fi
+
+# The fast parts of make lint run in make test too (mw-gq6.1260), for the same
+# reason: a branch with an unformatted .go file must fail make test itself.
+# Every check script the test target names that is not under test here is a
+# stand-in that passes, so only gofmt (and the file length) can fail the gate.
+rm "$GATE/application/big.go"
+if ! sed -n '/^test:/,/^$/p' "$GATE/Makefile" | grep -q 'scripts/check-gofmt.sh'; then
+	fail "the test target does not run scripts/check-gofmt.sh"
+fi
+expect "gate on a formatted tree" ok make -C "$GATE" test GO=true
+printf 'package x\n\nfunc  f( ) {\n}\n' >"$GATE/application/unformatted.go"
+expect "gate on an unformatted file" refuse make -C "$GATE" test GO=true
+if ! grep -q "application/unformatted.go" "$TMP/out"; then fail "the gate's refusal does not name the unformatted file: $(cat "$TMP/out")"; fi
 
 if [ "$fails" -gt 0 ]; then
 	echo "check-file-length_test: $fails failed" >&2
