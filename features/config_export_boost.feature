@@ -23,6 +23,10 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       [changed_specs]
       lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
 
+      [named_tests]
+      argus = "npm test -- --grep \"{tests}\""
+      millwright = "go test -run \"^({tests})$\" ./..."
+
       [test_parts.lampas]
       "install" = "npm ci --no-audit --no-fund"
       "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
@@ -51,6 +55,10 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       [changed_specs]
       lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
 
+      [named_tests]
+      argus = "npm test -- --grep \"{tests}\""
+      millwright = "go test -run \"^({tests})$\" ./..."
+
       [test_parts.lampas]
       "install" = "npm ci --no-audit --no-fund"
       "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
@@ -61,6 +69,8 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       """
     And the export committed "hosts/boost-config.toml" and nothing else
     And mw config export-boost printed "[tests] argus: missing"
+    And mw config export-boost printed "[named_tests] argus: missing"
+    And mw config export-boost printed "[named_tests] millwright: missing"
     And mw config export-boost printed "[test_parts.lampas]: missing"
     And mw config export-boost printed "[session] deny: missing"
 
@@ -117,6 +127,10 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       [changed_specs]
       lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
 
+      [named_tests]
+      argus = "npm test -- --grep \"{tests}\""
+      millwright = "go test -run \"^({tests})$\" ./..."
+
       [test_parts.lampas]
       "install" = "npm ci --no-audit --no-fund"
       "vitest 2/2" = "TZ=UTC npx vitest run --shard 2/2"
@@ -150,6 +164,8 @@ Feature: mw config export-boost writes the vault's hosts/boost-config.toml from 
       argus = "npm test"
 
       [changed_specs]
+
+      [named_tests]
       """
 
   Scenario: a second export finds the file level, writes nothing and commits nothing
