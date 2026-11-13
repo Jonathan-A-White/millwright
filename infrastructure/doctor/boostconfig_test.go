@@ -207,3 +207,63 @@ func TestBoostConfigOnABoostIsFaultyForADifferingNamedTestsLine(t *testing.T) {
 		t.Errorf("a level [named_tests] line should be ok, got %s (%s)", verdict, reason)
 	}
 }
+
+// the home's check cures by running mw config export-boost (mw-gq6.1241).
+func TestBoostConfigOnTheHomeCuresByExportingAndCommitting(t *testing.T) {
+	check := boostConfigOnTheHome(t, "[tests]\nargus = \"npm test\"\n", "[tests]\n")
+	vault := &apptest.FakeVaultFiles{}
+	check.Vault = vault
+	if verdict, _ := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty before the cure, got %s", verdict)
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("expected the cure to run, got %v", err)
+	}
+	commits := vault.Commits()
+	if len(commits) != 1 || len(commits[0].Paths) != 1 || commits[0].Paths[0] != application.BoostConfigFile {
+		t.Fatalf("expected one commit of %s by that path alone, got %+v", application.BoostConfigFile, commits)
+	}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected the check to clear after the cure, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestBoostConfigOnTheHomeCuresAMissingFile(t *testing.T) {
+	check := boostConfigOnTheHome(t, "[tests]\nargus = \"npm test\"\n", "")
+	check.Vault = &apptest.FakeVaultFiles{}
+	if verdict, _ := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty before the cure, got %s", verdict)
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("expected the cure to run, got %v", err)
+	}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected the check to clear after the cure, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestBoostConfigCureThatCannotCommitFailsAndSaysWhy(t *testing.T) {
+	check := boostConfigOnTheHome(t, "[tests]\nargus = \"npm test\"\n", "[tests]\n")
+	check.Vault = &apptest.FakeVaultFiles{CommitErr: errors.New("hosts/boost-config.toml has local changes")}
+	check.Probe(context.Background())
+	err := check.Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not committed") || !strings.Contains(err.Error(), "local changes") {
+		t.Fatalf("expected the cure to fail saying why, got %v", err)
+	}
+	if wait, capPer := check.Damper(); wait != 0 || capPer != 1 {
+		t.Fatalf("expected a failed cure to damp after one try, got %v %d", wait, capPer)
+	}
+}
+
+func TestBoostConfigOnABoostStillHasNoCure(t *testing.T) {
+	check := boostConfigOnABoost(t, "[tests]\nmillwright = \"a\"\n", "[tests]\nmillwright = \"b\"\n")
+	vault := &apptest.FakeVaultFiles{}
+	check.Vault = vault
+	check.Probe(context.Background())
+	if err := check.Cure(context.Background()); err == nil || !strings.Contains(err.Error(), "no cure") {
+		t.Fatalf("expected no cure on a host that is not home, got %v", err)
+	}
+	if len(vault.Commits()) != 0 {
+		t.Fatalf("expected nothing committed on a Boost, got %+v", vault.Commits())
+	}
+}

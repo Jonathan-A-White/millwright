@@ -191,6 +191,7 @@ func newDoctorCmd() *cobra.Command {
 			boostConfig := doctor.NewBoostConfig(mwVault(vault, host), host,
 				configfile.New(configPath), configfile.New(filepath.Join(vault, application.BoostConfigFile)))
 			boostConfig.ConfigErr = configPathErr
+			boostConfig.Vault = mwVault(vault, host)
 
 			staleMinutes, err := config.DoctorMayorStaleMinutes()
 			if err != nil {

@@ -54,6 +54,8 @@ type doctorContext struct {
 	// boostConfigDir is the temp dir a boost-config scenario made, removed by
 	// the After hook; empty in any other.
 	boostConfigDir string
+	// boostConfigVault is the vault the boost-config cure commits in.
+	boostConfigVault *apptest.FakeVaultFiles
 
 	tmpLeftoversTmp       string
 	tmpLeftoversProc      string
@@ -90,6 +92,8 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 			log:   &apptest.FakeDoctorLog{},
 			notes: apptest.NewFakeDoctorNotes(),
 			now:   time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
+
+			boostConfigVault: &apptest.FakeVaultFiles{},
 		}
 		return ctx, nil
 	})

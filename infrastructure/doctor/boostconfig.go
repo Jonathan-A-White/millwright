@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -17,8 +18,9 @@ var _ application.DoctorCheck = (*BoostConfig)(nil)
 // line as `mw doctor boost-config`.
 const BoostConfigName = "boost-config"
 
-// The boost-config check's damper: it has no cure to retry, so one failed cure
-// attempt is all an episode ever spends, as with rig-tests.
+// The boost-config check's damper: the cure is one command that a second try
+// does not make likelier to work (a vault that will not commit), so one failed
+// cure attempt is all an episode ever spends, as with rig-tests.
 const (
 	BoostConfigDamperWait = 0 * time.Second
 	BoostConfigDamperCap  = 1
@@ -26,14 +28,20 @@ const (
 
 const boostConfigNoCure = "no cure: a person runs mw config export-boost on the home"
 
+// boostConfigNoCureOnABoost is said on a host that is not home: a Boost's lines
+// are the person's to change with mw config set, as the finding says.
+const boostConfigNoCureOnABoost = "no cure: a person runs the mw config set the finding names on this host"
+
 // BoostConfig is the check, on the home, that the vault's
 // hosts/boost-config.toml holds the home's [tests], [changed_specs], [named_tests], [test_parts.<rig>] and [session] deny tables
 // alike (mw-gq6.456). contrib/boost-bootstrap.sh gives a new Boost its lines
 // from that file, so a rig's line the file lacks or holds differently gates
 // that rig on the next Boost with make test, or with the old command. On a host
 // that is not home it compares only the lines the host holds with the vault's
-// file, and is faulty when one differs (mw-gq6.704). It never cures: on the
-// home the fix is `mw config export-boost`, on a Boost `mw config set`.
+// file, and is faulty when one differs (mw-gq6.704). On the home its cure runs
+// `mw config export-boost` (ConfigExportBoost: it writes the file and commits
+// it by path, mw-gq6.1241); a cure that cannot commit fails, saying why, and
+// the damper holds it. On a Boost it cannot cure: the fix is `mw config set`.
 type BoostConfig struct {
 	// Home and Host are the vault's home file and this host's name. A nil
 	// Home judges as the home; a home that cannot be told is cannot-tell.
@@ -45,10 +53,19 @@ type BoostConfig struct {
 	// ConfigErr is why this host's config file could not be found, if it
 	// could not: the check cannot tell.
 	ConfigErr error
+	// Vault commits the exported file, by path. Nil leaves the home's cure
+	// off, as a check built without a vault to commit in.
+	Vault application.BoostConfigVault
+	// Out is where the cure's export says what it brought level; nil is
+	// discarded.
+	Out io.Writer
 
 	// faulty is the last probe's finding when it was faulty, which the cure's
 	// error carries so the report names each rig.
 	faulty string
+	// onHome is whether the last probe judged this host the home, which is
+	// where export-boost may run.
+	onHome bool
 }
 
 // NewBoostConfig is the check for the host named host, against the given home
@@ -67,6 +84,7 @@ func (b *BoostConfig) Name() string { return BoostConfigName }
 // that is not home: ok unless a line it holds differs from the vault's.
 func (b *BoostConfig) Probe(ctx context.Context) (application.Verdict, string) {
 	b.faulty = ""
+	b.onHome = false
 	verdict, reason := b.probe(ctx)
 	if verdict == application.DoctorFaulty {
 		b.faulty = reason
@@ -83,6 +101,7 @@ func (b *BoostConfig) probe(ctx context.Context) (application.Verdict, string) {
 		}
 		isHome = home
 	}
+	b.onHome = isHome
 	if b.ConfigErr != nil {
 		return application.DoctorCannotTell, fmt.Sprintf("finding the config file: %v", b.ConfigErr)
 	}
@@ -178,13 +197,34 @@ func readBoostTables(file application.ConfigFile) (domain.BoostTables, error) {
 	return tables, nil
 }
 
-// Cure implements application.DoctorCheck: there is none. Its error carries
-// the probe's finding.
-func (b *BoostConfig) Cure(context.Context) error {
-	if b.faulty == "" {
-		return errors.New(boostConfigNoCure)
+// Cure implements application.DoctorCheck: on the home it runs the export
+// `mw config export-boost` runs, which rewrites hosts/boost-config.toml and
+// commits that one path. A write or commit that fails is the error, saying why.
+// Elsewhere, or with no Vault, there is no cure, and the error carries the
+// probe's finding.
+func (b *BoostConfig) Cure(ctx context.Context) error {
+	if b.onHome && b.Vault != nil && b.faulty != "" {
+		out := b.Out
+		if out == nil {
+			out = io.Discard
+		}
+		err := application.ConfigExportBoost{
+			Config: b.Config, Target: b.Target, Vault: b.Vault,
+			Home: b.Home, Host: b.Host, Out: out,
+		}.Run(ctx, false)
+		if err != nil {
+			return fmt.Errorf("mw config export-boost failed: %w", err)
+		}
+		return nil
 	}
-	return fmt.Errorf("%s: %s", boostConfigNoCure, b.faulty)
+	noCure := boostConfigNoCure
+	if !b.onHome {
+		noCure = boostConfigNoCureOnABoost
+	}
+	if b.faulty == "" {
+		return errors.New(noCure)
+	}
+	return fmt.Errorf("%s: %s", noCure, b.faulty)
 }
 
 // Damper implements application.DoctorCheck.
@@ -192,7 +232,9 @@ func (b *BoostConfig) Damper() (time.Duration, int) {
 	return BoostConfigDamperWait, BoostConfigDamperCap
 }
 
-// WayBack implements application.DoctorCheck: nothing ever changes.
+// WayBack implements application.DoctorCheck: the cure rewrites the vault's
+// hosts/boost-config.toml and commits it, so the commit before it is the way
+// back.
 func (b *BoostConfig) WayBack() string {
-	return "none: no cure runs; a person runs mw config export-boost on the home"
+	return "git revert the vault's commit of hosts/boost-config.toml made by mw config export-boost; nothing else changes (on a host that is not home no cure runs)"
 }
