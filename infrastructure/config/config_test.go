@@ -3091,6 +3091,24 @@ func TestRetiredHostsAreNoneUntilTheConfigNamesThem(t *testing.T) {
 	}
 }
 
+// mw-gq6.1165: how long a host may have had no room before its stories move.
+func TestRepathNoRoomIsAnHourUntilTheConfigSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\n")
+	if got, err := config.RepathNoRoom(); err != nil || got != time.Hour {
+		t.Fatalf("expected an hour, got %v: %v", got, err)
+	}
+	writeConfig(t, "vault = \"/v\"\nrepath_no_room_minutes = 90 # a little longer\n")
+	if got, err := config.RepathNoRoom(); err != nil || got != 90*time.Minute {
+		t.Fatalf("expected 90 minutes, got %v: %v", got, err)
+	}
+	for _, bad := range []string{"0", "-5", "\"an hour\""} {
+		writeConfig(t, "vault = \"/v\"\nrepath_no_room_minutes = "+bad+"\n")
+		if _, err := config.RepathNoRoom(); err == nil || !strings.Contains(err.Error(), "repath_no_room_minutes") {
+			t.Errorf("repath_no_room_minutes = %s: expected an error naming the key, got %v", bad, err)
+		}
+	}
+}
+
 // mw-2891blf.7: the tmux servers give way looks at: the default, $MW_TMUX_SOCKET
 // (the seat commands' server) and the host's giveway_tmux_sockets.
 func TestGiveWayTmuxSocketsAreTheEnvironmentsAndTheConfigsAndNoneByDefault(t *testing.T) {

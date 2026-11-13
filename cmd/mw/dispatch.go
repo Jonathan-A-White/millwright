@@ -378,6 +378,18 @@ func newDispatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			// The hosts that cannot take a story, for the re-path of one pinned to
+			// them (mw-gq6.1165): the retired ones, the cloud's book, and how long a
+			// full host may stay full.
+			retired, err := config.RetiredHosts()
+			if err != nil {
+				return err
+			}
+			repathNoRoom, err := config.RepathNoRoom()
+			if err != nil {
+				return err
+			}
 			// A rehearsal only looks: it keeps no answer and writes no event.
 			net, err := hostNetwork(dryRun)
 			if err != nil {
@@ -426,6 +438,8 @@ func newDispatchCmd() *cobra.Command {
 				HeavyNet:      heavy,
 				Exclusive:     hostDispatchLock(dir),
 				Events:        homeEventLog(),
+				Retired:       retired,
+				RepathNoRoom:  repathNoRoom,
 				SmokeHolds:    gristSmokeBook(gateway, host),
 				Home:          files,
 				DryRun:        dryRun,
@@ -436,6 +450,7 @@ func newDispatchCmd() *cobra.Command {
 
 				HasGristTestKey: hostHasGristTestKey,
 			}, recheckSuite)
+			dispatch.CloudBook, dispatch.CloudPlan = cloudStatus(dir, host)
 			// The mill answers what it left waiting, on the host that is home and
 			// where a [grist] table says so. A mill that cannot be set up costs
 			// the tick its grist pass and nothing else.

@@ -14,6 +14,7 @@
 //	dispatch_sync_tries = 3
 //	dispatch_sync_wait = "15s"
 //	giveway_stale = "15m"              # how long a give-way marker may go unrenewed before the next dispatch tick lifts it
+//	repath_no_room_minutes = 60        # how long a story's pinned host may have had no room before a dispatch tick that has room moves the story to host=auto
 //	giveway_tmux_sockets = ["mw-seat"]  # tmux -L servers, besides the default and $MW_TMUX_SOCKET, whose panes mw giveway looks at
 //	push_tries = 4
 //	push_wait_seconds = 20
@@ -648,6 +649,34 @@ func HandsHosts() (map[string]string, error) {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	return tableIn(filepath.Join(home, File), HandsHostsTable)
+}
+
+// DefaultRepathNoRoom is how long a story's pinned host may have had no room
+// before a dispatch tick that has room moves the story to host=auto, when the
+// config file does not say (mw-gq6.1165; the Governor has yet to confirm it).
+const DefaultRepathNoRoom = 60 * time.Minute
+
+// RepathNoRoom reports how long a host may have had no room before its open
+// stories are re-pathed to host=auto, read from the root-table
+// `repath_no_room_minutes` key of ~/.config/mw/config.toml as a whole number
+// of minutes above zero; DefaultRepathNoRoom when it is absent.
+func RepathNoRoom() (time.Duration, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	said, err := valueIn(filepath.Join(home, File), "repath_no_room_minutes")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultRepathNoRoom, nil
+	}
+	minutes, err := strconv.Atoi(strings.TrimSpace(said))
+	if err != nil || minutes <= 0 {
+		return 0, fmt.Errorf("repath_no_room_minutes is %q in %s: it is a whole number of minutes above zero, such as 60", said, File)
+	}
+	return time.Duration(minutes) * time.Minute, nil
 }
 
 // RetiredHosts reports the hosts the Governor has retired, read from the

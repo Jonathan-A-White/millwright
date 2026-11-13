@@ -155,7 +155,9 @@ func (n Next) workflowScopeHandOver(ctx context.Context, c *closeOut, report *Ne
 			"Give it the scope (the Governor's: keys), then run mw retry %s.", named, home, c.id), false
 	}
 	if err := writeRetrying(ctx, n, report, "the host of "+c.id, func() error {
-		return n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{"host": home})
+		// host_why keeps the re-path of a full or gone host from undoing it
+		// (mw-gq6.1165): only the home's credential has the workflow scope.
+		return n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{"host": home, "host_why": "the credential that has the workflow scope is the home's, " + home})
 	}); err != nil {
 		return fmt.Sprintf("%s It could not be re-pathed to host=%s: %v; run mw path set %s host=%s.", named, home, err, c.id, home), false
 	}
