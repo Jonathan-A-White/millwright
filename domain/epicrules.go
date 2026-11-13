@@ -139,7 +139,8 @@ const (
 
 // LandingSettings are the landing keys of a rig's file: the mode, when a batch
 // is due (BatchEvery after the oldest queued story, or BatchMax queued; at
-// least BatchMin queued), and the model, effort and turns of the fixer that
+// least BatchMin queued), how many stories it takes (at most BatchMax, the
+// oldest queued), and the model, effort and turns of the fixer that
 // is asked to mend a red batch.
 type LandingSettings struct {
 	Mode        LandingMode

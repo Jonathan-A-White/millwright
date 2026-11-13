@@ -1447,3 +1447,57 @@ func TestTheBatchLandJobKeepsTheRigsItHasWhenTheyCannotBeReadAgain(t *testing.T)
 		t.Fatal("a rigs file that cannot be read now must not make the follower forget the rigs it had")
 	}
 }
+
+// batch_max is not only when a batch is due: it is how many stories a batch
+// takes. Lampas batches 519 and 524 took 13 and 9 stories with batch_max 6, and
+// a bigger batch has a bigger related-tests gate and more ways to go red
+// (mw-gq6.1262).
+func TestABatchTakesNoMoreStoriesThanBatchMaxTheOldestFirst(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		max  int // 0 is the rig's file saying nothing: the default, 6
+		want int
+	}{
+		{"the default", 0, domain.DefaultBatchMax},
+		{"the rig's own key", 4, 4},
+		{"a key above the queue", 12, 10},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			land, tracker, out := aBatchRig(t)
+			rules := apptest.NewFakeEpicRules()
+			rules.Require("lampas", domain.EpicRequirements{Landing: domain.LandingSettings{Mode: domain.LandingBatch, BatchMax: c.max}})
+			land.Next.Rules = rules
+			ctx := context.Background()
+			var oldestFirst []string
+			for i := 0; i < 9; i++ {
+				id := fmt.Sprintf("lp-1.%d", 10+i)
+				tracker.AddStory("lp-1", domain.Story{ID: id, Title: "The story " + id})
+				mustDo(t, tracker.ClaimStory(ctx, id))
+				queue(t, tracker, id)
+				// The ids run backwards in time: the last added is the oldest.
+				mustDo(t, tracker.SetStoryMetadata(ctx, id, map[string]string{
+					application.QueuedAtField: time.Date(2026, 10, 15, 11, 59-i, 0, 0, time.UTC).Format(time.RFC3339),
+				}))
+			}
+			for i := 8; i >= 0; i-- {
+				oldestFirst = append(oldestFirst, fmt.Sprintf("lp-1.%d", 10+i))
+			}
+			oldestFirst = append(oldestFirst, "lp-1.1")
+
+			report, err := land.Run(ctx, "lampas")
+			if err != nil {
+				t.Fatalf("a dry run: %v", err)
+			}
+			var got []string
+			for _, s := range report.Queue {
+				got = append(got, s.ID)
+			}
+			if want := oldestFirst[:c.want]; !reflect.DeepEqual(got, want) {
+				t.Fatalf("expected the %d oldest queued, %v, got %v", c.want, want, got)
+			}
+			if c.want < 10 && !strings.Contains(out.String(), "waits for the next batch") {
+				t.Fatalf("expected a note that the rest wait for the next batch, got:\n%s", out.String())
+			}
+		})
+	}
+}
