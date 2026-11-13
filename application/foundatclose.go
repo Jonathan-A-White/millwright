@@ -597,6 +597,10 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		}
 		overrides := c.path
 		overrides.Files = foundFiles(bug.said(), c.path.Files)
+		// The finder's size, bump and callers_ok are about the finder's own files
+		// and change, so none is copied, as mw path set --from copies none
+		// (mw-gq6.672, mw-gq6.1195); the Builder's size for the finding is set below.
+		overrides.Size, overrides.Bump, overrides.CallersOK = "", "", ""
 		acceptance := ""
 		if bug.item != nil {
 			acceptance = bug.item.Acceptance()

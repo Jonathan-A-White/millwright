@@ -315,6 +315,55 @@ func TestAFindingWithAnACAndASweepIsFiledWithThemInItsAcceptanceAndItsSizeInItsP
 	}
 }
 
+// A story filed from a finding is a different story from the finder: the
+// finder's callers_ok is a reason about the finder's files, and its size and
+// bump are its own, so none is copied, as mw path set --from copies none
+// (mw-gq6.1195).
+func TestAFoundStoryFiledAtCloseOutCarriesNoCallersOK(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{
+		CallersOK: "adds one new branch; the 44 callers are unchanged",
+		Size:      domain.SizeM,
+		Bump:      "minor",
+		Files:     "application/next.go",
+	}})
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+
+		"The parser drops a trailing line (application/parse.go:12). AC: go test ./application -run TestParseKeepsTheLastLine passes. Sweep: the other readers. By design? no\n"+
+		"For the rig memory: nothing"))
+	before := tracker.Stories()
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d: %+v", len(filed), filed)
+	}
+	path := filed[0].Merged()
+	if path.CallersOK != "" {
+		t.Errorf("expected no callers_ok on the filed story, got %q", path.CallersOK)
+	}
+	if path.Size != "" {
+		t.Errorf("expected no size copied from the finder, got %q", path.Size)
+	}
+	if path.Bump != "" {
+		t.Errorf("expected no bump copied from the finder, got %q", path.Bump)
+	}
+	if path.Files != "application/parse.go" {
+		t.Errorf("expected the files key of the file the finding names, got %q", path.Files)
+	}
+}
+
 // A finding the Builder says is by design is filed saying so.
 func TestAFindingSaidToBeByDesignIsFiledSayingSo(t *testing.T) {
 	tracker, rules := aBatchEpicToTest(t)

@@ -496,7 +496,7 @@ type aCodemapLanding struct {
 func aCodemapTracker() *apptest.FakeTracker {
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
-	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story", Overrides: domain.Path{Files: "application/next.go", Size: domain.SizeS}})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story", Overrides: domain.Path{Files: "application/next.go", Size: domain.SizeS, CallersOK: "additive, the callers are unchanged"}})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.2", Title: "Another story"})
 	return tracker
 }
