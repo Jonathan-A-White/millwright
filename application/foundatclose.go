@@ -83,9 +83,16 @@ func ParseFoundNotFixed(comment string) FoundNotFixed {
 	}
 	found := FoundNotFixed{Found: true}
 	seen := map[string]bool{}
+	// said is true once the section has said something, a finding or the word
+	// nothing; the next blank line then ends it (mw-gq6.1186).
+	said := false
 	take := func(raw string) {
 		text := strings.Join(strings.Fields(domain.TrimListMarker(raw)), " ")
-		if text == "" || strings.EqualFold(strings.Trim(text, " .*_`"), "nothing") || seen[text] {
+		if text == "" {
+			return
+		}
+		said = true
+		if strings.EqualFold(strings.Trim(text, " .*_`"), "nothing") || seen[text] {
 			return
 		}
 		seen[text] = true
@@ -94,7 +101,7 @@ func ParseFoundNotFixed(comment string) FoundNotFixed {
 	take(first)
 	for _, raw := range lines[start+1:] {
 		if strings.TrimSpace(raw) == "" {
-			if len(found.Lines) > 0 {
+			if said {
 				break
 			}
 			continue
