@@ -39,6 +39,7 @@ millwright = "make build"
 	want := BoostTables{Lines: map[string]map[string]string{
 		"tests":         {"argus": "npm test", "lampas": "npm ci && TZ=UTC npm test"},
 		"changed_specs": {"lampas": "npm run build && npx playwright test {specs}"},
+		"named_tests":   {},
 	}, Parts: map[string][]BoostPart{}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -65,7 +66,8 @@ func TestBoostTablesTextIsOneLinePerRigInEachTable(t *testing.T) {
 		`argus = "npm test -- --grep \"a\\b\""` + "\n" +
 		`millwright = "make test"` + "\n" +
 		`weird = "true"` + "\n" +
-		"\n[changed_specs]\n"
+		"\n[changed_specs]\n" +
+		"\n[named_tests]\n"
 	if body != want {
 		t.Fatalf("got\n%s\nwant\n%s", body, want)
 	}
@@ -424,5 +426,24 @@ func TestLevelBoostConfigAppendsNoSessionDenyWhenTheVaultHoldsNone(t *testing.T)
 	out, appended, differing, err := LevelBoostConfig(config, levelVault(t))
 	if err != nil || out != config || len(appended) != 0 || len(differing) != 0 {
 		t.Errorf("out %q, appended %v, differing %v, err %v", out, appended, differing, err)
+	}
+}
+
+func TestLevelBoostConfigAppendsANamedTestsLineTheConfigLacks(t *testing.T) {
+	vault, err := BoostTablesOf(mustParse(t, "[named_tests]\npostern = \"npm test -- --grep {tests}\"\nlampas = \"npx vitest run -t {tests}\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := "[rigs]\npostern = \"/p\"\nlampas = \"/l\"\n\n[named_tests]\nlampas = \"npx vitest run -t {tests}\"\n"
+	out, appended, differing, err := LevelBoostConfig(config, vault)
+	if err != nil || len(differing) != 0 {
+		t.Fatalf("err %v, differing %v", err, differing)
+	}
+	if !reflect.DeepEqual(appended, []string{"[named_tests] postern"}) {
+		t.Errorf("appended = %v", appended)
+	}
+	got, err := BoostTablesOf(mustParse(t, out))
+	if err != nil || got.Lines["named_tests"]["postern"] != "npm test -- --grep {tests}" || got.Lines["named_tests"]["lampas"] != "npx vitest run -t {tests}" {
+		t.Errorf("the line was not appended: %+v (%v)\n%s", got.Lines, err, out)
 	}
 }

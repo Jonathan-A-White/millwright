@@ -10,8 +10,10 @@ import (
 // BoostTableNames are the one-table-for-all-rigs tables of the home's
 // ~/.config/mw/config.toml that a Boost copies, in the order the vault's
 // hosts/boost-config.toml holds them: each rig's tests command, and the command
-// it runs on the end-to-end specs a story changed (mw-gq6.453, mw-gq6.456).
-var BoostTableNames = []string{"tests", "changed_specs"}
+// it runs on the end-to-end specs a story changed (mw-gq6.453, mw-gq6.456), and
+// the command that runs just the tests that failed, by name, on main alone
+// (mw-gq6.934, mw-gq6.1223).
+var BoostTableNames = []string{"tests", "changed_specs", "named_tests"}
 
 // BoostPartsPrefix begins the name of the tables that split a rig's gate into
 // parts, one table to a rig: [test_parts.lampas] (mw-gq6.567, mw-gq6.592). They
@@ -20,7 +22,7 @@ var BoostTableNames = []string{"tests", "changed_specs"}
 const BoostPartsPrefix = "test_parts."
 
 // BoostTablesHeader opens the vault's hosts/boost-config.toml.
-const BoostTablesHeader = `# The [tests], [changed_specs], [test_parts.<rig>] and [session] tables a Boost copies (contrib/boost-bootstrap.sh step 9).
+const BoostTablesHeader = `# The [tests], [changed_specs], [named_tests], [test_parts.<rig>] and [session] tables a Boost copies (contrib/boost-bootstrap.sh step 9).
 # Written by mw config export-boost from the home's ~/.config/mw/config.toml: change a line
 # there and run it again, never here. mw doctor's boost-config check says when they differ.
 `
@@ -239,7 +241,7 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // LevelBoostConfig brings a Boost's config file level with the vault's tables
 // (mw-gq6.593): for each rig the config's [rigs] names, a [tests] or
-// [changed_specs] line it lacks is appended to its table (the table too, when
+// [changed_specs] or [named_tests] line it lacks is appended to its table (the table too, when
 // it lacks that), and a [test_parts.<rig>] table it lacks altogether is appended
 // whole, with its parts in order, and so is the vault's [session] deny when the
 // config holds none (mw-t5shinh.62; a cloud box also has it set by the cloud
@@ -247,7 +249,7 @@ func sortedKeys[V any](m map[string]V) []string {
 // or removed: one that differs from the vault's is only named, as
 // "[tests] rig: differs", "[test_parts.rig]: differs" or "[session] deny:
 // differs". out is the config's text with the additions, every other byte as it
-// was; appended names each addition, as "[tests] rig", "[test_parts.rig]" or
+// was; appended names each addition, as "[tests] rig", "[named_tests] rig", "[test_parts.rig]" or
 // "[session] deny".
 func LevelBoostConfig(config string, vault BoostTables) (out string, appended, differing []string, err error) {
 	file, err := ParseConfigTOML(config)

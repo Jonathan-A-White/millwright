@@ -27,7 +27,7 @@ const (
 const boostConfigNoCure = "no cure: a person runs mw config export-boost on the home"
 
 // BoostConfig is the check, on the home, that the vault's
-// hosts/boost-config.toml holds the home's [tests], [changed_specs], [test_parts.<rig>] and [session] deny tables
+// hosts/boost-config.toml holds the home's [tests], [changed_specs], [named_tests], [test_parts.<rig>] and [session] deny tables
 // alike (mw-gq6.456). contrib/boost-bootstrap.sh gives a new Boost its lines
 // from that file, so a rig's line the file lacks or holds differently gates
 // that rig on the next Boost with make test, or with the old command. On a host
@@ -99,7 +99,7 @@ func (b *BoostConfig) probe(ctx context.Context) (application.Verdict, string) {
 	if err != nil {
 		return application.DoctorCannotTell, err.Error()
 	}
-	fix := fmt.Sprintf("run mw config export-boost (a Boost made now copies its [tests], [changed_specs], [test_parts] and [session] tables from %s)", application.BoostConfigFile)
+	fix := fmt.Sprintf("run mw config export-boost (a Boost made now copies its [tests], [changed_specs], [named_tests], [test_parts] and [session] tables from %s)", application.BoostConfigFile)
 	_, exists, err := b.Target.Read()
 	if err != nil {
 		return application.DoctorCannotTell, fmt.Sprintf("reading %s: %v", b.Target.Path(), err)
@@ -120,7 +120,7 @@ func (b *BoostConfig) probe(ctx context.Context) (application.Verdict, string) {
 }
 
 // probeBoost is the probe on a host that is not home (mw-gq6.704): faulty when a
-// [tests], [changed_specs] or [test_parts.<rig>] line this host holds differs
+// [tests], [changed_specs], [named_tests] or [test_parts.<rig>] line this host holds differs
 // from the vault's, naming each with both values and the fix. A line this host
 // lacks is not faulty (mw sync appends it, mw-gq6.593), nor is a vault with no
 // file yet: the home's check says that.

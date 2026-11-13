@@ -978,7 +978,7 @@ type Sync struct {
 	// BoostConfig is this host's ~/.config/mw/config.toml and BoostTarget the
 	// vault's hosts/boost-config.toml. On a host that is not the home, a sync
 	// whose vault half got level appends to BoostConfig any [tests],
-	// [changed_specs] line or [test_parts.<rig>] table of the rigs it has that
+	// [changed_specs] or [named_tests] line or [test_parts.<rig>] table of the rigs it has that
 	// BoostTarget holds and it lacks, and says what it appended; a line it has
 	// is never edited, and one that differs is only said (mw-gq6.593). Nil of
 	// either, or an unknown home, does nothing.

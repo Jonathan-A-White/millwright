@@ -190,3 +190,20 @@ func TestBoostConfigOnABoostIsFaultyForADifferingSessionDeny(t *testing.T) {
 		t.Errorf("a vault without the key should be ok, got %s (%s)", verdict, reason)
 	}
 }
+
+func TestBoostConfigOnABoostIsFaultyForADifferingNamedTestsLine(t *testing.T) {
+	vault := "[named_tests]\npostern = \"npm test -- --grep {tests}\"\n"
+	check := boostConfigOnABoost(t, "[named_tests]\npostern = \"npm test -- -t {tests}\"\n", vault)
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+	}
+	for _, want := range []string{"named_tests.postern", `here "npm test -- -t {tests}"`, `vault "npm test -- --grep {tests}"`, `mw config set named_tests.postern`} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason lacks %q: %s", want, reason)
+		}
+	}
+	if verdict, reason := boostConfigOnABoost(t, vault, vault).Probe(context.Background()); verdict != application.DoctorOK {
+		t.Errorf("a level [named_tests] line should be ok, got %s (%s)", verdict, reason)
+	}
+}
