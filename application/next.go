@@ -1350,8 +1350,10 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		// The pane is the only evidence of how a session that wrote no file died
+		// (mw-gq6.1193), as it is beside an empty one (emptyResult).
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session left no result at %s, so it never started or it died before it could write one",
-			resultPath), harnessCrashStopSaid(c, ""))
+			resultPath), harnessCrashStopSaid(c, n.paneTailSaid(ctx, c)))
 	case strings.TrimSpace(printed) == "":
 		why, said := n.emptyResult(ctx, c, resultName, resultPath)
 		return n.stop(ctx, c, report, ReasonNoResult, why, harnessCrashStopSaid(c, said))
@@ -1592,14 +1594,24 @@ func (n Next) emptyResult(ctx context.Context, c *closeOut, resultName, resultPa
 	} else {
 		said = fmt.Sprintf("%s is %d byte(s), last modified %s", resultPath, info.Size, info.ModTime.UTC().Format(time.RFC3339))
 	}
+	if pane := n.paneTailSaid(ctx, c); pane != "" {
+		said += "\n\n" + pane
+	}
+	return why, said
+}
+
+// paneTailSaid is what a no-result stop says of the session's pane: its last
+// lines, or that it could not be read, or nothing when the pane printed nothing
+// or there is no runner to ask.
+func (n Next) paneTailSaid(ctx context.Context, c *closeOut) string {
 	tail, lookErr := n.paneTail(ctx, c)
 	switch {
 	case lookErr != nil:
-		said += "\n\n" + paneUnreadable(lookErr)
+		return paneUnreadable(lookErr)
 	case tail != "":
-		said += "\n\nThe last lines of the session's pane:\n\n```\n" + tail + "\n```"
+		return "The last lines of the session's pane:\n\n```\n" + tail + "\n```"
 	}
-	return why, said
+	return ""
 }
 
 // harnessStopped stops a close-out for a harness stop. One that is an expired

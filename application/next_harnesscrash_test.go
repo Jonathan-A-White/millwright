@@ -53,6 +53,13 @@ type crashedRun struct {
 
 func aCrashedCloseOut(t *testing.T, attempts int, pane string, kept []string, lands *fakeRetryLanding) *crashedRun {
 	t.Helper()
+	return aCloseOutWithAResult(t, attempts, pane, kept, lands, true)
+}
+
+// aCloseOutWithAResult is aCrashedCloseOut, the result file written empty when
+// writeResult is true and never written at all when it is false.
+func aCloseOutWithAResult(t *testing.T, attempts int, pane string, kept []string, lands *fakeRetryLanding, writeResult bool) *crashedRun {
+	t.Helper()
 	ctx := context.Background()
 	dispatch, tracker, _, runner, vaultDir := aFactory(t)
 	now := time.Date(2026, 11, 12, 19, 46, 34, 0, time.UTC)
@@ -66,8 +73,10 @@ func aCrashedCloseOut(t *testing.T, attempts int, pane string, kept []string, la
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("making the run directory: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, application.ResultFileNameForAttempt(attempts)), nil, 0o644); err != nil {
-		t.Fatalf("writing the empty result: %v", err)
+	if writeResult {
+		if err := os.WriteFile(filepath.Join(dir, application.ResultFileNameForAttempt(attempts)), nil, 0o644); err != nil {
+			t.Fatalf("writing the empty result: %v", err)
+		}
 	}
 	for _, file := range kept {
 		if err := os.WriteFile(filepath.Join(dir, file), []byte("kept\n"), 0o644); err != nil {
@@ -185,6 +194,22 @@ func TestAnEmptyResultWithNoCrashBannerInThePaneStaysNoResult(t *testing.T) {
 	}
 	if slices.Contains(run.tracker.Asked(), "ReleaseClaim") {
 		t.Errorf("expected the claim kept, asked %v", run.tracker.Asked())
+	}
+}
+
+// mw-gq6.1193: a result file that was never written is the same stop as an
+// empty one, and its pane is the same evidence.
+func TestAMissingResultStopCarriesThePaneTail(t *testing.T) {
+	run := aCloseOutWithAResult(t, 1, "working\nthe last thing the session printed\n", nil, nil, false)
+
+	if run.report.Reason != application.ReasonNoResult {
+		t.Fatalf("expected %s, got %q: %s (%v)", application.ReasonNoResult, run.report.Reason, run.report.Why, run.err)
+	}
+	if !strings.Contains(run.report.Why, "left no result") {
+		t.Fatalf("expected the stop for a missing result file, got: %s", run.report.Why)
+	}
+	if !strings.Contains(run.comments(), "the last thing the session printed") {
+		t.Errorf("expected the stop's comment to carry the pane's tail, got:\n%s", run.comments())
 	}
 }
 
