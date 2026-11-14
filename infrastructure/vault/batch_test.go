@@ -76,3 +76,34 @@ func TestBatchOfFindsTheLandedBatchThatCarriedAStory(t *testing.T) {
 		}
 	}
 }
+
+// Each rig's newest batch directory with no outcome.txt is named; a batch with
+// one, an older one left bare, and a rig with no batch are not (mw-gq6.1264).
+func TestWithoutOutcomeNamesTheNewestBareBatchOfEachRig(t *testing.T) {
+	ctx := context.Background()
+	v := New(t.TempDir())
+	if got, err := v.WithoutOutcome(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("expected none in a vault with no batches, got %v (%v)", got, err)
+	}
+	for _, rig := range []string{"lampas", "millwright", "quiz"} {
+		for n := 1; n <= 2; n++ {
+			if got, err := v.NewBatch(ctx, rig); err != nil || got != n {
+				t.Fatalf("batch %d of %s: got %d (%v)", n, rig, got, err)
+			}
+		}
+	}
+	// lampas: batch 2 has an outcome; batch 1 is bare but not the newest.
+	// millwright: batch 2 is bare. quiz: both have one.
+	for _, put := range []struct {
+		rig string
+		n   int
+	}{{"lampas", 2}, {"quiz", 1}, {"quiz", 2}} {
+		if _, err := v.PutBatchFile(ctx, put.rig, put.n, "outcome.txt", "landed abc\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := v.WithoutOutcome(ctx)
+	if err != nil || len(got) != 1 || got[0].Rig != "millwright" || got[0].Number != 2 {
+		t.Fatalf("expected batch 2 of millwright only, got %v (%v)", got, err)
+	}
+}

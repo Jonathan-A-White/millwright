@@ -135,3 +135,45 @@ func landedStory(outcome, story string) bool {
 	}
 	return false
 }
+
+var _ application.BatchRefs = (*Vault)(nil)
+
+// WithoutOutcome implements application.BatchRefs: for each rig under
+// runs/batch, its highest-numbered batch directory when it holds no
+// outcome.txt, in rig order. A rig with no directory has none.
+func (v *Vault) WithoutOutcome(_ context.Context) ([]application.BatchRef, error) {
+	root := filepath.Join(v.dir, filepath.FromSlash(application.BatchDir))
+	rigs, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("listing %s: %w", root, err)
+	}
+	var out []application.BatchRef
+	for _, rig := range rigs {
+		if !rig.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(root, rig.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("listing %s: %w", filepath.Join(root, rig.Name()), err)
+		}
+		highest := 0
+		for _, entry := range entries {
+			if n, err := strconv.Atoi(entry.Name()); err == nil && entry.IsDir() && n > highest {
+				highest = n
+			}
+		}
+		if highest == 0 {
+			continue
+		}
+		_, err = os.Stat(filepath.Join(root, rig.Name(), strconv.Itoa(highest), application.BatchOutcomeFile))
+		if errors.Is(err, fs.ErrNotExist) {
+			out = append(out, application.BatchRef{Rig: rig.Name(), Number: highest})
+		} else if err != nil {
+			return nil, fmt.Errorf("reading the outcome of batch %d of %s: %w", highest, rig.Name(), err)
+		}
+	}
+	return out, nil
+}

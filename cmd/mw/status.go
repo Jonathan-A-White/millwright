@@ -265,6 +265,7 @@ func newStatusCmd() *cobra.Command {
 				Suites:           files,
 				SuiteHeads:       rig.New(),
 				Batches:          files,
+				BatchDirs:        mwVault(dir, host),
 				Graph:            tracker,
 				SyncHalt:         hostSyncHalt(),
 				CloseOuts:        hostCloseOuts(),
