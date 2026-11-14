@@ -2101,7 +2101,7 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	// criterion added since never reached the session (mw-gq6.509).
 	// The Mayor can answer the change: a re-scope recorded on the bead and a
 	// closing comment of his own after it (mw-gq6.1147).
-	if refusal, changed := acceptanceChangedRefusal(c); changed && !n.acceptanceRescoped(ctx, c, base) && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+	if refusal, refused := n.acceptanceRefusal(ctx, c, report, base); refused && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		return found
 	}
 
@@ -2610,17 +2610,9 @@ func readRefusal(err error) (Refusal, bool) {
 // and the story's comments, each read tried again on a passing fault of the
 // network; a read that fails for good is a closeReadError, not an empty answer.
 func (n Next) newestCommitAndComments(ctx context.Context, c *closeOut, report *NextReport, base string) (time.Time, []Comment, error) {
-	commits, err := readRetrying(ctx, n, report, "the commits of "+c.branch, func() ([]Commit, error) {
-		return n.Landing.Commits(ctx, c.rigDir, c.branch, base)
-	})
+	newest, err := n.newestCommit(ctx, c, report, base)
 	if err != nil {
-		return time.Time{}, nil, &closeReadError{ReasonGitFailed, "the commits of " + c.branch, err}
-	}
-	var newest time.Time
-	for _, commit := range commits {
-		if commit.Committed.After(newest) {
-			newest = commit.Committed
-		}
+		return time.Time{}, nil, err
 	}
 	comments, err := readRetrying(ctx, n, report, "the comments of "+c.id, func() ([]Comment, error) {
 		return n.Tracker.StoryComments(ctx, c.id)
