@@ -546,3 +546,35 @@ func TestAJoinOfAFindingToAnOpenBeadIsWrittenInTheCloseOutsLog(t *testing.T) {
 		})
 	}
 }
+
+// mw-gq6.1288: a bug filed from a finding under an epic that says why its host
+// stays is worked on that host, not on any host.
+func TestAFoundStoryOfAnEpicWithAHostWhyKeepsTheEpicsHost(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature",
+		Host: "laptop", HostWhy: "the Morpheus cache is made on the Laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{Files: "application/next.go"}})
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+
+		"The parser drops a line (application/next.go:12). AC: go test ./application passes. By design? no\n"+
+		"For the rig memory: nothing"))
+	before := tracker.Stories()
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "cloud2",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d", len(filed))
+	}
+	if got := filed[0].Merged(); got.Host != "laptop" || got.HostWhy == "" {
+		t.Errorf("expected the epic's host=laptop and its why, got host=%q host_why=%q", got.Host, got.HostWhy)
+	}
+}

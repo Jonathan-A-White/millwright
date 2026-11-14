@@ -166,6 +166,12 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		hostNote = fmt.Sprintf("host=%s was not written: %s; host=auto was written instead, so a host that passes its gates takes the story", path.Host, why)
 		path.Host, path.HostWhy = domain.HostAuto, ""
 	}
+	// A story whose path says why its host must stay keeps it: no other host,
+	// host=auto among them, is written over it unless the same command writes
+	// a new host_why (mw-gq6.1288).
+	if err := hostWhyRefusal(id, story.Merged(), path, named); err != nil {
+		return domain.Path{}, err
+	}
 	// A formula the vault has not installed would park the story: dispatch
 	// leaves it unclaimed with one comment nobody reads (mw-gq6.497).
 	if path.Formula != "" {
@@ -303,6 +309,27 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 	}
 	return path, nil
+}
+
+// hostWhyRefusal is the refusal of a path whose host is another than the one a
+// story must keep: the story's host_why, its own or its epic's (now), says why
+// it stays, and the path would write a different host over it (mw-gq6.1288).
+// The Mayor pathed the Septuagint model stories host=auto three times, and
+// mw took each, though only the Laptop has the Morpheus cache. A host=auto story
+// is pinned to nothing, so it is never refused; a command that writes a new
+// host_why too moves the story on purpose.
+func hostWhyRefusal(id string, now, path, named domain.Path) error {
+	why := strings.TrimSpace(now.HostWhy)
+	if why == "" || now.Host == "" || now.Host == domain.HostAuto {
+		return nil
+	}
+	if path.Host == "" || path.Host == now.Host || strings.TrimSpace(named.HostWhy) != "" {
+		return nil
+	}
+	return fmt.Errorf("the story %s must stay on host=%s: its host_why says %q, and host=%s would move it: nothing was written; "+
+		"to move it on purpose, write the new host with a new reason in one command: mw path set %s host=%s host_why=\"<why>\"; "+
+		"to clear the reason, remove it where it is kept (the story's, or its epic's): bd update <id> --unset-metadata host_why",
+		id, now.Host, why, path.Host, id, path.Host)
 }
 
 // FilesNotCopiedLine is the line on stderr of a path set --from on a rig that

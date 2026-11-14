@@ -425,7 +425,7 @@ func (gateProcess) Alive(pid int) bool { return processAlive(pid, "--gate-worker
 // outlives the tool call that asked, with its output appended to the file named.
 type partProcess struct{}
 
-func (partProcess) Start(_ context.Context, storyID string, part int, logPath string) (int, error) {
+func (partProcess) Start(_ context.Context, storyID string, part int, logPath string, takesSlot bool) (int, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return 0, fmt.Errorf("finding mw to run the part with: %w", err)
@@ -437,7 +437,15 @@ func (partProcess) Start(_ context.Context, storyID string, part int, logPath st
 	defer log.Close()
 	// Not exec.CommandContext: the part is meant to outlive the context it was
 	// started in.
-	cmd := exec.Command(self, "check", storyID, "--part", strconv.Itoa(part), "--part-worker", "--no-slot")
+	args := []string{"check", storyID, "--part", strconv.Itoa(part), "--part-worker"}
+	if takesSlot {
+		// A part that takes the merge slot waits for it itself, for as long as a
+		// check not kept to a call does (mw-gq6.1289).
+		args = append(args, "--wait", CheckWait.String())
+	} else {
+		args = append(args, "--no-slot")
+	}
+	cmd := exec.Command(self, args...)
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {

@@ -104,10 +104,17 @@ func (k Check) partPoll() time.Duration {
 }
 
 // detachesPart says the part is run by a process of its own: there is a way to
-// start one, a place for what it writes, and the part takes no merge slot, which
-// a process that outlives its call could not go on holding.
-func (k Check) detachesPart(part GatePart) bool {
-	return k.PartStarter != nil && k.Logs != nil && k.Records != nil && (k.Slot == nil || !PartNeedsSlot(part))
+// start one and a place for what it writes, and either the part takes no merge
+// slot, or it takes one and its usual time is at least a whole call (fit). A call
+// cannot go on holding the slot after it ends, so a part that fits a call and
+// takes the slot is run in the call; one that outruns every call is run by a
+// process that takes the slot itself and holds it until the part is done
+// (mw-gq6.1289).
+func (k Check) detachesPart(part GatePart, fit *callFit) bool {
+	if k.PartStarter == nil || k.Logs == nil || k.Records == nil {
+		return false
+	}
+	return k.Slot == nil || !PartNeedsSlot(part) || fit.outrunsACall()
 }
 
 // partRun is the process a call started for a part.
@@ -152,7 +159,7 @@ func (k Check) checkPartDetached(ctx context.Context, report CheckReport, c *clo
 			return report, fmt.Errorf("checking %s: %w", c.id, err)
 		}
 		var err error
-		if run, err = k.startPart(ctx, report, c, label, tip); err != nil {
+		if run, err = k.startPart(ctx, report, c, label, part, tip); err != nil {
 			return report, fmt.Errorf("checking %s: %w", c.id, err)
 		}
 	}
@@ -162,7 +169,7 @@ func (k Check) checkPartDetached(ctx context.Context, report CheckReport, c *clo
 // startPart starts the process of the part. Its record is made to say that the
 // part is running, so that an old result at this commit is not read as the new
 // run's, and its output file is emptied.
-func (k Check) startPart(ctx context.Context, report CheckReport, c *closeOut, label, tip string) (partRun, error) {
+func (k Check) startPart(ctx context.Context, report CheckReport, c *closeOut, label string, part GatePart, tip string) (partRun, error) {
 	if tip == "" {
 		tip = partNoTip
 	}
@@ -177,7 +184,7 @@ func (k Check) startPart(ctx context.Context, report CheckReport, c *closeOut, l
 	if _, err := k.Logs.PutRunFile(ctx, c.id, CheckPartProgressFileName(report.Attempt, k.Part), ""); err != nil {
 		return partRun{}, fmt.Errorf("%s could not be started: the file it writes to could not be made: %w", label, err)
 	}
-	pid, err := k.PartStarter.Start(ctx, c.id, k.Part, k.Logs.RunFile(c.id, outName))
+	pid, err := k.PartStarter.Start(ctx, c.id, k.Part, k.Logs.RunFile(c.id, outName), k.Slot != nil && PartNeedsSlot(part))
 	if err != nil {
 		return partRun{}, fmt.Errorf("%s could not be started: %w", label, err)
 	}

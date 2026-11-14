@@ -58,6 +58,18 @@ func PinWhy(path domain.Path, rules domain.EpicRequirements) string {
 	return ""
 }
 
+// EpicKeepsHost is the host and the why of an epic whose defaults carry both a
+// host and a host_why: every story filed under it is worked there, and a filer
+// that would write host=auto into one leaves the host key alone instead
+// (mw-gq6.1288). Empty when the epic pins none.
+func EpicKeepsHost(defaults domain.Path) (host, why string) {
+	why = strings.TrimSpace(defaults.HostWhy)
+	if why == "" || defaults.Host == "" || defaults.Host == domain.HostAuto {
+		return "", ""
+	}
+	return defaults.Host, why
+}
+
 // Repathed is one story a dispatch tick moved to host=auto.
 type Repathed struct {
 	StoryID string

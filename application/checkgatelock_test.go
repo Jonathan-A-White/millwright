@@ -1649,7 +1649,7 @@ func (h *heldGate) ranCount() int {
 type gateStarter struct{ workerStarter }
 
 func (s *gateStarter) Start(ctx context.Context, story, logPath string) (int, error) {
-	return s.workerStarter.Start(ctx, story, 0, logPath)
+	return s.workerStarter.Start(ctx, story, 0, logPath, false)
 }
 
 func (s *gateStarter) wait() {
@@ -1996,5 +1996,82 @@ func TestABatchGateTakingTurnsEndsAtItsFirstFailingPart(t *testing.T) {
 	}
 	if holder := w.gate.Holder(); holder != "" {
 		t.Errorf("expected the gate lock to be given back, %q holds it", holder)
+	}
+}
+
+// A close-out's gate of a single story on a rig whose gate is named as parts takes
+// the host's gate lock by turns, as a batch's does: a check of another rig queued
+// behind it has its turn within one part, not after the whole gate (mw-gq6.1301).
+func TestACloseOutGateOfARigWithPartsTakesTheGateLockByTurns(t *testing.T) {
+	own := &clockedChecks{at: make(chan time.Time, 1)}
+	w := newWholeCheckBesideTheGateLock(t, own)
+	own.clock = w.clock
+	lampas := &shardedGate{clock: w.clock, queued: w.queuedGate, shard: 7 * time.Minute, shards: 6}
+	if total := time.Duration(lampas.shards) * lampas.shard; total <= aTurnWithin {
+		t.Fatalf("the gate must hold the lock longer than N: %s against %s", total, aTurnWithin)
+	}
+	var closeSaid lockedBuffer
+	closeTracker := apptest.NewFakeTracker()
+	closeTracker.AddEpic("lp-1", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	closeTracker.AddStory("lp-1", domain.Story{ID: "lp-1.1", Title: "A story"})
+	vault := newFakeVault()
+	vault.written["lp-1.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
+
+	closed := make(chan error, 1)
+	go func() {
+		_, err := application.Next{
+			Tracker: closeTracker, Vault: vault, Worktrees: lands, Landing: lands,
+			Checks: lampas, GateParts: lampas, Slot: aSlot{}, Mailbox: apptest.NewFakeMailbox(), GateLock: w.gate,
+			Seat: "builder", Host: "laptop",
+			Rigs: map[string]string{"lampas": t.TempDir()},
+			Out:  writerOf(&closeSaid), Err: writerOf(&closeSaid),
+		}.Run(context.Background(), "lp-1.1")
+		closed <- err
+	}()
+	for deadline := time.Now().Add(10 * time.Second); w.gate.Holder() != "lp-1.1"; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("expected the close-out to take the gate lock, it is held by %q\n%s", w.gate.Holder(), closeSaid.String())
+		}
+	}
+
+	began := w.clock.Now()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	checked, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: own,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, Parts: lampas,
+		PartSlotWait: aTurnWithin, CallNow: w.clock.Now, GateNoticeEvery: time.Hour,
+		Host: "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir},
+		Out:  writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+	if err != nil {
+		t.Fatalf("expected the check of millwright to have its turn within %s of a close-out gate of %s, got %v\n%s\nthe check said:\n%s",
+			aTurnWithin, time.Duration(lampas.shards)*lampas.shard, err, checked, w.told.String())
+	}
+	select {
+	case at := <-own.at:
+		if waited := at.Sub(began); waited > aTurnWithin {
+			t.Errorf("expected the check to have the gate lock within %s, it waited %s", aTurnWithin, waited)
+		}
+	default:
+		t.Fatal("expected the check's tests to have run")
+	}
+
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Errorf("expected the close-out to land, got %v\n%s", err, closeSaid.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("expected the close-out to end once the check gave the lock back")
+	}
+	if lampas.wholeRuns != 0 || len(lampas.ran) != lampas.shards {
+		t.Errorf("expected the gate to run its %d parts and not the whole line, got %d parts, %d whole runs", lampas.shards, len(lampas.ran), lampas.wholeRuns)
+	}
+	if holder := w.gate.Holder(); holder != "" {
+		t.Errorf("expected the gate lock to be free after both, %q holds it", holder)
 	}
 }

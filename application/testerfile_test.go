@@ -18,8 +18,14 @@ import (
 // names another file, and an open bead that already holds one of the findings.
 func testerFileEpic(t *testing.T) (*apptest.FakeTracker, *apptest.FakeEpicRules) {
 	t.Helper()
+	return testerFileEpicWhy(t, "")
+}
+
+// testerFileEpicWhy is testerFileEpic with the epic's host_why, when given.
+func testerFileEpicWhy(t *testing.T, hostWhy string) (*apptest.FakeTracker, *apptest.FakeEpicRules) {
+	t.Helper()
 	tracker := apptest.NewFakeTracker()
-	tracker.AddEpic("mw-e", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelSonnet, Effort: domain.EffortHigh, Host: "laptop", Formula: "tdd-feature"})
+	tracker.AddEpic("mw-e", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelSonnet, Effort: domain.EffortHigh, Host: "laptop", Formula: "tdd-feature", HostWhy: hostWhy})
 	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.1", Title: "Reader remembers its place"})
 	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.2", Title: "Test: Reader remembers its place",
 		Overrides: domain.Path{Formula: "tester"}})
@@ -675,5 +681,30 @@ func TestTesterFileWritesAutoForARetiredHost(t *testing.T) {
 				t.Errorf("expected the host named as mended: %v, output was %q", c.said, out.String())
 			}
 		})
+	}
+}
+
+// mw-gq6.1288: a finding filed under an epic that says why its host stays is
+// worked there, whether the Tester named a host or not.
+func TestTesterFilingKeepsTheHostOfAnEpicWithAHostWhy(t *testing.T) {
+	for name, host := range map[string]string{"no host named": "", "another host named": "cloud2"} {
+		tracker, rules := testerFileEpicWhy(t, "the Morpheus cache is made on the Laptop")
+		finding := testerFinding()
+		finding.Host = host
+		var out strings.Builder
+		filed, err := application.TesterFiler{Tracker: tracker, Rules: rules, Out: &out}.File(context.Background(), "mw-e.2", finding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		story, err := tracker.ShowStory(context.Background(), filed.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := story.Merged(); got.Host != "laptop" || got.HostWhy == "" {
+			t.Errorf("%s: expected host=laptop with the epic's why, got host=%q host_why=%q", name, got.Host, got.HostWhy)
+		}
+		if host != "" && !strings.Contains(out.String(), "host=cloud2 was not written") {
+			t.Errorf("%s: expected the refused host said, got:\n%s", name, out.String())
+		}
 	}
 }

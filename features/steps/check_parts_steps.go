@@ -158,7 +158,7 @@ type clockedPart struct {
 	done    chan struct{}
 }
 
-func (p *clockedPart) Start(context.Context, string, int, string) (int, error) {
+func (p *clockedPart) Start(context.Context, string, int, string, bool) (int, error) {
 	p.began = p.clock.peek()
 	p.done = make(chan struct{})
 	go func() {

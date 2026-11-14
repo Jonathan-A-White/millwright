@@ -2010,7 +2010,7 @@ func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name, w
 			stuck = append(stuck, id)
 			continue
 		}
-		if story.Merged().Host != domain.HostAuto {
+		if story.Merged().Host != domain.HostAuto && strings.TrimSpace(story.Merged().HostWhy) == "" {
 			if err := p.check.Stories.SetStoryMetadata(ctx, id, map[string]string{"host": domain.HostAuto}); err != nil {
 				stuck = append(stuck, id)
 				continue
@@ -2105,6 +2105,11 @@ func (p *cloudPass) repathFrom(ctx context.Context, stories []StoryDetail, name 
 	for _, story := range stories {
 		status := strings.ToLower(strings.TrimSpace(story.Status))
 		if story.IsEpic || story.Merged().Host != name || status != StatusOpen {
+			continue
+		}
+		// A story whose path says why its host stays is not moved, here as in a
+		// dispatch tick (mw-gq6.1288); mw status names it as held by its pin.
+		if strings.TrimSpace(story.Merged().HostWhy) != "" {
 			continue
 		}
 		if err := p.check.Stories.SetStoryMetadata(ctx, story.Story.ID, map[string]string{"host": domain.HostAuto}); err != nil {

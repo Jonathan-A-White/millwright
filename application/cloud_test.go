@@ -1887,3 +1887,25 @@ func TestTheCloudCheckLeavesAHeldStoryPinnedToAGoneBoxAlone(t *testing.T) {
 		t.Errorf("the report names the held story:\n%s", text)
 	}
 }
+
+// mw-gq6.1288: a story whose path says why its host stays is left on a gone box
+// by the cloud check, as a dispatch tick leaves it.
+func TestTheCloudCheckLeavesAStoryWithAHostWhyOnAGoneBox(t *testing.T) {
+	now := time.Date(2026, 10, 26, 3, 12, 0, 0, time.UTC)
+	tracker := goneBoxStories(t)
+	if err := tracker.SetStoryMetadata(context.Background(), "mw-g.1", map[string]string{domain.HostWhyField: "the box holds the only copy"}); err != nil {
+		t.Fatal(err)
+	}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-10"}}
+	if _, err := (application.CloudCheck{
+		Work: tracker, Stories: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "laptop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"mw-g.1": "cloud1", "mw-g.7": domain.HostAuto} {
+		if got := hostOf(t, tracker, id); got != want {
+			t.Errorf("expected %s on host %s, got %s", id, want, got)
+		}
+	}
+}
