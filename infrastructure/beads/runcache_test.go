@@ -131,4 +131,47 @@ func TestRunCacheForgetsWhatAWriteChanged(t *testing.T) {
 	}
 }
 
+// A rig's closed stories, or every closed story, read again in the run from a
+// later time are answered from the first read, with the rows closed before that
+// time left out; a write ends what was kept (mw-gq6.1286).
+func TestRunCacheReadsClosedStoriesOnce(t *testing.T) {
+	closed := `[
+ {"id": "t-1", "title": "old", "status": "closed", "issue_type": "task", "closed_at": "2026-11-10T10:00:00Z", "metadata": {"rig": "r", "host": "laptop"}},
+ {"id": "t-2", "title": "new", "status": "closed", "issue_type": "task", "closed_at": "2026-11-12T10:00:00Z", "metadata": {"rig": "r", "host": "desktop"}}
+]`
+	gateway, log := leaseStandIn(t, map[string]string{"list": closed, "kv": `{}`, "sql": `[]`}, beads.WithRunCache())
+	ctx := context.Background()
+	first := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	later := time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC)
+
+	for _, read := range []func(since time.Time) ([]application.ClosedStory, error){
+		func(since time.Time) ([]application.ClosedStory, error) {
+			return gateway.ClosedStoriesOfRig(ctx, "r", since, 200)
+		},
+		func(since time.Time) ([]application.ClosedStory, error) { return gateway.ClosedStories(ctx, since) },
+	} {
+		got, err := read(first)
+		if err != nil || len(got) != 2 {
+			t.Fatalf("first read = %d stories (%v), want 2", len(got), err)
+		}
+		got, err = read(later)
+		if err != nil || len(got) != 1 || got[0].ID != "t-2" {
+			t.Fatalf("read from a later time = %v (%v), want only t-2", got, err)
+		}
+	}
+	if lists := askedWith(t, log, "list"); len(lists) != 2 {
+		t.Errorf("bd list ran %d times, want 2 (one of the rig, one of every rig):\n%s", len(lists), strings.Join(lists, "\n"))
+	}
+
+	if err := gateway.SetNote(ctx, "host.vps.x", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gateway.ClosedStoriesOfRig(ctx, "r", later, 200); err != nil {
+		t.Fatal(err)
+	}
+	if lists := askedWith(t, log, "list"); len(lists) != 3 {
+		t.Errorf("bd list ran %d times after a write, want 3", len(lists))
+	}
+}
+
 var _ application.TrackerSnapshot = (*beads.Gateway)(nil)

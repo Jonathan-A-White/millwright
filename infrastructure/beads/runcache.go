@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -36,6 +37,9 @@ type runCache struct {
 	// index is beads indexed for ShowBeads.
 	index memo[*snapshot]
 	notes memo[map[string]any]
+	// closed is the closed stories read of a rig, or of every rig, kept by
+	// closedKey.
+	closed closedMemo
 }
 
 // reset forgets everything kept.
@@ -43,6 +47,54 @@ func (c *runCache) reset() {
 	c.beads.reset()
 	c.index.reset()
 	c.notes.reset()
+	c.closed.reset()
+}
+
+// closedMemo keeps the closed stories a run read, each with the time it read
+// them back to: a later read of the same kind, from a time no earlier, is
+// answered from the rows it holds. The run's clock moves a few seconds between
+// two such reads, and a list of closed stories 2 to 4 s on a loaded laptop was
+// read again for each (mw-gq6.1286).
+type closedMemo struct {
+	mu   sync.Mutex
+	kept map[string]closedKept
+}
+
+type closedKept struct {
+	since   time.Time
+	stories []application.ClosedStory
+}
+
+// get is the stories the key was read for, closed at since or later, when the
+// key was read from a time no later than since; ok is false otherwise.
+func (m *closedMemo) get(key string, since time.Time) (stories []application.ClosedStory, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	held, there := m.kept[key]
+	if !there || held.since.After(since) {
+		return nil, false
+	}
+	for _, c := range held.stories {
+		if !c.ClosedAt.Before(since) {
+			stories = append(stories, c)
+		}
+	}
+	return stories, true
+}
+
+func (m *closedMemo) put(key string, since time.Time, stories []application.ClosedStory) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.kept == nil {
+		m.kept = map[string]closedKept{}
+	}
+	m.kept[key] = closedKept{since: since, stories: stories}
+}
+
+func (m *closedMemo) reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.kept = nil
 }
 
 // memo is one read made once: the first caller reads it and the ones that come
