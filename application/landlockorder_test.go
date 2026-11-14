@@ -178,8 +178,8 @@ func TestALandingThatWaitedForACalmHostHoldingTheGateLockAndAWholeCheckQueuedBot
 	land.Next.Load = &apptest.FakeHostLoad{Readings: []application.LoadReading{busy(), calm()}}
 	land.Next.LoadWait = func(context.Context, time.Duration) error {
 		checked = l.startCheck()
-		// The check is queued for the lock behind the landing when the slot was
-		// given up; if the slot was not, it waits for the slot and is never queued.
+		// The check takes the slot the landing gave up and queues for the lock the
+		// landing holds.
 		for deadline := time.Now().Add(200 * time.Millisecond); l.queuedGate() < 1 && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		}
 		return nil

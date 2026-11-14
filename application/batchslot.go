@@ -17,12 +17,12 @@ import (
 //
 // The one lock order of the rig's merge slot and the host's gate lock is the slot,
 // then the lock (a check and a close-out keep it; the after-landing lock is no
-// merge slot of the rig and is taken with no gate lock). A batch that
-// yields the slot for a wait for the gate lock holds the lock when the wait ends,
-// so it gives the lock back before it takes the slot alone again (Next.takeTheGateLock),
-// and it does not yield the slot for a wait for a calm host while it holds the lock
-// (Next.calmedThen): a check that took the slot shared meanwhile waits for the lock
-// and the batch would wait for it (mw-gq6.1316).
+// merge slot of the rig and is taken with no gate lock). A batch that yielded the
+// slot for a wait holds the gate lock when the wait ends if the wait was for the
+// lock or the host held it through a wait for calm, so it gives the lock back
+// before it takes the slot alone again and asks for the lock after it
+// (gateslotlock.go): a check that took the slot shared meanwhile waits for the
+// lock, and the batch would wait for it (mw-gq6.1316).
 type batchSlot struct {
 	holding Holding
 	// yielded says the batch is between a yield and its resume, so that a wait

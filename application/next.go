@@ -785,7 +785,11 @@ type closeOut struct {
 	readsGiveWay bool
 	// turns is the host's gate lock as a batch's gate holds it, part by part
 	// (gateturns.go, mw-gq6.1275); nil for every other gate.
-	turns    *gateTurns
+	turns *gateTurns
+	// gateHold is the gate lock this close-out holds when it also yields its merge
+	// slot for waits (Next.SlotYield), so that the slot is taken alone again with the
+	// lock given back (gateslotlock.go); nil otherwise.
+	gateHold *slotYieldingLock
 	detail   StoryDetail
 	path     domain.Path
 	rigDir   string
