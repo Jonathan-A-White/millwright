@@ -124,3 +124,29 @@ func TestTheBeadsServerDropInGivesItTheCPUBeforeTheTestRunners(t *testing.T) {
 		t.Error("a user unit cannot lower its niceness without root: use CPUWeight")
 	}
 }
+
+// mw-gq6.1287: the doctor's run has a budget of its own, so many slow checks end
+// the run by what the ones that ran found and not by systemd's timeout. The unit
+// is stopped above that budget, with a margin for the notes and the verdict the
+// run leaves after its checks.
+func TestTheDoctorRunBudgetIsUnderTheUnitsStartLimit(t *testing.T) {
+	text, err := os.ReadFile("../cmd/mw/doctor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^const doctorRunBudget = (\d+) \* time\.(Minute|Second)$`).FindSubmatch(text)
+	if m == nil {
+		t.Fatal("cmd/mw/doctor.go has no `const doctorRunBudget = <n> * time.Minute` (or time.Second) line")
+	}
+	n, _ := strconv.Atoi(string(m[1]))
+	budget := time.Duration(n) * time.Minute
+	if string(m[2]) == "Second" {
+		budget = time.Duration(n) * time.Second
+	}
+	const margin = 30 * time.Second
+	for _, unit := range []string{"mw-doctor.service", "system/mw-doctor.service"} {
+		if limit := startTimeout(t, unit); limit < budget+margin {
+			t.Errorf("%s stops at %v, not %v above the doctor's run budget %v", unit, limit, margin, budget)
+		}
+	}
+}

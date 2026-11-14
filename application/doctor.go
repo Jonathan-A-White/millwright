@@ -381,6 +381,15 @@ type Doctor struct {
 	// no budget.
 	CheckBudget time.Duration
 
+	// RunBudget is how long the checks and the dampers read may take all
+	// together, read off Now. A check begun after it is spent is not probed: it is
+	// said cannot-tell ("took over 180s: the run's budget is spent"), neither
+	// logged nor noted, as a probe past CheckBudget is, and a probe running when it
+	// is spent is left behind the same way. Many slow checks, each within
+	// CheckBudget, then end the run by what the checks that did run found, not by
+	// the unit's start limit (mw-gq6.1287). Zero sets no budget.
+	RunBudget time.Duration
+
 	// Load says the host's load for a reason that names it, as "41.2"; nil, or
 	// an empty answer, leaves the load out.
 	Load func() string
@@ -397,6 +406,9 @@ type Doctor struct {
 
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
+
+	// began is when Run started, which RunBudget counts from.
+	began time.Time
 
 	// noted is the keys of this host's notes as Run found them: a check that
 	// is ok clears its note only when it is there (nil, when the listing
@@ -445,8 +457,13 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 	} else {
 		d.noted = d.readNoted(ctx)
 	}
+	d.began = d.now()
 	var report DoctorReport
 	for _, check := range checks {
+		if d.runSpent() {
+			report.Results = append(report.Results, DoctorResult{Check: check.Name(), Verdict: "cannot-tell", Reason: d.overRunBudget()})
+			continue
+		}
 		result, err := d.one(ctx, check, dryRun)
 		if err != nil {
 			return report, err
@@ -527,15 +544,34 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 	return result, err
 }
 
-// probe runs check's Probe within CheckBudget. A probe still running at the
-// budget is left behind (late), with the reason to say; it is a read, and the
-// run is a process that ends, so what it holds is let go with it.
+// runSpent is whether RunBudget, counted from when Run began, is used up.
+func (d Doctor) runSpent() bool {
+	return d.RunBudget > 0 && d.now().Sub(d.began) >= d.RunBudget
+}
+
+// limit is how long one read may take from now: CheckBudget, or what is left of
+// RunBudget when that is less (byRun then says so). Zero is no limit.
+func (d Doctor) limit() (limit time.Duration, byRun bool) {
+	limit = d.CheckBudget
+	if d.RunBudget > 0 {
+		if left := d.RunBudget - d.now().Sub(d.began); limit <= 0 || left < limit {
+			return left, true
+		}
+	}
+	return limit, false
+}
+
+// probe runs check's Probe within CheckBudget and what is left of RunBudget. A
+// probe still running at the limit is left behind (late), with the reason to
+// say; it is a read, and the run is a process that ends, so what it holds is
+// let go with it.
 func (d Doctor) probe(ctx context.Context, check DoctorCheck) (verdict Verdict, reason string, late bool) {
-	if d.CheckBudget <= 0 {
+	limit, byRun := d.limit()
+	if limit <= 0 {
 		verdict, reason = check.Probe(ctx)
 		return verdict, reason, false
 	}
-	budget, cancel := context.WithTimeout(ctx, d.CheckBudget)
+	budget, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	type answer struct {
 		verdict Verdict
@@ -554,8 +590,21 @@ func (d Doctor) probe(ctx context.Context, check DoctorCheck) (verdict Verdict, 
 			a := <-done
 			return a.verdict, a.reason, false
 		}
-		return DoctorCannotTell, d.overBudget(), true
+		return DoctorCannotTell, d.overLimit(byRun), true
 	}
+}
+
+// overLimit is the reason of a read that took longer than its limit.
+func (d Doctor) overLimit(byRun bool) string {
+	if byRun {
+		return d.overRunBudget()
+	}
+	return d.overBudget()
+}
+
+// overRunBudget is the reason of a read that RunBudget has no time left for.
+func (d Doctor) overRunBudget() string {
+	return "took over " + strconv.FormatFloat(d.RunBudget.Seconds(), 'f', -1, 64) + "s: the run's budget is spent"
 }
 
 // overBudget is the reason of a read that took longer than CheckBudget.
@@ -569,12 +618,16 @@ func (d Doctor) overBudget() string {
 	return reason
 }
 
-// dampers reads the DAMPERS counts within CheckBudget, as probe does a check.
+// dampers reads the DAMPERS counts within the same limit probe holds a check to.
 func (d Doctor) dampers(ctx context.Context) (DampersReport, error) {
-	if d.CheckBudget <= 0 {
+	limit, byRun := d.limit()
+	if byRun && limit <= 0 {
+		return DampersReport{}, errors.New(d.overRunBudget())
+	}
+	if limit <= 0 {
 		return d.Dampers.DamperCounts(ctx)
 	}
-	budget, cancel := context.WithTimeout(ctx, d.CheckBudget)
+	budget, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	type answer struct {
 		report DampersReport
@@ -593,7 +646,7 @@ func (d Doctor) dampers(ctx context.Context) (DampersReport, error) {
 			a := <-done
 			return a.report, a.err
 		}
-		return DampersReport{}, errors.New(d.overBudget())
+		return DampersReport{}, errors.New(d.overLimit(byRun))
 	}
 }
 

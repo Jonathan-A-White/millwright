@@ -102,3 +102,138 @@ func TestTheDamperReadPastItsBudgetIsSaidAndTheRunEnds(t *testing.T) {
 		t.Errorf("the line says why:\n%s", out.String())
 	}
 }
+
+// mw-gq6.1287: each check was held to CheckBudget but the run was not held to
+// anything, so many slow checks, each within its budget, ran past the unit's 4
+// minutes. The run has a budget of its own, read off the injected Now.
+
+// advancingCheck is a check whose probe takes took on the injected clock.
+type advancingCheck struct {
+	apptest.FakeDoctorCheck
+	now  *time.Time
+	took time.Duration
+}
+
+func (a *advancingCheck) Probe(ctx context.Context) (application.Verdict, string) {
+	*a.now = a.now.Add(a.took)
+	return a.FakeDoctorCheck.Probe(ctx)
+}
+
+func slowOne(name string, now *time.Time, verdict application.Verdict) *advancingCheck {
+	return &advancingCheck{
+		FakeDoctorCheck: apptest.FakeDoctorCheck{CheckName: name, Verdict: verdict, Wait: time.Hour, Cap: 3},
+		now:             now,
+		took:            2 * time.Minute,
+	}
+}
+
+const spentReason = "took over 180s: the run's budget is spent"
+
+func TestDoctorRunBudgetLeavesTheChecksAfterItCannotTell(t *testing.T) {
+	now := doctorNow
+	a, b := slowOne("a", &now, application.DoctorOK), slowOne("b", &now, application.DoctorOK)
+	c, d := slowOne("c", &now, application.DoctorOK), slowOne("d", &now, application.DoctorOK)
+	log := &apptest.FakeDoctorLog{}
+	doc := aDoctor(apptest.NewFakeDoctorState(), log, &now, a, b, c, d)
+	doc.CheckBudget = time.Minute * 10
+	doc.RunBudget = 3 * time.Minute
+	var out strings.Builder
+	doc.Out = &out
+
+	report, err := doc.Run(context.Background(), "", false)
+	if err != nil {
+		t.Fatalf("a run past its budget is no failure of the run, got %v", err)
+	}
+	if len(report.Results) != 4 {
+		t.Fatalf("every check has a result: %d", len(report.Results))
+	}
+	for i, want := range []string{"ok", "ok", "cannot-tell", "cannot-tell"} {
+		if got := report.Results[i].Verdict; got != want {
+			t.Errorf("result %d (%s) = %q, want %q", i, report.Results[i].Check, got, want)
+		}
+	}
+	for _, i := range []int{2, 3} {
+		if got := report.Results[i].Reason; got != spentReason {
+			t.Errorf("%s reason = %q, want %q", report.Results[i].Check, got, spentReason)
+		}
+	}
+	if c.Probes() != 0 || d.Probes() != 0 {
+		t.Errorf("a check after the budget is not probed: c %d, d %d", c.Probes(), d.Probes())
+	}
+	if !strings.Contains(out.String(), "c: cannot-tell ("+spentReason+")") {
+		t.Errorf("the report says it:\n%s", out.String())
+	}
+	for _, line := range log.Lines() {
+		if strings.Contains(line, "cannot-tell") {
+			t.Errorf("a check past the budget is not logged: %s", line)
+		}
+	}
+}
+
+func TestDoctorRunBudgetEndsAsTheChecksThatRanDecide(t *testing.T) {
+	now := doctorNow
+	state := apptest.NewFakeDoctorState()
+	// a is faulty and held by its damper: left faulty and uncured, so exit 6.
+	_ = state.Save(context.Background(), "a", application.DoctorEpisode{Cures: 1, LastCure: now})
+	a := slowOne("a", &now, application.DoctorFaulty)
+	b := slowOne("b", &now, application.DoctorOK)
+	c := slowOne("c", &now, application.DoctorFaulty)
+	doc := aDoctor(state, &apptest.FakeDoctorLog{}, &now, a, b, c)
+	doc.RunBudget = 3 * time.Minute
+
+	report, err := doc.Run(context.Background(), "", false)
+	fault, ok := application.DoctorFaults(err)
+	if !ok || fault.Line != "a" {
+		t.Fatalf("the run ends faulty by a, which ran: %v", err)
+	}
+	if got := report.Results[2]; got.Verdict != "cannot-tell" || got.Faulty {
+		t.Errorf("c = %+v, want cannot-tell and not faulty", got)
+	}
+	if c.Probes() != 0 {
+		t.Errorf("c is not probed once the budget is spent")
+	}
+	if application.ExitStatus(err) != application.DoctorFaultExit {
+		t.Errorf("exit = %d, want %d", application.ExitStatus(err), application.DoctorFaultExit)
+	}
+}
+
+func TestDoctorRunBudgetEndsOKWhenTheChecksThatRanAreOK(t *testing.T) {
+	now := doctorNow
+	a, b := slowOne("a", &now, application.DoctorOK), slowOne("b", &now, application.DoctorOK)
+	c := slowOne("c", &now, application.DoctorFaulty)
+	doc := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, a, b, c)
+	doc.RunBudget = 3 * time.Minute
+	_, err := doc.Run(context.Background(), "", false)
+	if err != nil || application.ExitStatus(err) != 0 {
+		t.Fatalf("the run ends ok, got %v", err)
+	}
+}
+
+func TestDoctorRunBudgetIsReadFromTheInjectedClockAndSetsNoneByDefault(t *testing.T) {
+	now := doctorNow
+	a := slowOne("a", &now, application.DoctorOK)
+	b := slowOne("b", &now, application.DoctorOK)
+	doc := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, a, b)
+	report, err := doc.Run(context.Background(), "", false)
+	if err != nil || b.Probes() != 1 || report.Results[1].Verdict != "ok" {
+		t.Fatalf("no RunBudget leaves every check worked: %v %v", report.Results, err)
+	}
+}
+
+func TestDoctorRunBudgetSpentSaysSoOnTheDampersLineAndReadsNothing(t *testing.T) {
+	now := doctorNow
+	a := slowOne("a", &now, application.DoctorOK)
+	doc := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now, a)
+	doc.RunBudget = time.Minute
+	blocked := blockedDampers{release: make(chan struct{})}
+	defer close(blocked.release)
+	doc.Dampers = blocked
+	var out strings.Builder
+	doc.Out = &out
+	if _, err := doc.Run(context.Background(), "", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "dampers: could not be read (took over 60s: the run's budget is spent)") {
+		t.Errorf("the dampers line says why:\n%s", out.String())
+	}
+}
