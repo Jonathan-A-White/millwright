@@ -4968,7 +4968,9 @@ does not go is said on stderr, exit 0, the commit kept), spends no fuel and file
 ```sh
 mw errors add <slug> --symptom "<line>" --kinds <k1,k2> [--cause "<line>"] [--sweep "<line>"] [--shared <verdict>] [--found <rig>:<bead>]
 mw errors checked <slug> <rig> ok|found:<bead>
-mw errors shared <slug> none|candidate|exists <where>
+mw errors shared <slug> none
+mw errors shared <slug> candidate
+mw errors shared <slug> exists <where>
 mw errors kinds [<rig> [<kind>...]]
 mw errors list
 mw errors show <slug>

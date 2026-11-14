@@ -1213,7 +1213,7 @@ func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRu
 	if err == nil {
 		t.Fatal("expected a part that did not start to say so")
 	}
-	for _, want := range []string{"part 2 of 2 (unit) did not start", "needs about 10s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same command again"} {
+	for _, want := range []string{"part 2 of 2 (unit) did not start", "needs about 10s and only ", " left in this call", "your place 1 of 1 in the queue is kept for 10 minutes", "run the same part again with `mw check mw-x.1 --part 2` to start it"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected the line to say %q, got %q", want, err.Error())
 		}

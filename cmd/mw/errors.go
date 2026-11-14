@@ -145,9 +145,13 @@ func newErrorsCheckedCmd() *cobra.Command {
 
 func newErrorsSharedCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "shared <slug> none|candidate|exists <where>",
+		Use:   "shared <slug> <verdict>",
 		Short: "Record the Mayor's shared-component verdict on a class",
-		Args:  cobra.MinimumNArgs(2),
+		Long: "The verdict is one of these, and only these:\n" +
+			"  mw errors shared <slug> none             no shared component would carry one fix\n" +
+			"  mw errors shared <slug> candidate        one might (takes nothing after it)\n" +
+			"  mw errors shared <slug> exists <where>   one exists, and <where> says where",
+		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			register, err := errorsFor(cmd)
 			if err != nil {
