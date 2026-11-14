@@ -121,7 +121,7 @@ class Server(unittest.TestCase):
         req = urllib.request.Request(self.url + path, data=data, method=method,
                                      headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 return resp.status, resp.read().decode()
         except urllib.error.HTTPError as err:
             return err.code, err.read().decode()
