@@ -253,9 +253,9 @@ func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, wh
 	if err != nil {
 		return gated{Err: err}
 	}
-	if lock != nil {
-		defer n.giveTheGateLockBack(report, lock)
-	}
+	// The lock is held by turns: a rig whose gate is named as parts gives it back
+	// between them (gateturns.go, mw-gq6.1301).
+	defer n.takingTurns(c, report, lock)()
 	return n.gateOnACalmHostHolding(ctx, c, report, dir, what, span, lock)
 }
 

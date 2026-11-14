@@ -17,7 +17,10 @@ import (
 // gate is longer than one part of it and the gates of other rigs between. The
 // parts are the rig's whole gate, so a batch of such a rig runs them in place of
 // its related-tests line too: a wait bounded by a part is worth more to the host
-// than the narrowing, and lampas's related run was its whole vitest anyway.
+// than the narrowing, and lampas's related run was its whole vitest anyway. A
+// close-out's gate of a single story takes turns the same way (Next.gate,
+// mw-gq6.1301); the gate on a merged result keeps the lock it holds across the
+// merge (mergedResultGate) and runs the rig's gate whole.
 
 // gateTurns is the host's gate lock as a gate that takes turns holds it: what it
 // holds now, nil once the lock could not be taken again, and how long the turns
@@ -45,7 +48,7 @@ func (n Next) takingTurns(c *closeOut, report *NextReport, lock Holding) func() 
 }
 
 // turnParts is the parts of the rig's gate a close-out takes turns between: none
-// unless the close-out holds the lock by turns (a batch's gate) and the rig's gate
+// unless the close-out holds the lock by turns (a batch's gate or a story's) and the rig's gate
 // is named as more than one part on the host.
 func (n Next) turnParts(c *closeOut) []GatePart {
 	if c.turns == nil || n.GateParts == nil {
