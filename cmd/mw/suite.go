@@ -27,7 +27,9 @@ func newSuiteCmd() *cobra.Command {
 			"suite-<rig> beside the rig's story worktrees (never the rig's own checkout) and removes it\n" +
 			"after. What runs is the rig's [tests] command from the config file, then, if the rig has a\n" +
 			"[changed_specs] command, that command with {specs} replaced by nothing, so every spec runs.\n" +
-			"A rig with no [tests] entry is refused.\n\n" +
+			"A rig with no [tests] entry is refused. A rig whose gate the host names as more than one part\n" +
+			"([test_parts.<rig>]) has its parts run one after another in place of the [tests] line, the\n" +
+			"gate lock given back after each part, so a gate waits behind one part and not the suite.\n\n" +
 			"It first takes the host's gate lock, the one a close-out's gate and a whole mw check take, so\n" +
 			"that it never runs beside a gate: it says every minute whom it waits for and since when, and a\n" +
 			"lock that cannot be taken ends the suite with nothing run. It holds the lock until its tests\n" +
@@ -90,6 +92,10 @@ func newSuiteCmd() *cobra.Command {
 				return err
 			}
 
+			configuredParts, err := config.TestParts()
+			if err != nil {
+				return err
+			}
 			files := mwVault(dir, host)
 			var filer *application.SuiteFiler
 			if file {
@@ -107,6 +113,7 @@ func newSuiteCmd() *cobra.Command {
 				Filer:        filer,
 				Load:         hostload.Proc{},
 				GateLock:     hostGateLock(),
+				Parts:        partTable(gateParts(configuredParts)),
 				LoadBound:    calmBound,
 				Host:         host,
 				Rigs:         rigs,

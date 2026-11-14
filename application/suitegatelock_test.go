@@ -355,3 +355,114 @@ func TestAMwSuiteThatCannotTakeTheLockBackBetweenPhasesEndsSayingWhatRanAndWhoHo
 		t.Errorf("expected the suite to run its tests and no more, it ran %+v", ran)
 	}
 }
+
+// partsOfTheRig names a rig's gate as parts on the host, as [test_parts.<rig>]
+// does.
+type partsOfTheRig map[string][]application.GatePart
+
+func (p partsOfTheRig) Parts(rig string) []application.GatePart { return p[rig] }
+
+// A rig whose gate is named as parts on the host is run by the nightly suite part
+// by part, the gate lock given back between parts, so a check queued behind the
+// suite waits for one part and not for the whole of lampas's suite (mw-gq6.1300).
+func TestASuiteTakesTheGateLockByTurns(t *testing.T) {
+	partOne, finishOne := make(chan struct{}), make(chan struct{})
+	partTwo := make(chan struct{})
+	var heldAt []string
+	var w *aSuiteBesideTheHostsGateLock
+	w = newSuiteBesideTheGateLock(t, func(_, command string) (application.Checked, error) {
+		heldAt = append(heldAt, command+" under "+w.gate.Holder())
+		switch command {
+		case "npm run part-one":
+			close(partOne)
+			<-finishOne
+		case "npm run part-two":
+			close(partTwo)
+		}
+		return application.Checked{Passed: true}, nil
+	})
+	suite := w.suite()
+	suite.Parts = partsOfTheRig{"lampas": {
+		{Name: "one", Command: "npm run part-one"},
+		{Name: "two", Command: "npm run part-two"},
+	}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := suite.Run(context.Background(), "lampas")
+		done <- err
+	}()
+	select {
+	case <-partOne:
+	case <-time.After(30 * time.Second):
+		t.Fatal("expected the suite to start the first part of the rig's gate")
+	}
+
+	// A check comes while the first part runs and waits for it.
+	took := make(chan application.GateTurn, 1)
+	go func() {
+		turn, err := w.gate.Take(context.Background(), "mw-gq6.1300", nil)
+		if err != nil {
+			t.Error(err)
+		}
+		took <- turn
+	}()
+	w.queued(t)
+	close(finishOne)
+
+	// It is next after one part: the second part waits behind it.
+	var turn application.GateTurn
+	select {
+	case turn = <-took:
+	case <-time.After(30 * time.Second):
+		t.Fatal("expected the check to take the lock once the first part had ended, not to wait for the whole suite")
+	}
+	select {
+	case <-partTwo:
+		t.Fatal("expected the second part not to run beside the check")
+	case <-time.After(150 * time.Millisecond):
+	}
+	turn.Holding.Release(context.Background())
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected the suite to pass once the check gave the lock back, got %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("expected the suite to run its second part once the check gave the lock back")
+	}
+	for _, line := range heldAt {
+		if !strings.HasSuffix(line, " under suite lampas") {
+			t.Errorf("expected each part to run holding the gate lock, got %q", line)
+		}
+	}
+	ran := w.runner.Ran()
+	if len(ran) != 2 || ran[0].Command != "npm run part-one" || ran[1].Command != "npm run part-two" {
+		t.Errorf("expected the suite to run the two parts in place of the tests line, it ran %+v", ran)
+	}
+}
+
+func TestASuiteOfPartsStopsAtTheFirstPartThatFailsAndRunsTheFailingFileAlone(t *testing.T) {
+	w := newSuiteBesideTheGateLock(t, func(_, command string) (application.Checked, error) {
+		if command == "npm run part-one" {
+			return application.Checked{Passed: false, Output: "FAIL tests/a.test.ts > a\n"}, nil
+		}
+		return application.Checked{Passed: true}, nil
+	})
+	suite := w.suite()
+	suite.Parts = partsOfTheRig{"lampas": {
+		{Name: "one", Command: "npm run part-one"},
+		{Name: "two", Command: "npm run part-two"},
+	}}
+	report, err := suite.Run(context.Background(), "lampas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Failed || len(report.Result.Failing) != 1 {
+		t.Fatalf("expected the failing file of the first part to be kept, got %+v", report.Result)
+	}
+	for _, ran := range w.runner.Ran() {
+		if ran.Command == "npm run part-two" {
+			t.Errorf("expected the suite to stop at the first failing part, it ran %+v", w.runner.Ran())
+		}
+	}
+}
