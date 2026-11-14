@@ -6250,6 +6250,13 @@ faults when a key is there at all: the key lives on the home only. It has no
 cure — the doctor never makes, moves or deletes a key — and names what it
 found and what a person does; `docs/secrets.md` says how.
 
+**hosts-readable** watches `/etc/hosts` on the wg hub (the file holding `# mw-wg`
+lines, which `contrib/wg-enrol` writes). It faults when the file's mode lacks o+r:
+DynamicUser services such as alerts-mail then cannot resolve `laptop.mw`, and every
+charge alert is deferred with nothing alarming. On any other host's file, or with
+mode 644, it says nothing. It has no cure; the line it prints names the fix,
+`chmod 644 /etc/hosts`.
+
 **claude-login** warns before the factory's Claude login dies (`~/.config/mw/claude.env`,
 see *Keeping the factory's tokens*). It faults when the token in that file is 335
 days old or more by the file's mtime, when `claude auth status` says the host is not

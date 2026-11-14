@@ -570,6 +570,7 @@ func newDoctorCmd() *cobra.Command {
 				kitLag,
 				followerStalled,
 				ageKey,
+				doctor.NewHostsReadable(doctor.HostsFile),
 				claudeLogin,
 				doctor.NewWorkflowScope(doctor.GhScopes{}, host),
 				usageFresh,
