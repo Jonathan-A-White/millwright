@@ -101,3 +101,26 @@ func TestTheDoctorUnitsStopUnderTheTimersPeriodAndSayTheSame(t *testing.T) {
 		t.Errorf("the doctor unit stops at %v, want from 4 minutes to under its timer's 5", user)
 	}
 }
+
+// mw-gq6.1294: the served beads timed out mw's own reads while the Laptop's load ran
+// at several times its cores. The drop-in gives dolt-beads the CPU first.
+func TestTheBeadsServerDropInGivesItTheCPUBeforeTheTestRunners(t *testing.T) {
+	text, err := os.ReadFile("dolt-beads/priority.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^CPUWeight=(\d+)$`).FindSubmatch(text)
+	if m == nil {
+		t.Fatal("dolt-beads/priority.conf has no CPUWeight=<n> line")
+	}
+	// systemd's default weight is 100 and its top is 10000.
+	if n, _ := strconv.Atoi(string(m[1])); n < 500 || n > 10000 {
+		t.Errorf("CPUWeight=%d: expected the server well above the default 100, at most 10000", n)
+	}
+	if !regexp.MustCompile(`(?m)^\[Service\]$`).Match(text) {
+		t.Error("the drop-in has no [Service] section, so systemd would ignore CPUWeight")
+	}
+	if regexp.MustCompile(`(?m)^Nice=-`).Match(text) {
+		t.Error("a user unit cannot lower its niceness without root: use CPUWeight")
+	}
+}
