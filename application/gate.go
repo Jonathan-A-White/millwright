@@ -178,7 +178,9 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 	n.markCloseOut(ctx, c.id, c.began, true)
 	defer n.markCloseOut(ctx, c.id, c.began, false)
 	if n.SlotYield != nil {
-		defer n.SlotYield(ctx)()
+		// The slot is taken alone again with the gate lock given back first, when the
+		// close-out holds it (resumeSlot, mw-gq6.1316).
+		defer n.resumeSlot(ctx, c, report, n.SlotYield(ctx))
 	}
 	since := n.now()
 	var waited, said time.Duration
@@ -367,23 +369,7 @@ func (n Next) takeTheGateLock(ctx context.Context, c *closeOut, report *NextRepo
 	if n.GateLock == nil {
 		return nil, nil
 	}
-	var resume func()
-	_, saysItsOwn := n.GateLock.(checkGateLock)
-	turn, err := n.GateLock.Take(ctx, c.id, func(by string) {
-		// A check's lock says its own wait, naming more (Check.heldLine).
-		if !saysItsOwn {
-			n.print(fmt.Sprintf("  wait    %s's gate lock is held by %s: waiting for it before %s\n", n.Host, by, what))
-		}
-		// The close-out says it is waiting, so that mw status and the quiet
-		// alarm do not take the story for quiet while it queues.
-		n.markCloseOut(ctx, c.id, c.began, true)
-		if n.SlotYield != nil && resume == nil {
-			resume = n.SlotYield(ctx)
-		}
-	})
-	if resume != nil {
-		resume()
-	}
+	turn, err := n.takeGateLockUnderTheSlot(ctx, c, report, what)
 	if err != nil {
 		n.markCloseOut(ctx, c.id, c.began, false)
 		var handBack GateLockHandBack
@@ -397,7 +383,7 @@ func (n Next) takeTheGateLock(ctx context.Context, c *closeOut, report *NextRepo
 		n.markCloseOut(ctx, c.id, c.began, false)
 		report.Notes = append(report.Notes, fmt.Sprintf("gate waited %s for %s before %s", gateWaited(turn.Waited), turn.For, what))
 	}
-	return turn.Holding, nil
+	return n.keepTheLockForTheSlot(c, what, turn.Holding), nil
 }
 
 // noteLocklessGate says the gate lock could not be taken, and that the tests
