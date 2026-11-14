@@ -26,6 +26,8 @@ type AfterLanding struct {
 	limits   map[string]time.Duration
 	deploys  map[string]int
 	shell    string
+	nice     int
+	jobs     int
 }
 
 // AfterLanding satisfies the port.
@@ -123,6 +125,22 @@ func WithAfterLimit(limit time.Duration) AfterLandingOption {
 	}
 }
 
+// WithAfterNice runs every rig's after-landing command under `nice -n <n>`, so a
+// build, a deploy and a shots run (Playwright's chrome by the dozen) yield the CPU
+// to the beads server and to whoever sits at the host (mw-gq6.1294). 0, the
+// default, runs it as it was.
+func WithAfterNice(n int) AfterLandingOption {
+	return func(a *AfterLanding) { a.nice = n }
+}
+
+// WithAfterJobs caps the test workers an after-landing command may start at n, by
+// handing it JOBS, GOMAXPROCS and VITEST_MAX_WORKERS (application.WorkerLimitEnv),
+// as a Builder's gate is given them (mw-gq6.399). 0, the default, leaves the
+// command the environment it was started in.
+func WithAfterJobs(n int) AfterLandingOption {
+	return func(a *AfterLanding) { a.jobs = n }
+}
+
 // WithAfterStretch is how many times its limit a command is waited for before it
 // is stopped, instead of application.AfterLandingStretch (mw-gq6.1268). Less than
 // one changes nothing.
@@ -207,7 +225,7 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 	limited, cancel := context.WithTimeout(ctx, stopAt)
 	defer cancel()
 	began := a.now()
-	output, err := runLine(limited, a.shell, line, dir, 0, freePortEnv())
+	output, err := runLine(limited, a.shell, line, dir, a.nice, append(freePortEnv(), workerEnv(a.jobs)...))
 	ran := application.Ran{Command: command, Output: output, Steps: steps, Step: stepEndedIn(output, steps), ReadAt: readAt, Changed: changed, ReadFailed: readFailed,
 		Limit: limit, Took: a.now().Sub(began)}
 	if err == nil {
@@ -236,6 +254,15 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 // checkout's path (mw-gq6.479). The kernel picks it from its ephemeral range,
 // clear of the 4400-5399 postern's gate runs derive from their worktrees.
 const PreviewPortEnv = "PREVIEW_PORT"
+
+// workerEnv is the worker limit n as KEY=VALUE words, none for no limit.
+func workerEnv(n int) []string {
+	var env []string
+	for name, value := range application.WorkerLimitEnv(n) {
+		env = append(env, name+"="+value)
+	}
+	return env
+}
 
 // freePortEnv names a port nothing listens on now, as the one variable of the
 // command's environment; nil when none could be had, and then the command

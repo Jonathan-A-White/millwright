@@ -51,12 +51,20 @@ func newAfterLandingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			nice, err := config.BuilderNice()
+			if err != nil {
+				return err
+			}
+			jobs, err := config.BuilderJobs()
+			if err != nil {
+				return err
+			}
 			dir, err := config.Vault()
 			if err != nil {
 				return err
 			}
 			return application.AfterLandingRun{
-				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits), deploySteps),
+				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs)),
 				Slot: rig.NewSlots(
 					rig.WithSlotSuffix(rig.AfterLandingSlotSuffix),
 					rig.WithSlotNotice(func(said string) { cmd.ErrOrStderr().Write([]byte(said)) }),

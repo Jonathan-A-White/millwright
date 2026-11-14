@@ -2,6 +2,7 @@ package rig_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,5 +312,55 @@ func TestACommandThatFailsAfterItsLimitSaysSoAndKeepsItsStatus(t *testing.T) {
 func TestACommandIsStoppedAtTwiceItsLimitUnlessTheStretchIsChanged(t *testing.T) {
 	if application.AfterLandingStretch != 2 {
 		t.Errorf("expected the stretch to be 2, got %d", application.AfterLandingStretch)
+	}
+}
+
+// TestAnAfterLandingCommandRunsUnderTheHostsNiceAndWorkerLimit: a postern shots
+// run after a landing starts Playwright's chrome and a build, and on a host that
+// is also someone's PC (and serves the beads) it must yield the CPU and start no
+// more workers than the host says, as a Builder's gate does (mw-gq6.1294).
+func TestAnAfterLandingCommandRunsUnderTheHostsNiceAndWorkerLimit(t *testing.T) {
+	read := func(options ...rig.AfterLandingOption) string {
+		t.Helper()
+		options = append(options, rig.WithAfterCommands(map[string]string{"millwright": `echo "nice=$(nice) jobs=$JOBS vitest=$VITEST_MAX_WORKERS"`}))
+		ran, err := rig.NewAfterLanding(options...).Run(context.Background(), "millwright", t.TempDir())
+		if err != nil || !ran.Succeeded() {
+			t.Fatalf("running the command: %v, %+v", err, ran)
+		}
+		return strings.TrimSpace(ran.Output)
+	}
+
+	base := read()
+	var baseNice int
+	if _, err := fmt.Sscanf(base, "nice=%d", &baseNice); err != nil {
+		t.Fatalf("reading the base niceness from %q: %v", base, err)
+	}
+	if strings.Contains(base, "jobs=3") {
+		t.Fatalf("the environment this test runs in already limits jobs: %q", base)
+	}
+
+	got := read(rig.WithAfterNice(7), rig.WithAfterJobs(3))
+	want := baseNice + 7
+	if want > 19 {
+		want = 19
+	}
+	if !strings.Contains(got, fmt.Sprintf("nice=%d ", want)) || !strings.Contains(got, "jobs=3") || !strings.Contains(got, "vitest=3") {
+		t.Errorf("expected the command to run %d nicer than %d with 3 workers, got %q", 7, baseNice, got)
+	}
+	if off := read(rig.WithAfterNice(0), rig.WithAfterJobs(0)); off != base {
+		t.Errorf("expected a nice and a limit of 0 to leave the command as it was (%q), got %q", base, off)
+	}
+}
+
+// TestAnAfterLandingCommandStillFindsItsFreePortUnderALimit: the worker limit is
+// added to the free port, not put in its place.
+func TestAnAfterLandingCommandStillFindsItsFreePortUnderALimit(t *testing.T) {
+	after := rig.NewAfterLanding(rig.WithAfterNice(5), rig.WithAfterJobs(2), rig.WithAfterCommands(map[string]string{"millwright": `echo "port=$PREVIEW_PORT jobs=$JOBS"`}))
+	ran, err := after.Run(context.Background(), "millwright", t.TempDir())
+	if err != nil || !ran.Succeeded() {
+		t.Fatalf("running the command: %v, %+v", err, ran)
+	}
+	if strings.Contains(ran.Output, "port= ") || !strings.Contains(ran.Output, "jobs=2") {
+		t.Errorf("expected a port and 2 jobs, got %q", ran.Output)
 	}
 }
