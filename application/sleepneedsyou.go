@@ -514,7 +514,7 @@ type NeedsYouSurvey struct {
 // Read reads the facts. The queue itself must be read: its failure is the
 // error; the rest is said to be missing by what it leaves out.
 func (s NeedsYouSurvey) Read(ctx context.Context) (NeedsYouFacts, error) {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if s.Now != nil {
 		now = s.Now()
 	}

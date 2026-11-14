@@ -69,7 +69,7 @@ func (p Peek) Run(ctx context.Context, storyID string) error {
 		return p.remote(ctx, host, storyID)
 	}
 
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if p.Now != nil {
 		now = p.Now()
 	}

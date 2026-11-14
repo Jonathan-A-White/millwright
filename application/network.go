@@ -151,7 +151,7 @@ var _ NetworkReader = (*Network)(nil)
 
 func (n *Network) now() time.Time {
 	if n.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return n.Now()
 }

@@ -81,6 +81,16 @@ type ReviewHold struct {
 	// Sender is the command that asks, named in what the hold says ("mw grill
 	// --ask"); empty is "mw postern send".
 	Sender string
+	// Now is the clock the age of a cloud make is read by; nil is the host's.
+	Now func() time.Time
+}
+
+// now is the clock the hold reads.
+func (h ReviewHold) now() time.Time {
+	if h.Now != nil {
+		return h.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // sender is the name the hold's lines open with.
@@ -125,7 +135,7 @@ func (h ReviewHold) sayCloudMakes(ctx context.Context) {
 	if !ok || h.Err == nil {
 		return
 	}
-	for _, line := range reader.CloudMakeLines(ctx, time.Now()) {
+	for _, line := range reader.CloudMakeLines(ctx, h.now()) {
 		fmt.Fprintf(h.Err, "%s: %s\n", h.sender(), line)
 	}
 }

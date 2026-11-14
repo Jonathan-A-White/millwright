@@ -51,7 +51,7 @@ type FactoryReportSend struct {
 
 // Run sends the summary, and reports the txid; empty when nothing was sent.
 func (s FactoryReportSend) Run(ctx context.Context) (string, error) {
-	now := time.Now()
+	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
 	if s.Now != nil {
 		now = s.Now()
 	}

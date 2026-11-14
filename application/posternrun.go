@@ -298,7 +298,7 @@ func (i PosternInbox) reportRun(ctx context.Context, bead, txid, text, told, sub
 // now is the clock an approval's age and a run's time are read by.
 func (i PosternInbox) now() time.Time {
 	if i.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return i.Now()
 }

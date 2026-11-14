@@ -106,7 +106,7 @@ var _ DoctorCoolingQuiet = (*RecheckSkipCheck)(nil)
 
 func (c *RecheckSkipCheck) now() time.Time {
 	if c.Now == nil {
-		return time.Now()
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
 	}
 	return c.Now()
 }

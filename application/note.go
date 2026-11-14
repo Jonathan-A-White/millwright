@@ -235,7 +235,7 @@ func (n Note) now() time.Time {
 	if n.Now != nil {
 		return n.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // RunFile adds the text of the file at path to bead id as a comment.
