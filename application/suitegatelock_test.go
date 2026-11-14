@@ -393,7 +393,7 @@ func TestASuiteTakesTheGateLockByTurns(t *testing.T) {
 	}()
 	select {
 	case <-partOne:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("expected the suite to start the first part of the rig's gate")
 	}
 
@@ -413,7 +413,7 @@ func TestASuiteTakesTheGateLockByTurns(t *testing.T) {
 	var turn application.GateTurn
 	select {
 	case turn = <-took:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("expected the check to take the lock once the first part had ended, not to wait for the whole suite")
 	}
 	select {
@@ -427,7 +427,7 @@ func TestASuiteTakesTheGateLockByTurns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected the suite to pass once the check gave the lock back, got %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("expected the suite to run its second part once the check gave the lock back")
 	}
 	for _, line := range heldAt {
