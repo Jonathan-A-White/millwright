@@ -97,17 +97,18 @@ func (k Check) gateRecordOf(ctx context.Context, storyID string, attempt int) (g
 
 // detachedGate is a foreground whole check whose gate outruns a call: it joins the
 // outstanding process of the check if there is one, else starts one when the gate
-// usually takes at least a whole call, and waits for it for what is left of the
+// usually takes at least a whole call or has no figure here (noFigure, mw-gq6.1290),
+// and waits for it for what is left of the
 // call. done says the call's report is made: the one line the call ends in, or the
 // verdict the process kept. When it is not done the check goes on in the call as
 // before: there is no process and the gate fits a call, or the process ended
 // having kept that the tests passed at this commit.
-func (k Check) detachedGate(ctx context.Context, report CheckReport, c *closeOut, tip string, fit *callFit) (CheckReport, bool, error) {
+func (k Check) detachedGate(ctx context.Context, report CheckReport, c *closeOut, tip string, fit *callFit, noFigure bool) (CheckReport, bool, error) {
 	runName := CheckGateRunFileName(report.Attempt)
 	for try := 0; try < 2; try++ {
 		run, outstanding := k.partRunOf(ctx, c.id, runName)
 		if !outstanding {
-			if !fit.outrunsACall() {
+			if !fit.outrunsACall() && !noFigure {
 				return report, false, nil
 			}
 			var err error
@@ -166,7 +167,10 @@ func (k Check) startGate(ctx context.Context, c *closeOut, attempt int, fit *cal
 	if _, err := k.Records.PutRunFile(ctx, c.id, CheckGateRunFileName(attempt), record); err != nil {
 		return partRun{}, fmt.Errorf("the check was started as a process of its own, but its process could not be kept in the run, so no later call can wait for it: %w", err)
 	}
-	if k.Out != nil {
+	if k.Out != nil && fit == nil {
+		fmt.Fprintf(k.Out, "  note    there is no figure for the rig's gate on %s, so how long it takes is not known here: the check runs as a process of its own, which takes the merge slot and gate lock itself and goes on if this call (%s) ends\n",
+			k.Host, gateWaited(k.CallBudget))
+	} else if k.Out != nil {
 		fmt.Fprintf(k.Out, "  note    the rig's gate usually takes about %s on %s, longer than this call's %s, so the check runs as a process of its own, which takes the merge slot and gate lock itself and goes on if this call ends\n",
 			gateWaited(fit.expected), k.Host, gateWaited(fit.budget))
 	}

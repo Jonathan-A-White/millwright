@@ -169,16 +169,27 @@ func (k Check) callNow() time.Time {
 
 // callFitOf is the fit of the rig's gate to the call this check began, nil when
 // the check is not asked to keep to a call (no CallBudget) or no figure for the
-// rig's gate is known.
-func (k Check) callFitOf(ctx context.Context, rig string, began time.Time) *callFit {
+// rig's gate is known. unknown says it is the second: the check is kept to a call
+// and the host has no figure for the rig's gate (a new host, or one with no bench
+// rows), so that nothing says whether the gate ends inside the call (mw-gq6.1290).
+func (k Check) callFitOf(ctx context.Context, rig string, began time.Time) (fit *callFit, unknown bool) {
 	if k.CallBudget <= 0 || k.GateExpected == nil {
-		return nil
+		return nil, false
 	}
 	expected := k.GateExpected(ctx, rig)
 	if expected <= 0 {
-		return nil
+		return nil, true
 	}
-	return &callFit{began: began, budget: k.CallBudget, expected: expected, now: k.CallNow}
+	return &callFit{began: began, budget: k.CallBudget, expected: expected, now: k.CallNow}, false
+}
+
+// noFigureLine is the one line a foreground check says before it starts a gate
+// whose length on this host is not known and which it cannot hand to a process of
+// its own: a gate that outruns the call is cut off by the tool with nothing said,
+// and the same check run with --background is not kept to a call (mw-gq6.1290).
+func (k Check) noFigureLine(story string) string {
+	return fmt.Sprintf("there is no figure for the rig's gate on %s, so how long it takes is not known here: the gate is started in this call, which is cut off with nothing said if the gate outlasts its %s; to run it so that it outlives the call, run `mw check %s --background`",
+		k.Host, gateWaited(k.CallBudget), story)
 }
 
 // left is what is left of the call's budget.

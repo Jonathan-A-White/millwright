@@ -504,15 +504,21 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	}
 	var fit *callFit
 	if !split && kept == "" {
-		fit = k.callFitOf(ctx, path.Rig, began)
+		var noFigure bool
+		fit, noFigure = k.callFitOf(ctx, path.Rig, began)
 		if k.detachesGate() {
-			// A gate no call can fit is run by a process of its own (mw-gq6.1273).
-			detached, done, err := k.detachedGate(ctx, report, c, tip, fit)
+			// A gate no call can fit is run by a process of its own (mw-gq6.1273),
+			// and so is one whose length here is not known (mw-gq6.1290).
+			detached, done, err := k.detachedGate(ctx, report, c, tip, fit, noFigure)
 			if done || err != nil {
 				return wholeCheckVerdict(detached, err)
 			}
 			// The process passed the tests at this commit: they are not run again.
 			kept = k.keptTests(ctx, storyID, report.Attempt, tip)
+		} else if noFigure && k.Out != nil {
+			// It cannot start a process: the gate is run in the call as it was, and
+			// the call says before it starts that it may be cut off (mw-gq6.1290).
+			fmt.Fprintf(k.Out, "  note    %s\n", k.noFigureLine(c.id))
 		}
 	}
 	var gateLock GateLock
