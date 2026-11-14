@@ -521,6 +521,13 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	}
 
 	ran, retried, err := n.deploy(ctx, c, report)
+	if !report.Rig.Current() {
+		// The checkout stopped being one to build from while the command waited
+		// for its lock: nothing was run (mw-6ww.175.51).
+		report.AfterLandingSkipped = afterLandingLine(command, "not run, "+report.Rig.NotCurrent(c.target))
+		report.Notes = append(report.Notes, report.AfterLandingSkipped)
+		return
+	}
 	report.Notes = append(report.Notes, ran.ReadLines()...)
 	line := ran.Line()
 	if err != nil {
@@ -686,11 +693,35 @@ func (n Next) deploy(ctx context.Context, c *closeOut, report *NextReport) (ran 
 	if err != nil {
 		return Ran{}, "", err
 	}
-	ran, retried, err = runAfterLanding(ctx, n.AfterLanding, c.path.Rig, c.rigDir, n.AfterRetryWait, n.wait)
+	n.lookAgainAtCheckout(ctx, c, report)
+	if report.Rig.Current() {
+		ran, retried, err = runAfterLanding(ctx, n.AfterLanding, c.path.Rig, c.rigDir, n.AfterRetryWait, n.wait)
+	}
 	if relErr := release(ctx); relErr != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the after-landing lock of %s could not be given back: %v", c.path.Rig, relErr))
 	}
 	return ran, retried, err
+}
+
+// lookAgainAtCheckout reads the rig's checkout once more, with the after-landing
+// lock held and so as near the command's start as can be: the landing's own
+// fast-forward was read before the command waited for its lock, and the checkout
+// can have changed since (a person's checkout of another branch or an edit, a
+// fast-forward of another process half done). It is the landing's own Advance,
+// which waits for any other on the checkout and leaves it alone unless it is on
+// the target branch and clean, so a build is never made of files that are not
+// the landed commit's. What it finds replaces report.Rig, so the grist smoke
+// that follows reads the same checkout. Nothing is read for a landing with no
+// commit or no Landing to ask (mw-6ww.175.51).
+func (n Next) lookAgainAtCheckout(ctx context.Context, c *closeOut, report *NextReport) {
+	if n.Landing == nil || report.How.Commit == "" {
+		return
+	}
+	advanced, err := n.Landing.Advance(ctx, c.rigDir, c.target, report.How.Commit)
+	if err != nil {
+		advanced = Advanced{Held: "git said: " + firstLine(err.Error())}
+	}
+	report.Rig = advanced
 }
 
 // restartUnits restarts this host's long-running mw units on the build that just
