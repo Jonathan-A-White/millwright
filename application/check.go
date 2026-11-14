@@ -164,11 +164,13 @@ type Check struct {
 	Records CheckRecords
 	Part    int
 
-	// PartStarter, when it is set, runs a --part that takes no merge slot as a
+	// PartStarter, when it is set, runs a --part that takes no merge slot, or one
+	// that takes it and usually takes a whole call or more (mw-gq6.1289), as a
 	// process of its own that outlives the call (mw-gq6.1029): the call waits for it
 	// for what is left of the Builder's foreground call, and a part still running
 	// then is waited for again by the same command. PartWorker is that process: the
-	// part run and kept, with no wait for a calm host or the slot. PartPoll is how
+	// part run and kept, with no wait for a calm host; it waits for the merge slot
+	// itself when it takes one. PartPoll is how
 	// often a call looks at the process; CheckPartPoll when zero.
 	PartStarter PartStarter
 	PartWorker  bool

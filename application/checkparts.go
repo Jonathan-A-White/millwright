@@ -71,8 +71,10 @@ type CheckRecords interface {
 // of its own so that it outlives the tool call that asked, with everything it
 // prints appended to the file at logPath, and says whether such a process is
 // still running. Start returns once the part has started, not when it is done.
+// takesSlot says the process takes the rig's merge slot itself, around the part,
+// as a part that needs it does (PartNeedsSlot); otherwise it takes none.
 type PartStarter interface {
-	Start(ctx context.Context, storyID string, part int, logPath string) (pid int, err error)
+	Start(ctx context.Context, storyID string, part int, logPath string, takesSlot bool) (pid int, err error)
 	Alive(pid int) bool
 	// Kill stops the process Start returned and everything it started, its whole
 	// process group, and returns once it is gone (mw-82lb97i.12).
@@ -203,15 +205,13 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	part := parts[k.Part-1]
 	label := partLabel(k.Part, len(parts), part)
 	tip := k.cleanTip(ctx, c)
-	switch {
-	case k.PartWorker:
-		// The process a call started for the part: it waits for neither a calm host
-		// nor the slot, which the call that started it did.
-		return k.runPart(ctx, report, c, label, part, tip, nil, LoadReading{})
-	case k.detachesPart(part):
-		return k.checkPartDetached(ctx, report, c, label, part, tip)
+	if k.PartWorker {
+		return k.runPartWorker(ctx, report, c, label, part, tip)
 	}
 	fit := k.partFitOf(ctx, c.path.Rig, k.Part, k.began)
+	if k.detachesPart(part, fit) {
+		return k.checkPartDetached(ctx, report, c, label, part, tip)
+	}
 
 	// The part waits for a calm host, as a whole check does, before anything else
 	// of it, and what the wait leaves is what the merge slot is waited for in
@@ -246,6 +246,31 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 			c.id, label, gateWaited(fit.expected), gateWaited(fit.left()), k.Host, c.id, k.Part)
 	}
 	return k.runPart(ctx, report, c, label, part, tip, fit, before)
+}
+
+// runPartWorker is the process a call started for the part. It waits for no calm
+// host, which the call that started it did. A part that takes no merge slot runs at
+// once; one that takes it (PartNeedsSlot, and a slot to take: the process was not
+// told --no-slot) waits for it itself, for what its own wait allows, and holds it
+// for the part alone, so the call that started it never held or waited for the
+// slot (mw-gq6.1289). A wait for the slot that ends without it is closed as handed
+// back, as a part that could not run is.
+func (k Check) runPartWorker(ctx context.Context, report CheckReport, c *closeOut, label string, part GatePart, tip string) (CheckReport, error) {
+	if k.Slot != nil && PartNeedsSlot(part) {
+		holding, err := k.takeSlotFit(ctx, c, nil, k.partSlotWait(), slotTry{
+			label:  label,
+			noun:   "part",
+			record: CheckPartHeldFileName(report.Attempt, k.Part),
+			again:  fmt.Sprintf("run the same part again with `mw check %s --part %d`", c.id, k.Part),
+		})
+		if err != nil {
+			err = fmt.Errorf("checking %s: %w", c.id, err)
+			k.closeRunningRecord(ctx, c, report.Attempt, err)
+			return report, err
+		}
+		defer holding.Release(ctx)
+	}
+	return k.runPart(ctx, report, c, label, part, tip, nil, LoadReading{})
 }
 
 // runPart runs part n of the gate in the story's worktree and keeps what it said:
