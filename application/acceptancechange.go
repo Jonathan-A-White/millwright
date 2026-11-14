@@ -106,6 +106,25 @@ func acceptanceChangedRefusal(c *closeOut) (Refusal, bool) {
 	return Refusal{ReasonAcceptanceChanged, "the acceptance changed after the claim of " + c.id, said}, true
 }
 
+// acceptanceRefusal is the refusal of a story whose acceptance changed after the
+// claim and that the Mayor has not answered. The answer is read from the bead's
+// comments and the branch's commits; a read that fails is a refusal to say so
+// (tracker-failed or git-failed, the claim kept), not an answer of no.
+func (n Next) acceptanceRefusal(ctx context.Context, c *closeOut, report *NextReport, base string) (Refusal, bool) {
+	refusal, changed := acceptanceChangedRefusal(c)
+	if !changed {
+		return Refusal{}, false
+	}
+	rescoped, err := n.acceptanceRescoped(ctx, c, report, base)
+	if err != nil {
+		return readRefusal(err)
+	}
+	if rescoped {
+		return Refusal{}, false
+	}
+	return refusal, true
+}
+
 // RescopedMark opens the comment that records a Mayor's re-scope of a story
 // whose work is done (mw-gq6.1147): who wrote it and when are the comment's
 // own, and the why follows the mark. RescopedAcceptanceLine, on the next line,
@@ -144,12 +163,15 @@ func rescopeHash(comment Comment) string {
 	return ""
 }
 
-// newestCommit is when the story's branch was last committed to; zero when the
-// commits cannot be read.
-func (n Next) newestCommit(ctx context.Context, c *closeOut, base string) time.Time {
-	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, base)
+// newestCommit is when the story's branch was last committed to. A read that
+// fails, after its retries on a passing fault, is a closeReadError (git-failed),
+// not the zero time (mw-gq6.1315).
+func (n Next) newestCommit(ctx context.Context, c *closeOut, report *NextReport, base string) (time.Time, error) {
+	commits, err := readRetrying(ctx, n, report, "the commits of "+c.branch, func() ([]Commit, error) {
+		return n.Landing.Commits(ctx, c.rigDir, c.branch, base)
+	})
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, &closeReadError{ReasonGitFailed, "the commits of " + c.branch, err}
 	}
 	var newest time.Time
 	for _, commit := range commits {
@@ -157,18 +179,20 @@ func (n Next) newestCommit(ctx context.Context, c *closeOut, base string) time.T
 			newest = commit.Committed
 		}
 	}
-	return newest
+	return newest, nil
 }
 
 // acceptanceRescoped says the Mayor answered the change of the story's
 // acceptance since the claim (mw-gq6.1147): the bead holds a RESCOPED-BY-MAYOR:
 // comment pinning the acceptance it holds now, and a closing comment not
-// written by a Builder, after the branch's newest commit. It reads, and
-// anything it cannot read counts as no.
-func (n Next) acceptanceRescoped(ctx context.Context, c *closeOut, base string) bool {
-	comments, err := n.Tracker.StoryComments(ctx, c.id)
+// written by a Builder, after the branch's newest commit. A read that fails is
+// the error (a closeReadError), not a no.
+func (n Next) acceptanceRescoped(ctx context.Context, c *closeOut, report *NextReport, base string) (bool, error) {
+	comments, err := readRetrying(ctx, n, report, "the comments of "+c.id, func() ([]Comment, error) {
+		return n.Tracker.StoryComments(ctx, c.id)
+	})
 	if err != nil {
-		return false
+		return false, &closeReadError{ReasonTrackerFailed, "the comments of " + c.id, err}
 	}
 	now := AcceptanceAtClaim(c.detail.Acceptance)
 	pinned := false
@@ -178,15 +202,18 @@ func (n Next) acceptanceRescoped(ctx context.Context, c *closeOut, base string) 
 		}
 	}
 	if !pinned {
-		return false
+		return false, nil
 	}
-	committed := n.newestCommit(ctx, c, base)
+	committed, err := n.newestCommit(ctx, c, report, base)
+	if err != nil {
+		return false, err
+	}
 	for _, comment := range comments {
 		if comment.Created.After(committed) && !builderAuthor(comment.Author) && isClosingComment(comment.Text) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // recordRescope writes the RESCOPED-BY-MAYOR: comment a --rescoped-by-mayor

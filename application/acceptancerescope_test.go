@@ -52,7 +52,7 @@ func TestARescopeWithAMayorClosingCommentAnswersTheChangedAcceptance(t *testing.
 			rescopeComment("AC 4 and 5 reworded", "1. One.\n2. Two, reworded.", committed.Add(25*time.Minute)),
 		}
 	})
-	if !n.acceptanceRescoped(context.Background(), c, "main") {
+	if rescoped, err := n.acceptanceRescoped(context.Background(), c, &NextReport{}, "main"); err != nil || !rescoped {
 		t.Fatal("expected a recorded re-scope with a Mayor closing comment to answer the change")
 	}
 }
@@ -86,7 +86,7 @@ func TestARescopeNoMayorClosingCommentAnswersIsStillRefused(t *testing.T) {
 	}
 	for name, comments := range cases {
 		n, c, _ := rescopedStory(comments)
-		if n.acceptanceRescoped(context.Background(), c, "main") {
+		if rescoped, err := n.acceptanceRescoped(context.Background(), c, &NextReport{}, "main"); err != nil || rescoped {
 			t.Errorf("%s: expected the change not to be answered", name)
 		}
 	}
@@ -112,7 +112,7 @@ func TestRecordRescopeWritesWhoWhenAndWhyOnTheBeadOnce(t *testing.T) {
 	if len(written) != 1 || !strings.Contains(written[0], n.RescopedByMayor) {
 		t.Fatalf("expected one re-scope comment holding the why, got %q", written)
 	}
-	if !n.acceptanceRescoped(context.Background(), c, "main") {
+	if rescoped, err := n.acceptanceRescoped(context.Background(), c, &NextReport{}, "main"); err != nil || !rescoped {
 		t.Error("expected the comment just written to answer the change")
 	}
 }
