@@ -43,6 +43,10 @@ type Worktrees struct {
 	raceWait time.Duration
 	// refreshLimit is the longest a grind refresh's fetch may run (mw-gq6.647).
 	refreshLimit time.Duration
+	// buildLimits is the limit of a backend build by the rig's checkout, and
+	// buildStretch how many times it a build is waited for (mw-gq6.1291).
+	buildLimits  map[string]time.Duration
+	buildStretch int
 	mergeScript  string
 	// endProcess ends one process found holding a worktree (mw-gq6.876).
 	endProcess func(pid int) error
@@ -99,6 +103,34 @@ func WithNpm(program string) Option {
 // a driver that fails.
 func WithMergeScript(script string) Option {
 	return func(w *Worktrees) { w.mergeScript = script }
+}
+
+// WithBuildLimits names the limit of each rig's backend build, by the path of the
+// rig's checkout, from the [after_landing_limit] table of the config file as the
+// after-landing step reads it (WithAfterLimits): a rig the table does not name, or
+// names with no time, keeps application.AfterLandingLimit.
+func WithBuildLimits(limits map[string]time.Duration) Option {
+	return func(w *Worktrees) {
+		for dir, limit := range limits {
+			if limit > 0 {
+				if w.buildLimits == nil {
+					w.buildLimits = map[string]time.Duration{}
+				}
+				w.buildLimits[filepath.Clean(dir)] = limit
+			}
+		}
+	}
+}
+
+// WithBuildStretch is how many times its limit a backend build is waited for
+// before it is stopped, instead of application.AfterLandingStretch. Less than one
+// changes nothing.
+func WithBuildStretch(times int) Option {
+	return func(w *Worktrees) {
+		if times >= 1 {
+			w.buildStretch = times
+		}
+	}
 }
 
 // New returns a Worktrees that runs git as this host has it.

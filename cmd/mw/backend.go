@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
@@ -39,10 +40,21 @@ func hostBackend(gateway *beads.Gateway, files application.HomeFile, host string
 		}
 		return application.BackendStage{}
 	}
+	// A backend build has the limit its rig's after-landing command has.
+	limits, err := config.AfterLandingLimits()
+	if err != nil && errs != nil {
+		fmt.Fprintf(errs, "backend builds keep the default limit: %v\n", err)
+	}
+	byDir := map[string]time.Duration{}
+	for name, limit := range limits {
+		if dir := rigs[name]; dir != "" {
+			byDir[dir] = limit
+		}
+	}
 	stage := application.BackendStage{
 		Rigs:     rigs,
 		Settings: map[string]application.BackendRig{},
-		Builds:   rig.New(),
+		Builds:   rig.New(rig.WithBuildLimits(byDir)),
 		Home:     files,
 		Host:     host,
 		Tracker:  gateway,
