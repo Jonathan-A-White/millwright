@@ -1468,8 +1468,8 @@ type roomMove struct {
 // when they do not free enough, the decisions with a since over
 // MakeRoomDecisionDays days old, then a decision whose subject is one file, not
 // 'general', placed over MakeRoomKeepDays days ago, then, for a rig too young for
-// those rules, a gotcha or decision of any age whose source is a story that is
-// closed and landed (Landed); never a sentence beginning 'His ' or holding 'the
+// those rules, a gotcha or decision placed over MakeRoomKeepDays days ago whose
+// source is a story that is closed and landed (Landed); never a sentence beginning 'His ' or holding 'the
 // Governor', "Governor's" or 'his words'; never an aged one with
 // a since within MakeRoomKeepDays days; the oldest since first, then, of one day, the
 // one placed first (the moment it was added), then the subject least queried (as
@@ -1556,8 +1556,9 @@ const (
 	// roomFileDecision is a decision whose subject is one file, placed over
 	// MakeRoomKeepDays days ago.
 	roomFileDecision
-	// roomLanded is a gotcha or decision of any age whose source is a story that
-	// is closed and landed: the one way a rig of a day or two has anything to take.
+	// roomLanded is a gotcha or decision placed over MakeRoomKeepDays days ago
+	// whose source is a story that is closed and landed: a fact placed within
+	// those days is never taken, whatever its story.
 	roomLanded
 )
 
@@ -1680,7 +1681,7 @@ func (m Memory) roomTier(fact RigFact, landed map[string]bool) (int, bool) {
 		return roomOldDecision, true
 	case fact.Kind == FactDecision && namesOneFile(fact.Subject) && m.sinceBefore(fact, MakeRoomKeepDays):
 		return roomFileDecision, true
-	case landed[fact.Source]:
+	case landed[fact.Source] && m.sinceBefore(fact, MakeRoomKeepDays):
 		return roomLanded, true
 	}
 	return 0, false
