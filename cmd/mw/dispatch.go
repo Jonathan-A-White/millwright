@@ -106,14 +106,38 @@ func hostGateLock() application.GateLock {
 	return hostlock.NewGate(filepath.Join(home, SyncHaltStateDir))
 }
 
+// TestRunsDir is where this host's test-runner slots live, inside the state
+// directory the gate lock is kept in.
+const TestRunsDir = "test-runs"
+
+// hostTestRuns is this host's limit on how many test runners start at once, from
+// builder_test_runs (mw-gq6.1303): every Checks and AfterLanding mw builds to run a
+// rig's own command is given it, so the limit is the one place a runner start
+// goes through. Nil when the key is unset or 0: no limit, as it was. A wait for a
+// slot says who it waits for on the standard error.
+func hostTestRuns() (*rig.TestRuns, error) {
+	limit, err := config.BuilderTestRuns()
+	if err != nil {
+		return nil, err
+	}
+	home, err := os.UserHomeDir()
+	if limit <= 0 || err != nil || home == "" {
+		return nil, nil
+	}
+	return rig.NewTestRuns(filepath.Join(home, SyncHaltStateDir, TestRunsDir), limit,
+		rig.WithTestRunsNotice(func(said string) { fmt.Fprintln(os.Stderr, said) })), nil
+}
+
 // hostRecheckSuite is the suite that re-runs one spec alone on a rig's main: the
 // dispatch re-runs a bug's spec with it before it claims the bug (mw-gq6.414), and
 // mw next re-runs it for a bug whose Builder found it fixed already (mw-gq6.869).
 // It reads the host's load and waits for a calm host before a second run as mw suite
 // does (mw-gq6.1081), with the same calm bound.
 func hostRecheckSuite(ctx context.Context, worktrees *rig.Worktrees, files *vault.Vault, rigs, tests, changedSpecs map[string]string, nice, jobs int, host string) application.Suite {
+	// A limit that cannot be read is no limit here, as jobs read in the same way.
+	testRuns, _ := hostTestRuns()
 	return application.Suite{
-		Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(files.TimingTests(ctx))),
+		Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTestRuns(testRuns), rig.WithTimingTests(files.TimingTests(ctx))),
 		Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,
 		Load: hostload.Proc{}, LoadBound: application.SuiteCalmBound, Host: host,
 	}

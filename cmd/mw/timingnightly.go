@@ -39,6 +39,10 @@ func nightlyTimingSpringJob(host string, suiteHour int, out io.Writer) (applicat
 	if err != nil {
 		return application.SpringJob{}, err
 	}
+	testRuns, err := hostTestRuns()
+	if err != nil {
+		return application.SpringJob{}, err
+	}
 	files := vault.New(dir)
 	worktrees := rig.New()
 	gateway := mwGateway(dir, host)
@@ -54,7 +58,7 @@ func nightlyTimingSpringJob(host string, suiteHour int, out io.Writer) (applicat
 		},
 		Rules: files, Suites: files, History: files, Records: files, Files: mwVault(dir, host),
 		Source: worktrees, Trees: worktrees, Heads: worktrees,
-		Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs)),
+		Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTestRuns(testRuns)),
 		Uptime: hostload.Uptime{},
 		Filer:  application.TimingFiler{Tracker: gateway, Rules: files},
 		Load:   hostload.Proc{}, GateLock: hostGateLock(),

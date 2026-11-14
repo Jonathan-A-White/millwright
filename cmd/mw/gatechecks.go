@@ -84,11 +84,15 @@ func landingChecks(vaultDir string, which gateCommands) (*rig.Checks, error) {
 	if err != nil {
 		return nil, err
 	}
+	testRuns, err := hostTestRuns()
+	if err != nil {
+		return nil, err
+	}
 	named, err := config.NamedTests()
 	if err != nil {
 		return nil, err
 	}
-	options := []rig.CheckOption{rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNamedCommands(named), rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTimingTests(vault.New(vaultDir).TimingTests(context.Background()))}
+	options := []rig.CheckOption{rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNamedCommands(named), rig.WithNice(nice), rig.WithJobs(jobs), rig.WithTestRuns(testRuns), rig.WithTimingTests(vault.New(vaultDir).TimingTests(context.Background()))}
 	if which.related {
 		related, err := config.RelatedTests()
 		if err != nil {
