@@ -5,13 +5,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -107,49 +103,15 @@ func (Shape) Lines(rigDir, file string) (int, error) {
 // the files counted side by side, because SHAPE asks for over a hundred and
 // one call each would read every test again.
 func (Shape) TestCallersOf(rigDir string, files []string) (map[string]int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), callerSearchLimit)
-	defer cancel()
-	args := []string{"-C", rigDir, "ls-files", "-z", "--", "features", "tests", ":(glob)**/*_test.go"}
-	out, err := exec.CommandContext(ctx, "git", args...).Output()
+	tests, err := readTestFiles(rigDir)
 	if err != nil {
-		return nil, fmt.Errorf("counting the test callers in %s: %w", rigDir, err)
+		return nil, err
 	}
-	type testFile struct {
-		name string
-		text []byte
+	groups := make([][]string, len(files))
+	for i, file := range files {
+		groups[i] = []string{file}
 	}
-	var tests []testFile
-	for _, name := range strings.Split(string(out), "\x00") {
-		if name == "" {
-			continue
-		}
-		if text, err := os.ReadFile(filepath.Join(rigDir, filepath.FromSlash(name))); err == nil {
-			tests = append(tests, testFile{name, text})
-		}
-	}
-	counts := make([]int, len(files))
-	next := make(chan int)
-	var wg sync.WaitGroup
-	for w := 0; w < runtime.NumCPU(); w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range next {
-				matcher := newCallerMatcher(rigDir, []string{files[i]})
-				own := path.Clean(files[i])
-				for _, test := range tests {
-					if test.name != own && matcher.calls(path.Dir(test.name), test.text) {
-						counts[i]++
-					}
-				}
-			}
-		}()
-	}
-	for i := range files {
-		next <- i
-	}
-	close(next)
-	wg.Wait()
+	counts := countCallers(rigDir, tests, groups)
 	byFile := make(map[string]int, len(files))
 	for i, file := range files {
 		byFile[file] = counts[i]
