@@ -454,3 +454,85 @@ func TestAPartThatCannotGetTheSlotKeepsItsPlaceAndSaysToRunItAgain(t *testing.T)
 		t.Errorf("expected one line, got %q", err.Error())
 	}
 }
+
+// openStepsSaidOfPartTwo is the open-steps refusal of a story whose part 1 passed
+// at the tip and whose part 2's record is the text given (no record when empty).
+func openStepsSaidOfPartTwo(t *testing.T, record string) string {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	tracker.AddFormula("tdd-feature", application.FormulaStep{ID: "s-1", Title: "Run the full build, tests and vet"})
+	poured, err := tracker.PourFormula(context.Background(), "tdd-feature", "mw-x.1", "One", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStoryMetadata(context.Background(), "mw-x.1", map[string]string{application.MoleculeField: poured.RootID}); err != nil {
+		t.Fatal(err)
+	}
+	records := &mapRecords{}
+	tip := "abc1234abc1234abc1234abc1234abc1234abc12"
+	landing := &headedLanding{fakeRetryLanding: &fakeRetryLanding{AheadCount: 1}, head: tip}
+	if _, err := records.PutRunFile(context.Background(), "mw-x.1", application.CheckPartFileName(1, 1), "tip "+tip+"\npassed\nok\n"); err != nil {
+		t.Fatal(err)
+	}
+	if record != "" {
+		if _, err := records.PutRunFile(context.Background(), "mw-x.1", application.CheckPartFileName(1, 2), strings.ReplaceAll(record, "<tip>", tip)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, _ := application.Check{
+		Tracker: tracker, Landing: landing, Checks: &scriptedChecks{passes: []bool{true}},
+		Parts: newHeldParts(), Records: records,
+		Host: "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard,
+	}.Run(context.Background(), "mw-x.1")
+	for _, r := range report.Refusals {
+		if r.Reason == application.ReasonOpenSteps {
+			return r.Said
+		}
+	}
+	t.Fatalf("expected an open-steps refusal, got %+v", report.Refusals)
+	return ""
+}
+
+// Each state of a part's record the whole-gate verdict reads, and the line it
+// gets: a part killed as hung and a part handed back have their own lines; the
+// rest are 'not run' on purpose (mw-82lb97i.14).
+func TestWholeGateVerdictLineOfEachStateOfAPartsRecord(t *testing.T) {
+	cases := []struct {
+		name, record string
+		want, not    []string
+	}{
+		{"killed as hung", "tip -\nhung\nchecking mw-x.1: part 2 hung on laptop: no output for 20m0s\n",
+			[]string{"part 2 (unit) was killed as hung", "no output for 20m0s", "mw check mw-x.1 --part 2"},
+			[]string{"has not been run at this commit"}},
+		{"handed back", "tip -\nhanded-back\nchecking mw-x.1: the worker ended in an error: boom\n",
+			[]string{"part 2 (unit) was handed back without a result", "the worker ended in an error: boom", "mw check mw-x.1 --part 2"},
+			[]string{"has not been run at this commit"}},
+		{"failed", "tip <tip>\nfailed\nbad\n",
+			[]string{"part 2 (unit) failed at this commit", "mw check mw-x.1 --part 2"}, nil},
+		{"passed at an earlier tip", "tip 1111111111111111111111111111111111111111\npassed\nok\n",
+			[]string{"part 2 (unit) has not been run at this commit", "it passed at 111111111111, an earlier commit"}, nil},
+		{"unknown second line", "tip <tip>\nsurprised\nok\n",
+			[]string{"part 2 (unit) has not been run at this commit", "mw check mw-x.1 --part 2"}, []string{"killed as hung", "handed back"}},
+		{"no record", "",
+			[]string{"part 2 (unit) has not been run at this commit", "mw check mw-x.1 --part 2"}, []string{"killed as hung", "handed back"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			said := openStepsSaidOfPartTwo(t, tc.record)
+			for _, w := range tc.want {
+				if !strings.Contains(said, w) {
+					t.Errorf("expected %q in the verdict, got:\n%s", w, said)
+				}
+			}
+			for _, n := range tc.not {
+				if strings.Contains(said, n) {
+					t.Errorf("expected no %q in the verdict, got:\n%s", n, said)
+				}
+			}
+		})
+	}
+}

@@ -598,6 +598,10 @@ func (g recordedGate) Run(ctx context.Context, _, _ string) (Checked, error) {
 		case partPassed:
 		case partFailed:
 			found = append(found, fmt.Sprintf("part %d (%s) failed at this commit%s", i+1, part.Name, fix))
+		case partHung:
+			found = append(found, fmt.Sprintf("part %d (%s) was killed as hung (%s)%s", i+1, part.Name, g.saidOf(ctx, i+1), fix))
+		case partHandedBack:
+			found = append(found, fmt.Sprintf("part %d (%s) was handed back without a result (%s)%s", i+1, part.Name, g.saidOf(ctx, i+1), fix))
 		default:
 			found = append(found, fmt.Sprintf("part %d (%s) has not been run at this commit%s%s%s", i+1, part.Name, fix, g.heldNote(ctx, i+1), g.staleNote(ctx, i+1)))
 		}
@@ -651,8 +655,24 @@ func (g recordedGate) staleNote(ctx context.Context, n int) string {
 	return fmt.Sprintf(" (it passed at %s, an earlier commit; any commit since, a doc too, makes it run again)", shortCommit(tip[1]))
 }
 
+// saidOf is what part n's record says after its second line, as one line: the
+// words of the kill of a hung part or of the error a part was handed back with.
+func (g recordedGate) saidOf(ctx context.Context, n int) string {
+	text, err := g.records.ReadRunFile(ctx, g.storyID, CheckPartFileName(g.attempt, n))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) < 3 {
+		return ""
+	}
+	return strings.Join(strings.Fields(strings.Join(lines[2:], " ")), " ")
+}
+
 // stateOf is what part n's record says of the commit at the tip: partPassed,
-// partFailed, or empty when there is no record of a run at the tip.
+// partFailed, or empty when there is no record of a run at the tip. A part killed
+// as hung or handed back is kept with no tip (its run came to no result at any
+// commit), and reads as partHung or partHandedBack (mw-82lb97i.14).
 func (g recordedGate) stateOf(ctx context.Context, n int) string {
 	if g.tip == "" {
 		return ""
@@ -666,6 +686,13 @@ func (g recordedGate) stateOf(ctx context.Context, n int) string {
 		return ""
 	}
 	tip := strings.Fields(lines[0])
+	if len(tip) == 2 && tip[0] == partTipWord && tip[1] == partNoTip {
+		switch result := strings.TrimSpace(lines[1]); result {
+		case partHung, partHandedBack:
+			return result
+		}
+		return ""
+	}
 	if len(tip) != 2 || tip[0] != partTipWord || tip[1] != g.tip {
 		return ""
 	}
