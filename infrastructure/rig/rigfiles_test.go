@@ -231,3 +231,30 @@ func TestAFieldWithTheNameOfATypeIsNotACallOfTheType(t *testing.T) {
 		t.Errorf("TestCallers = %d, %v; want 3 (the literal, the variable and the qualified use)", got, err)
 	}
 }
+
+// One reader of the test files serves the one-story path (the named files
+// together) and the many-files path (each alone): a test that calls either of
+// two files is one caller of the pair, and the two paths agree for each file.
+func TestTheOneFilePathAndTheManyFilesPathCountOverTheSameRead(t *testing.T) {
+	tests := map[string]string{
+		"src/one.go":        "package src\n\nfunc One() {}\n",
+		"src/two.go":        "package src\n\nfunc Two() {}\n",
+		"src/one_test.go":   "package src\n\nvar _ = One\n",
+		"src/two_test.go":   "package src\n\nvar _ = Two\n",
+		"src/both_test.go":  "package src\n\nvar _, _ = One, Two\n",
+		"src/other_test.go": "package src\n\nvar _ = 1\n",
+	}
+	for i := 0; i < 30; i++ {
+		tests[fmt.Sprintf("src/many%d_test.go", i)] = "package src\n\nvar _ = Two\n"
+	}
+	dir := trackedRepo(t, tests)
+	named := []string{"src/one.go", "src/two.go"}
+	together, err := rig.Files{}.TestCallers(dir, named)
+	if err != nil || together != 33 {
+		t.Errorf("TestCallers(both) = %d, %v; want 33 (each caller of either file once)", together, err)
+	}
+	each, err := rig.Shape{}.TestCallersOf(dir, named)
+	if err != nil || each["src/one.go"] != 2 || each["src/two.go"] != 32 {
+		t.Errorf("TestCallersOf = %v, %v; want one.go 2 and two.go 32", each, err)
+	}
+}

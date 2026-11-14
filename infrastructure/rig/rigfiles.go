@@ -12,7 +12,9 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -139,29 +141,74 @@ const callerSearchLimit = 20 * time.Second
 // itself a test declares nothing others call, one that is not there declares
 // nothing, and a named file is never its own caller.
 func (Files) TestCallers(rigDir string, named []string) (int, error) {
+	tests, err := readTestFiles(rigDir)
+	if err != nil {
+		return 0, err
+	}
+	return countCallers(rigDir, tests, [][]string{named})[0], nil
+}
+
+// testFile is a tracked test file of a checkout and what it says.
+type testFile struct {
+	name string
+	text []byte
+}
+
+// readTestFiles lists the tracked test files of the checkout at rigDir (those
+// under features/ or tests/, and any *_test.go) and reads each once: the one
+// reader of the test files, for Files.TestCallers (one story's files together)
+// and Shape.TestCallersOf (each of many files alone).
+func readTestFiles(rigDir string) ([]testFile, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callerSearchLimit)
 	defer cancel()
 	args := []string{"-C", rigDir, "ls-files", "-z", "--", "features", "tests", ":(glob)**/*_test.go"}
 	out, err := exec.CommandContext(ctx, "git", args...).Output()
 	if err != nil {
-		return 0, fmt.Errorf("counting the test callers in %s: %w", rigDir, err)
+		return nil, fmt.Errorf("counting the test callers in %s: %w", rigDir, err)
 	}
-	matcher := newCallerMatcher(rigDir, named)
-	own := map[string]bool{}
-	for _, file := range named {
-		own[path.Clean(file)] = true
-	}
-	var n int
-	for _, test := range strings.Split(string(out), "\x00") {
-		if test == "" || own[test] {
+	var tests []testFile
+	for _, name := range strings.Split(string(out), "\x00") {
+		if name == "" {
 			continue
 		}
-		text, err := os.ReadFile(filepath.Join(rigDir, filepath.FromSlash(test)))
-		if err == nil && matcher.calls(path.Dir(test), text) {
-			n++
+		if text, err := os.ReadFile(filepath.Join(rigDir, filepath.FromSlash(name))); err == nil {
+			tests = append(tests, testFile{name, text})
 		}
 	}
-	return n, nil
+	return tests, nil
+}
+
+// countCallers counts, for each group of named files, the tests that call
+// something the group declares; a named file is never its own caller. The
+// groups are counted side by side over the one read of the tests.
+func countCallers(rigDir string, tests []testFile, groups [][]string) []int {
+	counts := make([]int, len(groups))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < runtime.NumCPU(); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				matcher := newCallerMatcher(rigDir, groups[i])
+				own := map[string]bool{}
+				for _, file := range groups[i] {
+					own[path.Clean(file)] = true
+				}
+				for _, test := range tests {
+					if !own[test.name] && matcher.calls(path.Dir(test.name), test.text) {
+						counts[i]++
+					}
+				}
+			}
+		}()
+	}
+	for i := range groups {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	return counts
 }
 
 // callerMatcher says whether a test file calls what a story's files declare.
