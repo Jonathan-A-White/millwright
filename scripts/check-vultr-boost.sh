@@ -238,7 +238,14 @@ for a in "\$@"; do
 	esac
 done
 case \$sub in
-init) ;;
+init)
+	# a file the check lays makes terraform's init fail, with words on both streams
+	if [ -e "$T/tf-init-fail" ]; then
+		echo "TF-INIT-STDOUT: Initializing the backend"
+		echo "TF-INIT-STDERR: Error: Failed to query available provider packages" >&2
+		exit 1
+	fi
+	;;
 apply)
 	echo "\$state" >"$T/statepath"
 	cat >"\$state" <<JSON
@@ -564,5 +571,18 @@ tail -n +2 "$VAULT/hosts/vultr/cloud2.tfstate.age" | base64 -d | grep -q 'inst-7
 if out=$(run adopt --yes --name cloud2 2>&1); then fail "adopt with no --instance should be refused: $out"; fi
 out=$(run_bare adopt --dry-run --name cloud2 --instance inst-77 2>&1) || fail "adopt --dry-run failed: $out"
 echo "$out" | grep -q 'import' || fail "adopt --dry-run does not name terraform import: $out"
+
+# --- j. terraform init that fails says why -------------------------------------
+# init's own words are kept and printed on a failure, never sent to /dev/null (mw-gq6.1283)
+: >"$T/tf-init-fail"
+for cmd in "up --yes --name cloud3" "adopt --yes --name cloud3 --instance inst-88" "down --yes --name cloud1"; do
+	# shellcheck disable=SC2086
+	if out=$(run $cmd 2>&1); then fail "$cmd should fail when terraform init fails: $out"; fi
+	echo "$out" | grep -q 'terraform init failed' || fail "$cmd does not say terraform init failed: $out"
+	echo "$out" | grep -q 'TF-INIT-STDERR: Error: Failed to query available provider packages' || fail "$cmd drops terraform init's stderr: $out"
+	echo "$out" | grep -q 'TF-INIT-STDOUT: Initializing the backend' || fail "$cmd drops terraform init's stdout: $out"
+	[ -z "$(ls -A "$RUN")" ] || fail "$cmd left a tmpfs directory behind"
+done
+rm -f "$T/tf-init-fail"
 
 echo "check-vultr-boost: ok"

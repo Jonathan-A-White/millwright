@@ -483,6 +483,11 @@ tf() { # terraform arguments: run in the tokens' environment, never their comman
 	)
 }
 
+tf_init() { # terraform init, quiet when it works; its own output is said when it fails (mw-gq6.1283)
+	local out
+	out=$(tf init -input=false 2>&1) || die "terraform init failed: $out"
+}
+
 load_settings() {
 	[ -f "$TFVARS" ] || die "no settings: write $TFVARS (docs/vultr-boost.md lists them)"
 	local k
@@ -561,7 +566,7 @@ do_up() {
 
 	step "terraform: init, then apply (this is where the box starts to cost money)"
 	cost_line
-	tf init -input=false >/dev/null || die "terraform init failed"
+	tf_init
 	local rc=0
 	# shellcheck disable=SC2046
 	tf apply -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(snapshot_args) $(confirm_args) || rc=$?
@@ -609,7 +614,7 @@ do_down() {
 	step "terraform: destroy"
 	local rc=0 why held=""
 	if [ -s "$PRIV/terraform.tfstate" ]; then
-		tf init -input=false >/dev/null || die "terraform init failed"
+		tf_init
 		# shellcheck disable=SC2046
 		tf destroy -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(confirm_args) || rc=$?
 	else
@@ -692,7 +697,7 @@ do_adopt() {
 	fi
 	step "terraform: import vultr_instance.boost $INSTANCE"
 	local rc=0
-	tf init -input=false >/dev/null || die "terraform init failed"
+	tf_init
 	# shellcheck disable=SC2046
 	tf import -input=false -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(snapshot_args) vultr_instance.boost "$INSTANCE" || rc=$?
 	step "state: seal it in the vault"
