@@ -24,6 +24,7 @@ Feature: mw memory
       status: current
       source: mw-1
       since: 2026-10-10
+      placed: 2026-10-10T09:00:00Z
       ---
 
       Point every bd call at the vault with -C.
@@ -45,6 +46,7 @@ Feature: mw memory
       status: current
       source: mayor:2026-10-10
       since: 2026-10-10
+      placed: 2026-10-10T09:00:00Z
       ---
 
       The gate is make check.
@@ -78,6 +80,7 @@ Feature: mw memory
       status: current
       source: mw-2
       since: 2026-10-10
+      placed: 2026-10-10T09:00:00Z
       supersedes: old-tmux
       ---
 
@@ -992,6 +995,7 @@ Feature: mw memory
       status: current
       source: mw-9
       since: 2026-10-10
+      placed: 2026-10-10T09:00:00Z
       ---
 
       The fresh probe waits for its socket file.
