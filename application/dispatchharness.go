@@ -99,6 +99,11 @@ func (d Dispatch) loginHoldCleared(ctx context.Context, stop HarnessStop) bool {
 // one a hand mw retry, or an earlier pass, left — and clears a note whose time
 // has passed.
 func (d Dispatch) readHarnessHoldNote(ctx context.Context, report *DispatchReport) {
+	// A drained cloud's hold lasts until undrain, and says so (mw-gq6.1296).
+	if drained, held := ReadDrainedHold(ctx, d.Memory, d.Host); held {
+		report.HarnessHold = &drained
+		return
+	}
 	hold, held := readHarnessHold(ctx, d.Memory, d.Host)
 	if !held {
 		return
@@ -119,6 +124,13 @@ func (d Dispatch) readHarnessHoldNote(ctx context.Context, report *DispatchRepor
 
 // harnessHeld is why a ready story is passed over while the host is held.
 func (h HarnessHold) harnessHeld(host string) string {
+	if h.drained() {
+		return fmt.Sprintf("%s claims nothing new: %s", host, h.Said)
+	}
 	return fmt.Sprintf("%s claims nothing new until %s: the harness stopped a session (%s: %s)",
 		host, h.Until.UTC().Format(time.RFC3339), h.Reason, h.Said)
 }
+
+// waits says the hold is a wait that ends of itself or on purpose, not a fault:
+// a usage limit's reset, or a drain the Governor ends with mw cloud undrain.
+func (h HarnessHold) waits() bool { return h.Reason == ReasonUsageLimit || h.drained() }

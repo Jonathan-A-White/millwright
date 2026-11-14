@@ -38,6 +38,8 @@ type CapFiles struct {
 	// Config is the home's ~/.config/mw/config.toml.
 	Config string
 	Vault  VaultCommitter
+	// DefaultMaxBoxes is the max_boxes in force when the config says none.
+	DefaultMaxBoxes int
 }
 
 var _ application.CloudCapFiles = CapFiles{}
@@ -136,4 +138,87 @@ func addKey(text, table, line string) (string, bool) {
 		}
 	}
 	return text, false
+}
+
+// DrainedKey is the [cloud] key a drain keeps the old max_boxes in, in the
+// home's config and in the vault's copy: undrain reads it and takes it away.
+const DrainedKey = "drained_max_boxes"
+
+// MaxBoxesKept implements application.CloudDrainFiles: the max_boxes the home's
+// [cloud] table says (DefaultMaxBoxes when it says none), the value a drain
+// kept, and whether one did.
+func (f CapFiles) MaxBoxesKept(context.Context) (n, kept int, drained bool, err error) {
+	raw, err := os.ReadFile(f.Config)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("reading %s: %w", f.Config, err)
+	}
+	_, n, found := setKey(string(raw), "cloud", "max_boxes", 0, false)
+	if !found {
+		n = f.DefaultMaxBoxes
+	}
+	_, kept, drained = setKey(string(raw), "cloud", DrainedKey, 0, false)
+	return n, kept, drained, nil
+}
+
+// SetDrained implements application.CloudDrainFiles: max_boxes 0 and the old
+// value kept, written as SetBoxCap writes: the vault's copy first and committed
+// by path, the home's config last.
+func (f CapFiles) SetDrained(ctx context.Context, old int) error {
+	return f.drain(ctx, 0, old, true, fmt.Sprintf("mw cloud drain: max_boxes 0 (was %d)", old))
+}
+
+// SetUndrained implements application.CloudDrainFiles: max_boxes back at the
+// kept value and the kept value taken away, in the same order.
+func (f CapFiles) SetUndrained(ctx context.Context, back int) error {
+	return f.drain(ctx, back, 0, false, fmt.Sprintf("mw cloud undrain: max_boxes %d", back))
+}
+
+// drain sets max_boxes to n and, with keep, the kept value to old; without it
+// the kept value is taken away.
+func (f CapFiles) drain(ctx context.Context, n, old int, keep bool, message string) error {
+	table := filepath.Join(f.Vault.Dir(), CloudTablePath)
+	if err := f.editDrained(table, n, old, keep); err != nil {
+		return err
+	}
+	commit, cancel := context.WithTimeout(context.WithoutCancel(ctx), capCommitWait)
+	defer cancel()
+	if _, err := f.Vault.Commit(commit, message, []string{CloudTablePath}); err != nil {
+		return fmt.Errorf("committing max_boxes in the vault: %w (the home's config is as it was)", err)
+	}
+	if err := f.editDrained(f.Config, n, old, keep); err != nil {
+		return fmt.Errorf("%w (the vault's %s was written and committed)", err, CloudTablePath)
+	}
+	return nil
+}
+
+func (f CapFiles) editDrained(path string, n, old int, keep bool) error {
+	if err := f.edit(path, "cloud", "max_boxes", n, false); err != nil {
+		return err
+	}
+	if !keep {
+		return f.remove(path, "cloud", DrainedKey)
+	}
+	return f.edit(path, "cloud", DrainedKey, old, false)
+}
+
+// remove rewrites the file without the line `key = <number>` of table; a file
+// without one is left as it is.
+func (f CapFiles) remove(path, table, key string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	line := regexp.MustCompile(`^\s*` + regexp.QuoteMeta(key) + `\s*=\s*["']?\d+["']?.*$`)
+	lines := strings.Split(string(raw), "\n")
+	inside := table == ""
+	for i, l := range lines {
+		if m := tableHeader.FindStringSubmatch(l); m != nil {
+			inside = m[1] == table
+			continue
+		}
+		if inside && line.MatchString(l) {
+			return atomicfile.Write(path, []byte(strings.Join(append(lines[:i:i], lines[i+1:]...), "\n")), 0o644)
+		}
+	}
+	return nil
 }

@@ -16,7 +16,7 @@ three.
 | `no-path` | the story's path cannot be read |
 | `no-host` | the path names no host |
 | `other-host` | the path names another host |
-| `harness-hold` | the harness stopped a session here (usage limit, rate limit, overloaded or failing API) and the time it named has not come (below) |
+| `harness-hold` | the harness stopped a session here (usage limit, rate limit, overloaded or failing API) and the time it named has not come, or the cloud is drained and this box held (below) |
 | `no-room` | the host has no room: load, or a grist tutor in use |
 | `queued` | its work is done and it is labelled `run:queued` for its rig's batch, yet it is open (a hold and un-hold, or an open-steps give-back, left it so): `mw land` takes it, a new attempt would redo done work (mw-bo813m2) |
 | `landed` | its last run landed it and only the close was lost |
@@ -111,6 +111,11 @@ claims nothing new; once it has come, a dispatch gives the stopped story back
 itself, its stopped attempt not counted, and it is started again. `mw retry` of
 such a story does not count the attempt either, and keeps the hold. The hold is
 kept in the host's note `host.<host>.harness_hold`.
+
+A cloud box a drain holds (`mw cloud drain`, mw-gq6.1296) is passed over under the same gate, from
+its own note `host.<box>.drained`, with its own reason word `drained`: it says `<box> claims
+nothing new: the cloud is drained by the Governor`, lasts until `mw cloud undrain`, and is a wait,
+not a harness stop.
 
 An expired Claude login (`Failed to authenticate: OAuth session expired and could
 not be refreshed`) holds the host for `LoginExpiredWait` (12 hours): the close-out

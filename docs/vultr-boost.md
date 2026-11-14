@@ -380,6 +380,16 @@ keeps the three places level.
 To undo: `mw cloud cap <old>`; the next check sets the old cap on each box again. A box that is
 being made takes the tfvars `cap`, which the command keeps level with `box_cap`.
 
+**`mw cloud drain`** (the home only) lets the boxes finish and adds none: it sets `max_boxes` to 0 in
+the home's `[cloud]` table and in the vault's copy `hosts/vultr/cloud-table.toml` (committed by
+path), keeps the old value beside it as `drained_max_boxes` in both, and puts each box up on a
+drained hold of its own, the note `host.<box>.drained`. A held box claims nothing new, and `mw status`
+and the dispatch's passed-over line say `the cloud is drained by the Governor`, not that the harness
+stopped a session; the sessions it runs finish and an idle box is destroyed at `idle_minutes` as
+ever. A second drain keeps the first old value. `mw cloud undrain` puts `max_boxes` back at the
+kept value in both files and clears the holds; on a cloud that is not drained it says so and changes
+nothing. `mw doctor boost-config` never reads `[cloud]`, so it does not alarm on a drained cloud.
+
 ### Stories pathed to a box that goes down
 
 A story pathed to a host that is gone is never dispatched. Whenever a box is destroyed (idle, the

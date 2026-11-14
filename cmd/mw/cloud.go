@@ -65,6 +65,8 @@ func newCloudCmd() *cobra.Command {
 	})
 	cmd.AddCommand(newCloudMakeCmd())
 	cmd.AddCommand(newCloudCapCmd())
+	cmd.AddCommand(newCloudDrainCmd(false))
+	cmd.AddCommand(newCloudDrainCmd(true))
 	cmd.AddCommand(newCloudDownCmd())
 	return cmd
 }
@@ -162,6 +164,65 @@ func newCloudCapCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// newCloudDrainCmd builds `mw cloud drain`, or with undrain `mw cloud undrain`:
+// the cloud told to finish what it runs and take nothing new, and told it may
+// again.
+func newCloudDrainCmd(undrain bool) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "drain",
+		Short: "Let the cloud boxes finish and add no more: max_boxes 0, each box held",
+		Long: "drain sets max_boxes to 0 in the [cloud] table of the home's ~/.config/mw/config.toml and in\n" +
+			"the vault's copy of it (hosts/vultr/cloud-table.toml, committed by path), keeping the old value\n" +
+			"beside it as drained_max_boxes, and puts each box up on a drained hold of its own\n" +
+			"(host.<box>.drained): it claims nothing new, and says the cloud is drained, not that the harness\n" +
+			"stopped. Running sessions finish, and an idle box is destroyed at idle_minutes as ever. A\n" +
+			"second drain keeps the first old value. It prints the old value, the way back. It runs on the\n" +
+			"home only.",
+		Args: cobra.NoArgs,
+	}
+	if undrain {
+		cmd.Use = "undrain"
+		cmd.Short = "Put max_boxes back at the value drain kept and clear the drained holds"
+		cmd.Long = "undrain puts max_boxes back at the value drain kept, in the home's config and the vault's copy,\n" +
+			"and clears the drained hold of each box. On a cloud that is not drained it says so and changes\n" +
+			"nothing. It runs on the home only."
+	}
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		dir, err := config.Vault()
+		if err != nil {
+			return err
+		}
+		host, err := config.Host()
+		if err != nil {
+			return err
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		files := mwVault(dir, host)
+		drain := application.CloudDrain{
+			Files: cloud.CapFiles{Config: filepath.Join(home, config.File), Vault: files, DefaultMaxBoxes: config.DefaultCloudMaxBoxes},
+			Book:  vault.CloudBook{Vault: files},
+			Notes: mwGateway(dir, host),
+			Home:  files,
+			Host:  host,
+			Now:   time.Now,
+		}
+		run := drain.Drain
+		if undrain {
+			run = drain.Undrain
+		}
+		report, err := run(cmd.Context())
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), report)
+		return nil
+	}
+	return cmd
 }
 
 // newCloudMakeCmd builds `mw cloud make <box>`: the process the cloud check

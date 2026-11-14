@@ -214,6 +214,8 @@ func (d Dispatch) cannotTakeInstead(pinned string, detail StoryDetail, path doma
 		return "this host is retired"
 	case noRoom != "":
 		return "this host has no room"
+	case report.HarnessHold != nil && report.HarnessHold.drained():
+		return "the cloud is drained"
 	case report.HarnessHold != nil:
 		return "this host is held by a harness stop"
 	}
