@@ -1256,7 +1256,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 
 	if s.Notes != nil {
-		if hold, held := readHarnessHold(ctx, s.Notes, s.Host); held && hold.Until.After(s.now()) {
+		if hold, held := ReadHostHold(ctx, s.Notes, s.Host, s.now()); held {
 			report.HarnessHold = &hold
 		}
 	}

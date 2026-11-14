@@ -1201,7 +1201,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// stop names: its usage limit's reset, or a quarter hour after a rate
 		// limit or an overloaded API (mw-gq6.434).
 		if hold := report.HarnessHold; hold != nil {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "harness-hold", Why: hold.harnessHeld(d.Host), Waiting: hold.Reason == ReasonUsageLimit})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "harness-hold", Why: hold.harnessHeld(d.Host), Waiting: hold.waits()})
 			continue
 		}
 		// gate: no-room

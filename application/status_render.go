@@ -224,6 +224,9 @@ func (r StatusReport) String() string {
 			clip(&b, fmt.Sprintf("  claims nothing new until %s; once the", hold.Until.UTC().Format("01-02 15:04Z")))
 			clip(&b, "  Governor has logged in again, clear it with:")
 			clip(&b, "    "+LoginHoldClearCommand(r.Host))
+		} else if hold.drained() {
+			clip(&b, "HELD · the cloud is drained by the Governor")
+			clip(&b, fmt.Sprintf("  %s claims nothing new; `mw cloud undrain` ends it", r.Host))
 		} else {
 			clip(&b, "HELD: "+hold.harnessHeld(r.Host))
 		}
