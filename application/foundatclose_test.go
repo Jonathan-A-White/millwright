@@ -461,3 +461,88 @@ func TestParseFoundItem(t *testing.T) {
 		})
 	}
 }
+
+// aStoryLandedWithAFinding lands mw-x.1 with a closing comment holding finding
+// under 'Found, not fixed:' while mw-x.9, a held found-at-close bead, is open,
+// and gives the vault the close-out wrote into.
+func aStoryLandedWithAFinding(t *testing.T, finding, otherTitle, otherDescription string) *fakeVault {
+	t.Helper()
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{Files: "application/next.go"}})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.9", Title: otherTitle})
+	mustDo(t, tracker.SetDescription("mw-x.9", otherDescription))
+	mustDo(t, tracker.SetLabels("mw-x.9", "bug", "found-at-close"))
+	mustDo(t, tracker.SetStatus("mw-x.9", apptest.StatusDeferred))
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+finding+"\nFor the rig memory: nothing"))
+	vault := newFakeVault()
+	vault.written["mw-x.1/next-1.log"] = "close-out started 2026-11-13T10:00:00Z\n"
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+	return vault
+}
+
+// A finding joined to an open bead, or filed as a near match of one, is said in
+// the close-out's log, runs/<story>/next-<n>.log: the finding, the bead and the
+// rule that matched, so that a wrong join can be found afterwards (mw-gq6.1107).
+func TestAJoinOfAFindingToAnOpenBeadIsWrittenInTheCloseOutsLog(t *testing.T) {
+	cases := []struct {
+		name, finding, title, description string
+		wants                             []string
+	}{
+		{
+			"the same file and line",
+			"A formatting fault: cmd/mw/member.go:1 is not gofmt-clean",
+			"[bug] gofmt lists cmd/mw/member.go (cmd/mw/member.go:1)", "",
+			[]string{"A formatting fault: cmd/mw/member.go:1 is not gofmt-clean", "mw-x.9", "cmd/mw/member.go:1"},
+		},
+		{
+			"the same symbol and fault words",
+			"A second run reads the first run's output because `Job` is never reset between runs",
+			"[bug] `Job` is never reset between runs, so a second run reads the first run's output", "",
+			[]string{"`Job` is never reset between runs", "mw-x.9", "Job", "second", "output"},
+		},
+		{
+			"a near match",
+			"The loader reads the file twice (application/parse.go:40)",
+			"[bug] the parser drops a trailing line (application/parse.go:12)", "",
+			[]string{"The loader reads the file twice", "mw-x.9", "near", "application/parse.go"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			vault := aStoryLandedWithAFinding(t, c.finding, c.title, c.description)
+			log := vault.written["mw-x.1/next-1.log"]
+			if !strings.HasPrefix(log, "close-out started 2026-11-13T10:00:00Z\n") {
+				t.Errorf("expected what the log held kept, got %q", log)
+			}
+			var line string
+			for _, l := range strings.Split(log, "\n") {
+				if strings.Contains(l, "mw-x.9") {
+					line = l
+				}
+			}
+			if line == "" {
+				t.Fatalf("expected one line of the log to name mw-x.9, got %q", log)
+			}
+			for _, want := range c.wants {
+				if !strings.Contains(line, want) {
+					t.Errorf("expected the line to say %q, got %q", want, line)
+				}
+			}
+			if strings.Count(log, "mw-x.9") != 1 {
+				t.Errorf("expected exactly one line naming mw-x.9, got %q", log)
+			}
+		})
+	}
+}

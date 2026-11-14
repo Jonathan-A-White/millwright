@@ -2,7 +2,10 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -481,12 +484,13 @@ func foundBeadText(d StoryDetail) string {
 // no reason to file nothing. A bead another close-out of the same story filed is
 // neither: a story's own findings may share a file (mw-gq6.1068). A shared file
 // or function alone never makes a match (mw-gq6.1103).
-func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near string) {
+func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near, why string) {
 	text := strings.Join(bug.said(), "\n")
 	refs, symbols, words := foundRefs(text), foundSymbols(text), foundFaultWords(text)
 	if len(refs) == 0 && len(symbols) == 0 {
-		return "", ""
+		return "", "", ""
 	}
+	nearWhy := ""
 	for _, d := range beads {
 		if d.Closed() || !slices.Contains(d.Labels, LabelFoundAtClose) || strings.Contains(d.Description, "Seen by: "+finder+"\n") {
 			continue
@@ -494,25 +498,82 @@ func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near st
 		other := foundBeadText(d)
 		otherRefs, otherSymbols := foundRefs(other), foundSymbols(other)
 		sameSymbol, sharesFile := false, false
+		sharedSymbol, sharedFile := "", ""
 		for _, ref := range refs {
 			for _, o := range otherRefs {
 				if foundOverlap(ref, o) {
-					return d.Story.ID, near
+					return d.Story.ID, near, "the same line of " + foundRefText(ref) + " as " + foundRefText(o)
 				}
-				sharesFile = sharesFile || ref.path == o.path
+				if ref.path == o.path && !sharesFile {
+					sharesFile, sharedFile = true, ref.path
+				}
 			}
 		}
-		for symbol := range symbols {
-			sameSymbol = sameSymbol || otherSymbols[symbol]
+		for _, symbol := range slices.Sorted(maps.Keys(symbols)) {
+			if otherSymbols[symbol] && !sameSymbol {
+				sameSymbol, sharedSymbol = true, symbol
+			}
 		}
 		if sameSymbol && foundSameWords(words, foundFaultWords(other)) {
-			return d.Story.ID, near
+			return d.Story.ID, near, fmt.Sprintf("the symbol %s and the fault words %s", sharedSymbol, strings.Join(foundSharedWords(words, foundFaultWords(other)), ", "))
 		}
 		if near == "" && (sameSymbol || sharesFile) {
 			near = d.Story.ID
+			if sameSymbol {
+				nearWhy = "near match: shares only the symbol " + sharedSymbol
+			} else {
+				nearWhy = "near match: shares only the file " + sharedFile
+			}
 		}
 	}
-	return "", near
+	return "", near, nearWhy
+}
+
+// foundRefText is a ref as a person reads it: path:line, path:from-to or the
+// bare path.
+func foundRefText(r foundRef) string {
+	switch {
+	case r.from <= 0:
+		return r.path
+	case r.to > r.from:
+		return fmt.Sprintf("%s:%d-%d", r.path, r.from, r.to)
+	}
+	return fmt.Sprintf("%s:%d", r.path, r.from)
+}
+
+// foundSharedWords are the fault words a and b have in common, in order.
+func foundSharedWords(a, b map[string]bool) []string {
+	var shared []string
+	for word := range a {
+		if b[word] {
+			shared = append(shared, word)
+		}
+	}
+	slices.Sort(shared)
+	return shared
+}
+
+// keepJoin says in the story's close-out log, runs/<story>/next-<n>.log, what a
+// close-out joined to an open bead and by which rule, so that a wrong join can be
+// found afterwards: NextReport.Notes is shown once and kept nowhere (mw-gq6.1107).
+// The line is added to what the log holds, which the session's own command line
+// is also appending to (tee -a); a log that cannot be written is a note.
+func (n Next) keepJoin(ctx context.Context, c *closeOut, report *NextReport, line string) {
+	if n.Vault == nil {
+		return
+	}
+	name := NextLogNameForAttempt(c.attempt())
+	kept, err := n.Vault.ReadRunFile(ctx, c.id, name)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		report.Notes = append(report.Notes, fmt.Sprintf("the join %q could not be kept in runs/%s/%s: %v", line, c.id, name, err))
+		return
+	}
+	if kept != "" && !strings.HasSuffix(kept, "\n") {
+		kept += "\n"
+	}
+	if _, err := n.Vault.PutRunFile(ctx, c.id, name, kept+line+"\n"); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the join %q could not be kept in runs/%s/%s: %v", line, c.id, name, err))
+	}
 }
 
 // FindingLine is a file a finding names on main, with the line it names there
@@ -828,12 +889,13 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 
 	for i, bug := range bugs {
 		id, there := filed[bug.title]
-		near := ""
+		near, why := "", "the same title"
 		if !there {
-			id, near = foundMatch(bug, beads, c.id)
+			id, near, why = foundMatch(bug, beads, c.id)
 			there = id != ""
 		}
 		if there {
+			n.keepJoin(ctx, c, report, fmt.Sprintf("joined the finding %q of %s to %s by %s", strings.Join(bug.said(), " "), c.id, id, why))
 			report.Notes = append(report.Notes, fmt.Sprintf("%s already files the finding of %s: %s", id, c.id, bug.title))
 			block = append(block, fmt.Sprintf("Already filed: %s. %s", id, strings.Join(bug.lines, " ")))
 			continue
@@ -890,6 +952,7 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			}
 		}
 		if near != "" {
+			n.keepJoin(ctx, c, report, fmt.Sprintf("filed %s for the finding %q of %s as a %s with %s", id, strings.Join(bug.said(), " "), c.id, why, near))
 			report.Notes = append(report.Notes, fmt.Sprintf("%s may overlap %s, which names the same file or symbol but not the same fault", id, near))
 			block = append(block, fmt.Sprintf("Filed: %s, held (may overlap %s). %s", id, near, strings.Join(bug.lines, " ")))
 		} else {

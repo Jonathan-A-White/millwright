@@ -1,10 +1,15 @@
 package application_test
 
 import (
+	"context"
+	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 func TestReadACNotMet(t *testing.T) {
@@ -45,5 +50,47 @@ func TestReadACNotMet(t *testing.T) {
 				t.Fatalf("Subject() = %q, want %q", got.Subject(), c.subject)
 			}
 		})
+	}
+}
+
+// A bug already filed for an unmet AC is said in the close-out's log with the
+// rule that matched, its title (mw-gq6.1107).
+func TestAnUnmetACJoinedToAFiledBugIsWrittenInTheCloseOutsLog(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story"})
+	mustDo(t, tracker.SetAcceptance("mw-x.1", "1. One.\n2. Two."))
+	title := "[bug] mw-x.1 landed without its AC 2: Two."
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.9", Title: title})
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nAC 2 NOT met: it did not run.\nFor the rig memory: nothing"))
+	vault := newFakeVault()
+	vault.written["mw-x.1/next-1.log"] = "close-out started 2026-11-13T10:00:00Z\n"
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+
+	log := vault.written["mw-x.1/next-1.log"]
+	if !strings.HasPrefix(log, "close-out started 2026-11-13T10:00:00Z\n") {
+		t.Errorf("expected what the log held kept, got %q", log)
+	}
+	var line string
+	for _, l := range strings.Split(log, "\n") {
+		if strings.Contains(l, "mw-x.9") {
+			line = l
+		}
+	}
+	for _, want := range []string{"AC 2", "mw-x.9", "same title", title} {
+		if !strings.Contains(line, want) {
+			t.Errorf("expected the line to say %q, got %q (log %q)", want, line, log)
+		}
 	}
 }

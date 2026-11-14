@@ -190,6 +190,7 @@ func (n Next) landedWithoutACs(ctx context.Context, c *closeOut, report *NextRep
 		}
 		for _, d := range stories {
 			if d.Story.Title == title {
+				n.keepJoin(ctx, c, report, fmt.Sprintf("joined the unmet AC %s of %s to %s by the same title %q", found.Words(), c.id, d.Story.ID, title))
 				report.Notes = append(report.Notes, fmt.Sprintf("%s already files the unmet AC %s of %s", d.Story.ID, found.Words(), c.id))
 				return verdict, block + "\nFiled: " + d.Story.ID + ", held."
 			}
