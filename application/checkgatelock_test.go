@@ -74,7 +74,11 @@ func (c *callClock) Now() time.Time {
 // deadline, ahead of the start of its call), nor does a sleep; the ticket does
 // (mw-gq6.1184).
 func (c *callClock) PassOnceQueued(d time.Duration, queued func() int) {
-	for deadline := time.Now().Add(10 * time.Second); queued() < 1 && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+	// No real-time bound: a host loaded enough to make the call slow to queue is
+	// waited for, and a call that never queues ends in the test's own timeout
+	// (mw-gq6.1302).
+	for queued() < 1 {
+		time.Sleep(time.Millisecond)
 	}
 	c.Pass(d)
 }
@@ -527,6 +531,19 @@ func TestAWholeCheckThatReachesItsWaitLimitSaysSoAndTellsTheBuilderToHandBackAtO
 // queuedGate counts the tickets in the gate lock's queue directory.
 func (w *aWholeCheckBesideTheHostsGateLock) queuedGate() int {
 	return ticketsInPlace(filepath.Join(w.gate.Dir, hostlock.GateQueueDir))
+}
+
+// checkSaidItWaits is 1 once the check has said, in its output, that the gate lock
+// is held and that it waits for its turn, and 0 before. A gate that gives the lock
+// back as soon as the check's ticket is queued can do so before the check has read
+// who holds the lock: the file is emptied a moment before the lock is given back,
+// and the check then says "somebody" (mw-gq6.1302). The check says it only after
+// its ticket is in place, so the call is queued when this is 1.
+func (w *aWholeCheckBesideTheHostsGateLock) checkSaidItWaits() int {
+	if strings.Contains(w.told.String(), "gate lock is held by") {
+		return 1
+	}
+	return 0
 }
 
 // ticketsInPlace counts the tickets in place in a queue directory: not one still
@@ -1898,14 +1915,29 @@ type shardedGate struct {
 	// failAt, when it is not 0, is the part that fails.
 	failAt int
 
+	// began is closed when the gate's first run starts: the gate then holds the
+	// lock, and a test waits for it on this and not by a real deadline.
+	began chan struct{}
+
 	mu        sync.Mutex
 	ran       []string
 	wholeRuns int
 }
 
+func newShardedGate(clock *callClock, queued func() int, shard time.Duration, shards int) *shardedGate {
+	return &shardedGate{clock: clock, queued: queued, shard: shard, shards: shards, began: make(chan struct{})}
+}
+
 func (s *shardedGate) pass(d time.Duration) {
 	s.mu.Lock()
 	first := len(s.ran) == 0 && s.wholeRuns == 0
+	if first && s.began != nil {
+		select {
+		case <-s.began:
+		default:
+			close(s.began)
+		}
+	}
 	s.mu.Unlock()
 	if first {
 		s.clock.PassOnceQueued(d, s.queued)
@@ -1963,7 +1995,7 @@ func TestABatchGateLongerThanNGivesAWaitingCheckOfAnotherRigItsTurnWithinN(t *te
 	own := &clockedChecks{at: make(chan time.Time, 1)}
 	w := newWholeCheckBesideTheGateLock(t, own)
 	own.clock = w.clock
-	lampas := &shardedGate{clock: w.clock, queued: w.queuedGate, shard: 7 * time.Minute, shards: 6}
+	lampas := newShardedGate(w.clock, w.checkSaidItWaits, 7*time.Minute, 6)
 	var batchSaid lockedBuffer
 	land := application.BatchLand{Next: application.Next{
 		Tracker: apptest.NewFakeTracker(), Vault: newFakeVault(), Checks: lampas, GateParts: lampas,
@@ -1977,10 +2009,10 @@ func TestABatchGateLongerThanNGivesAWaitingCheckOfAnotherRigItsTurnWithinN(t *te
 
 	gated := make(chan application.Checked, 1)
 	go func() { gated <- land.GateTheBatch(context.Background(), t.TempDir(), report) }()
-	for deadline := time.Now().Add(10 * time.Second); w.gate.Holder() != "batch 526 of lampas"; time.Sleep(time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("expected the batch to take the gate lock, it is held by %q", w.gate.Holder())
-		}
+	// The batch's first part runs once it holds the gate lock: the gate says so.
+	<-lampas.began
+	if holder := w.gate.Holder(); holder != "batch 526 of lampas" {
+		t.Fatalf("expected the batch to take the gate lock, it is held by %q", holder)
 	}
 
 	began := w.clock.Now()
@@ -2010,11 +2042,9 @@ func TestABatchGateLongerThanNGivesAWaitingCheckOfAnotherRigItsTurnWithinN(t *te
 	}
 
 	var batch application.Checked
-	select {
-	case batch = <-gated:
-	case <-time.After(30 * time.Second):
-		t.Fatal("expected the batch gate to end once the check gave the lock back")
-	}
+	// No real deadline: the batch ends once the check gives the lock back, and a
+	// batch that does not ends in the test's own timeout.
+	batch = <-gated
 	if !batch.Passed || lampas.wholeRuns != 0 || len(lampas.ran) != lampas.shards {
 		t.Errorf("expected the batch gate to pass by its %d parts and not by the whole line, got %d parts, %d whole runs, %+v",
 			lampas.shards, len(lampas.ran), lampas.wholeRuns, batch)
@@ -2080,7 +2110,7 @@ func TestACloseOutGateOfARigWithPartsTakesTheGateLockByTurns(t *testing.T) {
 	own := &clockedChecks{at: make(chan time.Time, 1)}
 	w := newWholeCheckBesideTheGateLock(t, own)
 	own.clock = w.clock
-	lampas := &shardedGate{clock: w.clock, queued: w.queuedGate, shard: 7 * time.Minute, shards: 6}
+	lampas := newShardedGate(w.clock, w.checkSaidItWaits, 7*time.Minute, 6)
 	if total := time.Duration(lampas.shards) * lampas.shard; total <= aTurnWithin {
 		t.Fatalf("the gate must hold the lock longer than N: %s against %s", total, aTurnWithin)
 	}
@@ -2103,10 +2133,9 @@ func TestACloseOutGateOfARigWithPartsTakesTheGateLockByTurns(t *testing.T) {
 		}.Run(context.Background(), "lp-1.1")
 		closed <- err
 	}()
-	for deadline := time.Now().Add(10 * time.Second); w.gate.Holder() != "lp-1.1"; time.Sleep(time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("expected the close-out to take the gate lock, it is held by %q\n%s", w.gate.Holder(), closeSaid.String())
-		}
+	<-lampas.began
+	if holder := w.gate.Holder(); holder != "lp-1.1" {
+		t.Fatalf("expected the close-out to take the gate lock, it is held by %q\n%s", holder, closeSaid.String())
 	}
 
 	began := w.clock.Now()
@@ -2134,13 +2163,8 @@ func TestACloseOutGateOfARigWithPartsTakesTheGateLockByTurns(t *testing.T) {
 		t.Fatal("expected the check's tests to have run")
 	}
 
-	select {
-	case err := <-closed:
-		if err != nil {
-			t.Errorf("expected the close-out to land, got %v\n%s", err, closeSaid.String())
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("expected the close-out to end once the check gave the lock back")
+	if err := <-closed; err != nil {
+		t.Errorf("expected the close-out to land, got %v\n%s", err, closeSaid.String())
 	}
 	if lampas.wholeRuns != 0 || len(lampas.ran) != lampas.shards {
 		t.Errorf("expected the gate to run its %d parts and not the whole line, got %d parts, %d whole runs", lampas.shards, len(lampas.ran), lampas.wholeRuns)
