@@ -56,6 +56,12 @@ type SuiteRunner interface {
 	RunLine(ctx context.Context, rig, dir, command string) (Checked, error)
 }
 
+// SuiteParts is how a rig's gate is named as parts on the host (GateParts is it
+// and the runner).
+type SuiteParts interface {
+	Parts(rig string) []GatePart
+}
+
 // SuiteRecords is the port a suite's result files are written to the vault
 // through. It reports the path of the file from the vault's root, as
 // VaultFiles.Commit wants it.
@@ -84,6 +90,12 @@ type Suite struct {
 	// GateNoticeEvery is how often a suite that waits for the gate lock says
 	// again that it is waiting; zero reads CheckGateNoticeEvery.
 	GateNoticeEvery time.Duration
+	// Parts, when it is set, says how a rig's gate is named as parts on this host
+	// ([test_parts.<rig>]): the suite of a rig of more than one part runs the parts
+	// one by one in place of its [tests] line, taking the gate lock for each and
+	// giving it back after it, so a gate waits behind one part and not behind the
+	// whole suite (mw-gq6.1300). nil, or a rig of one part or none, runs the line.
+	Parts SuiteParts
 
 	// LoadPoll, LoadBound and LoadWait are Next's own: how often a busy host is
 	// looked at again, how long it is waited for, and how the wait is made. Zero
@@ -551,6 +563,47 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		return checked, err
 	}
 
+	// runTests runs the line of the tests phase: the rig's parts one after another,
+	// each under the gate lock and the lock given back after it, when the host names
+	// its gate as more than one part, else the [tests] line as it is. The first part
+	// that fails, or does not start, ends the run as a step of a line does; the
+	// Checked is the run as a whole, its command the parts that ran joined as a
+	// line joins its steps and its output theirs in turn (mw-gq6.1300). what names
+	// the line for the waits.
+	var parts []GatePart
+	if s.Parts != nil {
+		if named := s.Parts.Parts(rig); len(named) > 1 {
+			parts = named
+		}
+	}
+	runTests := func(dir, command, what string) (Checked, error) {
+		if parts == nil || command != tests {
+			return runLine(dir, command)
+		}
+		var commands []string
+		var output strings.Builder
+		for i, part := range parts {
+			if i > 0 {
+				if err := turn(fmt.Sprintf("%s, part %d of %d (%s)", what, i+1, len(parts), part.Name)); err != nil {
+					return Checked{}, err
+				}
+			}
+			run, err := runLine(dir, part.Command)
+			if err != nil {
+				return Checked{}, fmt.Errorf("part %d of %d of the rig's gate (%s): %w", i+1, len(parts), part.Name, err)
+			}
+			commands = append(commands, part.Command)
+			output.WriteString(run.Output)
+			if run.Output != "" && !strings.HasSuffix(run.Output, "\n") {
+				output.WriteString("\n")
+			}
+			if run.NotRun || !run.Passed {
+				return Checked{Command: strings.Join(commands, " && "), NotRun: run.NotRun, Output: output.String()}, nil
+			}
+		}
+		return Checked{Command: strings.Join(commands, " && "), Passed: true, Output: output.String()}, nil
+	}
+
 	// lastLoad is the last reading of the host's load taken, the load a line is
 	// taken to have started at (mw-gq6.1069).
 	var lastLoad LoadReading
@@ -596,7 +649,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		if err := turn(what); err != nil {
 			return suiteAttempt{}, err
 		}
-		run.Checked, run.Err = runLine(dir, command)
+		run.Checked, run.Err = runTests(dir, command, what)
 		if run.Err != nil || run.NotRun || run.Passed || s.Load == nil {
 			return run, nil
 		}
@@ -627,7 +680,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		if err := turn(what + " again"); err != nil {
 			return suiteAttempt{}, err
 		}
-		run.Checked, run.Err = runLine(dir, command)
+		run.Checked, run.Err = runTests(dir, command, what)
 		result.Notes = append(result.Notes, fmt.Sprintf("`%s` ran again after load %.1f of %d (%s was far over its cores when it failed): the second run stands", command, busy.Load, busy.Cores, s.Host))
 		return run, nil
 	}
