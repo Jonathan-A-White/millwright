@@ -1,0 +1,8 @@
+{
+  "about": "Postern's wire contract: the closed lists the PWA (src/), the backend (server/) and millwright keep by hand. Each side's test (tests/unit/contract.test.ts, server/internal/record TestContract) fails when its own list differs from this file, so a value added on one side only is caught. millwright's copy is checked by its TestPosternContract.",
+  "message_classes": ["message", "decision-needed", "landing", "alarm", "move-home", "grist", "talk", "call", "events", "card", "card-update"],
+  "event_kinds": ["bead_changed", "card_asked", "card_answered", "card_applied", "message", "talk_turn", "hands_ran", "mail", "job", "handover", "control", "action_applied", "cloud", "verify_folded", "seat_limited", "seat_past_line"],
+  "expect_states": ["open", "landed", "verified", "closed", "answered", "held"],
+  "need_kinds": ["question", "approve", "verify", "stale", "demo", "hands", "review", "decision", "waiting", "chase", "alarm"],
+  "action_words": ["release", "hold", "thaw", "priority", "verified", "run", "keep", "close", "chase", "ask_done", "keep_waiting", "todo_add", "todo_edit", "todo_move"]
+}
