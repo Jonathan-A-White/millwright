@@ -612,7 +612,8 @@ var (
 // deterministic enough to run on main before the bug is filed, or empty: the
 // words before 'passes' (or a backticked span of them), and only make lint, go
 // test with -run and no './...', or a script under scripts/, or a grep read by
-// its exit (foundGrepCommand). Anything with a pipe, redirect or the like is not
+// its exit (foundGrepCommand), or a web rig's npm test or npx vitest run of up to
+// three test files (the install is Suite.RecheckFinding's). Anything with a pipe, redirect or the like is not
 // run, nor is a whole suite (make test, go test ./...): it takes minutes under
 // the host's gate lock for one finding, so such a finding is filed as before.
 func foundCheckCommand(ac string) string {
@@ -637,6 +638,8 @@ func foundCheckCommand(ac string) string {
 	switch {
 	case len(words) == 2 && words[0] == "make" && words[1] == "lint":
 	case len(words) >= 3 && words[0] == "go" && words[1] == "test" && slices.Contains(words, "-run") && !slices.Contains(words, "./..."):
+	case len(words) == 2 && words[0] == "npm" && words[1] == "test":
+	case foundVitestFiles(words):
 	case len(words) >= 1 && foundScriptWord(words[0]):
 	case len(words) >= 2 && (words[0] == "sh" || words[0] == "bash") && foundScriptWord(words[1]):
 	default:
@@ -740,6 +743,26 @@ func foundGrepRead(words []string, phrase string) string {
 		return line + "; test $? -eq 1"
 	}
 	return ""
+}
+
+// foundVitestMostFiles is the most test files one finding's vitest run may name:
+// the run is made in a tree with a fresh install, under the host's gate lock.
+const foundVitestMostFiles = 3
+
+var foundTestFile = regexp.MustCompile(`\.(?:test|spec)\.[cm]?[jt]sx?$`)
+
+// foundVitestFiles says words are 'npx vitest run' and one to three test files
+// by plain relative paths, with no flag, name filter or watch mode (mw-gq6.1293).
+func foundVitestFiles(words []string) bool {
+	if len(words) < 4 || len(words) > 3+foundVitestMostFiles || words[0] != "npx" || words[1] != "vitest" || words[2] != "run" {
+		return false
+	}
+	for _, file := range words[3:] {
+		if strings.HasPrefix(file, "-") || strings.HasPrefix(file, "/") || strings.Contains(file, "..") || !foundTestFile.MatchString(file) {
+			return false
+		}
+	}
+	return true
 }
 
 func foundScriptWord(word string) bool {
