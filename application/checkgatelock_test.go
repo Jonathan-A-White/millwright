@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1798,5 +1799,202 @@ func TestAForegroundCheckOnAGateLongerThanTheCallReadsAFailedVerdict(t *testing.
 	}
 	if f.inCall.ranCount() != 0 || f.gate.ranCount() != 1 || f.starter.startedCount() != 1 {
 		t.Errorf("expected nothing run or started again, got %d in the call, %d by %d process(es)", f.inCall.ranCount(), f.gate.ranCount(), f.starter.startedCount())
+	}
+}
+
+// mw-gq6.1275: a lampas batch gate held the laptop's gate lock for as long as its
+// vitest ran (39 to 46 minutes), and every other rig's check waited behind it for
+// 40 minutes to 1h27m, past any call of a Builder's. A batch gate on a rig whose
+// gate is named as parts on the host takes the lock part by part, so that a check
+// of another rig waiting for the lock has its turn between two parts.
+
+// aTurnWithin is N: the most a check of another rig waits for the gate lock behind
+// a batch gate that holds it far longer, here six 7-minute shards, 42 minutes.
+const aTurnWithin = 10 * time.Minute
+
+// shardedGate is lampas's gate on the check's clock: as one line, the whole gate
+// in one run of 42 minutes; as parts, six shards of 7 minutes. The first run of
+// either ends only once a check of another rig is queued for the gate lock.
+type shardedGate struct {
+	clock  *callClock
+	queued func() int
+	shard  time.Duration
+	shards int
+
+	// failAt, when it is not 0, is the part that fails.
+	failAt int
+
+	mu        sync.Mutex
+	ran       []string
+	wholeRuns int
+}
+
+func (s *shardedGate) pass(d time.Duration) {
+	s.mu.Lock()
+	first := len(s.ran) == 0 && s.wholeRuns == 0
+	s.mu.Unlock()
+	if first {
+		s.clock.PassOnceQueued(d, s.queued)
+		return
+	}
+	s.clock.Pass(d)
+}
+
+// Run is the rig's gate as one line.
+func (s *shardedGate) Run(context.Context, string, string) (application.Checked, error) {
+	s.pass(time.Duration(s.shards) * s.shard)
+	s.mu.Lock()
+	s.wholeRuns++
+	s.mu.Unlock()
+	return application.Checked{Command: "npm test", Passed: true, Output: "all shards passed\n"}, nil
+}
+
+// Parts is the rig's gate as parts: lampas's alone.
+func (s *shardedGate) Parts(rig string) []application.GatePart {
+	if rig != "lampas" {
+		return nil
+	}
+	var parts []application.GatePart
+	for i := 1; i <= s.shards; i++ {
+		parts = append(parts, application.GatePart{Name: fmt.Sprintf("vitest %d/%d", i, s.shards), Command: fmt.Sprintf("npx vitest run --shard %d/%d", i, s.shards)})
+	}
+	return parts
+}
+
+// RunLine is one part.
+func (s *shardedGate) RunLine(_ context.Context, _, _, command string) (application.Checked, error) {
+	s.pass(s.shard)
+	s.mu.Lock()
+	s.ran = append(s.ran, command)
+	failed := len(s.ran) == s.failAt
+	s.mu.Unlock()
+	if failed {
+		return application.Checked{Command: command, Output: command + ": FAIL tests/unit/a.test.ts > a\n"}, nil
+	}
+	return application.Checked{Command: command, Passed: true, Output: command + ": passed\n"}, nil
+}
+
+// clockedChecks is the check's own tests, noting the check's clock when they ran.
+type clockedChecks struct {
+	clock *callClock
+	at    chan time.Time
+}
+
+func (c *clockedChecks) Run(context.Context, string, string) (application.Checked, error) {
+	c.at <- c.clock.Now()
+	return application.Checked{Command: "make test", Passed: true, Output: "ok\n"}, nil
+}
+
+func TestABatchGateLongerThanNGivesAWaitingCheckOfAnotherRigItsTurnWithinN(t *testing.T) {
+	own := &clockedChecks{at: make(chan time.Time, 1)}
+	w := newWholeCheckBesideTheGateLock(t, own)
+	own.clock = w.clock
+	lampas := &shardedGate{clock: w.clock, queued: w.queuedGate, shard: 7 * time.Minute, shards: 6}
+	var batchSaid lockedBuffer
+	land := application.BatchLand{Next: application.Next{
+		Tracker: apptest.NewFakeTracker(), Vault: newFakeVault(), Checks: lampas, GateParts: lampas,
+		GateLock: w.gate, Host: "laptop", Seat: "builder", Out: writerOf(&batchSaid), Err: writerOf(&batchSaid),
+	}}
+	report := &application.BatchReport{Rig: "lampas", Number: 526, Target: "main", Base: "origin/main",
+		Merged: []application.BatchStory{{ID: "lp-1.1"}}}
+	if total := time.Duration(lampas.shards) * lampas.shard; total <= aTurnWithin {
+		t.Fatalf("the batch gate must hold the lock longer than N: %s against %s", total, aTurnWithin)
+	}
+
+	gated := make(chan application.Checked, 1)
+	go func() { gated <- land.GateTheBatch(context.Background(), t.TempDir(), report) }()
+	for deadline := time.Now().Add(10 * time.Second); w.gate.Holder() != "batch 526 of lampas"; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("expected the batch to take the gate lock, it is held by %q", w.gate.Holder())
+		}
+	}
+
+	began := w.clock.Now()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
+	checked, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: own,
+		Slot: w.slots, GateLock: w.gate, Records: w.records, Parts: lampas,
+		// The check waits N by its clock, and a minute by the real time.
+		PartSlotWait: aTurnWithin, CallNow: w.clock.Now, GateNoticeEvery: time.Hour,
+		Host: "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": w.rigDir},
+		Out:  writerOf(w.told),
+	}.Run(context.Background(), "mw-x.1")
+	if err != nil {
+		t.Fatalf("expected the check of millwright to have its turn within %s of a batch gate of %s, got %v\n%s\nthe check said:\n%s",
+			aTurnWithin, time.Duration(lampas.shards)*lampas.shard, err, checked, w.told.String())
+	}
+	select {
+	case at := <-own.at:
+		if waited := at.Sub(began); waited > aTurnWithin {
+			t.Errorf("expected the check to have the gate lock within %s, it waited %s", aTurnWithin, waited)
+		}
+	default:
+		t.Fatal("expected the check's tests to have run")
+	}
+
+	var batch application.Checked
+	select {
+	case batch = <-gated:
+	case <-time.After(30 * time.Second):
+		t.Fatal("expected the batch gate to end once the check gave the lock back")
+	}
+	if !batch.Passed || lampas.wholeRuns != 0 || len(lampas.ran) != lampas.shards {
+		t.Errorf("expected the batch gate to pass by its %d parts and not by the whole line, got %d parts, %d whole runs, %+v",
+			lampas.shards, len(lampas.ran), lampas.wholeRuns, batch)
+	}
+	for _, want := range []string{"vitest run --shard 1/6", "vitest run --shard 6/6"} {
+		if !strings.Contains(batch.Command+batch.Output, want) {
+			t.Errorf("expected the batch's gate log to hold %q, got %+v", want, batch)
+		}
+	}
+	if holder := w.gate.Holder(); holder != "" {
+		t.Errorf("expected the gate lock to be free after both, %q holds it", holder)
+	}
+
+	// The wait was said in one line: who holds the lock, the batch of its rig, since
+	// when, and what the check does next.
+	said := lineWith(w.told.String(), "gate lock is held by batch 526 of lampas")
+	if said == "" {
+		t.Fatalf("expected the check to say who held the gate lock, got:\n%s", w.told.String())
+	}
+	t.Logf("the check said: %s", said)
+	for _, want := range []string{"since ", "ago", "between its 6 parts", "waits for its turn"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("expected the wait line to say %q, got %q", want, said)
+		}
+	}
+	// The batch said it gave the lock back between parts and took it again.
+	if !strings.Contains(batchSaid.String(), "gives laptop's gate lock back") {
+		t.Errorf("expected the batch to say it gave the lock back between parts, got:\n%s", batchSaid.String())
+	}
+}
+
+// A part of a batch gate taking turns that fails ends the gate there, as a step of
+// the rig's one line does: the parts after it are not run, the gate has not passed,
+// and its log holds what the failing part said (mw-gq6.1275).
+func TestABatchGateTakingTurnsEndsAtItsFirstFailingPart(t *testing.T) {
+	w := newWholeCheckBesideTheGateLock(t, &scriptedChecks{passes: []bool{true}})
+	lampas := &shardedGate{clock: w.clock, queued: func() int { return 1 }, shard: time.Minute, shards: 6, failAt: 2}
+	var said lockedBuffer
+	land := application.BatchLand{Next: application.Next{
+		Tracker: apptest.NewFakeTracker(), Vault: newFakeVault(), Checks: lampas, GateParts: lampas,
+		GateLock: w.gate, Host: "laptop", Seat: "builder", Out: writerOf(&said), Err: writerOf(&said),
+	}}
+	report := &application.BatchReport{Rig: "lampas", Number: 527, Target: "main", Base: "origin/main",
+		Merged: []application.BatchStory{{ID: "lp-1.1"}}}
+
+	gate := land.GateTheBatch(context.Background(), t.TempDir(), report)
+
+	if gate.Passed || gate.NotRun || len(lampas.ran) != 2 || lampas.wholeRuns != 0 {
+		t.Errorf("expected a failed gate after two parts and no run of the whole line, got %d parts, %d whole runs, %+v", len(lampas.ran), lampas.wholeRuns, gate)
+	}
+	if !strings.Contains(gate.Output, "FAIL tests/unit/a.test.ts") || strings.Contains(gate.Command, "3/6") {
+		t.Errorf("expected the gate to hold the failing part and nothing after it, got %+v", gate)
+	}
+	if holder := w.gate.Holder(); holder != "" {
+		t.Errorf("expected the gate lock to be given back, %q holds it", holder)
 	}
 }

@@ -351,6 +351,17 @@ nightly Lampas suite was among the load sources of the Laptop at 40 to 80 of 20 
 (handoff 726). The numbers above are its reason: a gate with another run beside it takes
 three to four times as long.
 
+A batch's gate takes the lock by turns in the same way when its rig's gate is named as
+parts on the host (`[test_parts.<rig>]`): it runs the parts one after another, as the
+rig's one line runs its steps, gives the lock back after each and takes it again behind
+whoever queued for it meanwhile (`application/gateturns.go`, mw-gq6.1275). Lampas batch
+gates held the Laptop's lock 39 to 46 minutes for their vitest, and other rigs' checks
+waited behind them 40 minutes to 1h27m; behind a batch taking turns a check waits one
+part, a vitest shard. The parts are the whole gate, so such a batch runs them in place of
+its related-tests line. A check that finds the lock held says so in one line: who holds
+it (a batch named with its rig, and that it gives the lock back between its parts),
+since when, and that the check waits for its turn up to what its deadline has left.
+
 The numbers behind the order and the rule, from the vault's `runs/suite/lampas` of the 21
 nights 2026-10-13 to 2026-11-02: the whole suite ran 16 to 131 minutes (median 36), from
 08:00 to 09:44 UTC. Taking the lock before the calm wait made a close-out wait for that and

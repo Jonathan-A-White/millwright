@@ -268,9 +268,9 @@ func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, wh
 // run, with Said naming the specs. log is what the gate ran as a gate log
 // holds it, one "$ command" and its output after another.
 func (n Next) gateWithSpecs(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) (verdict gated, log string) {
-	if lock := n.waitForTheGateLock(ctx, c, report, what); lock != nil {
-		defer n.giveTheGateLockBack(report, lock)
-	}
+	// The lock is held by turns: a rig whose gate is named as parts gives it back
+	// between them (gateturns.go, mw-gq6.1275).
+	defer n.takingTurns(c, report, n.waitForTheGateLock(ctx, c, report, what))()
 	tests := n.gateOnACalmHost(ctx, c, report, dir, what, span)
 	log = gateLogOf(tests.Checked)
 	if tests.Err != nil || tests.Checked.NotRun || !tests.Checked.Passed || n.SpecChecks == nil {
@@ -368,8 +368,12 @@ func (n Next) takeTheGateLock(ctx context.Context, c *closeOut, report *NextRepo
 		return nil, nil
 	}
 	var resume func()
+	_, saysItsOwn := n.GateLock.(checkGateLock)
 	turn, err := n.GateLock.Take(ctx, c.id, func(by string) {
-		n.print(fmt.Sprintf("  wait    %s's gate lock is held by %s: waiting for it before %s\n", n.Host, by, what))
+		// A check's lock says its own wait, naming more (Check.heldLine).
+		if !saysItsOwn {
+			n.print(fmt.Sprintf("  wait    %s's gate lock is held by %s: waiting for it before %s\n", n.Host, by, what))
+		}
 		// The close-out says it is waiting, so that mw status and the quiet
 		// alarm do not take the story for quiet while it queues.
 		n.markCloseOut(ctx, c.id, c.began, true)

@@ -783,11 +783,14 @@ type closeOut struct {
 	// (the tests, their run again, the changed specs) the host's give-way marker is
 	// read, and a host that gives way starts none (gateGivesWay, mw-2891blf.19).
 	readsGiveWay bool
-	detail       StoryDetail
-	path         domain.Path
-	rigDir       string
-	worktree     string
-	branch       string
+	// turns is the host's gate lock as a batch's gate holds it, part by part
+	// (gateturns.go, mw-gq6.1275); nil for every other gate.
+	turns    *gateTurns
+	detail   StoryDetail
+	path     domain.Path
+	rigDir   string
+	worktree string
+	branch   string
 	// branchPushed is set when the stop pushed the story's branch to the remote
 	// for the home to finish (unprovedFromAHostWithNoMill).
 	branchPushed bool
