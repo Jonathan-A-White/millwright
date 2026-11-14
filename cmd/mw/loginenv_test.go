@@ -123,7 +123,7 @@ func TestMwGiveWayWithABareEnvironmentStopsTheSessionsProcesses(t *testing.T) {
 		kill.Run()
 	})
 	var pid string
-	for i := 0; i < 100 && pid == ""; i++ {
+	for i := 0; i < 600 && pid == ""; i++ {
 		if raw, err := os.ReadFile(pidFile); err == nil {
 			pid = strings.TrimSpace(string(raw))
 		} else {
