@@ -136,6 +136,35 @@ func TestWSLFlagSaysThatTheTaskNeverTookTheFlag(t *testing.T) {
 	}
 }
 
+// A host that is slow to take the write (a loaded host, a slow ssh) must not
+// spend the wait: --limit bounds the wait for the result, not the write of the
+// flag, so a slow write still leaves the flag, and the wait ends "still there".
+func TestWSLFlagLimitDoesNotBoundTheWriteOfTheFlag(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	real := hostWSLFlagRun
+	hostWSLFlagRun = func(ctx context.Context, host, ssh, script string) (string, error) {
+		if script == wslFlagWriteScript("restart") {
+			select { // the write takes longer than --limit
+			case <-time.After(400 * time.Millisecond):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		return real(ctx, host, ssh, script)
+	}
+	t.Cleanup(func() { hostWSLFlagRun = real })
+	out, err := runMw(t, "host", "wsl-flag", "restart", "--limit", "300ms")
+	if err == nil {
+		t.Fatalf("expected a wait with no watcher to fail, got:\n%s", out)
+	}
+	if strings.Contains(err.Error(), "was not written") || !strings.Contains(err.Error(), "still there") {
+		t.Errorf("expected the flag said still there after a slow write, got %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "wsl-flag")); string(b) != "restart" {
+		t.Errorf("expected the flag left in place, got %q", b)
+	}
+}
+
 func TestWSLFlagSaysThatTheTaskTookTheFlagButHasNotAnswered(t *testing.T) {
 	dir := wslFlagHere(t, nil)
 	fakeWatcher(t, dir, "")
