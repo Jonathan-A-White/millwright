@@ -1605,6 +1605,7 @@ Feature: Closing out a finished story and carrying on
     And that mail's subject is "Landed: The story mw-gq6.1"
     And that mail's first line is: after landing STOPPED at the limit: the site may be half-deployed
     And that mail's body says: after landing: <the command>: stopped after 600ms, still running
+    And that mail's body says: [after_landing_limit]
 
   Scenario: An after-landing command that fails once on a passing network fault is run again, and the mail says it was retried
     Given the rig names a command to run after a landing, which fails the first time on a name-resolution fault, exit 255, and then succeeds

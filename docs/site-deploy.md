@@ -34,6 +34,8 @@ A command that is stopped at twice its limit is never quiet. The mail to the May
 opens with `after landing STOPPED at the limit: the site may be half-deployed`,
 the comment on the story starts with it, and the report's one line says
 `stopped after 40m0s, still running` (for a limit of 20m).
+The line also says the stop is at twice the rig's limit and names the table:
+`set [after_landing_limit] <rig> = "<time>" in the config file to give this rig longer`.
 
 ## `contrib/site-deploy <dist> <host> <dir>`
 

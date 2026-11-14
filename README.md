@@ -1282,6 +1282,7 @@ off: a command still running at its limit is waited for up to twice the limit, a
 that ends of itself in that time is reported as it ended, with `it ran 7m0s, past its
 limit of 5m0s, and finished by itself`, and no alarm (mw-gq6.1268). A command stopped
 at twice its limit is also said first in the mail to the Mayor, `after landing STOPPED at the limit: the site may be half-deployed`,
+and its line names the limit and the `[after_landing_limit]` table that gives the rig longer,
 because a site copied by a command cut off midway is half-deployed; a rig that ships
 a site uses `contrib/site-deploy`, which cannot leave it so (`docs/site-deploy.md`).
 A rig the table does not name runs nothing, except `millwright` on a host whose

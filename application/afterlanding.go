@@ -239,6 +239,21 @@ func (r Ran) lateWords() string {
 	return fmt.Sprintf("it ran %s, past its limit of %s, and finished by itself", r.Took.Round(time.Second), r.Limit)
 }
 
+// StoppedWords say, for a command that was stopped, that the stop is at twice the
+// rig's limit (the limit it was given, when the port timed it) and the table of
+// the host's config that gives the rig longer; empty for a command that was not
+// stopped (mw-gq6.1292).
+func (r Ran) StoppedWords(rig string) string {
+	if r.TimedOut == 0 {
+		return ""
+	}
+	at := "stopped at twice the rig's limit"
+	if r.Limit > 0 {
+		at += " of " + r.Limit.String()
+	}
+	return fmt.Sprintf(`%s: set [after_landing_limit] %s = "<time>" in the config file to give this rig longer`, at, rig)
+}
+
 // Succeeded says the command ran to the end and exited with status zero.
 func (r Ran) Succeeded() bool { return r.Status == 0 && r.TimedOut == 0 }
 
@@ -561,6 +576,11 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	}
 	if kept != "" {
 		line += "; the whole output is in " + kept
+	}
+	if err == nil {
+		if words := ran.StoppedWords(c.path.Rig); words != "" {
+			line += "; " + words
+		}
 	}
 	report.Notes = append(report.Notes, line)
 	if err == nil && ran.TimedOut > 0 {
