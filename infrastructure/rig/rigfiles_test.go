@@ -165,6 +165,11 @@ func TestATypeScriptFileIsCalledOnlyByTheTestsThatImportIt(t *testing.T) {
 		"tests/lazy.test.ts":          "const m = await import('../src/Reader')\n",
 		"tests/require.test.js":       "const { helper } = require('../src/util')\n",
 		"tests/mjs.test.js":           "import { lib } from '../src/lib.mjs'\n",
+		"tests/sideeffect.test.tsx":   "import '../src/Reader'\n",
+		"tests/vimock.test.tsx":       "vi.mock('../src/Reader', () => ({}))\n",
+		"tests/jestmock.test.tsx":     "jest.mock(\"../src/Reader\")\n",
+		"tests/reexport.test.ts":      "export * from '../src/Reader'\n",
+		"tests/othermock.test.tsx":    "vi.mock('../src/Readers')\nimport '../src/Reader.css'\n",
 		"tests/other.test.tsx":        "import { Readers } from '../src/Readers'\nimport x from '../src/Reader.css'\n",
 		"tests/helper-words.test.tsx": "helper lib\n",
 	})
@@ -173,10 +178,10 @@ func TestATypeScriptFileIsCalledOnlyByTheTestsThatImportIt(t *testing.T) {
 		named []string
 		want  int
 	}{
-		{[]string{"src/Reader.tsx"}, 4},
+		{[]string{"src/Reader.tsx"}, 8},
 		{[]string{"src/util.js"}, 1},
 		{[]string{"src/lib.mjs"}, 1},
-		{[]string{"src/Reader.tsx", "src/util.js", "src/lib.mjs"}, 6},
+		{[]string{"src/Reader.tsx", "src/util.js", "src/lib.mjs"}, 10},
 	} {
 		got, err := files.TestCallers(dir, c.named)
 		if err != nil || got != c.want {

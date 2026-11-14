@@ -127,8 +127,9 @@ const callerSearchLimit = 20 * time.Second
 //   - Go: it says pkg.Name, pkg being the declaring file's package, or it is in
 //     the same directory (the same package) and says Name not after a dot, so
 //     that a field called Status is not a call of a type called Status;
-//   - TS or JS: it imports the path (from, require or import() of
-//     '.../<stem>', by any relative or aliased path). The file's exported names
+//   - TS or JS: it imports the path (from, import, require or import() of
+//     '.../<stem>', or vi.mock or jest.mock of it, by any relative or aliased
+//     path; a side-effect import and export ... from count too). The file's exported names
 //     as words are not looked for: a name like Reader or Settings is said in
 //     strings and comments of hundreds of tests that never import the file
 //     (mw-6ww.175.4).
@@ -194,7 +195,7 @@ func newCallerMatcher(rigDir string, named []string) callerMatcher {
 			anywhere = append(anywhere, `\b(?:`+names+`)\b`)
 		}
 		if d.importStem != "" {
-			anywhere = append(anywhere, `(?:from|require\(|import\()\s*['"](?:[^'"\n]*/)?`+regexp.QuoteMeta(d.importStem)+`(?:\.[cm]?[jt]sx?)?['"]`)
+			anywhere = append(anywhere, `(?:from|import|require\(|import\(|(?:vi|jest)\.(?:mock|doMock)\()\s*['"](?:[^'"\n]*/)?`+regexp.QuoteMeta(d.importStem)+`(?:\.[cm]?[jt]sx?)?['"]`)
 		}
 	}
 	m := callerMatcher{sameDir: map[string]*regexp.Regexp{}}
