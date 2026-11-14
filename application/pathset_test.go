@@ -428,3 +428,108 @@ func TestPathSetFromStillCopiesNoFiles(t *testing.T) {
 		t.Errorf("expected the formula copied and the files not, got %+v", detail.Story.Overrides)
 	}
 }
+
+// mw-gq6.1288: a story whose path says why its host must stay (host_why) keeps
+// it: mw path set will not write another host over it, whatever the host is.
+func TestPathSetRefusesAnotherHostOnAStoryWithAHostWhy(t *testing.T) {
+	const why = "the Morpheus cache is made on the Laptop"
+	for name, pairs := range map[string][]string{
+		"auto":         {"host=auto"},
+		"a cloud box":  {"host=cloud2"},
+		"with a model": {"model=sonnet", "host=auto"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tracker := aVaultWithTwoFormulas()
+			pinnedTo(tracker, "mw-gq6.3", "laptop", domain.HostWhyField, why)
+			var out strings.Builder
+			_, err := application.PathSet{Tracker: tracker, Out: &out}.Run(context.Background(), "mw-gq6.3", "", pairs)
+			if err == nil {
+				t.Fatalf("path set %v on a story with a host_why wrote it", pairs)
+			}
+			for _, want := range []string{why, "host_why", "nothing was written", "--unset-metadata host_why"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal lacks %q: %v", want, err)
+				}
+			}
+			detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.3")
+			if got := detail.Merged(); got.Host != "laptop" || got.Model == domain.ModelSonnet || got.HostWhy != why {
+				t.Errorf("a refused set changed the path: %+v", got)
+			}
+		})
+	}
+}
+
+func TestPathSetRefusesACopiedHostOnAStoryWithAHostWhy(t *testing.T) {
+	tracker := aVaultWithTwoFormulas()
+	pinnedTo(tracker, "mw-gq6.3", "laptop", domain.HostWhyField, "the Morpheus cache is on the Laptop")
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.4", Title: "sibling on a box",
+		Overrides: domain.Path{Rig: "lampas", Host: "cloud2"}})
+	if _, err := (application.PathSet{Tracker: tracker}).Run(context.Background(), "mw-gq6.3", "mw-gq6.4", nil); err == nil {
+		t.Fatal("path set --from a sibling on another host moved a story with a host_why")
+	}
+	if got := storyHost(t, tracker, "mw-gq6.3"); got != "laptop" {
+		t.Errorf("host = %q, want laptop kept", got)
+	}
+}
+
+func TestPathSetStillTakesTheSameHostOrANewWhyOnAStoryWithAHostWhy(t *testing.T) {
+	tracker := aVaultWithTwoFormulas()
+	pinnedTo(tracker, "mw-gq6.3", "laptop", domain.HostWhyField, "the Morpheus cache is on the Laptop")
+	ctx := context.Background()
+	if _, err := (application.PathSet{Tracker: tracker}).Run(ctx, "mw-gq6.3", "", []string{"host=laptop", "model=sonnet"}); err != nil {
+		t.Fatalf("the same host: %v", err)
+	}
+	// On purpose: the new host with the reason it must stay there.
+	if _, err := (application.PathSet{Tracker: tracker}).Run(ctx, "mw-gq6.3", "", []string{"host=desktop", "host_why=the GPU is there"}); err != nil {
+		t.Fatalf("a new host with a new why: %v", err)
+	}
+	if got := storyHost(t, tracker, "mw-gq6.3"); got != "desktop" {
+		t.Errorf("host = %q, want desktop", got)
+	}
+}
+
+// A story with no host_why is moved as ever.
+func TestPathSetStillMovesAStoryWithNoHostWhy(t *testing.T) {
+	tracker := aVaultWithTwoFormulas()
+	if _, err := (application.PathSet{Tracker: tracker}).Run(context.Background(), "mw-gq6.2", "", []string{"host=auto"}); err != nil {
+		t.Fatalf("host=auto on a story with no host_why: %v", err)
+	}
+}
+
+// A host the Governor retired is written as host=auto instead (mw-gq6.1165), and
+// that is another host: a pinned story naming its own retired host keeps it
+// refused rather than moved.
+func TestPathSetDoesNotMoveAPinnedStoryToAutoByWayOfItsRetiredHost(t *testing.T) {
+	tracker := aVaultWithTwoFormulas()
+	pinnedTo(tracker, "mw-gq6.3", "desktop", domain.HostWhyField, "the GPU is on the desktop")
+	_, err := application.PathSet{Tracker: tracker, Retired: []string{"desktop"}}.
+		Run(context.Background(), "mw-gq6.3", "", []string{"host=desktop"})
+	if err == nil {
+		t.Fatal("a retired host written over a pinned story was turned into host=auto")
+	}
+	if got := storyHost(t, tracker, "mw-gq6.3"); got != "desktop" {
+		t.Errorf("host = %q, want desktop kept", got)
+	}
+}
+
+// mw-gq6.1288 AC 2: an epic whose metadata carries host and host_why gives both
+// to the stories filed under it, and mw path set refuses another host for them.
+func TestAStoryOfAnEpicWithAHostWhyKeepsItsHost(t *testing.T) {
+	const why = "lampas docs/lxx-derivation.md:552: model stories are pathed host=laptop"
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-u2w5klk", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelSonnet, Effort: domain.EffortHigh, Host: "laptop", HostWhy: why})
+	tracker.AddStory("mw-u2w5klk", domain.Story{ID: "mw-u2w5klk.238", Title: "a model story"})
+
+	detail, _ := tracker.ShowStory(context.Background(), "mw-u2w5klk.238")
+	if got := detail.Merged(); got.Host != "laptop" || got.HostWhy != why {
+		t.Fatalf("the story has host=%q host_why=%q, want the epic's", got.Host, got.HostWhy)
+	}
+	_, err := application.PathSet{Tracker: tracker}.Run(context.Background(), "mw-u2w5klk.238", "", []string{"host=auto"})
+	if err == nil || !strings.Contains(err.Error(), why) {
+		t.Fatalf("host=auto on a story of an epic with a host_why: want a refusal naming the why, got %v", err)
+	}
+	if got := storyHost(t, tracker, "mw-u2w5klk.238"); got != "laptop" {
+		t.Errorf("host = %q, want laptop kept", got)
+	}
+}

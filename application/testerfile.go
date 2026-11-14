@@ -236,6 +236,15 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 			path.Host = domain.HostAuto
 		}
 	}
+	// An epic that says why its host stays keeps it for the finding too: the
+	// host written above is replaced by the epic's own, and a host the Tester
+	// named is not (mw-gq6.1288).
+	if host, why := EpicKeepsHost(landed.Defaults); host != "" {
+		if named := strings.TrimSpace(finding.Host); named != "" && named != host {
+			f.say("host=%s was not written: %s must stay on host=%s (%s); the finding is filed there\n", named, landed.EpicID, host, why)
+		}
+		path.Host = ""
+	}
 	if files := domain.FileList(finding.Files); len(files) > 0 {
 		path.Files = strings.Join(files, ",")
 	}

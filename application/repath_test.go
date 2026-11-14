@@ -493,3 +493,50 @@ func TestRepathLeavesOutTheNoRoomNoteOfADestroyedBox(t *testing.T) {
 		}
 	})
 }
+
+// mw-gq6.1288 AC 3: a story that carries a host_why, its own or its epic's, is
+// given no other host: not by the dispatcher's re-path of a full or gone host,
+// and not by its auto choice on a host that is not the story's.
+func TestTheDispatcherNeverGivesAStoryWithAHostWhyAnotherHost(t *testing.T) {
+	const why = "the Morpheus cache is made on the Laptop"
+	t.Run("repath of a retired host, the story's own why", func(t *testing.T) {
+		dispatch, tracker := aRePathFactory(t)
+		pinnedTo(tracker, "mw-gq6.1", "desktop", domain.HostWhyField, why)
+		if _, err := dispatch.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := storyHost(t, tracker, "mw-gq6.1"); got != "desktop" {
+			t.Errorf("host = %q, want desktop kept by its why", got)
+		}
+	})
+	t.Run("repath of a retired host, the epic's why", func(t *testing.T) {
+		dispatch, tracker := aRePathFactory(t)
+		tracker.AddEpic("mw-epic", domain.Path{Host: "desktop", HostWhy: why})
+		tracker.AddStory("mw-epic", domain.Story{ID: "mw-epic.1", Title: "of a pinned epic"})
+		if _, err := dispatch.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if got := storyHost(t, tracker, "mw-epic.1"); got != "desktop" {
+			t.Errorf("host = %q, want desktop kept by its epic's why", got)
+		}
+	})
+	t.Run("the auto choice of another host", func(t *testing.T) {
+		dispatch, tracker := aRePathFactory(t)
+		dispatch.Cap = 5
+		dispatch.Host = "cloud2"
+		tracker.AddEpic("mw-epic", domain.Path{Host: "laptop", HostWhy: why})
+		tracker.AddStory("mw-epic", domain.Story{ID: "mw-epic.1", Title: "of a pinned epic"})
+		report, err := dispatch.Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, started := range report.Started {
+			if started.StoryID == "mw-epic.1" {
+				t.Errorf("cloud2 took a story whose host is laptop by its why")
+			}
+		}
+		if got := storyHost(t, tracker, "mw-epic.1"); got != "laptop" {
+			t.Errorf("host = %q, want laptop kept", got)
+		}
+	})
+}
