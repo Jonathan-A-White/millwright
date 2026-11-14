@@ -284,6 +284,8 @@ case "$FORCE_FAIL:\$last" in
 hub-enrol:*"wg-enrol "*) echo FORCED-STDOUT; echo FORCED-STDERR >&2; return 2 ;;
 esac
 case \$last in
+*"/^# peer "*"/etc/wireguard/wg0.conf"*) sh -c "\$(printf '%s' "\$last" | sed 's#/etc/wireguard/wg0.conf#$HUB/wg0.conf#g')" ;;
+"sh -s") cat >/dev/null ;; # a box asked over ssh: its bootstrap is done (no cloud-init says nothing)
 *"wg-enrol --remove"*) sh -c "\$(printf '%s' "\$last" | sed 's#/etc/wireguard/wg0.conf#$HUB/wg0.conf#g')" ;;
 *"wg-enrol "*)
 	echo "backup:/etc/wireguard/wg0.conf.bak-FAKE"
@@ -504,6 +506,7 @@ cmp -s "$T/cloud1.state.keep" "$VAULT/hosts/vultr/terraform.tfstate.age" || fail
 : >"$CURLLOG"
 out=$(run snapshot --name cloud2 2>&1) || fail "snapshot failed: $out"
 grep -q '^curl .*-X POST.*instance_id.*inst-1234.*/snapshots' "$CALLS" || fail "snapshot did not ask Vultr to snapshot cloud2's box: $(grep '^curl' "$CALLS" | tail -n 1)"
+grep -q '^ssh .* sh -s$' "$CALLS" || fail "snapshot did not ask the box whether its bootstrap finished: $(grep '^ssh' "$CALLS" | tail -n 2)"
 echo "$out" | grep -q 'snap-77' || fail "snapshot does not print the snapshot's id: $out"
 echo "$out" | grep -q 'snapshot = "snap-77"' || fail "snapshot does not say where the id goes: $out"
 grep -q "$VULTR_KEY" "$CURLLOG" || fail "snapshot did not send the token to curl on stdin"
