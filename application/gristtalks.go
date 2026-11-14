@@ -705,10 +705,7 @@ func (l GristTalksList) Run(ctx context.Context, app string, asJSON bool) ([]Gri
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if l.Now != nil {
-		now = l.Now()
-	}
+	now := l.now()
 	shown := []GristTalkShown{}
 	for _, t := range talks {
 		age := now.Sub(t.LastUsed)
@@ -765,10 +762,7 @@ func (e GristTalksEnd) Run(ctx context.Context, app, talk string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if e.Now != nil {
-		now = e.Now()
-	}
+	now := e.now()
 	ended := 0
 	for _, t := range talks {
 		if t.App != app || t.Talk != talk || (t.Session == "" && t.KeyPoints == "") {
@@ -820,10 +814,7 @@ func (s GristTalkSweep) End(ctx context.Context, app, talk string) (int, error) 
 // killed midway leaves its record): a talk named eval: or smoke: that was last
 // used GristTalkQuiet or more ago. A younger one may be a run still going.
 func (s GristTalkSweep) Tidy(ctx context.Context, app string) (int, error) {
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if s.Now != nil {
-		now = s.Now()
-	}
+	now := s.now()
 	return s.forget(ctx, func(t GristTalk) bool {
 		return t.App == app && now.Sub(t.LastUsed) >= GristTalkQuiet &&
 			(strings.HasPrefix(t.Talk, GristEvalTalkPrefix+":") || strings.HasPrefix(t.Talk, GristSmokeTalkPrefix+":"))
@@ -867,4 +858,28 @@ func (s GristTalkSweep) forget(ctx context.Context, match func(GristTalk) bool) 
 		deleted++
 	}
 	return deleted, first
+}
+
+// now is the injected clock, or the host's when none is set.
+func (l GristTalksList) now() time.Time {
+	if l.Now != nil {
+		return l.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}
+
+// now is the injected clock, or the host's when none is set.
+func (e GristTalksEnd) now() time.Time {
+	if e.Now != nil {
+		return e.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}
+
+// now is the injected clock, or the host's when none is set.
+func (s GristTalkSweep) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

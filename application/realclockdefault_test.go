@@ -12,7 +12,8 @@ import (
 // a time.Now() call lies only in a method named now that returns it when Now is
 // nil.
 func TestTimeNowOnlyInANowDefault(t *testing.T) {
-	for _, file := range []string{"pauseusage.go", "pause.go", "followerstall.go", "queue.go"} {
+	for _, file := range []string{"pauseusage.go", "pause.go", "followerstall.go", "queue.go",
+		"doctor.go", "factoryreport.go", "fuelkinds.go", "gristtalks.go", "gristtidy.go", "hands.go", "ice.go", "loop.go", "loopsitting.go", "mayorneeds.go"} {
 		fset := token.NewFileSet()
 		f, err := parser.ParseFile(fset, file, nil, 0)
 		if err != nil {

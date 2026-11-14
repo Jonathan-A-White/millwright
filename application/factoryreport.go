@@ -391,11 +391,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if r.Tracker == nil || r.Files == nil {
 		return FactoryReportResult{}, fmt.Errorf("reporting quality: it needs the tracker and the vault")
 	}
-	//mw:realclock the default clock, taken before an injected Now replaces it
-	now := time.Now()
-	if r.Now != nil {
-		now = r.Now()
-	}
+	now := r.now()
 	ledger, err := r.Files.ReadLedger(ctx, r.Seat)
 	if err != nil {
 		return FactoryReportResult{}, fmt.Errorf("reporting quality: the %s seat's ledger: %w", r.Seat, err)
@@ -1107,4 +1103,12 @@ func fitLine(text string, width int) string {
 	}
 	runes := []rune(text)
 	return string(runes[:width-1]) + "…"
+}
+
+// now is the injected clock, or the host's when none is set.
+func (r FactoryReport) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
