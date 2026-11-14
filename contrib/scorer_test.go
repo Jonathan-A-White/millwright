@@ -9,10 +9,13 @@ package contrib_test
 // and the gate, which had skipped it, said nothing).
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -24,9 +27,7 @@ func TestScorerTestsThatNeedNoModel(t *testing.T) {
 		t.Skip("python3 is not installed")
 	}
 	// About 40 s on an idle host, so the 60 s default killed it on a loaded one.
-	if out, err := commandWithin(t, 5*time.Minute, "scorer/test.sh", "--pure").CombinedOutput(); err != nil {
-		t.Fatalf("contrib/scorer/test.sh --pure: %v\n%s", err, out)
-	}
+	runScorerTests(t, scorerPureDeadline, "--pure")
 }
 
 func TestScorerScoresTheFixtureClips(t *testing.T) {
@@ -43,11 +44,60 @@ func TestScorerScoresTheFixtureClips(t *testing.T) {
 		t.Skipf("no scorer venv at %s: contrib/scorer/install.sh has not run on this host", filepath.Join(home, "venv"))
 	}
 	readScorerSources(t)
-	// The one test that loads the real model: it takes over a minute on a busy
-	// host, so it has its own, longer deadline.
-	if out, err := commandWithin(t, 8*time.Minute, "scorer/test.sh").CombinedOutput(); err != nil {
-		t.Fatalf("contrib/scorer/test.sh: %v\n%s", err, out)
+	runScorerTests(t, scorerFullDeadline)
+}
+
+const (
+	// scorerPureDeadline is for the tests that need no model: about 25 to 40 s
+	// on an idle host.
+	scorerPureDeadline = 5 * time.Minute
+	// scorerFullDeadline is for the one run that loads the real model: about
+	// 105 s at load 20 of 20 cores, and the first run of mw-gq6.1257 failed at
+	// load 77 of 20 (mw-gq6.1295), where the work takes several times as long.
+	// It stays under the 20 minute package timeout of `make test`, and a run
+	// that does not end by it is cut with the test it was in named.
+	scorerFullDeadline = 15 * time.Minute
+)
+
+// runScorerTests runs contrib/scorer/test.sh with -v, so that a run cut at its
+// deadline still shows which test it was in, and fails the test with
+// scorerFailure.
+func runScorerTests(t *testing.T, deadline time.Duration, args ...string) {
+	t.Helper()
+	args = append(append([]string{}, args...), "-v")
+	out, err := commandWithin(t, deadline, "scorer/test.sh", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("contrib/scorer/test.sh %s: %s\n\nthe whole output:\n%s", strings.Join(args, " "), scorerFailure(string(out), err, deadline), out)
 	}
+}
+
+var (
+	// unittest -v prints "test_x (mod.Class.test_x) ... " when a test starts and
+	// the result after it, on the same line.
+	scorerStartedTest = regexp.MustCompile(`(?m)^(test\S* \([^)\n]*\)) \.\.\. ?$`)
+	// ... and a "FAIL: " or "ERROR: " line for each that failed, in its summary.
+	scorerFailedTest = regexp.MustCompile(`(?m)^(?:FAIL|ERROR): (test\S* \([^)\n]*\))`)
+)
+
+// scorerFailure says what failed in a run of test.sh -v that ended in err: each
+// scorer test that failed or errored, or, when the run was cut with no result
+// in it (the deadline), the test it was in.
+func scorerFailure(out string, err error, deadline time.Duration) string {
+	var failed []string
+	seen := map[string]bool{}
+	for _, m := range scorerFailedTest.FindAllStringSubmatch(out, -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			failed = append(failed, m[1])
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Sprintf("%v; failed: %s", err, strings.Join(failed, ", "))
+	}
+	if m := scorerStartedTest.FindAllStringSubmatch(out, -1); len(m) > 0 {
+		return fmt.Sprintf("%v: no result after %v; it was in %s", err, deadline, m[len(m)-1][1])
+	}
+	return fmt.Sprintf("%v: no test had started (the run did not get as far as the first test)", err)
 }
 
 // readScorerSources reads every file of the scorer from this process, because go
@@ -129,5 +179,69 @@ func TestScorerGateIsSilentAndRunsEverythingWhereTheVenvIs(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "-p test_*.py") || strings.Contains(string(got), "test_[as]*.py") {
 		t.Errorf("test.sh did not run every test file: python was called with %q", got)
+	}
+}
+
+func TestScorerFailureNamesTheTestThatWasRunningWhenTheDeadlineCutIt(t *testing.T) {
+	t.Parallel()
+	out := "test_a_clip (tests.test_fixtures.Fixtures.test_a_clip) ... ok\n" +
+		"test_the_slow_clip (tests.test_fixtures.Fixtures.test_the_slow_clip) ... "
+	got := scorerFailure(out, errors.New("signal: killed"), 8*time.Minute)
+	for _, want := range []string{"8m0s", "test_the_slow_clip (tests.test_fixtures.Fixtures.test_the_slow_clip)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the failure does not say %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "test_a_clip") {
+		t.Errorf("the failure names a test that had finished:\n%s", got)
+	}
+}
+
+func TestScorerFailureNamesTheTestsThatFailed(t *testing.T) {
+	t.Parallel()
+	out := "test_ok (tests.test_fixtures.Fixtures.test_ok) ... ok\n" +
+		"test_bad_clip (tests.test_fixtures.Fixtures.test_bad_clip) ... FAIL\n" +
+		"test_broken (tests.test_align.Align.test_broken) ... ERROR\n\n" +
+		"======================================================================\n" +
+		"FAIL: test_bad_clip (tests.test_fixtures.Fixtures.test_bad_clip)\n" +
+		"----------------------------------------------------------------------\n" +
+		"AssertionError: 3 != 4\n\n" +
+		"======================================================================\n" +
+		"ERROR: test_broken (tests.test_align.Align.test_broken)\n" +
+		"----------------------------------------------------------------------\n" +
+		"KeyError: 'x'\n"
+	got := scorerFailure(out, errors.New("exit status 1"), 8*time.Minute)
+	for _, want := range []string{"test_bad_clip (tests.test_fixtures.Fixtures.test_bad_clip)", "test_broken (tests.test_align.Align.test_broken)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the failure does not name %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "test_ok") {
+		t.Errorf("the failure names a test that passed:\n%s", got)
+	}
+}
+
+func TestScorerFailureOfASetupThatNeverNamedATestSaysSo(t *testing.T) {
+	t.Parallel()
+	got := scorerFailure("test.sh: no scorer venv\n", errors.New("exit status 1"), time.Minute)
+	if !strings.Contains(got, "no test had started") {
+		t.Errorf("want the failure to say no test had started:\n%s", got)
+	}
+}
+
+func TestScorerGivesVerboseToPythonSoAKilledRunNamesItsTest(t *testing.T) {
+	t.Parallel()
+	home, bin, argsFile := standInVenv(t)
+	for _, args := range [][]string{{"-v"}} {
+		if out, err := scorerScript(t, home, bin, args...); err != nil {
+			t.Fatalf("test.sh %v: %v\n%s", args, err, out)
+		}
+		got, err := os.ReadFile(argsFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), " -v") && !strings.HasPrefix(string(got), "-v") {
+			t.Errorf("test.sh %v did not give -v to python: %q", args, got)
+		}
 	}
 }

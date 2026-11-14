@@ -6,6 +6,9 @@
 #                                   the model in the cache
 #   contrib/scorer/test.sh --pure   only the tests that need no model (the
 #                                   alignment, the windows and the HTTP face), with any python3
+#   contrib/scorer/test.sh -v       (after either of the two above) names each test as it
+#                                   starts and ends, so a run that is cut off still shows
+#                                   the test it was in
 #   contrib/scorer/test.sh --gate-note
 #                                   runs nothing: says so, on stdout, when the full
 #                                   run above could not run here (no venv, no
@@ -20,6 +23,10 @@ here=$(cd "$(dirname "$0")" && pwd)
 home=${MW_SCORER_HOME:-$HOME/.local/share/mw-scorer}
 
 python=$home/venv/bin/python
+verbose=
+for arg in "$@"; do
+	case $arg in -v) verbose=-v ;; esac
+done
 # Why the full run cannot run here, or nothing.
 cannot_run_full() {
 	[ -x "$python" ] || { echo "no scorer venv at $home/venv: run contrib/scorer/install.sh first"; return 0; }
@@ -44,4 +51,4 @@ else
 	set -- -p 'test_*.py'
 fi
 HF_HUB_OFFLINE=1 PYTHONPATH=$here PYTHONDONTWRITEBYTECODE=1 \
-	exec "$python" -m unittest discover -s "$here/tests" -t "$here" "$@"
+	exec "$python" -m unittest discover ${verbose:+"$verbose"} -s "$here/tests" -t "$here" "$@"
