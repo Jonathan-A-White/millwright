@@ -53,8 +53,12 @@ func (n Next) beginGate(ctx context.Context, c *closeOut, reading LoadReading) {
 // its tests, given the files the span says changed; an empty span, a rig with no
 // line, and a branch with no file to give it run the rig's whole tests.
 func (n Next) timedChecks(ctx context.Context, c *closeOut, report *NextReport, dir string, span RelatedSpan) (Checked, error) {
-	started := n.now()
-	defer func() { c.gate.seconds += n.now().Sub(started).Seconds() }()
+	started, waitedBefore := n.now(), c.turnsWaited()
+	// The turns' waits for other gates are no time of this gate's (mw-gq6.1275).
+	defer func() { c.gate.seconds += (n.now().Sub(started) - (c.turnsWaited() - waitedBefore)).Seconds() }()
+	if parts := n.turnParts(c); parts != nil {
+		return n.partsTakingTurns(ctx, c, report, dir, parts)
+	}
 	if n.RelatedChecks != nil && span.Base != "" {
 		span.Also = n.failedInOwnChecks(ctx, c)
 		run, err := n.RelatedChecks.RunRelated(ctx, c.path.Rig, dir, span)

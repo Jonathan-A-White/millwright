@@ -97,7 +97,8 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 		return GateTurn{Holding: bothHoldings{slot: slot}}, nil
 	}
 
-	waitCtx, cancel := k.boundByClock(ctx, max(within-k.callNow().Sub(began), 0))
+	waitFor := max(within-k.callNow().Sub(began), 0)
+	waitCtx, cancel := k.boundByClock(ctx, waitFor)
 	defer cancel()
 	waitCtx, ask := k.askToKeep(waitCtx, c)
 	if ask != nil && fit != nil {
@@ -107,6 +108,9 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 	defer notices.stop()
 	holder := k.checkHolder(c)
 	turn, err := k.GateLock.Take(waitCtx, holder, func(by string) {
+		if k.Out != nil {
+			fmt.Fprintf(k.Out, "  wait    %s\n", k.heldLine(try, by, waitFor))
+		}
 		if held != nil {
 			held(by)
 		}
@@ -125,6 +129,23 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 		fmt.Fprintf(k.Out, "  gate    expected about %s, %s left in this call\n", gateWaited(fit.expected), gateWaited(fit.left()))
 	}
 	return GateTurn{Holding: bothHoldings{slot: slot, lock: turn.Holding}, Waited: turn.Waited, For: turn.For}, nil
+}
+
+// heldLine is the one line a check says when it finds the host's gate lock held
+// (mw-gq6.1275): whose gate holds it, a batch named with its rig, since when and
+// for how long so far, that a batch of a rig whose gate is named as parts gives
+// the lock back between them (gateturns.go), and what the check does next.
+func (k Check) heldLine(try slotTry, by string, waitFor time.Duration) string {
+	holder, since := k.gateHolderNow(by, k.callNow())
+	line := fmt.Sprintf("%s's gate lock is held by %s, since %s (%s ago)",
+		k.Host, holder, since.UTC().Format("15:04:05Z"), gateWaited(k.callNow().Sub(since)))
+	if rig, ok := batchRigOf(holder); ok && k.Parts != nil {
+		if parts := len(k.Parts.Parts(rig)); parts > 1 {
+			line += fmt.Sprintf("; the batch's gate gives the lock back between its %d parts", parts)
+		}
+	}
+	return line + fmt.Sprintf(": this check waits for its turn for up to %s and then runs %s, or ends in one line saying who still holds the lock, having run nothing",
+		gateWaited(waitFor), try.label)
 }
 
 // callFit is whether the rig's gate fits what is left of a Builder's foreground
