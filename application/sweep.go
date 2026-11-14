@@ -186,6 +186,7 @@ func (s Sweep) markStuck(ctx context.Context, detail StoryDetail, why string, re
 // now is the clock staleness is measured against.
 func (s Sweep) now() time.Time {
 	if s.Now == nil {
+		//mw:realclock the default of the injected Now, used where none is set
 		return time.Now()
 	}
 	return s.Now()

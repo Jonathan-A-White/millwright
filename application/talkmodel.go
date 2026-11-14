@@ -142,6 +142,7 @@ func (t TalkModel) log(ctx context.Context, text string) (string, error) {
 
 func (t TalkModel) now() time.Time {
 	if t.Now == nil {
+		//mw:realclock the default of the injected Now, used where none is set
 		return time.Now()
 	}
 	return t.Now()

@@ -138,5 +138,6 @@ func (s TalkSay) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
 	}
+	//mw:realclock the default of the injected Now, used where none is set
 	return time.Now()
 }

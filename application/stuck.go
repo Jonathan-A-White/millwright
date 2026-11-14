@@ -119,6 +119,7 @@ type StuckSurvey struct {
 
 // Find reads the beads and reports the roots, in id order.
 func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
+	//mw:realclock the default of the injected Now, used where none is set
 	now := time.Now()
 	if s.Now != nil {
 		now = s.Now()

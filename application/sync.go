@@ -1749,6 +1749,7 @@ func (s Sync) restoreNote(ctx context.Context, key, before string) error {
 // now is the clock this sync reads.
 func (s Sync) now() time.Time {
 	if s.Now == nil {
+		//mw:realclock the default of the injected Now, used where none is set
 		return time.Now()
 	}
 	return s.Now()

@@ -122,6 +122,7 @@ func (n *NightlySuite) now() time.Time {
 	if n.Now != nil {
 		return n.Now().UTC()
 	}
+	//mw:realclock the default of the injected Now, used where none is set
 	return time.Now().UTC()
 }
 

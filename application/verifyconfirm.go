@@ -433,6 +433,7 @@ func (c VerifyConfirm) olderThanLanding(ctx context.Context, bead StoryDetail, d
 	if demo {
 		landed = time.Time{}
 		if bead.EpicID != "" {
+			//mw:realclock the default of the injected Now, used where none is set
 			now := time.Now()
 			if c.Now != nil {
 				now = c.Now()
@@ -514,6 +515,7 @@ type VerifyList struct {
 // that has a PROPOSED comment and no VERIFIED one: one entry for each proposal,
 // demos first, by id, then landings by close time.
 func (l VerifyList) Run(ctx context.Context) ([]VerifyWaiting, error) {
+	//mw:realclock the default of the injected Now, used where none is set
 	now := time.Now()
 	if l.Now != nil {
 		now = l.Now()

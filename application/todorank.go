@@ -193,6 +193,7 @@ type TodoRankPass struct {
 // todo_slipped on a starred card past due once for each due time, then the
 // pass log. It reports the rows in the order the cards were read.
 func (p TodoRankPass) Run(ctx context.Context, dryRun bool) ([]TodoRankRow, error) {
+	//mw:realclock start of the real elapsed time the pass logs; the pass's own date comes from the injected Now below
 	started := time.Now()
 	now := started
 	if p.Now != nil {
@@ -301,6 +302,7 @@ func (p TodoRankPass) Run(ctx context.Context, dryRun bool) ([]TodoRankRow, erro
 	fuel := usage
 	entry := TodoRankLog{
 		At: now.UTC().Format(time.RFC3339), Model: p.Model, Effort: p.Effort,
+		//mw:realclock how long the pass really took, written to its log: a measured duration, not a bound anything waits on
 		Elapsed: time.Since(started).Round(time.Millisecond).String(),
 		Tokens: TodoRankTokens{
 			Input: fuel.Input, Output: fuel.Output, CacheRead: fuel.CacheRead, CacheWrite: fuel.CacheWrite, Total: fuel.Total(),

@@ -252,5 +252,6 @@ func (c TalkCall) now() time.Time {
 	if c.Now != nil {
 		return c.Now()
 	}
+	//mw:realclock the default of the injected Now, used where none is set
 	return time.Now()
 }

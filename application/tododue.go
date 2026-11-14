@@ -132,6 +132,7 @@ type TodoDueReader interface {
 // once more. It reports how many pushes it sent, and an error only for what
 // stops the pass or what a push failed with.
 func (r TodoReminder) Run(ctx context.Context) (int, error) {
+	//mw:realclock the default of the injected Now, used where none is set
 	now := time.Now()
 	if r.Now != nil {
 		now = r.Now()

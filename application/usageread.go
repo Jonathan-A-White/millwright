@@ -254,6 +254,7 @@ func (u UsageRead) Run(ctx context.Context) error {
 			return err
 		}
 	}
+	//mw:realclock the default of the injected Now, used where none is set
 	now := time.Now()
 	if u.Now != nil {
 		now = u.Now()
@@ -304,6 +305,7 @@ func (u UsageRead) sweep(ctx context.Context) {
 		fmt.Fprintf(u.Out, "could not look for stale usage probes: %v\n", err)
 		return
 	}
+	//mw:realclock the default of the injected Now, used where none is set
 	now := time.Now()
 	if u.Now != nil {
 		now = u.Now()

@@ -221,6 +221,7 @@ func (r TesterReport) since() time.Time {
 	case !r.Trial.Until.IsZero():
 		return r.Trial.Until.AddDate(0, 0, -TesterTrialDays)
 	}
+	//mw:realclock the default of the injected Now, used where none is set
 	now := time.Now()
 	if r.Now != nil {
 		now = r.Now()

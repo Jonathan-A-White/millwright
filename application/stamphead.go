@@ -141,6 +141,7 @@ func (s StampHead) refuseStamped(ctx context.Context, rig, commit string) error 
 
 func (s StampHead) now() time.Time {
 	if s.Now == nil {
+		//mw:realclock the default of the injected Now, used where none is set
 		return time.Now()
 	}
 	return s.Now()

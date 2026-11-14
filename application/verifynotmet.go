@@ -130,6 +130,7 @@ func (n VerifyNotMet) Run(ctx context.Context, req VerifyNotMetRequest) error {
 			return fmt.Errorf("mw verify notmet: --fix %s is not a bead the tracker has", req.Fix)
 		}
 	}
+	//mw:realclock the default of the injected Now, used where none is set
 	now := time.Now()
 	if n.Now != nil {
 		now = n.Now()

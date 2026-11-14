@@ -186,6 +186,7 @@ func (p VerifyMatch) now() time.Time {
 	if p.Now != nil {
 		return p.Now().UTC()
 	}
+	//mw:realclock the default of the injected Now, used where none is set
 	return time.Now().UTC()
 }
 
@@ -306,6 +307,7 @@ const verifyTimeFormat = "2006-01-02 15:04Z"
 // Run makes one run. With DryRun it reads the candidates and the evidence and
 // prints them with the dir's size, and starts nothing and writes nothing.
 func (p VerifyMatch) Run(ctx context.Context, opts VerifyOptions) (VerifyResult, error) {
+	//mw:realclock start of the real elapsed time the run logs; the run's own date comes from now()
 	started := time.Now()
 	now := p.now()
 	settings := p.Settings.orDefaults()
@@ -399,6 +401,7 @@ func (p VerifyMatch) Run(ctx context.Context, opts VerifyOptions) (VerifyResult,
 	log := VerifyRunLog{
 		Run: result.Run, At: now.Format(time.RFC3339), Model: settings.Model, Effort: settings.Effort,
 		Billing: billing.Billing, Confidence: settings.Confidence,
+		//mw:realclock how long the run really took, written to its log: a measured duration, not a bound anything waits on
 		Elapsed: time.Since(started).Round(time.Millisecond).String(),
 		Tokens: SleepTokens{
 			Input: grind.Fuel.Input, Output: grind.Fuel.Output,
