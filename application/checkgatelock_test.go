@@ -1672,6 +1672,11 @@ type aForegroundCheckOnAGateLongerThanTheCall struct {
 	starter *gateStarter
 	records *logRecords
 	check   func() (application.CheckReport, error)
+	// expected is the figure GateExpected gives, cloud8's usual gate unless a test
+	// says another (0 is a host with no figure for the rig's gate).
+	expected time.Duration
+	// noStarter takes the process away: the check cannot start one of its own.
+	noStarter bool
 }
 
 const cloud8sUsualGate = 12*time.Minute + 47*time.Second
@@ -1680,11 +1685,12 @@ func newForegroundCheckOnAGateLongerThanTheCall(t *testing.T, passed bool) *aFor
 	t.Helper()
 	w := newWholeCheckBesideTheGateLock(t, nil)
 	f := &aForegroundCheckOnAGateLongerThanTheCall{
-		w:       w,
-		inCall:  &gateTakingTheCall{clock: w.clock, took: cloud8sUsualGate},
-		gate:    newHeldGate(passed),
-		starter: &gateStarter{},
-		records: &logRecords{dir: t.TempDir()},
+		w:        w,
+		inCall:   &gateTakingTheCall{clock: w.clock, took: cloud8sUsualGate},
+		gate:     newHeldGate(passed),
+		starter:  &gateStarter{},
+		records:  &logRecords{dir: t.TempDir()},
+		expected: cloud8sUsualGate,
 	}
 	landing := aLandingAtATip{&fakeRetryLanding{AheadCount: 1}, "abc1234"}
 	build := func(worker bool, out io.Writer) application.Check {
@@ -1700,10 +1706,13 @@ func newForegroundCheckOnAGateLongerThanTheCall(t *testing.T, passed bool) *aFor
 			k.Checks, k.GateWorker = f.gate, true
 			k.PartSlotWait, k.HandBackAtOnce = 40*time.Minute, true
 		} else {
-			k.Checks, k.GateStarter = f.inCall, f.starter
+			k.Checks = f.inCall
+			if !f.noStarter {
+				k.GateStarter = f.starter
+			}
 			k.PartSlotWait, k.KeepPlace = application.CheckPartSlotWait, application.CheckKeepPlace
 			k.CallBudget, k.CallNow = application.CheckCallBudget, w.clock.Now
-			k.GateExpected = func(context.Context, string) time.Duration { return cloud8sUsualGate }
+			k.GateExpected = func(context.Context, string) time.Duration { return f.expected }
 		}
 		return k
 	}
@@ -1775,6 +1784,71 @@ func TestAForegroundCheckOnAGateLongerThanTheCall(t *testing.T) {
 	if got := application.CheckedTip(log); got != "abc1234" {
 		t.Errorf("expected the check's log to be the passed check at abc1234 that mw next trusts, got tip %q of %q", got, log)
 	}
+}
+
+// A foreground whole check on a host with no figure for its rig's gate (a new host,
+// or one with no bench rows) is never cut off silently either (mw-gq6.1290). It
+// can start a process of its own, and then the gate runs there and outlives the
+// call, as a gate known to be long does; it cannot, and then it says in one line,
+// before the gate starts, that how long the gate takes is not known here and how
+// to run it so that it outlives the call.
+func TestAForegroundWholeCheckWithNoFigureForItsGateIsNotCutOffWithTheCall(t *testing.T) {
+	t.Run("it can start a process of its own", func(t *testing.T) {
+		f := newForegroundCheckOnAGateLongerThanTheCall(t, true)
+		f.expected = 0
+		go func() {
+			<-f.gate.started
+			f.w.clock.Pass(application.CheckCallBudget)
+		}()
+		report, err := f.check()
+		if err != nil || len(report.Refusals) != 0 {
+			t.Fatalf("expected a call that ended on a running gate to end without an error or a refusal, got %v %+v\n%s", err, report.Refusals, report)
+		}
+		if f.inCall.ranCount() != 0 || f.starter.startedCount() != 1 {
+			t.Fatalf("expected the gate run by one process of its own and not in the call, ran %d in the call, %d process(es)", f.inCall.ranCount(), f.starter.startedCount())
+		}
+		if !strings.Contains(report.Waiting, "still running on laptop as a process of its own") || strings.Contains(report.Waiting, "usually about") {
+			t.Errorf("expected the line to say the process goes on and name no usual time, got %q", report.Waiting)
+		}
+		if !strings.Contains(f.w.told.String(), "no figure for the rig's gate on laptop") {
+			t.Errorf("expected the call to say that the gate's length is not known, got %q", f.w.told.String())
+		}
+		close(f.gate.release)
+		f.starter.wait()
+		report, err = f.check()
+		if err != nil || !report.Passed() || report.Tip != "abc1234" {
+			t.Fatalf("expected the check run again to pass at abc1234 on what the process kept, got %v (tip %q)\n%s", err, report.Tip, report)
+		}
+		if f.inCall.ranCount() != 0 || f.gate.ranCount() != 1 {
+			t.Errorf("expected the gate run once, by the process, got %d in the call, %d by it", f.inCall.ranCount(), f.gate.ranCount())
+		}
+	})
+	t.Run("it cannot", func(t *testing.T) {
+		f := newForegroundCheckOnAGateLongerThanTheCall(t, true)
+		f.expected, f.noStarter = 0, true
+		report, err := f.check()
+		if err != nil || report.Waiting != "" {
+			t.Fatalf("expected the gate to be started as it always was, got %v and %q", err, report.Waiting)
+		}
+		if f.inCall.ranCount() != 1 {
+			t.Fatalf("expected the gate run once in the call, ran %d", f.inCall.ranCount())
+		}
+		told := f.w.told.String()
+		line := ""
+		for _, l := range strings.Split(told, "\n") {
+			if strings.Contains(l, "no figure for the rig's gate on laptop") {
+				line = l
+			}
+		}
+		if line == "" {
+			t.Fatalf("expected one line saying the gate's length is not known here, got %q", told)
+		}
+		for _, want := range []string{"not known", "mw check mw-x.1 --background", "outlive"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("expected the line to say %q, got %q", want, line)
+			}
+		}
+	})
 }
 
 // A process that ran the gate and failed it gives the call run again its verdict:
