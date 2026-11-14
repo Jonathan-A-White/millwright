@@ -1359,6 +1359,11 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		if rep, handled, crashErr := n.harnessCrashed(ctx, c, report); handled {
 			return rep, crashErr
 		}
+		// The harness's program was not there to start (mw-gq6.1281): its code
+		// never ran, so the attempt is tooling's and the claim is given back once.
+		if rep, handled, missErr := n.harnessMissing(ctx, c, report); handled {
+			return rep, missErr
+		}
 	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -3507,7 +3512,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 				trouble = append(trouble, fmt.Sprintf("the reason %s is held could not be written on it: %v", c.id, err))
 			}
 		}
-	} else if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || reason == ReasonHarnessCrash || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
+	} else if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || reason == ReasonHarnessCrash || reason == ReasonHarnessMissing || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
 		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {
@@ -3580,8 +3585,8 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		// Once per host per expiry, not per story (mw-gq6.781): the Mayor has the
 		// news in the mail holdHostForLogin sent.
 		mail = NewMessage{}
-	} else if reason == ReasonHarnessCrash {
-		// A crash given back needs nobody (mw-gq6.1137): the story's comment and
+	} else if reason == ReasonHarnessCrash || reason == ReasonHarnessMissing {
+		// A crash, or a missing harness, given back needs nobody (mw-gq6.1137): the story's comment and
 		// the ledger line say it, and the story is dispatched again. A second
 		// crash on the story stops as no-result and mails as that does.
 		mail = NewMessage{}
