@@ -1,7 +1,10 @@
 package rig_test
 
 import (
+	"time"
+
 	"context"
+	"github.com/Jonathan-A-White/millwright/application"
 	"os"
 	"path/filepath"
 	"strings"
@@ -276,5 +279,66 @@ func TestStagedIsTrueForABinaryBuiltAtTheCommitOrALaterOneOfMain(t *testing.T) {
 	}
 	if got, err := worktrees.Staged(ctx, here, stage, "other", changed); err != nil || got {
 		t.Fatalf("expected another binary's name not to count, got %v, %v", got, err)
+	}
+}
+
+// A backend build is called slow at its rig's limit ([after_landing_limit], as the
+// after-landing step has it) and stopped only at the limit stretched, so that a
+// build that runs on past the limit and ends is kept (mw-gq6.1291).
+func TestABackendBuildPastItsLimitButInsideTheStretchIsKept(t *testing.T) {
+	here := aRigWithAServer(t)
+	commit := run(t, here, "git", "rev-parse", "HEAD")
+	// The limit is 0.5s and the stretch twenty times that: the build's 2s is four
+	// times the limit and a fifth of where it is stopped, so a busy host cannot
+	// move it across either.
+	worktrees := rig.New(
+		rig.WithBuildLimits(map[string]time.Duration{here: 500 * time.Millisecond}),
+		rig.WithBuildStretch(20),
+	)
+	out := filepath.Join(t.TempDir(), "postern-slow")
+
+	if err := worktrees.Build(context.Background(), here, commit, "server", "sleep 2; cat main.txt > {out}", out); err != nil {
+		t.Fatalf("expected a build that ends after its limit but inside the stretch to be kept, got %v", err)
+	}
+	if got, err := os.ReadFile(out); err != nil || string(got) != "the backend\n" {
+		t.Errorf("expected the binary staged, got %q, %v", got, err)
+	}
+}
+
+func TestABackendBuildPastItsLimitAndTheStretchIsStoppedAndSaysSo(t *testing.T) {
+	here := aRigWithAServer(t)
+	commit := run(t, here, "git", "rev-parse", "HEAD")
+	worktrees := rig.New(
+		rig.WithBuildLimits(map[string]time.Duration{here: 500 * time.Millisecond}),
+		rig.WithBuildStretch(4),
+	)
+	out := filepath.Join(t.TempDir(), "postern-hung")
+
+	began := time.Now()
+	err := worktrees.Build(context.Background(), here, commit, "server", "sleep 30; cat main.txt > {out}", out)
+	took := time.Since(began)
+
+	if err == nil || !strings.Contains(err.Error(), "stopped after 2s") || !strings.Contains(err.Error(), "limit of 500ms") {
+		t.Fatalf("expected the build to be stopped at 4 x 500ms and the error to say so, got %v", err)
+	}
+	if took > 15*time.Second {
+		t.Errorf("expected the build to be stopped, it ran for %s", took)
+	}
+	if left, _ := filepath.Glob(out + "*"); len(left) != 0 {
+		t.Errorf("expected nothing staged, got %v", left)
+	}
+}
+
+// A rig the table does not name has the default limit, stretched by the default.
+func TestABackendBuildPastItsLimitIsWaitedForByTheDefaultsToo(t *testing.T) {
+	if application.AfterLandingStretch != 2 {
+		t.Fatalf("expected the stretch to be 2, got %d", application.AfterLandingStretch)
+	}
+	here := aRigWithAServer(t)
+	commit := run(t, here, "git", "rev-parse", "HEAD")
+	worktrees := rig.New(rig.WithBuildLimits(map[string]time.Duration{here: 0, "/elsewhere": time.Second}))
+	out := filepath.Join(t.TempDir(), "postern-default")
+	if err := worktrees.Build(context.Background(), here, commit, "server", "cat main.txt > {out}", out); err != nil {
+		t.Fatalf("building: %v", err)
 	}
 }

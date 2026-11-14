@@ -78,12 +78,18 @@ func (w *Worktrees) Build(ctx context.Context, rigDir, commit, subdir, command, 
 
 	partial := out + ".building"
 	_ = os.Remove(partial)
-	limited, cancel := context.WithTimeout(ctx, application.AfterLandingLimit)
+	// The limit is where a build is called slow; it is stopped only at the limit
+	// stretched, as an after-landing command is (mw-gq6.1268, mw-gq6.1291).
+	limit, stopAt := w.buildStop(rigDir)
+	limited, cancel := context.WithTimeout(ctx, stopAt)
 	defer cancel()
 	built := strings.ReplaceAll(command, application.BackendOutPlaceholder, shellWord(partial))
 	output, err := runLine(limited, Shell, built, filepath.Join(dir, subdir), 0, nil)
 	if err != nil {
 		_ = os.Remove(partial)
+		if limited.Err() != nil && ctx.Err() == nil {
+			return fmt.Errorf("`%s` stopped after %s, still running: past its limit of %s: %s", command, stopAt, limit, application.RecentLines(output, 10))
+		}
 		return fmt.Errorf("`%s` failed: %w: %s", command, err, application.RecentLines(output, 10))
 	}
 	if err := os.Rename(partial, out); err != nil {
@@ -91,6 +97,20 @@ func (w *Worktrees) Build(ctx context.Context, rigDir, commit, subdir, command, 
 		return fmt.Errorf("`%s` left no binary to stage at %s: %w", command, out, err)
 	}
 	return nil
+}
+
+// buildStop is the limit of the backend build of the rig checked out at rigDir
+// and where it is stopped: that limit times the stretch.
+func (w *Worktrees) buildStop(rigDir string) (limit, stopAt time.Duration) {
+	limit = application.AfterLandingLimit
+	if named, ok := w.buildLimits[filepath.Clean(rigDir)]; ok {
+		limit = named
+	}
+	stretch := application.AfterLandingStretch
+	if w.buildStretch >= 1 {
+		stretch = w.buildStretch
+	}
+	return limit, limit * time.Duration(stretch)
 }
 
 // shellWord is s as one word of a shell command line.
