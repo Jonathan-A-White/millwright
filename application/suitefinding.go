@@ -43,6 +43,10 @@ func (s Suite) RecheckFinding(ctx context.Context, rig, command string, files []
 	if command == "" {
 		return answer, nil
 	}
+	command, err = s.findingLine(rig, command)
+	if err != nil {
+		return FindingAnswer{}, err
+	}
 	checked, err := s.Runner.RunLine(ctx, rig, dir, command)
 	if err != nil {
 		return FindingAnswer{}, fmt.Errorf("running `%s` in %s: %w", command, dir, err)
@@ -52,4 +56,46 @@ func (s Suite) RecheckFinding(ctx context.Context, rig, command string, files []
 	}
 	answer.Ran, answer.Passed, answer.Tail = true, checked.Passed, checked.Tail(SpecRecheckTail)
 	return answer, nil
+}
+
+// findingLine is the line a finding's command is run as in the fresh worktree
+// of main: a command that is not node's is itself, and `npm test` or `npx
+// vitest run <files>` follows the install step of the rig's own [tests] line
+// (the tree has no node_modules) and the env its unit step runs with
+// (TZ=UTC). A rig whose [tests] line installs nothing, or has no npm test unit
+// step for `npm test`, is an error: the finding is not read and is filed as
+// before (mw-gq6.1293).
+func (s Suite) findingLine(rig, command string) (string, error) {
+	if command != "npm test" && !strings.HasPrefix(command, "npx vitest run ") {
+		return command, nil
+	}
+	tests := strings.TrimSpace(s.Tests[rig])
+	install := installStep(tests)
+	if install == "" {
+		return "", fmt.Errorf("the rig %s's [tests] line has no install step (npm ci), so a fresh worktree of main has no node_modules to run `%s` with", rig, command)
+	}
+	var unit string
+	for _, step := range strings.Split(tests, " && ") {
+		if found := unitRunners.FindStringSubmatch(strings.TrimSpace(step)); found != nil {
+			unit = strings.TrimSpace(step)
+			if command == "npm test" && found[1] == "" {
+				return "", fmt.Errorf("the rig %s's unit step is `%s`, not npm test, so `npm test` is not read", rig, unit)
+			}
+			break
+		}
+	}
+	if unit == "" && command == "npm test" {
+		return "", fmt.Errorf("the rig %s's [tests] line has no npm test step, so `npm test` is not read", rig)
+	}
+	if command == "npm test" {
+		return install + " && " + unit, nil
+	}
+	var env string
+	for _, word := range strings.Fields(unit) {
+		if !strings.Contains(word, "=") || !foundSafeWord.MatchString(word) {
+			break
+		}
+		env += word + " "
+	}
+	return install + " && " + env + command, nil
 }

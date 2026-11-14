@@ -250,7 +250,7 @@ func TestATesterFindingWhoseCommandPassesOnMainIsNotFiled(t *testing.T) {
 	}{
 		"the command fails": {func(*application.TesterFinding) {}, application.FindingAnswer{Ran: true, Passed: false}},
 		"no cheap command": {func(f *application.TesterFinding) {
-			f.Acceptance = "npx vitest run src/Reader.test.tsx passes\nSweep: every viewport effect in src/ is grepped for state it drops"
+			f.Acceptance = "npm run test:layout passes\nSweep: every viewport effect in src/ is grepped for state it drops"
 		}, application.FindingAnswer{Ran: true, Passed: true}},
 		"a taste finding":       {func(f *application.TesterFinding) { f.Kind = "taste" }, application.FindingAnswer{Ran: true, Passed: true}},
 		"the command is no run": {func(*application.TesterFinding) {}, application.FindingAnswer{Ran: true, Passed: true, Tail: "ok x [no tests to run]"}},
@@ -316,6 +316,117 @@ func TestFoundCheckCommandReadsAGrepWithItsExitMeaning(t *testing.T) {
 			}
 			if len(filed) != 0 {
 				t.Errorf("expected a grep that passes on main to file no bug, got %+v", filed)
+			}
+		})
+	}
+}
+
+// A finding whose acceptance is a vitest run of named test files, or the rig's
+// npm test, is read on main as the grep and the go test are: only plain relative
+// test files, no flag and nothing the shell could read more into (mw-gq6.1293).
+func TestFoundCheckCommandReadsAVitestFile(t *testing.T) {
+	for name, c := range map[string]struct {
+		ac   string
+		want string
+	}{
+		"one test file":             {`npx vitest run src/lib/reader.test.ts passes`, `npx vitest run src/lib/reader.test.ts`},
+		"a backticked command":      {"`npx vitest run tests/unit/a.test.ts` passes", `npx vitest run tests/unit/a.test.ts`},
+		"a numbered line":           {`1. npx vitest run tests/unit/a.test.tsx exits 0`, `npx vitest run tests/unit/a.test.tsx`},
+		"two files":                 {`npx vitest run a.test.ts b.spec.ts passes`, `npx vitest run a.test.ts b.spec.ts`},
+		"the rig's npm test":        {`npm test passes`, `npm test`},
+		"npm test with a sentence":  {"`npm test` exits 0", `npm test`},
+		"no file":                   {`npx vitest run passes`, ``},
+		"a file that is no test":    {`npx vitest run src/lib/reader.ts passes`, ``},
+		"a flag":                    {`npx vitest run --reporter=json a.test.ts passes`, ``},
+		"a name filter":             {`npx vitest run a.test.ts -t reader passes`, ``},
+		"watch mode":                {`npx vitest a.test.ts passes`, ``},
+		"a file above the rig":      {`npx vitest run ../a.test.ts passes`, ``},
+		"a file by absolute path":   {`npx vitest run /etc/a.test.ts passes`, ``},
+		"too many files":            {`npx vitest run a.test.ts b.test.ts c.test.ts d.test.ts passes`, ``},
+		"a pipe":                    {`npx vitest run a.test.ts | tee x passes`, ``},
+		"a redirect":                {`npx vitest run a.test.ts > /tmp/x passes`, ``},
+		"a variable":                {`npx vitest run $F passes`, ``},
+		"a chained command":         {`npx vitest run a.test.ts && rm -rf x passes`, ``},
+		"npm test with an argument": {`npm test -- --coverage passes`, ``},
+		"another npm script":        {`npm run test:layout passes`, ``},
+		"npm install":               {`npm install passes`, ``},
+		"an unrelated npx":          {`npx playwright test a.spec.ts passes`, ``},
+	} {
+		t.Run(name, func(t *testing.T) {
+			main := &stubFindingChecks{answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: ""}}
+			line := "A is wrong (a.go:5). AC: " + c.ac + ". Sweep: none. Size: S. By design? no"
+			filed, _, _ := landedWithFindings(t, "Done.\nFound, not fixed:\n"+line+"\nFor the rig memory: nothing", main)
+			if c.want == "" {
+				if main.command != "" {
+					t.Errorf("expected no run of %q on main", main.command)
+				}
+				return
+			}
+			if main.command != c.want {
+				t.Errorf("expected main asked to run %q, got %q", c.want, main.command)
+			}
+			if len(filed) != 0 {
+				t.Errorf("expected a run that passes on main to file no bug, got %+v", filed)
+			}
+		})
+	}
+}
+
+// A web rig's fresh worktree of main has no node_modules: the finding's vitest
+// run is made after the install step of the rig's own [tests] line, with the
+// env that line's unit step runs with. A rig whose [tests] line installs nothing
+// is not read (an error: the bug is filed as before), and neither is npm test
+// for a rig whose unit step is something else.
+func TestASuiteReadsAVitestFindingAfterTheRigsInstall(t *testing.T) {
+	passing := func(_, _ string) (application.Checked, error) {
+		return application.Checked{Passed: true, Output: " Tests  3 passed (3)\n"}, nil
+	}
+	for name, c := range map[string]struct {
+		tests   string
+		command string
+		want    string // the line run, "" for an error
+	}{
+		"vitest after npm ci": {
+			"npm ci --no-audit --no-fund && TZ=UTC npm test && npm run lint",
+			"npx vitest run a.test.ts",
+			"npm ci --no-audit --no-fund && TZ=UTC npx vitest run a.test.ts",
+		},
+		"npm test as the rig's unit step": {
+			"npm ci --no-audit --no-fund && TZ=UTC npm test && npm run build",
+			"npm test",
+			"npm ci --no-audit --no-fund && TZ=UTC npm test",
+		},
+		"a rig that installs nothing": {"npm test", "npx vitest run a.test.ts", ""},
+		"npm test where the unit step is another": {
+			"npm ci && npx vitest run && npm run build", "npm test", "",
+		},
+		"a go rig": {"go test ./...", "npx vitest run a.test.ts", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runs := &apptest.FakeSuiteRunner{Respond: passing}
+			suite, trees := recheckSuite(runs)
+			suite.Tests["lampas"] = c.tests
+			got, err := suite.RecheckFinding(context.Background(), "lampas", c.command, nil)
+			if trees.Live() != 0 {
+				t.Errorf("the worktree should be taken away, %d live", trees.Live())
+			}
+			if c.want == "" {
+				if err == nil {
+					t.Fatalf("expected an error for a finding that cannot be read in this rig, got %+v", got)
+				}
+				if len(runs.Ran()) != 0 {
+					t.Errorf("expected nothing run, ran %+v", runs.Ran())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != c.want {
+				t.Errorf("expected one run of %q, ran %+v", c.want, ran)
+			}
+			if !got.Ran || !got.Passed {
+				t.Errorf("expected the run read as passed, got %+v", got)
 			}
 		})
 	}
