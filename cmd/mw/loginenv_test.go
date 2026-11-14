@@ -123,14 +123,11 @@ func TestMwGiveWayWithABareEnvironmentStopsTheSessionsProcesses(t *testing.T) {
 		kill.Run()
 	})
 	var pid string
-	for i := 0; i < 600 && pid == ""; i++ {
-		if raw, err := os.ReadFile(pidFile); err == nil {
-			pid = strings.TrimSpace(string(raw))
-		} else {
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
-	if pid == "" {
+	if !pollUntil(pidWait, func() bool {
+		raw, err := os.ReadFile(pidFile)
+		pid = strings.TrimSpace(string(raw))
+		return err == nil && pid != ""
+	}) {
 		t.Fatal("the session's process did not start")
 	}
 	stateOf := func() string {
@@ -150,15 +147,48 @@ func TestMwGiveWayWithABareEnvironmentStopsTheSessionsProcesses(t *testing.T) {
 	if out, err := on.CombinedOutput(); err != nil {
 		t.Fatalf("mw giveway on with a bare environment: %v\n%s", err, out)
 	}
-	if got := stateOf(); got != "T" {
-		t.Errorf("process %s of the session is in state %q after mw giveway on, want T (stopped)", pid, got)
+	// A signal's effect on another process is not seen at once on a loaded host.
+	if !pollUntil(processWait, func() bool { return stateOf() == "T" }) {
+		t.Errorf("process %s of the session is in state %q after mw giveway on, want T (stopped)", pid, stateOf())
 	}
 	off := exec.Command(bin, "giveway", "off", "--session", "mw-a_1")
 	off.Env = bare
 	if out, err := off.CombinedOutput(); err != nil {
 		t.Fatalf("mw giveway off with a bare environment: %v\n%s", err, out)
 	}
-	if got := stateOf(); got == "T" {
+	if !pollUntil(processWait, func() bool { return stateOf() != "T" }) {
 		t.Errorf("process %s is still stopped after mw giveway off", pid)
+	}
+}
+
+// pidWait is how long a test waits for the pid file of a process it starts with a
+// built mw and tmux, which a busy host takes much longer over than a signal.
+const pidWait = 30 * time.Second
+
+// processWait is how long a test waits for another process to show what a signal
+// did to it: a loaded host (load 30 on 20 cores) is slow to show it.
+const processWait = 10 * time.Second
+
+// pollUntil runs cond until it is true or the wait is over, and says which.
+func pollUntil(wait time.Duration, cond func() bool) bool {
+	deadline := time.Now().Add(wait)
+	for {
+		if cond() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestPollUntilWaitsForAConditionThatBecomesTrueLate(t *testing.T) {
+	became := time.Now().Add(300 * time.Millisecond)
+	if !pollUntil(5*time.Second, func() bool { return time.Now().After(became) }) {
+		t.Error("pollUntil gave up on a condition that became true after 300ms")
+	}
+	if pollUntil(100*time.Millisecond, func() bool { return false }) {
+		t.Error("pollUntil said a condition that never holds became true")
 	}
 }
