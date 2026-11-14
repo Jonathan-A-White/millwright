@@ -2420,7 +2420,15 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 	case err != nil:
 		return Refusal{ReasonTrackerFailed, fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), ""}, true
 	case len(open) > 0:
-		if closing != leaveClosingStep && len(open) == 1 && n.closingCommentWritten(ctx, c, open[0], base) {
+		written := false
+		if closing != leaveClosingStep && len(open) == 1 {
+			var readErr error
+			if written, readErr = n.closingCommentWritten(ctx, c, report, open[0], base); readErr != nil {
+				// A comment that could not be looked for is not one that is missing.
+				return readRefusal(readErr)
+			}
+		}
+		if written {
 			if closing == previewClosingStep {
 				report.Notes = append(report.Notes, ClosingStepNote(true))
 				return Refusal{}, false
@@ -2473,7 +2481,10 @@ func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, report *Ne
 	if c.detail.Molecule.RootID == "" {
 		return Refusal{}, false
 	}
-	text, written := n.closingCommentTextOnStory(ctx, c, base)
+	text, written, readErr := n.closingCommentTextOnStory(ctx, c, report, base)
+	if readErr != nil {
+		return readRefusal(readErr)
+	}
 	if unmet := UnmetCriteria(text); written && len(unmet) > 0 {
 		return Refusal{ReasonUnmetCriterion, fmt.Sprintf("the closing comment of %s says an acceptance criterion is not met: %s", c.id, unmet[0]),
 			"The closing comment says, of acceptance criteria:\n" + bulletList(unmet) + "\n" +
@@ -2483,7 +2494,11 @@ func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, report *Ne
 	if written {
 		return n.gristExampleRefusal(ctx, c, report, text)
 	}
-	if stub, found := n.stubCommentOnStory(ctx, c, base); found {
+	stub, found, readErr := n.stubCommentOnStory(ctx, c, report, base)
+	if readErr != nil {
+		return readRefusal(readErr)
+	}
+	if found {
 		return Refusal{ReasonStubClosingComment, fmt.Sprintf("the formula of %s is finished, but the newest comment is %s (%s): %s", c.id, quoteStub(stub), byteCount(len(stub)), StubCommentCure),
 			"The work of the story is done and committed, so a new attempt would build it again: the story is held for the Mayor, who writes the closing comment from the session's log or has it written, and lets the story through.\n\n" +
 				"A closing comment has HOW TO CHECK IT, for the Governor (or the line 'Internal: nothing for the Governor to look at') and 'For the rig memory:'."}, true
@@ -2518,21 +2533,11 @@ func byteCount(n int) string {
 
 // stubCommentOnStory is the newest comment written after the newest commit of
 // the story's branch when it is under StubCommentBytes, and whether there is
-// one. Anything it cannot read counts as no.
-func (n Next) stubCommentOnStory(ctx context.Context, c *closeOut, base string) (string, bool) {
-	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, base)
+// one. A read that failed is the error, not a no.
+func (n Next) stubCommentOnStory(ctx context.Context, c *closeOut, report *NextReport, base string) (string, bool, error) {
+	committed, comments, err := n.newestCommitAndComments(ctx, c, report, base)
 	if err != nil {
-		return "", false
-	}
-	var committed time.Time
-	for _, commit := range commits {
-		if commit.Committed.After(committed) {
-			committed = commit.Committed
-		}
-	}
-	comments, err := n.Tracker.StoryComments(ctx, c.id)
-	if err != nil {
-		return "", false
+		return "", false, err
 	}
 	var newest time.Time
 	var text string
@@ -2543,9 +2548,9 @@ func (n Next) stubCommentOnStory(ctx context.Context, c *closeOut, base string) 
 		}
 	}
 	if !found || len(text) >= StubCommentBytes {
-		return "", false
+		return "", false, nil
 	}
-	return text, true
+	return text, true, nil
 }
 
 // bulletList is lines, one to a line, each after a '- '.
@@ -2564,29 +2569,52 @@ func ClosingStepNote(preview bool) string {
 
 // closingCommentWritten reports whether step asks for the closing comment and
 // the story carries one — HOW TO CHECK IT (or the Internal line that stands in
-// for it) and 'For the rig memory' — written after its newest commit. Anything
-// it cannot read counts as no.
-func (n Next) closingCommentWritten(ctx context.Context, c *closeOut, step FormulaStep, base string) bool {
+// for it) and 'For the rig memory' — written after its newest commit. A read
+// that fails is the error, not a no.
+func (n Next) closingCommentWritten(ctx context.Context, c *closeOut, report *NextReport, step FormulaStep, base string) (bool, error) {
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(step.Title)), strings.ToLower(ClosingCommentStepTitle)) {
-		return false
+		return false, nil
 	}
-	return n.closingCommentOnStory(ctx, c, base)
+	_, written, err := n.closingCommentTextOnStory(ctx, c, report, base)
+	return written, err
 }
 
-// closingCommentOnStory reports whether the story carries a closing comment
-// written after the newest commit of its branch, whether or not the step that
-// asks for it is closed (mw-gq6.630). Anything it cannot read counts as no.
-func (n Next) closingCommentOnStory(ctx context.Context, c *closeOut, base string) bool {
-	_, written := n.closingCommentTextOnStory(ctx, c, base)
-	return written
+// closeReadError is a read the close-out needed and could not make: the reason
+// to stop with, and the read's own words. A read that fails says so; it is not
+// an answer of no (mw-gq6.1313).
+type closeReadError struct {
+	reason Reason
+	what   string
+	err    error
 }
 
-// closingCommentTextOnStory is the newest closing comment written after the
-// newest commit of the story's branch, and whether there is one.
-func (n Next) closingCommentTextOnStory(ctx context.Context, c *closeOut, base string) (string, bool) {
-	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, base)
+func (e *closeReadError) Error() string {
+	return fmt.Sprintf("%s could not be read: %v", e.what, e.err)
+}
+func (e *closeReadError) Unwrap() error { return e.err }
+
+// readRefusal is the refusal of a close-out that could not read what it needs:
+// the claim is kept, as for every tracker or git failure, so that the close-out
+// can be run again once the read answers.
+func readRefusal(err error) (Refusal, bool) {
+	var read *closeReadError
+	if !errors.As(err, &read) {
+		return Refusal{}, false
+	}
+	return Refusal{read.reason, read.Error(),
+		"This is not a verdict on the story: mw next could not read what it needs to judge it, so it judged nothing. " +
+			"The claim is kept and the story is as the session left it; run mw next again when the read answers."}, true
+}
+
+// newestCommitAndComments reads the newest commit time on the story's branch
+// and the story's comments, each read tried again on a passing fault of the
+// network; a read that fails for good is a closeReadError, not an empty answer.
+func (n Next) newestCommitAndComments(ctx context.Context, c *closeOut, report *NextReport, base string) (time.Time, []Comment, error) {
+	commits, err := readRetrying(ctx, n, report, "the commits of "+c.branch, func() ([]Commit, error) {
+		return n.Landing.Commits(ctx, c.rigDir, c.branch, base)
+	})
 	if err != nil {
-		return "", false
+		return time.Time{}, nil, &closeReadError{ReasonGitFailed, "the commits of " + c.branch, err}
 	}
 	var newest time.Time
 	for _, commit := range commits {
@@ -2594,9 +2622,22 @@ func (n Next) closingCommentTextOnStory(ctx context.Context, c *closeOut, base s
 			newest = commit.Committed
 		}
 	}
-	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	comments, err := readRetrying(ctx, n, report, "the comments of "+c.id, func() ([]Comment, error) {
+		return n.Tracker.StoryComments(ctx, c.id)
+	})
 	if err != nil {
-		return "", false
+		return time.Time{}, nil, &closeReadError{ReasonTrackerFailed, "the comments of " + c.id, err}
+	}
+	return newest, comments, nil
+}
+
+// closingCommentTextOnStory is the newest closing comment written after the
+// newest commit of the story's branch, and whether there is one. A read that
+// failed is the error, not a no.
+func (n Next) closingCommentTextOnStory(ctx context.Context, c *closeOut, report *NextReport, base string) (string, bool, error) {
+	newest, comments, err := n.newestCommitAndComments(ctx, c, report, base)
+	if err != nil {
+		return "", false, err
 	}
 	var text string
 	written := false
@@ -2605,7 +2646,7 @@ func (n Next) closingCommentTextOnStory(ctx context.Context, c *closeOut, base s
 			newest, text, written = comment.Created, comment.Text, true
 		}
 	}
-	return text, written
+	return text, written, nil
 }
 
 // isClosingComment is a comment with the two sections of a Builder's closing
@@ -3650,18 +3691,14 @@ func (n Next) cappedAfterClosing(ctx context.Context, c *closeOut, report *NextR
 	if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
 		return false
 	}
-	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, StartPoint(n.remote(), c.target))
-	if err != nil || len(commits) == 0 {
+	newest, comments, err := n.newestCommitAndComments(ctx, c, report, StartPoint(n.remote(), c.target))
+	if err != nil {
+		// The story is then handed back as capped, a verdict on a read that
+		// failed: say so, so that the comment that may be there is looked for.
+		report.Notes = append(report.Notes, fmt.Sprintf("whether %s had written its closing comment before the turn cap is not known: %v", c.id, err))
 		return false
 	}
-	var newest time.Time
-	for _, commit := range commits {
-		if commit.Committed.After(newest) {
-			newest = commit.Committed
-		}
-	}
-	comments, err := n.Tracker.StoryComments(ctx, c.id)
-	if err != nil {
+	if newest.IsZero() {
 		return false
 	}
 	for _, comment := range comments {

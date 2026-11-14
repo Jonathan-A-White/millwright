@@ -73,7 +73,12 @@ func (n Next) closeAsFixedOnMain(ctx context.Context, c *closeOut, report *NextR
 	if !asked || !named || check.IsExample() {
 		return NextReport{}, false, nil
 	}
-	text, written := n.closingCommentTextOnStory(ctx, c, StartPoint(n.remote(), c.target))
+	text, written, readErr := n.closingCommentTextOnStory(ctx, c, report, StartPoint(n.remote(), c.target))
+	if readErr != nil {
+		// The refusal stands as it was; the comment that might say the bug is fixed could not be read.
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: %v, so whether it says the bug is fixed on %s was not known", c.id, readErr, c.target))
+		return NextReport{}, false, nil
+	}
 	if !written || !alreadyFixedOnMain.MatchString(text) {
 		return NextReport{}, false, nil
 	}
