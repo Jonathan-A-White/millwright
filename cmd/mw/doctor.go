@@ -599,8 +599,12 @@ func newDoctorCmd() *cobra.Command {
 				// goes on, so a loaded host does not run it into the unit's start
 				// limit (mw-gq6.1199).
 				CheckBudget: doctorCheckBudget,
-				Load:        hostLoadNow,
-				Out:         cmd.OutOrStdout(),
+				// All the checks and the dampers read together stop here, the checks
+				// after it said cannot-tell, so many slow checks do not run the
+				// unit past its start limit (mw-gq6.1287).
+				RunBudget: doctorRunBudget,
+				Load:      hostLoadNow,
+				Out:       cmd.OutOrStdout(),
 			}, name, dryRun)
 		},
 	}
@@ -627,6 +631,14 @@ func doctorDamperSurvey(vault, host string) (application.DamperSurvey, error) {
 // A budget of a minute leaves the unit's 4 minutes (under the timer's 5) room
 // for the checks past it.
 const doctorCheckBudget = time.Minute
+
+// doctorRunBudget is how long the checks and the dampers read may take all
+// together before the run says the checks left cannot-tell and ends. It is under
+// the doctor unit's TimeoutStartSec of 4 minutes (contrib/unittimeout_test.go
+// holds the two together), so the rest of the run (each check's own state, log
+// and notes, the verdict note, the printing) has the minute left, and systemd's
+// timeout is never what ends a run (mw-gq6.1287).
+const doctorRunBudget = 3 * time.Minute
 
 // hostLoadNow is this host's 1-minute load average as the kernel writes it, or
 // "" when it cannot be read.
