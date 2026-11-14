@@ -377,3 +377,42 @@ func TestDispatchOnABoxOfAnotherPrefixReadsItsGate(t *testing.T) {
 		t.Fatalf("farm3 with the gate open: held %q, started %d, want one story started", report.BoxHeld, len(report.Started))
 	}
 }
+
+// mw-gq6.1281: the home replaced cloud8's Claude Code while the box's own
+// dispatch started a story, whose session found no claude to run. The box's gate
+// is shut while its install runs, which is what its dispatch reads before it
+// takes a story, and open again once the install is over and claude answers.
+func TestABoxsGateIsShutWhileItsClaudeCodeIsReplacedAndOpenAgainAfter(t *testing.T) {
+	var during string
+	tracker := apptest.NewFakeTracker()
+	cloud := &apptest.FakeCloud{Harnesses: map[string]string{"cloud8": "2.1.323"}}
+	cloud.DuringHarness = func(name string) { during = gateOf(t, tracker, name) }
+	box := madeBox("cloud8")
+	box.Checked, box.Gate, box.Harness = boxCheckNow.Add(-time.Minute), application.BoxGateOK, "2.1.323"
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{box}}}
+	if err := tracker.SetNote(context.Background(), application.BoxGateKey("cloud8"), application.BoxGateOK); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := application.CloudCheck{
+		Work: tracker, Notes: tracker, Gate: tracker, Provider: cloud, Book: book, Host: "laptop",
+		Plan: boxCheckPlan, Now: func() time.Time { return boxCheckNow },
+		HarnessVersion: func(context.Context) (string, error) { return "2.1.325", nil },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := cloud.HarnessCalls(); len(got) != 1 || got[0] != "cloud8 2.1.325" {
+		t.Fatalf("expected one install of 2.1.325, got %v", got)
+	}
+	if !strings.HasPrefix(during, application.BoxGateHold) || !strings.Contains(during, "Claude Code") {
+		t.Errorf("expected the gate shut while the install ran, it said %q", during)
+	}
+	if after := gateOf(t, tracker, "cloud8"); !strings.HasPrefix(after, application.BoxGateOK) {
+		t.Errorf("expected the gate open again after the install, it says %q", after)
+	}
+	if got := bookBox(t, book, "cloud8").Gate; got != application.BoxGateOK {
+		t.Errorf("expected the book to keep the gate open, it says %q", got)
+	}
+}

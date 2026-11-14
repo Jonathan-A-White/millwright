@@ -1479,7 +1479,20 @@ func (p *cloudPass) setPaces(ctx context.Context) {
 // stays as it was, in one line that is a move only the first time, and is tried
 // again at the next pass.
 func (p *cloudPass) setHarness(ctx context.Context, box *CloudBox, version string) {
+	// The box's own dispatch ticks while its Claude Code is replaced, and a
+	// session started between the old binary going and the new one coming died
+	// with "claude: No such file or directory" (mw-gq6.1281): the gate is shut
+	// for the install and opened again once the provider has read claude --version
+	// on the box (set-harness's own last step), so no tick that reads the note in
+	// between takes a story. A box whose gate was not open is left as it was.
+	open := box.Gate == BoxGateOK
+	if open {
+		p.setGate(ctx, box, BoxGateHold, "its Claude Code is being brought level to "+version)
+	}
 	got, err := p.check.Provider.SetHarness(ctx, box.Name, version)
+	if open && box.MayWork() {
+		p.setGate(ctx, box, BoxGateOK, "")
+	}
 	if err != nil {
 		// A box that cannot be reached is a fault in the book, a move the first
 		// time for that fault, shown by mw status, and tried at the next pass

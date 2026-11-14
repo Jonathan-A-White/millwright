@@ -60,8 +60,11 @@ type FakeCloud struct {
 	// and SetPace asked, in order, as "harness <box>" and "pace <box>".
 	Harnesses    map[string]string
 	HarnessStuck map[string]string
-	harnessCalls []string
-	order        []string
+	// DuringHarness, when set, is called with the box's name from inside
+	// SetHarness, while the install is as good as running (mw-gq6.1281).
+	DuringHarness func(name string)
+	harnessCalls  []string
+	order         []string
 	// SessionDenies is the [session] deny list each box holds, by name, as
 	// domain.SessionDenyLiteral spells it ("" is none); SessionDenyCalls are the
 	// SetSessionDenys asked, as "<box> <list>" (mw-t5shinh.33).
@@ -238,6 +241,9 @@ func (f *FakeCloud) SetHarness(_ context.Context, name, version string) (applica
 	defer f.mu.Unlock()
 	f.harnessCalls = append(f.harnessCalls, name+" "+version)
 	f.order = append(f.order, "harness "+name)
+	if f.DuringHarness != nil {
+		f.DuringHarness(name)
+	}
 	if f.Unreachable[name] {
 		return application.CloudHarness{}, fmt.Errorf("ssh %s: no route to the box", name)
 	}
