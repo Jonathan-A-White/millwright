@@ -240,10 +240,7 @@ type IceboxReader struct {
 // Icebox reads the beads in the icebox and, from the notes, how long the
 // oldest has been there and how many were thawed in the last week.
 func (r IceboxReader) Icebox(ctx context.Context) (IceboxSummary, error) {
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if r.Now != nil {
-		now = r.Now()
-	}
+	now := r.now()
 	iced, err := r.Beads.IcedBeads(ctx)
 	if err != nil {
 		return IceboxSummary{}, fmt.Errorf("reading the iced beads: %w", err)
@@ -278,4 +275,12 @@ func (r IceboxReader) Icebox(ctx context.Context) (IceboxSummary, error) {
 		}
 	}
 	return summary, nil
+}
+
+// now is the injected clock, or the host's when none is set.
+func (r IceboxReader) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

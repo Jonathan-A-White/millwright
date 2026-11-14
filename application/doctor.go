@@ -1242,11 +1242,7 @@ type staleLanding struct {
 
 // find lists the landing directories older than a day, each judged by Trees.
 func (c *StaleLandingsCheck) find(ctx context.Context) []staleLanding {
-	//mw:realclock the default clock, taken before an injected Now replaces it
-	now := time.Now()
-	if c.Now != nil {
-		now = c.Now()
-	}
+	now := c.now()
 	var found []staleLanding
 	seen := map[string]bool{}
 	for _, dir := range c.Dirs {
@@ -1957,3 +1953,11 @@ func (c *RigOriginsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
 
 // WayBack implements DoctorCheck.
 func (c *RigOriginsCheck) WayBack() string { return "nothing was changed" }
+
+// now is the injected clock, or the host's when none is set.
+func (c *StaleLandingsCheck) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}

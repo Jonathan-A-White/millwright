@@ -936,10 +936,7 @@ func (l HandsList) runAll(ctx context.Context) ([]HandsStepRecord, error) {
 			closed[d.Story.ID] = d.Status == StatusClosed
 		}
 	}
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if l.Now != nil {
-		now = l.Now()
-	}
+	now := l.now()
 	var waiting []HandsStepRecord
 	for _, bead := range beads {
 		if closed[bead] {
@@ -1012,4 +1009,12 @@ type HandsOutcome struct {
 // started at all. The real adapter is infrastructure/hands's Runner.
 type HandsRunner interface {
 	Run(ctx context.Context, job HandsJob) (HandsOutcome, error)
+}
+
+// now is the injected clock, or the host's when none is set.
+func (l HandsList) now() time.Time {
+	if l.Now != nil {
+		return l.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

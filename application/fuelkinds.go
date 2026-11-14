@@ -44,11 +44,7 @@ type fuelLog struct {
 
 // Run prints a line for each kind that has a pass in the window.
 func (f FuelByKind) Run(ctx context.Context) error {
-	//mw:realclock the default clock, taken before an injected Now replaces it
-	now := time.Now()
-	if f.Now != nil {
-		now = f.Now()
-	}
+	now := f.now()
 	cutoff := now.UTC().AddDate(0, 0, -f.Days).Format(time.DateOnly)
 	fmt.Fprintf(f.Out, "Fuel of the model passes, the last %d days, by kind\n", f.Days)
 	shown := 0
@@ -95,4 +91,12 @@ func (f FuelByKind) Run(ctx context.Context) error {
 		fmt.Fprintln(f.Out, "no pass in that time")
 	}
 	return nil
+}
+
+// now is the injected clock, or the host's when none is set.
+func (f FuelByKind) now() time.Time {
+	if f.Now != nil {
+		return f.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

@@ -210,10 +210,7 @@ func (g GristTidy) Run(ctx context.Context) (GristTidyReport, error) {
 	if g.Idle() {
 		return report, fmt.Errorf("grist tidy: there is nothing wired to tidy")
 	}
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if g.Now != nil {
-		now = g.Now()
-	}
+	now := g.now()
 	var faults []error
 	fault := func(err error) {
 		faults = append(faults, err)
@@ -328,4 +325,12 @@ func humanBytes(n int64) string {
 		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
 	}
 	return fmt.Sprintf("%d B", n)
+}
+
+// now is the injected clock, or the host's when none is set.
+func (g GristTidy) now() time.Time {
+	if g.Now != nil {
+		return g.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
