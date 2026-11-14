@@ -28,6 +28,7 @@ type AfterLanding struct {
 	shell    string
 	nice     int
 	jobs     int
+	runs     *TestRuns
 }
 
 // AfterLanding satisfies the port.
@@ -141,6 +142,15 @@ func WithAfterJobs(n int) AfterLandingOption {
 	return func(a *AfterLanding) { a.jobs = n }
 }
 
+// WithAfterTestRuns has every after-landing command take one of the host's
+// test-runner slots before it starts and give it back when it ends (mw-gq6.1303):
+// a shots run starts Playwright's chrome by the dozen, as a gate's part does. The
+// wait for the slot is before the command's limit begins, so a wait is never the
+// command's time. A nil runs, the default, is no limit.
+func WithAfterTestRuns(runs *TestRuns) AfterLandingOption {
+	return func(a *AfterLanding) { a.runs = runs }
+}
+
 // WithAfterStretch is how many times its limit a command is waited for before it
 // is stopped, instead of application.AfterLandingStretch (mw-gq6.1268). Less than
 // one changes nothing.
@@ -217,6 +227,13 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 	if len(steps) > 1 {
 		line = markSteps(steps)
 	}
+	// Taken before the limit's clock starts: waiting for a slot is not the
+	// command running long.
+	release, err := a.runs.Take(ctx, "after-landing of "+rig)
+	if err != nil {
+		return application.Ran{}, fmt.Errorf("running `%s`: %w", command, err)
+	}
+	defer release()
 	limit := a.Limit(rig)
 	// The limit is where a command is called slow; it is stopped only at the limit
 	// stretched, so that a deploy that runs on past it and finishes is not said to

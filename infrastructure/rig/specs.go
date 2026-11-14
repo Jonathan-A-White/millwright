@@ -63,7 +63,12 @@ func (c *Checks) RunSpecs(ctx context.Context, rig, dir, base string) (applicati
 	}
 	command := strings.ReplaceAll(template, SpecsPlaceholder, shellWords(specs))
 
+	release, err := c.runs.Take(ctx, "changed specs of "+rig)
+	if err != nil {
+		return application.SpecsChecked{}, fmt.Errorf("running `%s`: %w", command, err)
+	}
 	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.commandEnv(rig))
+	release()
 	run := application.SpecsChecked{Checked: application.Checked{Command: command, Output: output, Passed: err == nil, Read: c.readOf(v, "changed_specs", template, c.specs[rig])}, Specs: specs, LeftOut: leftOut}
 	if err == nil {
 		return run, nil
