@@ -1443,17 +1443,18 @@ func TestAConfiguredRigThatKeepsAFlatMemoryFileIsNotGivenAFolderBesideIt(t *test
 	}
 }
 
-// aYoungRig is a rig of one day: every fact is of yesterday or today (the clock
-// says 2026-10-18), so the age rules of make-room take none of them. Two of its
-// facts cite a story that has landed, one a story still open. The budget is the
-// render's size.
+// aYoungRig is a rig of under a fortnight (the clock says 2026-10-18): no decision
+// is over 14 days old and no gotcha over 2, so the age rules of make-room take
+// none of them. Two of its decisions, 4 and 5 days old, cite a story that has
+// landed; two gotchas, of yesterday, cite a story still open or none. The budget
+// is the render's size.
 func aYoungRig() (*editableFiles, application.Memory, *bytes.Buffer) {
 	fact := func(subject, kind, since, source, sentence string) string {
 		return "---\nsubject: " + subject + "\nkind: " + kind + "\nstatus: current\nsource: " + source + "\nsince: " + since + "\n---\n\n" + sentence + "\n"
 	}
 	files := &editableFiles{files: map[string]string{
-		"zulu-socket-path.md": fact("zulu", "gotcha", "2026-10-17", "mw-10", "The zulu socket lives under the run directory of the host."),
-		"yankee-lease-ttl.md": fact("yankee", "decision", "2026-10-16", "mw-11", "The yankee lease is renewed by every heartbeat of the session."),
+		"zulu-socket-path.md": fact("zulu", "decision", "2026-10-14", "mw-10", "The zulu socket lives under the run directory of the host."),
+		"yankee-lease-ttl.md": fact("yankee", "decision", "2026-10-13", "mw-11", "The yankee lease is renewed by every heartbeat of the session."),
 		"xray-open-story.md":  fact("xray", "gotcha", "2026-10-17", "mw-12", "The xray probe is still being built by a running story."),
 		"whiskey-by-hand.md":  fact("whiskey", "gotcha", "2026-10-17", "mayor:2026-10-17", "The whiskey cache is emptied by hand before each restart."),
 	}}
@@ -1640,16 +1641,18 @@ func TestAStoryLandedIsClosedAndNotSupersededOrNeverReleased(t *testing.T) {
 	}
 }
 
-// aDayOldRig adds, through Add, one landed gotcha for each name at the clock's
-// time, a minute after the one before, then sets the budget to what the render
-// is: a rig whose boot facts all have the same since. Every sentence is of one
-// length, so any one demotion frees what another would.
+// aDayOldRig adds, through Add, one landed gotcha for each name on 2026-10-14,
+// a minute after the one before, then puts the clock back to the day it had
+// (2026-10-18) and sets the budget to what the render is: a rig whose boot facts
+// all have the same since, 4 days ago, so a landed story's fact is old enough to
+// take. Every sentence is of one length, so any one demotion frees what another would.
 func aDayOldRig(t *testing.T, names ...string) (*editableFiles, application.Memory, *bytes.Buffer) {
 	t.Helper()
 	files := &editableFiles{files: map[string]string{}}
 	var out bytes.Buffer
 	m := anEditableMemory(files, &recordingVault{}, &out)
-	at := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	today := m.Now
+	at := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
 	m.Now = func() time.Time { return at }
 	m.Landed = func(_ context.Context, ids []string) (map[string]bool, error) {
 		landed := map[string]bool{}
@@ -1668,6 +1671,7 @@ func aDayOldRig(t *testing.T, names ...string) (*editableFiles, application.Memo
 		}
 		at = at.Add(time.Minute)
 	}
+	m.Now = today
 	m.Budget = renderSize(files)
 	out.Reset()
 	return files, m, &out
@@ -1751,5 +1755,63 @@ func TestAddWithMakeRoomOnADayOldRigDemotesAnOlderFactNotTheOneItAdds(t *testing
 	}
 	if size := renderSize(files); size > m.Budget {
 		t.Errorf("the render is %d/%d after the add", size, m.Budget)
+	}
+}
+
+// aLandedStoryRig is a rig at its budget whose only facts cite a story that has
+// landed (mw-5), each placed on the day its name says, the clock being 2026-10-18.
+func aLandedStoryRig(kind string, placed map[string]string) (*editableFiles, application.Memory, *bytes.Buffer) {
+	files := &editableFiles{files: map[string]string{}}
+	for name, since := range placed {
+		files.files[name+".md"] = "---\nsubject: general\nkind: " + kind + "\nstatus: current\nsource: mw-5\nsince: " + since + "\n---\n\nThe " + name + " probe answers only on its own port.\n"
+	}
+	var out bytes.Buffer
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	m.Landed = func(_ context.Context, ids []string) (map[string]bool, error) {
+		landed := map[string]bool{}
+		for _, id := range ids {
+			landed[id] = true
+		}
+		return landed, nil
+	}
+	m.Budget = renderSize(files)
+	return files, m, &out
+}
+
+func TestMakeRoomNeverTakesALandedStorysFactPlacedWithinKeepDays(t *testing.T) {
+	for _, kind := range []string{"gotcha", "decision"} {
+		t.Run(kind+" placed today", func(t *testing.T) {
+			files, m, out := aLandedStoryRig(kind, map[string]string{"zulu": "2026-10-18", "yank": "2026-10-17"})
+			err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 10})
+			if err == nil {
+				t.Fatalf("want a refusal: only facts of a landed story placed within %d days\n%s", application.MakeRoomKeepDays, out)
+			}
+			if len(files.wrote) != 0 || demoted(files, "zulu") || demoted(files, "yank") {
+				t.Errorf("a fact placed within %d days was taken: wrote %v\n%s", application.MakeRoomKeepDays, files.wrote, out)
+			}
+		})
+	}
+	t.Run("decision placed 3 days ago", func(t *testing.T) {
+		files, m, out := aLandedStoryRig("decision", map[string]string{"zulu": "2026-10-18", "yank": "2026-10-15"})
+		want := roomLine("general", "The yank probe answers only on its own port.")
+		if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !demoted(files, "yank") || demoted(files, "zulu") {
+			t.Errorf("want the fact of 3 days ago taken and today's kept:\n%s", out)
+		}
+	})
+}
+
+func TestMakeRoomTakesAnOlderGotchaBeforeALandedStorysDecision(t *testing.T) {
+	files, m, out := aLandedStoryRig("decision", map[string]string{"zulu": "2026-10-10"})
+	files.files["alfa.md"] = "---\nsubject: alfa\nkind: gotcha\nstatus: current\nsource: mw-5\nsince: 2026-10-15\n---\n\nThe alfa probe answers only on its own port.\n"
+	m.Budget = renderSize(files)
+	want := roomLine("alfa", "The alfa probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "alfa") || demoted(files, "zulu") {
+		t.Errorf("want the older gotcha taken before the landed story's decision:\n%s", out)
 	}
 }
