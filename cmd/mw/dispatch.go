@@ -435,10 +435,16 @@ func newDispatchCmd() *cobra.Command {
 			}
 			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs, host)
 			dispatch := withHostRechecks(application.Dispatch{
-				Tracker:       gateway,
-				Worktrees:     worktrees,
-				Landing:       worktrees,
-				Runner:        tmux.New(),
+				Tracker:   gateway,
+				Worktrees: worktrees,
+				Landing:   worktrees,
+				Runner: application.HarnessReadyRunner{
+					Runner: tmux.New(), Host: host, Out: cmd.ErrOrStderr(),
+					Ready: func(ctx context.Context) error {
+						_, err := ownHarnessVersion(ctx)
+						return err
+					},
+				},
 				Boot:          builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
 				Memory:        gateway,
 				Sync:          sync,
@@ -451,27 +457,23 @@ func newDispatchCmd() *cobra.Command {
 				TestersPerRig: testers,
 				Mailbox:       gateway,
 				PushWait:      closePushWait(),
-				HarnessReady: func(ctx context.Context) error {
-					_, err := ownHarnessVersion(ctx)
-					return err
-				},
-				VaultDir:     dir,
-				Load:         hostload.Proc{},
-				Room:         application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
-				Grist:        hostGristRoom(room),
-				Rigs:         rigs,
-				Changes:      worktrees,
-				Rules:        files,
-				Network:      net,
-				HeavyNet:     heavy,
-				Exclusive:    hostDispatchLock(dir),
-				Events:       homeEventLog(),
-				Retired:      retired,
-				RepathNoRoom: repathNoRoom,
-				SmokeHolds:   gristSmokeBook(gateway, host),
-				Home:         files,
-				DryRun:       dryRun,
-				Out:          cmd.OutOrStdout(),
+				VaultDir:      dir,
+				Load:          hostload.Proc{},
+				Room:          application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
+				Grist:         hostGristRoom(room),
+				Rigs:          rigs,
+				Changes:       worktrees,
+				Rules:         files,
+				Network:       net,
+				HeavyNet:      heavy,
+				Exclusive:     hostDispatchLock(dir),
+				Events:        homeEventLog(),
+				Retired:       retired,
+				RepathNoRoom:  repathNoRoom,
+				SmokeHolds:    gristSmokeBook(gateway, host),
+				Home:          files,
+				DryRun:        dryRun,
+				Out:           cmd.OutOrStdout(),
 
 				RetryFromBranch: fromBranch,
 				Rebases:         worktrees,

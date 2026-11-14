@@ -198,18 +198,6 @@ type Dispatch struct {
 	PushWait  time.Duration
 	RetryWait func(ctx context.Context, d time.Duration) error
 
-	// HarnessReady asks this host whether its Claude Code answers
-	// (`claude --version`); nil asks nothing. A story whose session is to run
-	// claude waits for it before its session starts, HarnessTries asks apart by
-	// HarnessPoll (zero are DefaultHarnessTries and DefaultHarnessPoll), waiting
-	// with RetryWait: a box's Claude Code is replaced by the home's cloud check
-	// while the box's own dispatch ticks, and a session started in between died
-	// with "nice: claude: No such file or directory" (mw-gq6.1281). A harness
-	// that never answers gives the claim back, no attempt counted.
-	HarnessReady func(ctx context.Context) error
-	HarnessTries int
-	HarnessPoll  time.Duration
-
 	// VaultDir is the vault's directory, named in the mail that says the vault
 	// holds uncommitted changes, so its fix is a command to paste. Empty names
 	// no directory: the fix is run in the vault.
@@ -2216,9 +2204,6 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 			return undo("clearing the dead session "+spec.Name, err, true)
 		}
 	}
-	if err := d.harnessAnswers(ctx, path); err != nil {
-		return undo("waiting for the harness to answer", err, true)
-	}
 	if err := d.Runner.Start(ctx, spec); err != nil {
 		return undo("starting the session", err, true)
 	}
@@ -3459,50 +3444,4 @@ func (d Dispatch) pausedHere(ctx context.Context) (HostPause, bool, error) {
 		}
 	}
 	return HostPause{}, false, failed
-}
-
-// The wait a session's start makes for the harness to answer when Dispatch says
-// nothing of it: 24 asks, 5 seconds apart, two minutes in all, longer than the
-// install of a version of Claude Code takes to replace the binary.
-const (
-	DefaultHarnessTries = 24
-	DefaultHarnessPoll  = 5 * time.Second
-)
-
-// harnessAnswers waits until the harness a story's session runs answers on this
-// host, as a claim that has not yet started its session is about to. Only claude
-// is asked after (HarnessReady is the host's claude --version); a story of
-// another harness, or a Dispatch with no HarnessReady, waits for nothing. The
-// error is the last answer's, once every ask was made (mw-gq6.1281).
-func (d Dispatch) harnessAnswers(ctx context.Context, path domain.Path) error {
-	if d.HarnessReady == nil || (path.Harness != "" && path.Harness != domain.HarnessClaude) {
-		return nil
-	}
-	tries, poll := d.HarnessTries, d.HarnessPoll
-	if tries < 1 {
-		tries = DefaultHarnessTries
-	}
-	if poll <= 0 {
-		poll = DefaultHarnessPoll
-	}
-	wait := d.RetryWait
-	if wait == nil {
-		wait = sleepFor
-	}
-	var err error
-	for try := 1; try <= tries; try++ {
-		if err = d.HarnessReady(ctx); err == nil {
-			return nil
-		}
-		if try == tries {
-			break
-		}
-		if try == 1 {
-			d.print(fmt.Sprintf("  claude does not answer on %s (%s): waiting for it, up to %d asks %s apart\n", d.Host, oneLine(err.Error()), tries, poll))
-		}
-		if werr := wait(ctx, poll); werr != nil {
-			return werr
-		}
-	}
-	return fmt.Errorf("claude --version did not answer on %s in %d asks %s apart: %w", d.Host, tries, poll, err)
 }

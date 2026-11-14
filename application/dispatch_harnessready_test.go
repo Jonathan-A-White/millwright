@@ -21,7 +21,11 @@ func TestADispatchWaitsForClaudeToAnswerBeforeItStartsTheSession(t *testing.T) {
 	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
 
 	asks := 0
-	dispatch.HarnessReady = func(context.Context) error {
+	var waits []time.Duration
+	dispatch.Runner = application.HarnessReadyRunner{Runner: runner, Host: "vps", Sleep: func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}, Ready: func(context.Context) error {
 		asks++
 		if n := len(runner.Names()); n != 0 {
 			t.Errorf("ask %d: expected no session started before claude answers, got %q", asks, runner.Names())
@@ -30,12 +34,7 @@ func TestADispatchWaitsForClaudeToAnswerBeforeItStartsTheSession(t *testing.T) {
 			return errors.New("claude: command not found")
 		}
 		return nil
-	}
-	var waits []time.Duration
-	dispatch.RetryWait = func(_ context.Context, d time.Duration) error {
-		waits = append(waits, d)
-		return nil
-	}
+	}}
 
 	report, err := dispatch.Run(ctx)
 	if err != nil {
@@ -53,9 +52,9 @@ func TestADispatchWhoseClaudeNeverAnswersGivesTheClaimBackAndStartsNothing(t *te
 	ctx := context.Background()
 	dispatch, tracker, _, runner, _ := aFactory(t)
 	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
-	dispatch.HarnessTries = 3
-	dispatch.HarnessReady = func(context.Context) error { return errors.New("claude: command not found") }
-	dispatch.RetryWait = func(context.Context, time.Duration) error { return nil }
+	dispatch.Runner = application.HarnessReadyRunner{Runner: runner, Host: "vps", Tries: 3,
+		Sleep: func(context.Context, time.Duration) error { return nil },
+		Ready: func(context.Context) error { return errors.New("claude: command not found") }}
 
 	report, err := dispatch.Run(ctx)
 	if err == nil || !strings.Contains(err.Error(), "claude --version did not answer") {
