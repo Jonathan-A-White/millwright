@@ -1649,7 +1649,7 @@ func (h *heldGate) ranCount() int {
 type gateStarter struct{ workerStarter }
 
 func (s *gateStarter) Start(ctx context.Context, story, logPath string) (int, error) {
-	return s.workerStarter.Start(ctx, story, 0, logPath)
+	return s.workerStarter.Start(ctx, story, 0, logPath, false)
 }
 
 func (s *gateStarter) wait() {

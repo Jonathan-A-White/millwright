@@ -51,7 +51,7 @@ type specsStarter struct {
 }
 
 func (s *specsStarter) Start(ctx context.Context, story, _ string) (int, error) {
-	return s.workerStarter.Start(ctx, story, 0, "")
+	return s.workerStarter.Start(ctx, story, 0, "", false)
 }
 
 type detachedSpecsRig struct {

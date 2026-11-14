@@ -12,6 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
 // workerParts is a rig's gate of one part whose command the test holds: a run
@@ -23,6 +24,8 @@ type workerParts struct {
 	started chan struct{}
 	release chan struct{}
 	passed  bool
+	// command is what the part is, a vitest shard when it is empty.
+	command string
 }
 
 func newWorkerParts(passed bool) *workerParts {
@@ -30,6 +33,9 @@ func newWorkerParts(passed bool) *workerParts {
 }
 
 func (w *workerParts) Parts(string) []application.GatePart {
+	if w.command != "" {
+		return []application.GatePart{{Name: "vitest 5/6", Command: w.command}}
+	}
 	return []application.GatePart{{Name: "vitest 5/6", Command: "npx vitest run --shard=5/6"}}
 }
 
@@ -69,11 +75,20 @@ type workerStarter struct {
 	killed  int
 	pids    []int
 	logPath string
+	// tookSlot is what the last Start was told of the slot.
+	tookSlot bool
 }
 
-func (s *workerStarter) Start(_ context.Context, _ string, _ int, logPath string) (int, error) {
+func (s *workerStarter) lastTookSlot() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.tookSlot
+}
+
+func (s *workerStarter) Start(_ context.Context, _ string, _ int, logPath string, takesSlot bool) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tookSlot = takesSlot
 	s.started++
 	s.done = make(chan struct{})
 	s.stop = make(chan struct{})
@@ -567,4 +582,78 @@ func TestACallUsesTheUsualRunOfThePartForItsCeilingAndTheFixedOneWithout(t *test
 	if d.starter.killedCount() != 0 {
 		t.Errorf("expected no kill, got %d", d.starter.killedCount())
 	}
+}
+
+// A foreground --part that takes the merge slot and whose usual time is at least
+// the call's whole budget is not started inside the call, where the tool would cut
+// it off at 600 s with the slot held: it is run by a process of its own that takes
+// the slot itself and outlives the call, and the call run again reads its result
+// (mw-gq6.1289). Here a landing holds the slot while the call ends: the call does
+// not wait for the slot, the part is not run, and when the landing lets go the
+// process takes the slot, runs the part and gives the slot back.
+func TestAForegroundPartThatTakesTheSlotAndOutrunsTheCallIsNotStartedInTheCall(t *testing.T) {
+	d := aDetachedPartRig(t, true)
+	d.parts.command = "npm run gate:shots"
+	slots := rig.NewSlots(rig.WithSlotPoll(5 * time.Millisecond))
+	d.tune = func(k *application.Check) {
+		k.Slot = slots
+		k.PartSlotWait = time.Minute
+		k.PartExpected = func(context.Context, string, int) time.Duration { return time.Hour }
+	}
+	landing, err := slots.Take(context.Background(), d.rigDir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = d.check(150 * time.Millisecond)
+	if err == nil {
+		t.Fatal("expected a call that ended before the part did to say so, not to pass")
+	}
+	for _, want := range []string{"part 1 of 1 (vitest 5/6) is still running", "mw check mw-x.1 --part 1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the line to say %q, got %q", want, err.Error())
+		}
+	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Errorf("expected one line, got %q", err.Error())
+	}
+	if d.starter.startedCount() != 1 {
+		t.Fatalf("expected the part to be handed to a process of its own, %d were started", d.starter.startedCount())
+	}
+	if !d.starter.lastTookSlot() {
+		t.Errorf("expected the process to be told it takes the slot itself")
+	}
+	if d.parts.ranCount() != 0 {
+		t.Errorf("expected the part not to run while a landing holds the slot, it ran %d time(s)", d.parts.ranCount())
+	}
+
+	// The landing is done: the process takes the slot and runs the part, which holds it.
+	landing.Release(context.Background())
+	select {
+	case <-d.parts.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the process to run the part once the slot was free")
+	}
+	if extra, err := slots.Take(withShortWait(), d.rigDir, "mw land on laptop, landing a batch of millwright"); err == nil {
+		extra.Release(context.Background())
+		t.Error("expected the process to hold the merge slot while the part runs")
+	}
+	close(d.parts.release)
+	if err := d.check(30 * time.Second); err != nil {
+		t.Fatalf("expected the call run again to read the part's pass, got %v", err)
+	}
+	if d.parts.ranCount() != 1 || d.starter.startedCount() != 1 {
+		t.Errorf("expected one run by one process, ran %d time(s) in %d process(es)", d.parts.ranCount(), d.starter.startedCount())
+	}
+	again, err := slots.Take(context.Background(), d.rigDir, "mw land on laptop, landing a batch of millwright")
+	if err != nil {
+		t.Fatalf("expected the slot to be given back when the part was done, got %v", err)
+	}
+	again.Release(context.Background())
+}
+
+func withShortWait() context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	time.AfterFunc(time.Second, cancel)
+	return ctx
 }
