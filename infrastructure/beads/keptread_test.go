@@ -123,6 +123,15 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 			rows = kept
 		}
 		return &keptRows{cols: cols, rows: rows}, nil
+	case strings.Contains(q, "i.status = 'closed'") && strings.Contains(q, "from issues i where"):
+		return &keptRows{cols: []string{"id", "title", "issue_type", "closed_at", "close_reason", "metadata"}, rows: [][]driver.Value{
+			{"t-9", "Landed", "task", "2026-10-02 09:00:00", "Done", `{"rig":"millwright","host":"laptop"}`},
+			{"t-8", "Replaced", "bug", "2026-10-02 08:00:00", nil, nil},
+		}}, nil
+	case strings.Contains(q, "i.status = 'closed'") && strings.Contains(q, "from dependencies d"):
+		return &keptRows{cols: []string{"issue_id", "depends_on_id", "type"}, rows: [][]driver.Value{
+			{"t-9", "t-1", "parent-child"}, {"t-8", "t-9", "supersedes"},
+		}}, nil
 	case strings.Contains(q, "hitl:todo"):
 		return &keptRows{cols: []string{"id", "metadata"}, rows: [][]driver.Value{
 			{"td-1", `{"todo_due":"2026-10-14T08:00:00Z"}`},
@@ -622,5 +631,51 @@ esac
 	}
 	if got := bdsStarted(t, asked); got != 3 {
 		t.Errorf("expected the listing already read to be shared, got %d bd", got)
+	}
+}
+
+// mw-gq6.1286: the closed stories the dampers line reads for the proposals were a
+// bd list of the fortnight's closed beads, 3 to 8 s on a loaded laptop. Over the
+// kept connection they are two queries and no bd, with the epic, the Path and
+// the supersedes link a bd list would have printed.
+func TestClosedStoriesAreReadOverTheKeptConnectionWithoutStartingABd(t *testing.T) {
+	s := &keptServer{}
+	program, asked := standInSnapshotProgram(t, bdListing, bdTable)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
+
+	closed, err := g.ClosedStories(context.Background(), time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bdsStarted(t, asked); got != 0 {
+		t.Fatalf("expected no bd started while the connection answers, got %d", got)
+	}
+	if len(closed) != 2 {
+		t.Fatalf("expected 2 closed stories, got %v", closed)
+	}
+	landed, replaced := closed[0], closed[1]
+	if landed.ID != "t-9" || landed.EpicID != "t-1" || landed.Rig != "millwright" || landed.Host != "laptop" ||
+		landed.CloseReason != "Done" || landed.Type != "task" || landed.Superseded ||
+		!landed.ClosedAt.Equal(time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)) {
+		t.Errorf("the landed story read wrongly: %+v", landed)
+	}
+	if replaced.ID != "t-8" || !replaced.Superseded || replaced.EpicID != "" {
+		t.Errorf("the superseded story read wrongly: %+v", replaced)
+	}
+}
+
+// With the connection down the closed stories are read by bd, as they were.
+func TestClosedStoriesAreReadByBdWhenTheKeptConnectionFails(t *testing.T) {
+	s := &keptServer{}
+	s.fail.Store(true)
+	program, asked := standInSnapshotProgram(t, `[{"id":"t-9","title":"Landed","status":"closed","issue_type":"task","parent":"t-1","close_reason":"Done"}]`, bdTable)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
+
+	closed, err := g.ClosedStories(context.Background(), time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || len(closed) != 1 || closed[0].EpicID != "t-1" {
+		t.Fatalf("expected the closed story from bd, got %v, %v", closed, err)
+	}
+	if got := bdsStarted(t, asked); got != 1 {
+		t.Errorf("expected one bd, got %d", got)
 	}
 }

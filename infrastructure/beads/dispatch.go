@@ -139,6 +139,22 @@ var _ application.VerifyBeads = (*Gateway)(nil)
 // closed and whether it carries a supersedes link (bd supersede leaves no
 // close reason, only the link).
 func (g *Gateway) ClosedStories(ctx context.Context, since time.Time) ([]application.ClosedStory, error) {
+	if g.cache != nil {
+		if kept, ok := g.cache.closed.get("all", since); ok {
+			return kept, nil
+		}
+	}
+	closed, err := g.readClosedStories(ctx, since)
+	if err == nil && g.cache != nil {
+		g.cache.closed.put("all", since, closed)
+	}
+	return closed, err
+}
+
+func (g *Gateway) readClosedStories(ctx context.Context, since time.Time) ([]application.ClosedStory, error) {
+	if closed, ok := g.closedOverConnection(ctx, since); ok {
+		return closed, nil
+	}
 	out, err := g.call(ctx, "list", "--status", StatusClosed, "--closed-after", since.UTC().Format(time.RFC3339),
 		"--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
@@ -169,7 +185,24 @@ func (g *Gateway) ClosedStories(ctx context.Context, since time.Time) ([]applica
 // of each row omitted (mw-gq6.790). The rig and host of each row are its own
 // metadata's: a story that carries no path of its own (it takes its epic's) has
 // none here.
+//
+// With a run cache a rig read again in the run, from a time no earlier, is
+// answered from the first read (mw-gq6.1286).
 func (g *Gateway) ClosedStoriesOfRig(ctx context.Context, rig string, since time.Time, limit int) ([]application.ClosedStory, error) {
+	key := "rig " + rig + " " + strconv.Itoa(limit)
+	if g.cache != nil {
+		if kept, ok := g.cache.closed.get(key, since); ok {
+			return kept, nil
+		}
+	}
+	closed, err := g.readClosedStoriesOfRig(ctx, rig, since, limit)
+	if err == nil && g.cache != nil {
+		g.cache.closed.put(key, since, closed)
+	}
+	return closed, err
+}
+
+func (g *Gateway) readClosedStoriesOfRig(ctx context.Context, rig string, since time.Time, limit int) ([]application.ClosedStory, error) {
 	out, err := g.call(ctx, "list", "--status", StatusClosed, "--closed-after", since.UTC().Format(time.RFC3339),
 		"--exclude-type", "epic", "--metadata-field", "rig="+rig, "--sort", "closed", "--brief",
 		"--limit", strconv.Itoa(limit), "--json")
