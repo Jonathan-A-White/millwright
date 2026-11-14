@@ -125,7 +125,9 @@ func newSleeper(t *testing.T) *exec.Cmd {
 
 func waitState(t *testing.T, pid int, want string) {
 	t.Helper()
-	for i := 0; i < 100; i++ {
+	// A signal's effect on another process is not seen at once on a loaded host.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
 		if st, ok := readStat(fmt.Sprintf("/proc/%d/stat", pid)); ok && st.State == want {
 			return
 		}
