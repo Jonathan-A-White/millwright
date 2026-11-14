@@ -37,8 +37,8 @@ type runCache struct {
 	// index is beads indexed for ShowBeads.
 	index memo[*snapshot]
 	notes memo[map[string]any]
-	// closed is the closed stories read of a rig, or of every rig, kept by
-	// closedKey.
+	// closed is the closed stories read of a rig, or of every rig, each kept
+	// under the kind of read it was (see closedMemo).
 	closed closedMemo
 }
 
