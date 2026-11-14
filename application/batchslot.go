@@ -14,6 +14,14 @@ import (
 // ones out, so a check never runs beside the batch's own run of the tests. A
 // holding that cannot be yielded (a fake, or a slot of another kind) is simply
 // kept: the batch waits as it always did.
+//
+// The one lock order of the rig's merge slot and the host's gate lock is the slot,
+// then the lock (a check, a close-out and an after-landing keep it). A batch that
+// yields the slot for a wait for the gate lock holds the lock when the wait ends,
+// so it gives the lock back before it takes the slot alone again (Next.takeTheGateLock),
+// and it does not yield the slot for a wait for a calm host while it holds the lock
+// (Next.calmedThen): a check that took the slot shared meanwhile waits for the lock
+// and the batch would wait for it (mw-gq6.1316).
 type batchSlot struct {
 	holding Holding
 	// yielded says the batch is between a yield and its resume, so that a wait

@@ -1,6 +1,7 @@
 package application
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -177,7 +178,12 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 	// The close-out says it is waiting, and says it is running again once it stops.
 	n.markCloseOut(ctx, c.id, c.began, true)
 	defer n.markCloseOut(ctx, c.id, c.began, false)
-	if n.SlotYield != nil {
+	// A close-out with a gate lock waits for the host to calm holding it (the lock
+	// first, the calm after), and a check that took the slot shared meanwhile
+	// would wait for that lock: the slot is not given up for such a wait, as taking
+	// it alone again would wait for the check (mw-gq6.1316). A close-out with no
+	// gate lock holds none and gives the slot up.
+	if n.SlotYield != nil && n.GateLock == nil {
 		defer n.SlotYield(ctx)()
 	}
 	since := n.now()
@@ -360,6 +366,11 @@ func (n Next) waitForTheGateLock(ctx context.Context, c *closeOut, report *NextR
 	return lock
 }
 
+// slotAndLockTries is how many times a close-out that gives its merge slot up for
+// a wait for the gate lock gives the lock back to take the slot alone again, and
+// waits for the lock once more with the slot given up, before it keeps the slot.
+const slotAndLockTries = 3
+
 // takeTheGateLock is waitForTheGateLock for a gate that must not run without
 // the lock when the lock says to hand it back (GateLockHandBack): then the lock
 // is nil and the error is the hand-back, which ends the gate.
@@ -367,23 +378,52 @@ func (n Next) takeTheGateLock(ctx context.Context, c *closeOut, report *NextRepo
 	if n.GateLock == nil {
 		return nil, nil
 	}
-	var resume func()
 	_, saysItsOwn := n.GateLock.(checkGateLock)
-	turn, err := n.GateLock.Take(ctx, c.id, func(by string) {
-		// A check's lock says its own wait, naming more (Check.heldLine).
-		if !saysItsOwn {
-			n.print(fmt.Sprintf("  wait    %s's gate lock is held by %s: waiting for it before %s\n", n.Host, by, what))
+	var turn GateTurn
+	var err error
+	var waited time.Duration
+	var waitedFor string
+	// The one lock order is the rig's merge slot, then the host's gate lock (a
+	// check takes them so: Check.takeForTests). A close-out that gave its slot up
+	// for the wait (SlotYield) holds the gate lock when the wait ends, and must
+	// have the slot alone again: a check that took the slot shared meanwhile waits
+	// for the gate lock, so waiting for it with the lock held is a deadlock
+	// (mw-gq6.1316). It gives the lock back, takes the slot alone, and asks for the
+	// lock again, with the slot held alone; a lock that is still held then is
+	// waited for with the slot yielded once more, up to slotAndLockTries times, and
+	// after that with the slot kept (no check can wait for the lock beside it).
+	for try := 0; ; try++ {
+		var resume func()
+		yielding := n.SlotYield != nil && try < slotAndLockTries
+		turn, err = n.GateLock.Take(ctx, c.id, func(by string) {
+			// A check's lock says its own wait, naming more (Check.heldLine).
+			if !saysItsOwn && try == 0 {
+				n.print(fmt.Sprintf("  wait    %s's gate lock is held by %s: waiting for it before %s\n", n.Host, by, what))
+			}
+			// The close-out says it is waiting, so that mw status and the quiet
+			// alarm do not take the story for quiet while it queues.
+			n.markCloseOut(ctx, c.id, c.began, true)
+			if yielding && resume == nil {
+				resume = n.SlotYield(ctx)
+			}
+		})
+		waited += turn.Waited
+		waitedFor = cmp.Or(waitedFor, turn.For)
+		if resume == nil {
+			break
 		}
-		// The close-out says it is waiting, so that mw status and the quiet
-		// alarm do not take the story for quiet while it queues.
-		n.markCloseOut(ctx, c.id, c.began, true)
-		if n.SlotYield != nil && resume == nil {
-			resume = n.SlotYield(ctx)
+		if err == nil && turn.Holding != nil {
+			// The lock is held and the slot is shared: the lock goes back first.
+			if releaseErr := turn.Holding.Release(context.Background()); releaseErr != nil {
+				report.Notes = append(report.Notes, fmt.Sprintf("%s's gate lock could not be given back before the merge slot was taken alone again: %v", n.Host, releaseErr))
+			}
+			resume()
+			continue
 		}
-	})
-	if resume != nil {
 		resume()
+		break
 	}
+	turn.Waited, turn.For = waited, waitedFor
 	if err != nil {
 		n.markCloseOut(ctx, c.id, c.began, false)
 		var handBack GateLockHandBack
