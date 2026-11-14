@@ -21,7 +21,7 @@ since: 2026-10-01
 Point every bd call at the vault with -C, as its own Bash call.
 ```
 
-A superseded fact carries `superseded-by:`, a retired one `retired:` and a `reason:`. Only a current fact is read at boot; the others stay on disk with their reasons.
+A superseded fact carries `superseded-by:`, a retired one `retired:` and a `reason:`. A fact added by `mw memory add` also carries `placed:`, the moment it was added (RFC 3339, UTC), by which make-room orders the facts of one day. Only a current fact is read at boot; the others stay on disk with their reasons.
 
 **What goes in.** Facts that would have saved a Builder real time: a command that needs a flag, a test that cannot run in parallel, a path that looks right and is not, a tool whose error means something else; and choices already made, so they are not made twice. One sentence each.
 

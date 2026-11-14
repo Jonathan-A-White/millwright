@@ -144,6 +144,11 @@ func (m Memory) clock() time.Time {
 	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
+// placedNow is the moment a fact is added, as Placed holds it.
+func (m Memory) placedNow() string {
+	return m.clock().UTC().Format(time.RFC3339)
+}
+
 func (m Memory) today() string {
 	return m.clock().UTC().Format(FactDateLayout)
 }
@@ -463,7 +468,7 @@ func (m Memory) newFact(ctx context.Context, req MemoryAdd) (RigFact, []RigFact,
 	}
 	fact := RigFact{
 		Slug: slug, Subject: req.Subject, Kind: req.Kind, Status: FactCurrent,
-		Source: req.Source, Since: m.today(), Sentence: strings.TrimSpace(req.Sentence),
+		Source: req.Source, Since: m.today(), Placed: m.placedNow(), Sentence: strings.TrimSpace(req.Sentence),
 	}
 	return fact, nearFacts(fact, facts), nil
 }
@@ -585,7 +590,7 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 	// the boot render, so a supersede never grows it.
 	successor := RigFact{
 		Slug: slug, Subject: old.Subject, Kind: old.Kind, Status: FactCurrent,
-		Source: req.Source, Since: m.today(), Sentence: strings.TrimSpace(req.Sentence),
+		Source: req.Source, Since: m.today(), Placed: m.placedNow(), Sentence: strings.TrimSpace(req.Sentence),
 		Supersedes: old.Slug, Unbooted: old.Unbooted,
 	}
 	old.Status, old.SupersededBy = FactSuperseded, slug
@@ -1466,8 +1471,9 @@ type roomMove struct {
 // those rules, a gotcha or decision of any age whose source is a story that is
 // closed and landed (Landed); never a sentence beginning 'His ' or holding 'the
 // Governor', "Governor's" or 'his words'; never an aged one with
-// a since within MakeRoomKeepDays days; the oldest since first, then the subject
-// least queried (as stats counts), then by slug. Each goes through Demote with
+// a since within MakeRoomKeepDays days; the oldest since first, then, of one day, the
+// one placed first (the moment it was added), then the subject least queried (as
+// stats counts), then by slug. Each goes through Demote with
 // a question that is checked to put it in the top EvalTop results: the first
 // words of its own sentence (a decision gets a second question first: its
 // subject's words plus those first words); a file's decision or a landed
@@ -1596,6 +1602,11 @@ func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, 
 			return a.tier < b.tier
 		case a.fact.Since != b.fact.Since:
 			return a.fact.Since < b.fact.Since
+		case a.fact.Placed != b.fact.Placed:
+			// One day's facts tie on Since: the one placed last goes last, so
+			// the fact just added is not the first of its day to be demoted.
+			// A fact with no Placed is older than any that has one.
+			return a.fact.Placed < b.fact.Placed
 		case counts[a.fact.Subject] != counts[b.fact.Subject]:
 			return counts[a.fact.Subject] < counts[b.fact.Subject]
 		}
