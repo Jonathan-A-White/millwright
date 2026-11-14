@@ -16,7 +16,8 @@ import (
 // kept: the batch waits as it always did.
 //
 // The one lock order of the rig's merge slot and the host's gate lock is the slot,
-// then the lock (a check, a close-out and an after-landing keep it). A batch that
+// then the lock (a check and a close-out keep it; the after-landing lock is no
+// merge slot of the rig and is taken with no gate lock). A batch that
 // yields the slot for a wait for the gate lock holds the lock when the wait ends,
 // so it gives the lock back before it takes the slot alone again (Next.takeTheGateLock),
 // and it does not yield the slot for a wait for a calm host while it holds the lock
