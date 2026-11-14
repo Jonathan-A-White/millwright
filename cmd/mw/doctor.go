@@ -419,6 +419,7 @@ func newDoctorCmd() *cobra.Command {
 			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget, tmpLeftovers.GoBuildBudget = tmpLeftoversBudget, goBuildBudget
+			tmpLeftovers.GateHolder = hostGateHolder()
 			rootDisk := doctor.NewRootDiskBudget()
 			rootDisk.Budget, rootDisk.Margin = rootDiskBudget, rootDiskMargin
 			rootDisk.Note = func(ctx context.Context, text string) error {

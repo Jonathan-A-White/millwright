@@ -45,6 +45,23 @@ var tmpLeftoversLiveGoProcessNames = map[string]bool{
 	"compile":   true,
 	"link":      true,
 	"vet":       true,
+	// make runs a rig's gate (make test, then make lint): between its go steps
+	// no go process is live, but make is (mw-gq6.1332).
+	"make": true,
+}
+
+// tmpLeftoversGateVerbs are the mw subcommands that run a rig's gate, or a part
+// of it, or the commands after a landing: the mw process is alive across the
+// gaps between the go steps of its gate, and across the gaps between a split
+// gate's parts, where the gate lock is given back (mw-gq6.1332). mw dispatch is
+// not here: it lives for a whole session, and its gate is taken under the lock.
+var tmpLeftoversGateVerbs = map[string]bool{
+	"check":         true,
+	"next":          true,
+	"land":          true,
+	"after-landing": true,
+	"suite":         true,
+	"verify":        true,
 }
 
 // The tmp-leftovers check's damper: a short idle between two cures, and a
@@ -99,6 +116,11 @@ type TmpLeftovers struct {
 	// GoClean runs when GoBuildDir is past its budget. Nil runs the real `go
 	// clean -cache`.
 	GoClean func(ctx context.Context) error
+	// GateHolder says whose gate holds this host's gate lock now, "" for
+	// nobody (hostlock.Gate.Holder). A held gate lock is a gate under way,
+	// which has gaps between its go steps with no go process live: the cache
+	// is left alone while it is held. Nil reads as nobody.
+	GateHolder func() string
 
 	// cured is what the last Cure removed, and curedBytes what it freed,
 	// read by WayBack once Cure has run. Empty before any cure runs in this
@@ -166,7 +188,8 @@ func (t *TmpLeftovers) Probe(context.Context) (application.Verdict, string) {
 // budget and not live. Neither runs when its own half is not faulty: a check
 // faulty only on GoBuildDir never touches a dead leftover still under
 // budget, and the reverse; a live GoBuildDir is left for a later tick rather
-// than cleaned out from under a running go build, test or vet, and so is a
+// than cleaned out from under a running go build, test or vet, or a gate in
+// the gap between its go steps (mw-gq6.1332), and so is a
 // go clean that fails because one started meanwhile.
 func (t *TmpLeftovers) Cure(ctx context.Context) error {
 	dead, err := t.deadLeftovers()
@@ -340,8 +363,9 @@ func (t *TmpLeftovers) pathSize(path string, info os.FileInfo) (int64, error) {
 }
 
 // goBuildLive reports whether GoBuildDir should be left alone rather than
-// faulted on or cleaned: something on this host has a file open under it, or
-// a go build/test/vet process of its own is running — either is reason
+// faulted on or cleaned: something on this host has a file open under it, a
+// go build/test/vet process of its own is running, the gate lock is held, or a
+// mw check, next or land is running — any is reason
 // enough to leave a live cache alone even past budget.
 func (t *TmpLeftovers) goBuildLive() (bool, error) {
 	procDir := t.procDir()
@@ -352,7 +376,15 @@ func (t *TmpLeftovers) goBuildLive() (bool, error) {
 	if open {
 		return true, nil
 	}
-	return anyProcessNamed(procDir, tmpLeftoversLiveGoProcessNames)
+	// A held gate lock is a gate under way, whether or not a go process is live
+	// at this instant (mw-gq6.1332).
+	if t.GateHolder != nil && t.GateHolder() != "" {
+		return true, nil
+	}
+	if live, err := anyProcessNamed(procDir, tmpLeftoversLiveGoProcessNames); err != nil || live {
+		return live, err
+	}
+	return anyMwGateProcess(procDir)
 }
 
 // dirSize is dir's size, the way pathSize sums a directory, or an error for a
@@ -487,6 +519,38 @@ func anyProcessNamed(procDir string, names map[string]bool) (bool, error) {
 			continue
 		}
 		if names[strings.TrimSpace(string(comm))] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// anyMwGateProcess reports whether any process under procDir is a mw running one
+// of tmpLeftoversGateVerbs, read from <procDir>/<pid>/comm and cmdline: a gate's
+// parts, and the gaps between them, are one such process's. A process whose
+// files this check cannot read is treated as not one.
+func anyMwGateProcess(procDir string) (bool, error) {
+	entries, err := os.ReadDir(procDir)
+	if err != nil {
+		return false, fmt.Errorf("listing %s: %w", procDir, err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(entry.Name()); err != nil {
+			continue
+		}
+		comm, err := os.ReadFile(filepath.Join(procDir, entry.Name(), "comm"))
+		if err != nil || strings.TrimSpace(string(comm)) != "mw" {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join(procDir, entry.Name(), "cmdline"))
+		if err != nil {
+			continue
+		}
+		args := strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00")
+		if len(args) > 1 && tmpLeftoversGateVerbs[args[1]] {
 			return true, nil
 		}
 	}
