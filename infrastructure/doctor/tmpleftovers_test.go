@@ -560,3 +560,96 @@ func TestTheTmpLeftoversCheckEndsItsEpisodeOnlyWithACureThatFreedSomething(t *te
 		t.Errorf("expected a cure that cleaned go-build to end its episode")
 	}
 }
+
+// tlStartProcess is a process named comm, with the command line args, appearing
+// in the fake /proc: /proc/<pid>/cmdline holds the arguments NUL-separated.
+func tlStartProcess(t *testing.T, proc, pid, comm string, args ...string) {
+	t.Helper()
+	pidDir := filepath.Join(proc, pid)
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte(comm+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmdline := strings.Join(append([]string{comm}, args...), "\x00") + "\x00"
+	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte(cmdline), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mw-gq6.1332: a gate is `make test && scripts/check-codemap.sh`, with a gap
+// between its go steps in which no go process is live: the cure ran go clean
+// -cache in that gap and the next step failed 'package sort is not in std'.
+func TestGoBuildCureLeavesTheCacheWhileAGateIsRunningBetweenGoSteps(t *testing.T) {
+	tmp, proc := tlHost(t)
+	goBuildDir := tlGoBuildPastBudget(t)
+	held := "the gate of mw-gq6.1291"
+	var cleaned int
+	check := &doctor.TmpLeftovers{
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 100,
+		GateHolder: func() string { return held },
+		GoClean:    func(context.Context) error { cleaned++; return nil },
+	}
+
+	verdict, said := check.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.Contains(said, "left alone") {
+		t.Fatalf("with a gate lock held and no go process, expected ok naming 'left alone', got %s %q", verdict, said)
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("curing: %v", err)
+	}
+	if cleaned != 0 {
+		t.Fatalf("expected go clean -cache never to run while a gate lock is held, ran %d times", cleaned)
+	}
+	if _, err := os.Stat(filepath.Join(goBuildDir, "blob")); err != nil {
+		t.Fatalf("expected go-build's contents to remain: %v", err)
+	}
+
+	// The gate ends: the cache is past budget and nothing is running, so it is cured as before.
+	held = ""
+	if verdict, _ := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+		t.Fatalf("with the gate over, expected faulty, got %s", verdict)
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("curing: %v", err)
+	}
+	if cleaned != 1 {
+		t.Fatalf("expected go clean -cache to run once with no gate running, ran %d times", cleaned)
+	}
+}
+
+// A mw check, next or land is running a gate (or a part of one, between which
+// the gate lock is given back): the cache is left alone while it runs.
+func TestGoBuildCureLeavesTheCacheWhileAMwGateProcessIsRunning(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		comm string
+		args []string
+		live bool
+	}{
+		{"mw check", "mw", []string{"check", "mw-gq6.1291", "--part", "2"}, true},
+		{"mw next", "mw", []string{"next"}, true},
+		{"mw land", "mw", []string{"land", "mw-gq6.1291"}, true},
+		{"make test", "make", []string{"test"}, true},
+		{"mw doctor", "mw", []string{"doctor"}, false},
+		{"mw status", "mw", []string{"status"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp, proc := tlHost(t)
+			goBuildDir := tlGoBuildPastBudget(t)
+			tlStartProcess(t, proc, "300", tc.comm, tc.args...)
+			check := &doctor.TmpLeftovers{
+				TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, GoBuildBudget: 100,
+				GoClean: func(context.Context) error { return nil },
+			}
+			verdict, _ := check.Probe(context.Background())
+			if tc.live && verdict != application.DoctorOK {
+				t.Fatalf("expected ok (left alone) while %s runs, got %s", tc.name, verdict)
+			}
+			if !tc.live && verdict != application.DoctorFaulty {
+				t.Fatalf("expected faulty while only %s runs, got %s", tc.name, verdict)
+			}
+		})
+	}
+}
