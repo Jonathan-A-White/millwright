@@ -914,6 +914,11 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		// The finder's host is about the finder's work, so the bug goes to any host
 		// (mw-gq6.1255).
 		overrides.Host = domain.HostAuto
+		// Unless its epic says why its host stays: the bug is then worked there
+		// too, and the epic's host is its own by inheritance (mw-gq6.1288).
+		if host, _ := EpicKeepsHost(c.detail.Defaults); host != "" {
+			overrides.Host = ""
+		}
 		acceptance := ""
 		if bug.item != nil {
 			acceptance = bug.item.Acceptance()
