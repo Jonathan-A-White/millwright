@@ -225,6 +225,8 @@ const (
 
 	BuilderNiceEnv = "MW_BUILDER_NICE"
 	BuilderJobsEnv = "MW_BUILDER_JOBS"
+	// BuilderTestRunsEnv names builder_test_runs in the environment.
+	BuilderTestRunsEnv = "MW_BUILDER_TEST_RUNS"
 )
 
 // The environment variables bd itself reads to reach a Dolt database server
@@ -2183,6 +2185,27 @@ func BuilderJobsAt(now time.Time) (int, error) {
 	n, err := strconv.Atoi(said)
 	if err != nil || n < 1 {
 		return 0, fmt.Errorf("builder_jobs is %q: set it to a whole number of 1 or more, in %s or with %s", said, File, BuilderJobsEnv)
+	}
+	return n, nil
+}
+
+// BuilderTestRuns reports the most test runners this host starts at once across a
+// gate's parts, an after-landing command and a Builder's own test run through mw:
+// $MW_BUILDER_TEST_RUNS if set, otherwise the root-table `builder_test_runs` key
+// of ~/.config/mw/config.toml, and 0, no limit, when neither says (or says 0).
+// builder_jobs caps the workers inside one run and not how many runs start
+// together (mw-gq6.1303). A whole number of 0 or more is taken.
+func BuilderTestRuns() (int, error) {
+	said, _, err := knobIn("builder_test_runs", BuilderTestRunsEnv, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(said)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("builder_test_runs is %q: set it to a whole number, 1 or more to limit the runs and 0 for no limit, in %s or with %s", said, File, BuilderTestRunsEnv)
 	}
 	return n, nil
 }

@@ -51,6 +51,7 @@ type Checks struct {
 	shell    string
 	nice     int
 	jobs     int
+	runs     *TestRuns
 	read     func() (GateLines, error)
 	now      func() time.Time
 }
@@ -111,6 +112,13 @@ func WithNice(n int) CheckOption {
 // default, leaves the command the environment it was started in.
 func WithJobs(n int) CheckOption {
 	return func(c *Checks) { c.jobs = n }
+}
+
+// WithTestRuns has every run of a rig's tests, a gate's part or a changed-specs
+// line alike, take one of the host's test-runner slots before it starts and give
+// it back when it ends (mw-gq6.1303). A nil runs, the default, is no limit.
+func WithTestRuns(runs *TestRuns) CheckOption {
+	return func(c *Checks) { c.runs = runs }
 }
 
 // WithTimingTests gives each rig's commands MW_TIMING=skip and MW_TIMING_TESTS
@@ -206,7 +214,14 @@ func (c *Checks) runLineWith(ctx context.Context, rig, dir, command string, extr
 	for _, name := range names {
 		env = append(env, name+"="+extra[name])
 	}
+	// The slot is taken before the run's own work, so a wait for it is no part of
+	// anything the run is given its time for.
+	release, err := c.runs.Take(ctx, "tests of "+rig)
+	if err != nil {
+		return application.Checked{}, fmt.Errorf("running `%s`: %w", command, err)
+	}
 	output, err := runLine(ctx, c.shell, command, dir, c.nice, env)
+	release()
 	checked := application.Checked{Command: command, Output: output, Passed: err == nil}
 	if err == nil {
 		return checked, nil

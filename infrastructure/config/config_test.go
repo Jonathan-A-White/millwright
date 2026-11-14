@@ -2447,6 +2447,36 @@ func TestBuilderJobsIsUnsetUntilAHostSaysOtherwise(t *testing.T) {
 	}
 }
 
+func TestBuilderTestRunsIsUnsetUntilAHostSaysOtherwise(t *testing.T) {
+	t.Setenv(config.BuilderTestRunsEnv, "")
+	writeConfig(t, "cap = 4\n")
+	if got, err := config.BuilderTestRuns(); err != nil || got != 0 {
+		t.Fatalf("builder_test_runs = %d, %v; want 0 (no limit)", got, err)
+	}
+	writeConfig(t, "builder_test_runs = 3\n")
+	if got, err := config.BuilderTestRuns(); err != nil || got != 3 {
+		t.Fatalf("builder_test_runs = %d, %v; want 3", got, err)
+	}
+	writeConfig(t, "builder_test_runs = 0\n")
+	if got, err := config.BuilderTestRuns(); err != nil || got != 0 {
+		t.Fatalf("builder_test_runs = 0 gave %d, %v; want 0 (no limit)", got, err)
+	}
+	t.Setenv(config.BuilderTestRunsEnv, "2")
+	if got, err := config.BuilderTestRuns(); err != nil || got != 2 {
+		t.Fatalf("MW_BUILDER_TEST_RUNS=2 gave %d, %v; want 2", got, err)
+	}
+}
+
+func TestBuilderTestRunsRefusesWhatIsNotACount(t *testing.T) {
+	t.Setenv(config.BuilderTestRunsEnv, "")
+	for _, bad := range []string{"-1", "two", "1.5"} {
+		writeConfig(t, "builder_test_runs = "+bad+"\n")
+		if _, err := config.BuilderTestRuns(); err == nil || !strings.Contains(err.Error(), "builder_test_runs") {
+			t.Errorf("builder_test_runs = %s gave %v, want a refusal naming builder_test_runs", bad, err)
+		}
+	}
+}
+
 func TestBuilderJobsRefusesWhatCapsNothing(t *testing.T) {
 	t.Setenv(config.BuilderJobsEnv, "")
 	for _, bad := range []string{"0", "-1", "two", "1.5"} {

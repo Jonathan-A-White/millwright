@@ -81,6 +81,10 @@ func newLandCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			testRuns, err := hostTestRuns()
+			if err != nil {
+				return err
+			}
 			turns, turnsSaid, err := config.NextMaxTurnsSaid()
 			if err != nil {
 				return err
@@ -165,7 +169,7 @@ func newLandCmd() *cobra.Command {
 				Out:       cmd.OutOrStdout(),
 				Err:       cmd.ErrOrStderr(),
 
-				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs)),
+				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs), rig.WithAfterTestRuns(testRuns)),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
 				LiveSite:     verifyWeb{},
