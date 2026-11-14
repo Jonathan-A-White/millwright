@@ -162,6 +162,12 @@ func TestVultrBoostCheckGivesNoVerdictWhileTheBoxsBootstrapRuns(t *testing.T) {
 	if strings.Contains(out, "check = ") || strings.Contains(out, "fault = ") || !strings.Contains(errOut, "has not finished") {
 		t.Errorf("expected neither a fault nor a check line, and why on standard error, got out %q, err %q", out, errOut)
 	}
+	// The cloud check says the last line of standard error when the command
+	// fails: it says the box has not finished, not that it could not be asked.
+	lines := strings.Split(strings.TrimSpace(errOut), "\n")
+	if last := lines[len(lines)-1]; !strings.Contains(last, "has not finished") || strings.Contains(last, "could not ask") {
+		t.Errorf("expected the last line of standard error to say the bootstrap has not finished, got %q", last)
+	}
 }
 
 // cloud6's bootstrap died at step 10 of 13 on 2026-11-13 and its cloud-init
@@ -256,5 +262,91 @@ func TestVultrBoostCheckNamesASnapshotFileThatReadsAsZeros(t *testing.T) {
 	}
 	if len(faults) != 1 || !strings.HasPrefix(faults[0], "1 of the ") || !strings.Contains(faults[0], "~/postern/node_modules/playwright/lib/matchers/expect.js") || !strings.Contains(faults[0], "did not write the whole disk") {
 		t.Fatalf("expected one fault naming the snapshot's zero-filled file, got %q in:\n%s", faults, out)
+	}
+}
+
+// boostSnapshotRig is boostCheckRig with what snapshot reaches in front: mw
+// (secrets get), age (it decrypts a state that holds the instance abc-123), jq's
+// own and a curl that notes its calls, answering a snapshot. The age key and the
+// encrypted state are files of the vault's. It returns the environment, the
+// box's home and the file curl notes its calls in.
+func boostSnapshotRig(t *testing.T) (env []string, home, curlCalls string) {
+	t.Helper()
+	env, home = boostCheckRig(t, "all modules verified", soundKernelLog)
+	curlCalls = filepath.Join(home, "curl-calls")
+	run := filepath.Join(home, "run")
+	for _, dir := range []string{run, filepath.Join(home, ".config", "mw")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := `{"resources":[{"type":"vultr_instance","instances":[{"attributes":{"id":"abc-123"}}]}]}`
+	bin := filepath.Join(home, "check-bin")
+	for path, text := range map[string]string{
+		filepath.Join(bin, "mw"):  "#!/bin/bash\n[ \"$1 $2\" = 'secrets get' ] && echo token-9\n",
+		filepath.Join(bin, "age"): "#!/bin/bash\necho '" + state + "'\n",
+		filepath.Join(bin, "curl"): "#!/bin/bash\necho \"$*\" >>" + curlCalls + "\ncat >/dev/null\n" +
+			"echo '{\"snapshot\":{\"id\":\"snap-1\"}}'\n",
+		filepath.Join(home, ".config", "mw", "age.key"): "AGE-SECRET-KEY-1\n",
+		// The state the vault keeps for cloud1, which the age stand-in "decrypts".
+		filepath.Join(home, "vault", "hosts", "vultr", "terraform.tfstate.age"): "encrypted\n",
+	} {
+		if err := os.WriteFile(path, []byte(text), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env = append(env, "VULTR_BOOST_RUN="+run)
+	return env, home, curlCalls
+}
+
+// A box whose bootstrap ended in error is no image to make boxes from: snapshot
+// asks the box first and refuses, and asks Vultr for nothing (mw-gq6.1277).
+func TestVultrBoostSnapshotRefusesABoxWhoseBootstrapEndedInError(t *testing.T) {
+	env, home, curlCalls := boostSnapshotRig(t)
+	shim := "#!/bin/sh\necho 'status: error'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(home, "check-bin", "cloud-init"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := runBoost(t, env, "snapshot", "--name", "cloud1")
+	if err == nil {
+		t.Fatalf("expected snapshot of a box whose bootstrap ended in error to fail, got:\n%s", out)
+	}
+	lines := strings.Split(strings.TrimSpace(errOut), "\n")
+	if last := lines[len(lines)-1]; !strings.Contains(last, "cloud1") || !strings.Contains(last, "bootstrap ended in error") {
+		t.Errorf("expected the last line of standard error to name cloud1 and its bootstrap's error, got %q", last)
+	}
+	if got := readOrEmpty(curlCalls); got != "" {
+		t.Errorf("Vultr was asked for a snapshot of a box whose bootstrap ended in error: curl was called with %q", got)
+	}
+}
+
+// A box whose bootstrap has not finished is not snapshotted either, and one whose
+// bootstrap is done is.
+func TestVultrBoostSnapshotWaitsForABootstrapAndTakesABoxWhoseBootstrapIsDone(t *testing.T) {
+	env, home, curlCalls := boostSnapshotRig(t)
+	cloudInit := filepath.Join(home, "check-bin", "cloud-init")
+	if err := os.WriteFile(cloudInit, []byte("#!/bin/sh\necho 'status: running'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, err := runBoost(t, env, "snapshot", "--name", "cloud1")
+	if err == nil {
+		t.Fatalf("expected snapshot of a box still bootstrapping to fail")
+	}
+	lines := strings.Split(strings.TrimSpace(errOut), "\n")
+	if last := lines[len(lines)-1]; !strings.Contains(last, "has not finished") {
+		t.Errorf("expected the last line of standard error to say the bootstrap has not finished, got %q", last)
+	}
+	if got := readOrEmpty(curlCalls); got != "" {
+		t.Errorf("Vultr was asked for a snapshot of a box still bootstrapping: curl was called with %q", got)
+	}
+	if err := os.WriteFile(cloudInit, []byte("#!/bin/sh\necho 'status: done'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, err := runBoost(t, env, "snapshot", "--name", "cloud1")
+	if err != nil {
+		t.Fatalf("snapshot of a box whose bootstrap is done: %v: %s", err, errOut)
+	}
+	if !strings.Contains(out, "snap-1") || !strings.Contains(readOrEmpty(curlCalls), "snapshots") {
+		t.Errorf("expected the snapshot asked of Vultr and named, got out %q, curl %q", out, readOrEmpty(curlCalls))
 	}
 }

@@ -318,8 +318,14 @@ one that opens it:
   --connectivity-only` on every checkout under the box's home (the vault and each rig), `go mod
   verify` in `~/millwright`, counts the `EXT4-fs error` lines of `dmesg`, and looks under the home
   for a file older than the box's boot that begins with a block of zeros: cloud6 came up with the
-  last 36 GiB of its 350 GiB disk unwritten by the restore, and passed the first three. It changes
-  nothing on the box and takes one to two minutes.
+  last 36 GiB of its 350 GiB disk unwritten by the restore, and passed the first three. It
+  changes nothing on the box and takes one to two minutes. Before any of that it reads the
+  bootstrap's status (`cloud-init status`): a box whose bootstrap has not finished is given no
+  verdict and is asked again at the next check, and a box whose bootstrap ended in error is not
+  cleared whatever its disk reads (cloud6's died at step 10 of 13, mw-gq6.1189): the check prints
+  one `fault = cloud-init: the bootstrap ended in error` line and fails with the disk not read.
+  The home reads that line as a fault of the box, like any other, and not as a box that could not
+  be asked.
 - The verdict is in the book (`checked`, `check_fault`) and in the box's gate note,
   `host.<box>.box-gate`, in the beads server: `ok <time>` or `hold <time>: <why>`. On the box,
   `mw dispatch` reads the note before anything else, and does nothing, not even a sync, unless it
@@ -429,8 +435,10 @@ a snapshot is working in about two. To make the snapshot:
 
 1. `contrib/vultr-boost up --name cloud1`, and let the bootstrap finish
    (`~/boost-bootstrap.log` on the box; it shows in `mw status` once it dispatches).
-2. `contrib/vultr-boost snapshot --name cloud1` asks Vultr for a snapshot of it
-   and prints its id. Vultr takes some minutes to finish it.
+2. `contrib/vultr-boost snapshot --name cloud1` asks the box whether its bootstrap finished
+   and, only when it did, asks Vultr for a snapshot of it and prints its id. A box whose
+   bootstrap has not finished or ended in error is not snapshotted: it would become the image
+   every later box is made from. Vultr takes some minutes to finish the snapshot.
 3. Put the id in `[cloud] snapshot = "<id>"`, and `contrib/vultr-boost down
    --name cloud1`.
 

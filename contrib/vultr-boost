@@ -40,7 +40,9 @@
 #         costs; with no box, the price one would cost.
 # snapshot  makes a Vultr snapshot of a box that is up and bootstrapped, and prints its
 #         id: the ready-made image `up --snapshot ID` (mw's [cloud] snapshot) makes a box
-#         from, working in a couple of minutes instead of bootstrapping in full.
+#         from, working in a couple of minutes instead of bootstrapping in full. It asks the
+#         box first, over ssh, and snapshots none whose bootstrap (cloud-init) has not finished or
+#         ended in error (mw-gq6.1277).
 # spend   what Vultr's pending charges say the boxes named have cost this month, in
 #         dollars, or "unknown" when the billing could not be read: mw's cloud check
 #         takes it when it is more than its own count.
@@ -352,9 +354,10 @@ if [ "$DRY" = 1 ]; then
 		step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
 		;;
 	snapshot)
-		STEPS=2
+		STEPS=3
 		echo "vultr-boost snapshot --dry-run: nothing below is run"
 		step "state: open $STATE_AGE with age (read only) and read $NAME's id from it"
+		step "ssh $(box_user)@<$NAME's address>: ask cloud-init status whether the bootstrap finished; a box whose bootstrap has not finished or ended in error is not snapshotted (nothing on the box changes)"
 		step "curl -X POST $API/snapshots with the token on stdin: a snapshot of $NAME, whose id is printed for [cloud] snapshot"
 		;;
 	check)
@@ -774,13 +777,18 @@ box_id() {
 }
 
 do_snapshot() {
-	STEPS=2
-	need mw age jq curl
+	STEPS=3
+	need mw age jq curl ssh
 	step "state: read $NAME's id from the vault's"
-	local id token reply snap
+	local id token reply snap rc=0
 	open_priv
 	id=$(box_id)
 	[ -n "$id" ] || die "no box $NAME in the vault's state: make one with up --name $NAME, let it bootstrap, then snapshot it"
+	step "box: ask whether $NAME's bootstrap finished"
+	box_address "$NAME"
+	ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$(box_user)@$ADDR" "sh -s" <<<"$BOX_BOOTSTRAP" >/dev/null || rc=$?
+	bootstrap_refused "$rc" "$(box_user)@$ADDR" "snapshotted"
+	[ "$rc" = 0 ] || die "could not ask $NAME whether its bootstrap finished ($(box_user)@$ADDR)"
 	step "vultr: snapshot $id"
 	token=$(secret vultr_api_token) || die "no vultr_api_token kept: mw secrets put vultr_api_token < token.txt"
 	reply=$(printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' "$token" |
@@ -946,18 +954,25 @@ do_set_pace() {
 # cloud6 came up on 2026-11-13 with every file above 314 GiB of its 350 GiB disk reading zero,
 # the restore not having written the end of the disk, and passed the three checks above. Go's
 # and the rigs' testdata directories hold files that are zeros by design, and are left out.
-BOX_CHECK_BOOTSTRAP_ERROR=76
-BOX_CHECK='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:/usr/local/go/bin:$PATH
+BOX_BOOTSTRAP_PENDING=75
+BOX_BOOTSTRAP_ERROR=76
+# BOX_BOOTSTRAP is the one reader of the bootstrap's verdict, run on the box by check (as the
+# head of BOX_CHECK) and by snapshot: cloud-init's status is running or not yet (exit 75, and
+# the box says so on standard error), error (a "fault = " line and exit 76), or done, or no
+# cloud-init on the box (exit 0, and the caller goes on). bootstrap_refused is its reader on
+# the home, for the two that stop the caller (mw-gq6.1282).
+BOX_BOOTSTRAP='export PATH=$HOME/.local/bin:$HOME/.local/go/bin:/usr/local/go/bin:$PATH
 boot=$(command -v cloud-init >/dev/null 2>&1 && cloud-init status 2>/dev/null)
 if printf "%s\n" "$boot" | grep -q "^status: \(running\|not\)"; then
-	echo "the bootstrap of this box (cloud-init) has not finished: it is checked once it has" >&2
-	exit 75
+	echo "the bootstrap of this box (cloud-init) has not finished" >&2
+	exit '"$BOX_BOOTSTRAP_PENDING"'
 fi
 if printf "%s\n" "$boot" | grep -q "^status: error"; then
 	echo "fault = cloud-init: the bootstrap ended in error (cloud-init status says error), so the box is not whole whatever its disk reads: its log is ~/boost-bootstrap.log on the box"
-	exit '"$BOX_CHECK_BOOTSTRAP_ERROR"'
+	exit '"$BOX_BOOTSTRAP_ERROR"'
 fi
-n=0
+'
+BOX_CHECK=$BOX_BOOTSTRAP'n=0
 last() { printf "%s\n" "$1" | grep . | tail -n 1 | cut -c1-200; }
 walk() { git --git-dir="$1/.git" --work-tree="$1" fsck --connectivity-only --no-progress 2>&1 >/dev/null; }
 for g in "$HOME"/*/.git; do
@@ -1018,6 +1033,15 @@ else
 fi
 echo "check = $n checkouts (git fsck --connectivity-only), go mod verify in ~/millwright, EXT4-fs errors in dmesg, zero-filled files older than this boot"'
 
+# bootstrap_refused RC BOX WHAT: dies when RC, the exit of BOX_BOOTSTRAP's run on BOX, says the
+# bootstrap has not finished or ended in error; WHAT is what the box is not (cleared, snapshotted).
+bootstrap_refused() {
+	case $1 in
+	"$BOX_BOOTSTRAP_PENDING") die "$NAME's bootstrap (cloud-init) has not finished, so it is not $3: ask again once it has" ;;
+	"$BOX_BOOTSTRAP_ERROR") die "$NAME's bootstrap ended in error (cloud-init status), so it is not $3: its log is ~/boost-bootstrap.log on $2; to destroy the box: mw cloud down $NAME" ;;
+	esac
+}
+
 do_check() {
 	need ssh
 	[ -n "$NAME_ARG" ] || die "check needs --name NAME: the box to check the disk of"
@@ -1028,12 +1052,10 @@ do_check() {
 	local addr=$ADDR
 	step "box: check the disk of $(box_user)@$addr (git fsck, go mod verify, dmesg)"
 	out=$(ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$(box_user)@$addr" "sh -s" <<<"$BOX_CHECK") || rc=$?
-	if [ "$rc" = "$BOX_CHECK_BOOTSTRAP_ERROR" ]; then
-		# The box was asked and its answer is its fault line: it is printed, and the
-		# command fails so that no reader takes the box for cleared.
-		echo "$out"
-		die "$NAME's bootstrap ended in error (cloud-init status), so it is not cleared and its disk was not read: its log is ~/boost-bootstrap.log on $(box_user)@$addr; to destroy the box: mw cloud down $NAME"
-	fi
+	# The box was asked and its answer is its bootstrap's, and the command fails so that no
+	# reader takes the box for cleared; its fault line is printed first.
+	[ "$rc" != "$BOX_BOOTSTRAP_ERROR" ] || echo "$out"
+	bootstrap_refused "$rc" "$(box_user)@$addr" "cleared and its disk was not read"
 	[ "$rc" = 0 ] || die "could not ask $NAME to check its disk ($(box_user)@$addr)"
 	echo "$out"
 }

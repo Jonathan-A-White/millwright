@@ -237,3 +237,20 @@ echo "check = 12 checkouts (git fsck --connectivity-only), go mod verify in ~/mi
 		t.Error("a box that could not be asked is an error, got none")
 	}
 }
+
+// A box whose bootstrap ended in error is asked, and its answer is a fault
+// line and a failed command (mw-gq6.1282): it is a fault of the box, which the
+// home keeps and acts on, and no "could not be asked".
+func TestCheckBoxReadsABootstrapThatEndedInErrorAsAFault(t *testing.T) {
+	command, _ := standIn(t, `echo "==> [2/2] box: check the disk of mw@10.88.0.5"
+echo "fault = cloud-init: the bootstrap ended in error"
+echo "vultr-boost: cloud6's bootstrap ended in error (cloud-init status), so it is not cleared" >&2
+exit 1`)
+	found, err := cloud.Vultr{Command: command}.CheckBox(context.Background(), "cloud6")
+	if err != nil {
+		t.Fatalf("expected a fault and no error, got error %v", err)
+	}
+	if len(found.Faults) != 1 || !strings.Contains(found.Faults[0], "cloud-init: the bootstrap ended in error") {
+		t.Errorf("expected the one fault line of the bootstrap, got %q", found.Faults)
+	}
+}

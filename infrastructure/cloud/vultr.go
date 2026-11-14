@@ -246,14 +246,28 @@ func (v Vultr) SetPace(ctx context.Context, name string) (string, error) {
 // reads the box's WireGuard address off the hub and has the box check its own
 // disk over ssh. Each thing wrong is a "fault = " line of the wrapper's, and
 // its last "check = " line says the check ran to its end: without one the box
-// was not asked, which is an error and no verdict (mw-gq6.1172).
+// was not asked, which is an error and no verdict (mw-gq6.1172). A box whose
+// bootstrap ended in error is asked and answers with a "fault = " line and a
+// failed command, no "check = " line, its disk not read: that is a fault of
+// the box, not a box that could not be asked (mw-gq6.1282).
 func (v Vultr) CheckBox(ctx context.Context, name string) (application.CloudBoxChecked, error) {
 	out, err := v.run(ctx, checkBoxLimit, "check", "--name", name)
+	found, ran := readCheck(out)
 	if err != nil {
+		if len(found.Faults) > 0 && !ran {
+			return found, nil
+		}
 		return application.CloudBoxChecked{}, err
 	}
-	var found application.CloudBoxChecked
-	ran := false
+	if !ran {
+		return application.CloudBoxChecked{}, fmt.Errorf("%s check printed no \"check = \" line: whether %s is sound is not known", v.Command, name)
+	}
+	return found, nil
+}
+
+// readCheck reads the wrapper's "fault = " lines, and whether it printed its
+// last "check = " line.
+func readCheck(out string) (found application.CloudBoxChecked, ran bool) {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if fault, is := strings.CutPrefix(line, "fault = "); is && fault != "" {
@@ -263,10 +277,7 @@ func (v Vultr) CheckBox(ctx context.Context, name string) (application.CloudBoxC
 			ran = true
 		}
 	}
-	if !ran {
-		return application.CloudBoxChecked{}, fmt.Errorf("%s check printed no \"check = \" line: whether %s is sound is not known", v.Command, name)
-	}
-	return found, nil
+	return found, ran
 }
 
 // SetHarness implements application.CloudProvider: `set-harness --name <box>
@@ -381,7 +392,10 @@ func (v Vultr) run(ctx context.Context, limit time.Duration, args ...string) (st
 		}
 		// Terraform says what Vultr refused on standard error, a few lines
 		// above the wrapper's last: a refusal no retry mends is named so.
-		return "", application.ClassifyCloudError(failure, stderr.String())
+		// What the command printed is returned with its failure: a caller that
+		// reads a failed run's answer (CheckBox) has it, and the rest look at the
+		// error first.
+		return stdout.String(), application.ClassifyCloudError(failure, stderr.String())
 	}
 	return stdout.String(), nil
 }
