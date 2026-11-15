@@ -117,6 +117,22 @@ func (k Check) detachesPart(part GatePart, fit *callFit) bool {
 	return k.Slot == nil || !PartNeedsSlot(part) || fit.outrunsACall()
 }
 
+// cannotHoldSlotPastCall says a part would be run in the call though it takes the
+// merge slot and usually takes at least a whole call, because the check has no way
+// to start a process of its own to hold the slot until the part is done (no
+// PartStarter, no Logs, as with --log-is-stdout). A call cannot go on holding the
+// slot after it ends, and it would be cut off with the part half run, so the call
+// ends before it takes the slot or runs anything (mw-gq6.1322).
+func (k Check) cannotHoldSlotPastCall(part GatePart, fit *callFit) bool {
+	return k.Slot != nil && PartNeedsSlot(part) && fit.outrunsACall() && !k.detachesPart(part, fit)
+}
+
+// cannotDetachLine is the one line such a call ends with.
+func (k Check) cannotDetachLine(c *closeOut, label string, fit *callFit) string {
+	return fmt.Sprintf("checking %s: %s did not start: it takes the merge slot of %s and usually takes about %s, as long as a whole call or longer, and this check cannot start a process of its own to hold the slot until the part is done; nothing was run: run it without --log-is-stdout, as a foreground call from a Builder's session, with `mw check %s --part %d`",
+		c.id, label, c.path.Rig, gateWaited(fit.expected), c.id, k.Part)
+}
+
 // partRun is the process a call started for a part.
 type partRun struct {
 	pid     int

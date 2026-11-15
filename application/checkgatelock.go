@@ -206,7 +206,8 @@ func (f *callFit) left() time.Duration {
 // foreground check that can start a process of its own runs such a gate there
 // (Check.GateStarter, checkgatedetached.go, mw-gq6.1273), and such a part that takes
 // the merge slot the same (Check.detachesPart, mw-gq6.1289); neither gets here with
-// it, and one that cannot start a process starts it as it always was.
+// it; one that cannot start a process runs a whole check as it always was, and a
+// part that takes the merge slot ends in one line (cannotHoldSlotPastCall).
 func (f *callFit) late() bool { return f.expected < f.budget && f.expected > f.left() }
 
 // tooLateLine is the one line a foreground check ends with when it won the gate
