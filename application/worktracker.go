@@ -682,20 +682,24 @@ type EpicDetail struct {
 
 // NewEpic is an epic about to be filed: what it delivers, how it will be known
 // to be delivered, and the default Path its stories inherit. A Priority of zero
-// leaves the tracker's own default standing.
+// leaves the tracker's own default standing, unless MostUrgent says the epic is
+// to be filed at P0, which a zero Priority cannot say (mw-gq6.1321).
 type NewEpic struct {
 	Title           string
 	Description     string
 	SuccessCriteria string
 	Priority        int
-	Defaults        domain.Path
+	// MostUrgent files the epic at priority 0 (P0) whatever Priority holds.
+	MostUrgent bool
+	Defaults   domain.Path
 }
 
 // NewStory is a story about to be filed under an epic. Overrides are the fields
 // of the epic's default Path this story departs from, and are stored as the
 // story's metadata; Needs are the ids of the stories that must be finished
 // before it can be worked. A Priority or an EstimateMinutes of zero leaves the
-// tracker's own default standing.
+// tracker's own default standing, unless MostUrgent says the story is to be
+// filed at P0, which a zero Priority cannot say (mw-gq6.1321).
 //
 // A story with no epic is only filed when Standalone says so: a bead of the
 // factory's own making, such as a backend swap for a landing whose story had no
@@ -704,11 +708,13 @@ type NewStory struct {
 	EpicID string
 	// Standalone files the story with no parent, and is how an empty EpicID is
 	// told from one that was forgotten.
-	Standalone      bool
-	Title           string
-	Description     string
-	Acceptance      string
-	Priority        int
+	Standalone  bool
+	Title       string
+	Description string
+	Acceptance  string
+	Priority    int
+	// MostUrgent files the story at priority 0 (P0) whatever Priority holds.
+	MostUrgent      bool
 	EstimateMinutes int
 	Overrides       domain.Path
 	Needs           []string

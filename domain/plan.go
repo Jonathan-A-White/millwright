@@ -19,12 +19,13 @@ type Plan struct {
 }
 
 // PlanEpic is the epic a plan delivers. Defaults is the Path its stories are
-// worked by except where a story overrides it. A Priority of zero means the
-// plan does not say, and the tracker's own default stands.
+// worked by except where a story overrides it. A Priority that is absent means
+// the plan does not say, and the tracker's own default stands; a Priority of 0
+// is P0, the most urgent, and is filed as that (mw-gq6.1321).
 type PlanEpic struct {
 	Key         string `json:"key"`
 	Title       string `json:"title"`
-	Priority    int    `json:"priority"`
+	Priority    *int   `json:"priority"`
 	Description string `json:"description"`
 	Success     string `json:"success_criteria"`
 	Defaults    Path   `json:"defaults"`
@@ -32,12 +33,14 @@ type PlanEpic struct {
 
 // PlanStory is one story of a plan. Overrides are the fields of the epic's
 // default Path this story departs from; Needs are the keys of the stories that
-// must be finished before this one can be worked. A Priority or an Estimate of
-// zero means the plan does not say.
+// must be finished before this one can be worked. A Priority that is absent
+// means the plan does not say and the tracker's default stands; 0 is P0, the
+// most urgent. An Estimate of zero means the plan does not say: a story of no
+// minutes is not one anybody means, so zero cannot be meant there.
 type PlanStory struct {
 	Key         string   `json:"key"`
 	Title       string   `json:"title"`
-	Priority    int      `json:"priority"`
+	Priority    *int     `json:"priority"`
 	Estimate    int      `json:"estimate"`
 	Description string   `json:"description"`
 	Acceptance  string   `json:"acceptance"`
@@ -54,6 +57,28 @@ type PlanStory struct {
 	// --check's failure for it and is written to the filed story's metadata
 	// (mw-gq6.672). Empty waives nothing.
 	CallersOK string `json:"callers_ok,omitempty"`
+}
+
+// The priorities a plan may give, as the tracker holds them: 0 is the most
+// urgent (P0), 4 the least (P4).
+const (
+	planMostUrgent  = 0
+	planLeastUrgent = 4
+)
+
+// PriorityLabel is a priority as a person reads it: P0 to P4.
+func PriorityLabel(priority int) string {
+	return fmt.Sprintf("P%d", priority)
+}
+
+// priorityRefusal is why a plan's priority is not one the tracker holds, or
+// empty when it is absent or in range. who names the epic or story it is of.
+func priorityRefusal(who string, priority *int) string {
+	if priority == nil || (*priority >= planMostUrgent && *priority <= planLeastUrgent) {
+		return ""
+	}
+	return fmt.Sprintf("%s has the priority %d, and priorities run %d (P0, most urgent) to %d (P%d)",
+		who, *priority, planMostUrgent, planLeastUrgent, planLeastUrgent)
 }
 
 // PathOverrides are the fields of the epic's default Path this story departs
@@ -182,7 +207,7 @@ func FitTitleToSteps(title, storyID string, stepTitles []string) string {
 }
 
 // Validate reports every reason this plan cannot be filed: an epic with no
-// title, a story with no key, no title, a title over MaxTitleLength, no acceptance criteria or no Path, a
+// title or a priority outside 0..4, a story with no key, no title, a priority outside 0..4, a title over MaxTitleLength, no acceptance criteria or no Path, a
 // bug (a [bug] title or the bug label) whose acceptance has no Sweep line SweepOf passes, a
 // story of the FactoryRig whose acceptance has no Expect line ParseExpect reads, a
 // story waiting on a key no story in the plan has, and stories waiting on each
@@ -195,6 +220,9 @@ func (p Plan) Validate() error {
 	}
 	if n := len(p.Epic.Title); n > MaxTitleLength {
 		reasons = append(reasons, fmt.Sprintf("the epic has a title %d bytes long, and the tracker takes at most %d", n, MaxTitleLength))
+	}
+	if why := priorityRefusal("the epic", p.Epic.Priority); why != "" {
+		reasons = append(reasons, why)
 	}
 	if len(p.Stories) == 0 {
 		reasons = append(reasons, "the plan has no stories")
@@ -216,6 +244,9 @@ func (p Plan) Validate() error {
 		}
 		if n := len(story.Title); n > MaxTitleLength {
 			reasons = append(reasons, fmt.Sprintf("%s has a title %d bytes long, and the tracker takes at most %d", story.nameByKey(i), n, MaxTitleLength))
+		}
+		if why := priorityRefusal(name, story.Priority); why != "" {
+			reasons = append(reasons, why)
 		}
 		if strings.TrimSpace(story.Acceptance) == "" {
 			reasons = append(reasons, name+" has no acceptance criteria, so nobody could say it was done")

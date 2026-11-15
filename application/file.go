@@ -110,10 +110,14 @@ type FiledEpic struct {
 // tracker says it is now. A story just filed is held; a story read back later
 // may be anything.
 type FiledStory struct {
-	ID              string
-	Key             string
-	Title           string
-	Path            domain.Path
+	ID    string
+	Key   string
+	Title string
+	Path  domain.Path
+	// Priority is the story's priority as the tracker holds it, 0 (P0) to 4;
+	// the tree says it as P0..P4. A FiledStory built without it reads as P0, so
+	// every builder sets it (mw-gq6.1321).
+	Priority        int
 	EstimateMinutes int
 	Needs           []string
 	// State is the word the tree uses for what the tracker says this story is:
@@ -245,11 +249,13 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	// stories are never among it. Failing to read it refuses nothing.
 	work, workErr := f.Tracker.WorkInHand(ctx)
 
+	epicPriority, epicMostUrgent := newPriority(plan.Epic.Priority)
 	epicID, err := f.Tracker.CreateEpic(ctx, NewEpic{
 		Title:           plan.Epic.Title,
 		Description:     plan.Epic.Description,
 		SuccessCriteria: plan.Epic.Success,
-		Priority:        plan.Epic.Priority,
+		Priority:        epicPriority,
+		MostUrgent:      epicMostUrgent,
 		Defaults:        plan.Epic.Defaults,
 	})
 	if err != nil {
@@ -275,12 +281,14 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 		if hasLabel(story.Labels, LabelHitlTodo) {
 			description = TextNumbers{Book: f.Contacts, Say: f.Out}.Fill(ctx, description)
 		}
+		priority, mostUrgent := newPriority(story.Priority)
 		id, err := f.Tracker.CreateStory(ctx, NewStory{
 			EpicID:          epicID,
 			Title:           story.Title,
 			Description:     description,
 			Acceptance:      story.Acceptance,
-			Priority:        story.Priority,
+			Priority:        priority,
+			MostUrgent:      mostUrgent,
 			EstimateMinutes: story.Estimate,
 			Overrides:       story.PathOverrides(),
 			Needs:           needs,
@@ -303,6 +311,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			Key:             story.Key,
 			Title:           story.Title,
 			Path:            path,
+			Priority:        priorityFiled(story.Priority),
 			EstimateMinutes: story.Estimate,
 			Needs:           needs,
 			State:           StateHeld,
@@ -391,6 +400,7 @@ func (f File) Check(ctx context.Context, plan domain.Plan) error {
 		return fmt.Errorf("%s: more test callers than the size allows: split the story, size it up, or say why not with \"callers_ok\" (mw-gq6.661)",
 			strings.Join(over, ", "))
 	}
+	f.print(planPriorities(plan))
 	f.print(fmt.Sprintf("ok: %d stories would be filed\n", len(plan.Stories)))
 	return nil
 }
@@ -763,6 +773,37 @@ func (f File) validateStepTitles(ctx context.Context, story domain.PlanStory, fo
 	return "", nil
 }
 
+// planPriorities says the priority each of the plan's epic and stories would be
+// filed at, so that what mw file --check approves is what the tracker will hold:
+// the plan's own, or the tracker's default where it says none (mw-gq6.1321).
+func planPriorities(plan domain.Plan) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "  the epic: %s\n", domain.PriorityLabel(priorityFiled(plan.Epic.Priority)))
+	for _, story := range plan.Stories {
+		fmt.Fprintf(&b, "  story %s: %s\n", story.Key, domain.PriorityLabel(priorityFiled(story.Priority)))
+	}
+	return b.String()
+}
+
+// newPriority is the priority a plan gave, as a NewStory or NewEpic holds it:
+// absent leaves the tracker's default standing, and a given 0 is MostUrgent,
+// which the plain Priority of zero cannot say.
+func newPriority(given *int) (priority int, mostUrgent bool) {
+	if given == nil {
+		return 0, false
+	}
+	return *given, *given == MostUrgentPriority
+}
+
+// priorityFiled is the priority the tracker will hold for what the plan gave:
+// the given one, or DefaultPriority when the plan said nothing.
+func priorityFiled(given *int) int {
+	if given == nil {
+		return DefaultPriority
+	}
+	return *given
+}
+
 // print writes one block of the report, when there is somewhere to write it.
 func (f File) print(block string) {
 	if f.Out == nil {
@@ -798,7 +839,7 @@ func (s FiledStory) tree() string {
 	fmt.Fprintf(&b, "  %s · %s\n", s.ID, s.Title)
 	fmt.Fprintf(&b, "      path %s\n", s.Path.Summary())
 
-	state := []string{s.state()}
+	state := []string{s.state(), domain.PriorityLabel(s.Priority)}
 	if s.EstimateMinutes > 0 {
 		state = append(state, fmt.Sprintf("%dm", s.EstimateMinutes))
 	}

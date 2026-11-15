@@ -19,7 +19,7 @@ func twoStoryPlan() domain.Plan {
 		Epic: domain.PlanEpic{
 			Key:      "skeleton",
 			Title:    "Walking skeleton",
-			Priority: 1,
+			Priority: intp(1),
 			Success:  "One story goes from the plan file to a commit.",
 			Defaults: domain.Path{
 				Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
@@ -389,5 +389,95 @@ func TestAPlanWithAStoryTitledAsATesterNamingNoLandedStoryIsRefusedAtFiling(t *t
 	}
 	if err := (application.File{Tracker: tracker}).Check(context.Background(), plan); err == nil || !strings.Contains(err.Error(), application.TesterLandedLine) {
 		t.Errorf("want mw file --check to refuse it too, got %v", err)
+	}
+}
+
+func intp(n int) *int { return &n }
+
+// priorityPlan is a plan whose epic and first story say P0, whose second says
+// nothing and whose third says P3.
+func priorityPlan() domain.Plan {
+	plan := twoStoryPlan()
+	plan.Epic.Priority = intp(0)
+	plan.Stories = []domain.PlanStory{
+		{Key: "zero", Title: "Zero", Priority: intp(0), Acceptance: "ok\nExpect: none, because a test plan"},
+		{Key: "absent", Title: "Absent", Acceptance: "ok\nExpect: none, because a test plan"},
+		{Key: "three", Title: "Three", Priority: intp(3), Acceptance: "ok\nExpect: none, because a test plan"},
+	}
+	return plan
+}
+
+func TestAPlansPriorityOfZeroIsFiledAsP0AndAbsentAsTheDefault(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	out := &strings.Builder{}
+
+	filed, err := application.File{Tracker: tracker, Out: out}.Run(context.Background(), priorityPlan())
+	if err != nil {
+		t.Fatalf("filing the plan: %v", err)
+	}
+	epic, err := tracker.ShowEpic(context.Background(), filed.EpicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if epic.Priority != 0 {
+		t.Errorf("expected the epic at P0, got %d", epic.Priority)
+	}
+	want := []int{0, application.DefaultPriority, 3}
+	for i, story := range filed.Stories {
+		detail, err := tracker.ShowStory(context.Background(), story.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Priority != want[i] {
+			t.Errorf("expected story %s at priority %d, got %d", story.Key, want[i], detail.Priority)
+		}
+	}
+	// The tree names each story's priority.
+	for _, line := range []string{"held · P0", "held · P2", "held · P3"} {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("expected the tree to say %q, got:\n%s", line, out.String())
+		}
+	}
+}
+
+func TestCheckSaysTheStoriesPrioritiesAndFilesNothing(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	out := &strings.Builder{}
+
+	if err := (application.File{Tracker: tracker, Out: out}).Check(context.Background(), priorityPlan()); err != nil {
+		t.Fatalf("checking the plan: %v", err)
+	}
+	for _, line := range []string{"the epic: P0", "story zero: P0", "story absent: P2", "story three: P3", "ok: 3 stories would be filed"} {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("expected --check to say %q, got:\n%s", line, out.String())
+		}
+	}
+	if len(tracker.Epics()) != 0 || len(tracker.Stories()) != 0 {
+		t.Error("expected --check to file nothing")
+	}
+}
+
+func TestAPriorityOutsideZeroToFourIsRefusedByCheckAndByFilingAndNothingIsFiled(t *testing.T) {
+	plan := priorityPlan()
+	plan.Stories[2].Priority = intp(7)
+
+	for name, run := range map[string]func(application.File) error{
+		"check": func(f application.File) error { return f.Check(context.Background(), plan) },
+		"file": func(f application.File) error {
+			_, err := f.Run(context.Background(), plan)
+			return err
+		},
+	} {
+		tracker := apptest.NewFakeTracker()
+		tracker.AddFormula("tdd-feature")
+		err := run(application.File{Tracker: tracker})
+		if err == nil || !strings.Contains(err.Error(), "story three has the priority 7") {
+			t.Errorf("%s: expected a refusal naming story three and 7, got %v", name, err)
+		}
+		if len(tracker.Epics()) != 0 || len(tracker.Stories()) != 0 {
+			t.Errorf("%s: expected nothing to be filed", name)
+		}
 	}
 }

@@ -221,7 +221,9 @@ func (g *Gateway) CreateEpic(ctx context.Context, epic application.NewEpic) (str
 	if description != "" {
 		args = append(args, "--description", description)
 	}
-	if epic.Priority > 0 {
+	if epic.MostUrgent {
+		args = append(args, "--priority", "0")
+	} else if epic.Priority > 0 {
 		args = append(args, "--priority", strconv.Itoa(epic.Priority))
 	}
 	metadata, err := metadataJSON(epic.Defaults.Metadata())
@@ -259,7 +261,9 @@ func (g *Gateway) CreateStory(ctx context.Context, story application.NewStory) (
 	if acceptance := strings.TrimSpace(story.Acceptance); acceptance != "" {
 		args = append(args, "--acceptance", acceptance)
 	}
-	if story.Priority > 0 {
+	if story.MostUrgent {
+		args = append(args, "--priority", "0")
+	} else if story.Priority > 0 {
 		args = append(args, "--priority", strconv.Itoa(story.Priority))
 	}
 	if story.EstimateMinutes > 0 {

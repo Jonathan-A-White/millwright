@@ -404,7 +404,11 @@ bin/mw file plans/0001-walking-skeleton.json --approve  # filed and released
 
 A plan is JSON: one epic with the default Path its stories inherit, and the
 stories, each with its acceptance criteria, its estimate, whatever it overrides
-of that Path, optionally labels, and the keys of the stories it needs done first. `mw file` reads
+of that Path, optionally labels, and the keys of the stories it needs done first. An epic's or a
+story's `"priority"` is 0 (P0, the most urgent) to 4; absent, the tracker's default (P2) stands, and
+`"priority": 0` is filed as P0. A priority outside 0..4 is refused, naming the story. `mw file` and
+`mw file --check` say each story's priority (P0 to P4) so that what will be filed is read first
+(mw-gq6.1321). `mw file` reads
 the whole plan before it writes any of it — every story must resolve to a Path,
 carry acceptance criteria, and wait only on stories the plan has, never on
 itself or in a circle; a bug (a `[bug]` title or the `bug` label) must carry a

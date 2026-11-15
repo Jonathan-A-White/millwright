@@ -28,7 +28,7 @@ func TestTheMayorsOwnPlanIsRead(t *testing.T) {
 	if plan.Epic.Title != "Walking skeleton: mw files, dispatches and closes out one story" {
 		t.Errorf("expected the epic's title, got %q", plan.Epic.Title)
 	}
-	if plan.Epic.Success == "" || plan.Epic.Description == "" || plan.Epic.Priority != 1 {
+	if plan.Epic.Success == "" || plan.Epic.Description == "" || plan.Epic.Priority == nil || *plan.Epic.Priority != 1 {
 		t.Errorf("expected the epic's description, success criteria and priority, got %+v", plan.Epic)
 	}
 	want := domain.Path{
@@ -318,5 +318,62 @@ func TestPlanRefusalSaysAWantedLineIsInTheDescriptionNotTheAcceptance(t *testing
 	if err == nil || !strings.Contains(err.Error(), "no line begins with 'Sweep:'") || !strings.Contains(err.Error(), "no line begins with 'Expect:'") ||
 		strings.Contains(err.Error(), "in the description") {
 		t.Errorf("a plan with neither line anywhere keeps today's text, got %v", err)
+	}
+}
+
+const priorityPlan = `{
+  "epic": {"key": "e", "title": "E", "priority": 0, "defaults": {"rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "formula": "tdd-feature", "host": "vps"}},
+  "stories": [
+    {"key": "zero", "title": "Zero", "priority": 0, "acceptance": "ok\nExpect: none, because a test plan"},
+    {"key": "absent", "title": "Absent", "acceptance": "ok\nExpect: none, because a test plan"},
+    {"key": "three", "title": "Three", "priority": 3, "acceptance": "ok\nExpect: none, because a test plan"}
+  ]
+}`
+
+func TestAPlansPriorityOfZeroIsNotAnAbsentOne(t *testing.T) {
+	plan, err := domain.ParsePlan([]byte(priorityPlan))
+	if err != nil {
+		t.Fatalf("reading the plan: %v", err)
+	}
+	if plan.Epic.Priority == nil || *plan.Epic.Priority != 0 {
+		t.Errorf("expected the epic's priority to be a given 0, got %v", plan.Epic.Priority)
+	}
+	if p := plan.Stories[0].Priority; p == nil || *p != 0 {
+		t.Errorf("expected the story that says 0 to hold a given 0, got %v", p)
+	}
+	if plan.Stories[1].Priority != nil {
+		t.Errorf("expected the story that says nothing to hold no priority, got %d", *plan.Stories[1].Priority)
+	}
+	if p := plan.Stories[2].Priority; p == nil || *p != 3 {
+		t.Errorf("expected 3, got %v", p)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Fatalf("expected the plan to be filable: %v", err)
+	}
+}
+
+func TestAPriorityOutsideZeroToFourIsRefusedNamingTheStory(t *testing.T) {
+	plan, err := domain.ParsePlan([]byte(priorityPlan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	five, minus := 5, -1
+	plan.Stories[2].Priority = &five
+	plan.Stories[1].Priority = &minus
+	plan.Epic.Priority = &five
+	err = plan.Validate()
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	for _, want := range []string{"the epic has the priority 5", "story absent has the priority -1", "story three has the priority 5"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to say %q, got:\n%v", want, err)
+		}
+	}
+}
+
+func TestPriorityLabelReadsPZeroToPFour(t *testing.T) {
+	if got := domain.PriorityLabel(0); got != "P0" {
+		t.Errorf("expected P0, got %s", got)
 	}
 }

@@ -49,8 +49,11 @@ func TestCheckOfACleanPlanSaysHowManyStoriesWouldBeFiled(t *testing.T) {
 	if err := (application.File{Tracker: tracker, Out: out}).Check(context.Background(), twoStoryPlan()); err != nil {
 		t.Fatalf("checking a clean plan: %v", err)
 	}
-	if got := strings.TrimSpace(out.String()); got != "ok: 2 stories would be filed" {
-		t.Errorf("got %q", got)
+	// The priorities each story would be filed at come first (mw-gq6.1321); the
+	// ok line is still the last.
+	want := "the epic: P1\n  story module: P2\n  story gateway: P2\nok: 2 stories would be filed"
+	if got := strings.TrimSpace(out.String()); got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 	if tracker.Writes() != 0 || len(tracker.Epics()) != 0 || len(tracker.Stories()) != 0 {
 		t.Errorf("expected nothing filed, got %d writes", tracker.Writes())
