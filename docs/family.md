@@ -97,6 +97,8 @@ anything (a free port, an empty vault directory, a dolt on the `PATH`), and it w
 
 On a host that runs tests beside the served beads, `sh scripts/install-dolt-priority.sh` adds the
 `CPUWeight=1000` drop-in (`contrib/dolt-beads/priority.conf`) to that unit and reads the weight back.
+The weight keeps the server fed; it does not shorten a read. `go run ./contrib/dolt-beads/trace <command>`
+lists the statements a command's `bd` waits on and the server's time over each.
 
 The Dolt data lives outside the vault on purpose: a `.beads/dolt` directory that `bd` did not
 make itself is taken for a legacy workspace and refused. The beads database is made with
