@@ -1080,10 +1080,11 @@ func metadataSaid(fields map[string]string) string {
 
 // askAway asks the host a story was worked on, which is not this one, what its
 // worktree there holds, before the claim is given back without reading it
-// (mw-gq6.774). A clean worktree, or none, lets the retry go on. Uncommitted
-// work, or a host that could not be asked, refuses it, naming the host and the
-// command to run there, unless Force is given: then the retry goes on and the
-// report says what is left unsaved.
+// (mw-gq6.774). No worktree there lets the retry go on. A worktree there, clean
+// or not, has the host bundle its branch (mw-gq6.1305). A host that could not
+// be asked, or could not bundle, refuses it, naming the host and the command to
+// run there, unless Force is given: then the retry goes on and the report says
+// what is left unsaved, and that the branch could not be read from that host.
 func (r Retry) askAway(ctx context.Context, report RetryReport, host string) (RetryReport, error) {
 	var state WorktreeState
 	var asked error
@@ -1092,15 +1093,19 @@ func (r Retry) askAway(ctx context.Context, report RetryReport, host string) (Re
 	} else {
 		state, asked = r.Reach.WorktreeState(ctx, host, report.StoryID)
 	}
-	if asked == nil && state.Clean() {
+	// Nothing there to keep: the host answered and holds no worktree of the story.
+	if asked == nil && state.Path == "" {
 		return report, nil
 	}
 	there := fmt.Sprintf("run `mw retry %s` on %s, which bundles it", report.StoryID, host)
-	// A worktree holding work is bundled by the host itself, over the same line
-	// it was asked on, and the retry there gives the claim back: nothing is
-	// left unsaved and nothing needs --force (mw-gq6.1138).
+	// A worktree there, clean or not, holds the attempt's branch, which a hand
+	// back would leave on that host to be lost with it (mw-gq6.1305). The host
+	// bundles its own worktree's work and branch over the same line it was asked
+	// on, and the retry there gives the claim back: nothing is left unsaved and
+	// nothing needs --force (mw-gq6.1138). A forced retry of a worktree holding
+	// uncommitted work does not ask it: it leaves that work there, as it says.
 	var refusedThere error
-	if asked == nil && !r.Force {
+	if asked == nil && (!r.Force || state.Clean()) {
 		printed, err := r.Reach.RetryThere(ctx, host, report.StoryID, r.retryThereFlags())
 		if err == nil {
 			report.Delegated, report.DelegatedTo = printed, host
@@ -1109,24 +1114,35 @@ func (r Retry) askAway(ctx context.Context, report RetryReport, host string) (Re
 		refusedThere = err
 	}
 	if !r.Force {
-		if refusedThere != nil {
+		if refusedThere != nil && !state.Clean() {
 			return r.refuse(report, fmt.Sprintf(
 				"it was worked on %s, and its worktree there, %s, holds uncommitted work (%s) that this retry would leave unsaved, "+
 					"and asking %s to bundle it and give back failed (%s): %s, or add --force to give the claim back and leave it there",
 				host, state.Path, strings.Join(state.Left, ", "), host, oneLine(refusedThere.Error()), there))
 		}
+		if refusedThere != nil {
+			return r.refuse(report, fmt.Sprintf(
+				"it was worked on %s, and its branch %s there could not be bundled: asking %s to bundle it and give back failed (%s): "+
+					"%s, or add --force to give the claim back and leave the branch there",
+				host, StoryBranch(report.StoryID), host, oneLine(refusedThere.Error()), there))
+		}
 		if asked != nil {
 			return r.refuse(report, fmt.Sprintf(
-				"it was worked on %s, and %s could not be asked whether its worktree there holds uncommitted work (%s): "+
-					"%s, or add --force to give the claim back without knowing", host, host, oneLine(asked.Error()), there))
+				"it was worked on %s, and %s could not be asked what its worktree there holds, so its branch could not be read (%s): "+
+					"%s, or add --force to give the claim back without it", host, host, oneLine(asked.Error()), there))
 		}
 		return r.refuse(report, fmt.Sprintf(
 			"it was worked on %s, and its worktree there, %s, holds uncommitted work (%s) that this retry would leave unsaved: "+
 				"%s, or add --force to give the claim back and leave it there", host, state.Path, strings.Join(state.Left, ", "), there))
 	}
 	where := state.Path
-	if asked != nil {
-		where = fmt.Sprintf("the worktree of %s (%s could not be asked what it holds: %s)", report.StoryID, host, oneLine(asked.Error()))
+	switch {
+	case asked != nil:
+		where = fmt.Sprintf("the worktree of %s (its branch could not be read from %s: %s; it is lost with %s if that host goes away)",
+			report.StoryID, host, oneLine(asked.Error()), host)
+	case refusedThere != nil:
+		where = fmt.Sprintf("%s (its branch could not be bundled on %s: %s; it is lost with %s if that host goes away)",
+			state.Path, host, oneLine(refusedThere.Error()), host)
 	}
 	report.Unsaved = fmt.Sprintf("work left unsaved on %s: %s", host, where)
 	return report, nil
@@ -1249,7 +1265,7 @@ func (r RetryReport) String() string {
 		}
 	}
 	if r.DelegatedTo != "" {
-		fmt.Fprintf(&b, "  there   the story was worked on %s, whose worktree held work: %s bundled it and gave the claim back, and printed:\n", r.DelegatedTo, r.DelegatedTo)
+		fmt.Fprintf(&b, "  there   the story was worked on %s, whose worktree held its branch: %s bundled it and gave the claim back, and printed:\n", r.DelegatedTo, r.DelegatedTo)
 		for _, line := range strings.Split(strings.TrimRight(r.Delegated, "\n"), "\n") {
 			fmt.Fprintf(&b, "    %s\n", line)
 		}

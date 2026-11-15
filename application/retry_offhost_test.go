@@ -40,9 +40,9 @@ func stillClaimedByDesktop(t *testing.T, tracker *apptest.FakeTracker) {
 	}
 }
 
-func TestRetryOffTheStoryHostGivesTheClaimBackWhenItsWorktreeThereIsClean(t *testing.T) {
+func TestRetryOffTheStoryHostGivesTheClaimBackWhenThereIsNoWorktreeThere(t *testing.T) {
 	remote := apptest.NewFakeWorktreeRemote()
-	remote.Holds("desktop", application.WorktreeState{Path: "/home/j/.mw-worktrees/mw-gq6.1"})
+	remote.Holds("desktop", application.WorktreeState{})
 	retry, tracker, landing, out, errs := offHostRetry(t, remote)
 
 	report, err := retry.Run(context.Background(), "mw-gq6.1")
@@ -51,6 +51,9 @@ func TestRetryOffTheStoryHostGivesTheClaimBackWhenItsWorktreeThereIsClean(t *tes
 	}
 	if got := remote.Asked(); len(got) != 1 || got[0] != "desktop" {
 		t.Errorf("expected desktop asked once, got %v", got)
+	}
+	if got := remote.Retried(); len(got) != 0 {
+		t.Errorf("expected desktop not asked to retry, it has no worktree of the story: %v", got)
 	}
 	if !report.ClaimReleased || report.Elsewhere != "desktop" || report.Unsaved != "" {
 		t.Errorf("expected the claim given back from desktop with nothing unsaved, got %+v", report)
@@ -61,6 +64,65 @@ func TestRetryOffTheStoryHostGivesTheClaimBackWhenItsWorktreeThereIsClean(t *tes
 	if errs.Len() != 0 || strings.Contains(strings.Join(tracker.Comments("mw-gq6.1"), "\n"), "unsaved") {
 		t.Errorf("expected no unsaved-work warning for a clean worktree, got stderr %q comments %v", errs, tracker.Comments("mw-gq6.1"))
 	}
+}
+
+// mw-gq6.1305: a worktree with nothing uncommitted still holds the attempt's
+// branch, so a retry run elsewhere has the host that worked it bundle that
+// branch into the vault and say so, instead of leaving it there to be lost with
+// the box.
+func TestRetryOffTheStoryHostAsksTheHostToBundleItsBranchWhenItsWorktreeThereIsClean(t *testing.T) {
+	remote := apptest.NewFakeWorktreeRemote()
+	remote.Holds("desktop", application.WorktreeState{Path: "/home/j/.mw-worktrees/mw-gq6.1"})
+	remote.RetriesWith("desktop", "retry on desktop: mw-gq6.1\n  bundle  attempt 1 of mw/mw-gq6.1 (abc1234) into runs/mw-gq6.1/attempt-1.bundle\n")
+	retry, tracker, landing, out, errs := offHostRetry(t, remote)
+
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil || report.Refused {
+		t.Fatalf("expected the retry to go through, got err %v report %+v\n%s", err, report, out)
+	}
+	if got := remote.Retried(); len(got) != 1 || got[0] != "desktop mw-gq6.1" {
+		t.Errorf("expected desktop asked once to retry mw-gq6.1, got %v", got)
+	}
+	if report.DelegatedTo != "desktop" {
+		t.Errorf("expected the report to name desktop as where the branch was bundled, got %+v", report)
+	}
+	for _, want := range []string{"desktop", "runs/mw-gq6.1/attempt-1.bundle"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected the output to say %q, got %q", want, out)
+		}
+	}
+	if strings.Contains(out.String(), "left there") {
+		t.Errorf("expected no word of the branch being left on desktop, got %q", out)
+	}
+	if report.Unsaved != "" || errs.Len() != 0 {
+		t.Errorf("expected no unsaved-work warning, the branch was kept: %+v stderr %q", report, errs)
+	}
+	if landing.bundled || landing.removed {
+		t.Errorf("expected no worktree read or removed on laptop")
+	}
+	if len(tracker.Comments("mw-gq6.1")) != 0 {
+		t.Errorf("expected laptop to write no comment of its own, desktop's retry wrote it: %v", tracker.Comments("mw-gq6.1"))
+	}
+}
+
+// mw-gq6.1305: a clean worktree there whose host cannot bundle it is refused,
+// as a dirty one is, rather than the branch being left there to be lost.
+func TestRetryOffTheStoryHostRefusesWhenTheHostCannotBundleItsBranchFromACleanWorktree(t *testing.T) {
+	remote := apptest.NewFakeWorktreeRemote()
+	remote.Holds("desktop", application.WorktreeState{Path: "/home/j/.mw-worktrees/mw-gq6.1"})
+	remote.RetryFails("desktop", errors.New("retrying mw-gq6.1: its session is still running"))
+	retry, tracker, _, _, _ := offHostRetry(t, remote)
+
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err == nil || !report.Refused {
+		t.Fatalf("expected the retry refused, got err %v report %+v", err, report)
+	}
+	for _, want := range []string{"desktop", "branch", "still running", "mw retry mw-gq6.1", "--force"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to say %q, got: %v", want, err)
+		}
+	}
+	stillClaimedByDesktop(t, tracker)
 }
 
 func TestRetryOffTheStoryHostAsksTheHostToBundleAndGiveBackWhenItsWorktreeThereIsDirty(t *testing.T) {
@@ -187,6 +249,12 @@ func TestForcedRetryOffTheStoryHostWithTheHostUnreachableStillSaysItMayHoldUnsav
 	}
 	if said := strings.Join(tracker.Comments("mw-gq6.1"), "\n"); !strings.Contains(said, want) {
 		t.Errorf("expected the bead's comment to say %q, got %q", want, said)
+	}
+	// mw-gq6.1305: it says the branch could not be read from that host, by name.
+	for _, say := range []string{"its branch could not be read from desktop", "lost with desktop"} {
+		if !strings.Contains(report.Unsaved, say) || !strings.Contains(errs.String(), say) {
+			t.Errorf("expected %q in the report and on stderr, got stderr %q report %q", say, errs, report.Unsaved)
+		}
 	}
 }
 
