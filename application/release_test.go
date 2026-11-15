@@ -48,9 +48,9 @@ func TestReleasingAFiledPlanPrintsItsTreeAndSaysWhatIsReady(t *testing.T) {
 		filed.EpicID + " · Walking skeleton",
 		"default path millwright/main · claude/opus/high · tdd-feature · vps",
 		module + " · Go module",
-		"held · 60m · waits on nothing",
+		"held · P2 · 60m · waits on nothing",
 		gateway + " · Beads gateway",
-		"held · waits on " + module,
+		"held · P2 · waits on " + module,
 		"Released the 2 held stories of " + filed.EpicID + ". Ready now: " + module + ".",
 	} {
 		if !strings.Contains(out.String(), want) {
