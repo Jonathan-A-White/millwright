@@ -108,3 +108,34 @@ func (s PosternSend) inRootsOwnChannel(_ context.Context, req PosternSendRequest
 	}
 	return nil
 }
+
+// unseenRootRefusal is the refusal of an answer (Re) to a post mw has not
+// seen, with no channel flag: nil for a send that says its root is in Factory
+// (InFactory) and for mw's own recorded sends, which know their root. The txid
+// may be a talk turn's, and a reply that fell to Factory landed outside the
+// Governor's thread, so it names each way to say where the root is: Factory
+// has none of its own, so --factory (mw-gq6.1161, mw-gq6.1327).
+func (r PosternSendRequest) unseenRootRefusal() error {
+	if r.InFactory || r.Recorded {
+		return nil
+	}
+	re := strings.TrimSpace(r.Re)
+	return fmt.Errorf("mw postern send: %s is not a post mw knows, so the channel of its thread is not known and nothing was sent: "+
+		"if it is a talk turn's txid, answer with `mw talk say --talk <id> --turn <n>`; "+
+		"if the root is in a bead's or a named channel, send again with `--bead-channel <id>` or `--channel <name>`; "+
+		"if the root is in Factory, send again with `--factory`", re)
+}
+
+// validateFactoryFlag refuses --factory where it says nothing true: with no
+// --re there is no root, and with a channel flag the root is not in Factory.
+func (r PosternSendRequest) validateFactoryFlag() error {
+	switch {
+	case !r.InFactory:
+		return nil
+	case strings.TrimSpace(r.Re) == "":
+		return fmt.Errorf("mw postern send: --factory says the root --re names is in Factory: give --re <txid>, or drop --factory (a send with no --re and no channel flag already goes to Factory)")
+	case r.setsThread():
+		return fmt.Errorf("mw postern send: --factory and a channel flag (--bead-channel, --channel) name two channels for the root: give one")
+	}
+	return nil
+}
