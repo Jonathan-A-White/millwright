@@ -605,8 +605,12 @@ func newDoctorCmd() *cobra.Command {
 				// after it said cannot-tell, so many slow checks do not run the
 				// unit past its start limit (mw-gq6.1287).
 				RunBudget: doctorRunBudget,
-				Load:      hostLoadNow,
-				Out:       cmd.OutOrStdout(),
+				// A cure, a note and the verdict are cut at this long after it,
+				// said, so a hung bd there does not leave the run to the unit's
+				// timeout (mw-gq6.1330).
+				StepBudget: doctorStepBudget,
+				Load:       hostLoadNow,
+				Out:        cmd.OutOrStdout(),
 			}, name, dryRun)
 		},
 	}
@@ -641,6 +645,12 @@ const doctorCheckBudget = time.Minute
 // and notes, the verdict note, the printing) has the minute left, and systemd's
 // timeout is never what ends a run (mw-gq6.1287).
 const doctorRunBudget = 3 * time.Minute
+
+// doctorStepBudget is how long after doctorRunBudget a cure, a check's note and
+// the verdict note may still go on before the run cuts and says them, so the run
+// ends at 3 and a half minutes, 30 seconds under the unit's 4 (contrib/
+// unittimeout_test.go holds the three together; mw-gq6.1330).
+const doctorStepBudget = 30 * time.Second
 
 // hostLoadNow is this host's 1-minute load average as the kernel writes it, or
 // "" when it cannot be read.

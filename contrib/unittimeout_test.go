@@ -143,10 +143,17 @@ func TestTheDoctorRunBudgetIsUnderTheUnitsStartLimit(t *testing.T) {
 	if string(m[2]) == "Second" {
 		budget = time.Duration(n) * time.Second
 	}
+	// mw-gq6.1330: the cures, notes and verdict go on for a step budget after it.
+	step := regexp.MustCompile(`(?m)^const doctorStepBudget = (\d+) \* time\.Second$`).FindSubmatch(text)
+	if step == nil {
+		t.Fatal("cmd/mw/doctor.go has no `const doctorStepBudget = <n> * time.Second` line")
+	}
+	n, _ = strconv.Atoi(string(step[1]))
+	budget += time.Duration(n) * time.Second
 	const margin = 30 * time.Second
 	for _, unit := range []string{"mw-doctor.service", "system/mw-doctor.service"} {
 		if limit := startTimeout(t, unit); limit < budget+margin {
-			t.Errorf("%s stops at %v, not %v above the doctor's run budget %v", unit, limit, margin, budget)
+			t.Errorf("%s stops at %v, not %v above the doctor's run end %v (run budget plus step budget)", unit, limit, margin, budget)
 		}
 	}
 }

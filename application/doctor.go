@@ -390,6 +390,16 @@ type Doctor struct {
 	// the unit's start limit (mw-gq6.1287). Zero sets no budget.
 	RunBudget time.Duration
 
+	// StepBudget is how long after RunBudget the run's own steps (a check's cure,
+	// the notes written and cleared and listed, the verdict left) may still go on:
+	// the run ends at RunBudget plus StepBudget, counted from when it began. Each
+	// of those is a bd call, or a cure that may make one, and one that is still
+	// running at the end is cut and said (a cure as cure-failed, a note or the
+	// verdict as note-failed in the log) instead of leaving the run to systemd's
+	// timeout; one that would begin after it does not begin (mw-gq6.1330). Zero
+	// sets no end for them, and a zero RunBudget sets none either.
+	StepBudget time.Duration
+
 	// Load says the host's load for a reason that names it, as "41.2"; nil, or
 	// an empty answer, leaves the load out.
 	Load func() string
@@ -452,12 +462,12 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 		return DoctorReport{}, err
 	}
 
+	d.began = d.now()
 	if dryRun {
 		ctx = context.WithValue(ctx, doctorDryRunKey{}, true)
 	} else {
 		d.noted = d.readNoted(ctx)
 	}
-	d.began = d.now()
 	var report DoctorReport
 	for _, check := range checks {
 		if d.runSpent() {
@@ -605,6 +615,54 @@ func (d Doctor) overLimit(byRun bool) string {
 // overRunBudget is the reason of a read that RunBudget has no time left for.
 func (d Doctor) overRunBudget() string {
 	return "took over " + strconv.FormatFloat(d.RunBudget.Seconds(), 'f', -1, 64) + "s: the run's budget is spent"
+}
+
+// stepLeft is how long a step may still take: what is left of RunBudget plus
+// StepBudget, counted from when Run began. It says no when there is no end.
+func (d Doctor) stepLeft() (left time.Duration, bounded bool) {
+	if d.RunBudget <= 0 || d.StepBudget <= 0 {
+		return 0, false
+	}
+	return d.RunBudget + d.StepBudget - d.now().Sub(d.began), true
+}
+
+// overRunEnd is the reason of a step the end of the run has no time left for.
+func (d Doctor) overRunEnd() string {
+	return "took over " + strconv.FormatFloat((d.RunBudget+d.StepBudget).Seconds(), 'f', -1, 64) + "s: the run's budget is spent"
+}
+
+// step runs fn, one of the run's own steps (a cure, a note, the verdict), within
+// what is left of the run's end. A step not begun because the end has passed, or
+// still running at it, is left behind (cut), with the reason to say; like a
+// probe it is a call, and the run is a process that ends, so what it holds is
+// let go with it (mw-gq6.1330).
+func (d Doctor) step(ctx context.Context, fn func(context.Context) error) (err error, cut bool) {
+	left, bounded := d.stepLeft()
+	if !bounded {
+		return fn(ctx), false
+	}
+	if left <= 0 {
+		return errors.New(d.overRunEnd()), true
+	}
+	return d.within(ctx, left, fn, d.overRunEnd())
+}
+
+// within runs fn within limit, saying over and cut when it is still running at
+// the limit; a ctx that ends first is fn's own to answer.
+func (d Doctor) within(ctx context.Context, limit time.Duration, fn func(context.Context) error, over string) (err error, cut bool) {
+	budget, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- fn(budget) }()
+	select {
+	case err := <-done:
+		return err, false
+	case <-budget.Done():
+		if ctx.Err() != nil {
+			return <-done, false
+		}
+		return errors.New(over), true
+	}
 }
 
 // overBudget is the reason of a read that took longer than CheckBudget.
@@ -838,7 +896,10 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 		return DoctorResult{Check: name, Verdict: "would-cure", Reason: reason, WayBack: check.WayBack()}, nil
 	}
 
-	cureErr := check.Cure(ctx)
+	cureErr, cut := d.step(ctx, check.Cure)
+	if cut {
+		cureErr = fmt.Errorf("the cure %w", cureErr)
+	}
 	episode.Cures++
 	episode.LastCure = d.now()
 	episode.LastCureFailed = cureErr != nil
@@ -898,7 +959,9 @@ func (d Doctor) writeNote(ctx context.Context, check string, result DoctorResult
 		value += " " + result.Reason
 	}
 	value += " | last log lines: " + strings.Join(d.checkLogLines(ctx, check), " | ")
-	if err := d.Notes.SetNote(ctx, DoctorNoteKey(d.Host, check), value); err != nil {
+	if err, _ := d.step(ctx, func(ctx context.Context) error {
+		return d.Notes.SetNote(ctx, DoctorNoteKey(d.Host, check), value)
+	}); err != nil {
 		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
 		return false
 	}
@@ -918,7 +981,7 @@ func (d Doctor) clearNote(ctx context.Context, check string) {
 	if d.noted != nil && !d.noted.held[key] {
 		return
 	}
-	if err := d.Notes.ClearNote(ctx, key); err != nil {
+	if err, _ := d.step(ctx, func(ctx context.Context) error { return d.Notes.ClearNote(ctx, key) }); err != nil {
 		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
 		return
 	}
@@ -934,8 +997,18 @@ func (d Doctor) readNoted(ctx context.Context) *notedKeys {
 	if d.Notes == nil {
 		return nil
 	}
-	found, err := d.Notes.NotesWithPrefix(ctx, DoctorNoteKey(d.Host, ""))
-	if err != nil {
+	// The listing is read before the checks, so it is held to a check's budget,
+	// and not to the run's end, which the checks may need.
+	var found map[string]string
+	read := func(ctx context.Context) (err error) {
+		found, err = d.Notes.NotesWithPrefix(ctx, DoctorNoteKey(d.Host, ""))
+		return err
+	}
+	if limit, byRun := d.limit(); limit > 0 {
+		if err, cut := d.within(ctx, limit, read, d.overLimit(byRun)); err != nil || cut {
+			return nil
+		}
+	} else if byRun || read(ctx) != nil {
 		return nil
 	}
 	noted := &notedKeys{held: make(map[string]bool, len(found))}
@@ -1056,14 +1129,20 @@ func (d Doctor) leaveVerdict(ctx context.Context, report DoctorReport) {
 		}
 	}
 	key := DoctorVerdictKey(d.Host)
-	if kept, err := d.Verdicts.Note(ctx, key); err == nil {
+	var kept string
+	if err, _ := d.step(ctx, func(ctx context.Context) (err error) {
+		kept, err = d.Verdicts.Note(ctx, key)
+		return err
+	}); err == nil {
 		if held, ok := ParseDoctorVerdict(kept); ok && held.same(DoctorVerdict{Faulty: verdict.Faulty}) {
 			if age := verdict.At.Sub(held.At); age >= 0 && age < DoctorVerdictRefresh {
 				return
 			}
 		}
 	}
-	if err := d.Verdicts.SetNote(ctx, key, verdict.Note()); err != nil {
+	if err, _ := d.step(ctx, func(ctx context.Context) error {
+		return d.Verdicts.SetNote(ctx, key, verdict.Note())
+	}); err != nil {
 		_ = d.append(ctx, DoctorResult{Check: "doctor", Verdict: "note-failed", Reason: oneLine(err.Error())})
 	}
 }
