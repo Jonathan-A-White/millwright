@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -325,6 +326,130 @@ func foundFiles(lines []string, finder string) string {
 		return finder
 	}
 	return strings.Join(paths, ",")
+}
+
+// foundPlacing is where a finding's bug is pathed when it is about another rig.
+type foundPlacing struct {
+	// elsewhere says the finding is not about the finder's own rig; path is then
+	// the bug's whole path (the finder's keys that hold for any rig, the rig's
+	// own defaults and its files), and its Rig is empty when the rig cannot be
+	// told.
+	elsewhere bool
+	path      domain.Path
+}
+
+// foundPlace reads which rig the finding lines are about. Its files name
+// another rig when they lead with that rig's directory (Cairn/vite.config.ts),
+// and the prefix is then dropped from the file; failing that, its words name
+// one other rig and not the finder's own. Files of two rigs, of another rig
+// and of the finder's own, or words naming two other rigs, say no rig. The
+// rig's defaults are those of its newest story among beads: branch, formula and
+// the harness, model and effort the rig's stories use; the finder's host, size,
+// bump, callers_ok, host_why and max_turns are never copied. With no story to
+// read them from, the branch and formula are left unset, for mw path show to
+// warn of, and the finder's harness, model and effort stay.
+func (n Next) foundPlace(lines []string, finder domain.Path, beads []StoryDetail) foundPlacing {
+	byName := map[string]string{}
+	add := func(name string) {
+		if name = strings.TrimSpace(name); name != "" && name != finder.Rig {
+			byName[strings.ToLower(name)] = name
+		}
+	}
+	for name, dir := range n.Rigs {
+		add(name)
+		if base := filepath.Base(strings.TrimRight(dir, "/")); base != "." && base != "/" {
+			if name != finder.Rig {
+				byName[strings.ToLower(base)] = name
+			}
+		}
+	}
+	newest := map[string]domain.Path{}
+	newestAt := map[string]time.Time{}
+	for _, d := range beads {
+		merged := d.Merged()
+		if merged.Rig == "" || merged.Branch == "" || merged.Formula == "" {
+			continue
+		}
+		if at, seen := newestAt[merged.Rig]; !seen || !d.Created.Before(at) {
+			newest[merged.Rig], newestAt[merged.Rig] = merged, d.Created
+		}
+		add(merged.Rig)
+	}
+
+	var paths []string
+	seen := map[string]bool{}
+	for _, line := range lines {
+		for _, path := range foundPaths(line) {
+			if !seen[path] {
+				seen[path] = true
+				paths = append(paths, path)
+			}
+		}
+	}
+	rigs := map[string]bool{}
+	own := 0
+	stripped := make([]string, len(paths))
+	for i, path := range paths {
+		stripped[i] = path
+		if lead, rest, found := strings.Cut(path, "/"); found {
+			if rig, other := byName[strings.ToLower(lead)]; other {
+				rigs[rig], stripped[i] = true, rest
+				continue
+			}
+		}
+		own++
+	}
+	switch {
+	case len(rigs) == 1 && own == 0:
+		for rig := range rigs {
+			return foundRigPlace(rig, strings.Join(stripped, ","), finder, newest)
+		}
+	case len(rigs) > 0:
+		return foundPlacing{elsewhere: true, path: foundNoRigPlace(strings.Join(paths, ","), finder)}
+	}
+
+	// No file leads with another rig's directory: the words may name one.
+	text := strings.Join(lines, " ")
+	named := map[string]bool{}
+	for lower, rig := range byName {
+		if foundNamesRig(text, lower) {
+			named[rig] = true
+		}
+	}
+	if finder.Rig != "" && foundNamesRig(text, strings.ToLower(finder.Rig)) {
+		return foundPlacing{}
+	}
+	switch len(named) {
+	case 0:
+		return foundPlacing{}
+	case 1:
+		for rig := range named {
+			return foundRigPlace(rig, foundFiles(lines, ""), finder, newest)
+		}
+	}
+	return foundPlacing{elsewhere: true, path: foundNoRigPlace(foundFiles(lines, ""), finder)}
+}
+
+// foundNamesRig says text names the rig, in any case, as a word of its own.
+func foundNamesRig(text, lowerName string) bool {
+	return regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_\-])` + regexp.QuoteMeta(lowerName) + `(?:$|[^A-Za-z0-9_\-])`).MatchString(text)
+}
+
+// foundNoRigPlace is the path of a bug whose rig cannot be told: no rig, branch
+// or formula, which are a rig's, and the finder's harness, model and effort,
+// which are about the work and not the repo.
+func foundNoRigPlace(files string, finder domain.Path) domain.Path {
+	return domain.Path{Files: files, Host: domain.HostAuto, Harness: finder.Harness, Model: finder.Model, Effort: finder.Effort}
+}
+
+// foundRigPlace is the path of a bug filed in rig with files, from the rig's
+// newest story's defaults when one is known.
+func foundRigPlace(rig, files string, finder domain.Path, newest map[string]domain.Path) foundPlacing {
+	path := domain.Path{Rig: rig, Files: files, Host: domain.HostAuto, Harness: finder.Harness, Model: finder.Model, Effort: finder.Effort}
+	if known, ok := newest[rig]; ok {
+		path.Branch, path.Harness, path.Model, path.Effort, path.Formula = known.Branch, known.Harness, known.Model, known.Effort, known.Formula
+	}
+	return foundPlacing{elsewhere: true, path: path}
 }
 
 // foundRef is a file a finding names, with the lines it names in it; from and to
@@ -944,6 +1069,15 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		if host, _ := EpicKeepsHost(c.detail.Defaults); host != "" {
 			overrides.Host = ""
 		}
+		// A finding about another rig is that rig's bug, not the finder's: it is
+		// pathed to that rig with that rig's own defaults, or to none when the rig
+		// cannot be told, and filed under no epic of the finder's, whose defaults
+		// would otherwise give it the finder's rig back (mw-gq6.1317).
+		epicID, standalone := c.detail.EpicID, c.detail.EpicID == ""
+		if place := n.foundPlace(bug.said(), c.path, beads); place.elsewhere {
+			overrides = place.path
+			epicID, standalone = "", true
+		}
 		acceptance := ""
 		if bug.item != nil {
 			acceptance = bug.item.Acceptance()
@@ -952,8 +1086,8 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			}
 		}
 		story := NewStory{
-			EpicID:      c.detail.EpicID,
-			Standalone:  c.detail.EpicID == "",
+			EpicID:      epicID,
+			Standalone:  standalone,
 			Title:       bug.title,
 			Description: foundDescription(c, bug, n.Host),
 			Acceptance:  acceptance,
