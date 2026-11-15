@@ -657,3 +657,49 @@ func withShortWait() context.Context {
 	time.AfterFunc(time.Second, cancel)
 	return ctx
 }
+
+// A part run by a process of its own that a call at an earlier commit started and
+// no call told of: the call at the tip finds the process ended with a pass at the
+// earlier commit, and does not say it passed (mw-gq6.1304).
+func TestAPartPassedAtAnEarlierCommitIsNotReportedAsPassedAtTheTipInAProcessOfItsOwn(t *testing.T) {
+	d := aDetachedPartRig(t, true)
+	d.tune = func(k *application.Check) {
+		k.Landing = &headedLanding{fakeRetryLanding: &fakeRetryLanding{AheadCount: 1}, head: theTipNow}
+	}
+	ctx := context.Background()
+	record := "tip " + aTipThePartPassedAt + "\npassed\nok\n"
+	if _, err := d.records.PutRunFile(ctx, "mw-x.1", application.CheckPartFileName(1, 1), record); err != nil {
+		t.Fatal(err)
+	}
+	said := "  part 1 of 1 (vitest 5/6) passed at 1598c69170f9\n"
+	if _, err := d.records.PutRunFile(ctx, "mw-x.1", application.CheckPartOutFileName(1, 1), said); err != nil {
+		t.Fatal(err)
+	}
+	run := "pid 4242\nstarted " + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + "\n"
+	if _, err := d.records.PutRunFile(ctx, "mw-x.1", application.CheckPartRunFileName(1, 1), run); err != nil {
+		t.Fatal(err)
+	}
+	d.load.set(true)
+
+	err := d.check(30 * time.Second)
+	if err == nil {
+		t.Fatal("expected a part that did not run at the tip not to pass")
+	}
+	for _, want := range []string{"part 1 of 1 (vitest 5/6) has not run at this commit", "last passed at 1598c69170f9", "mw check mw-x.1 --part 1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the line to say %q, got %q", want, err.Error())
+		}
+	}
+	if strings.Contains(d.told.String(), "passed") {
+		t.Errorf("expected no 'passed' line for a part that did not run at the tip, got %q", d.told.String())
+	}
+	// The process is told of, so the next call starts the part afresh at the tip.
+	close(d.parts.release)
+	d.load.set(false)
+	if err := d.check(30 * time.Second); err != nil {
+		t.Fatalf("expected the next call to run the part at the tip and pass it, got %v", err)
+	}
+	if d.parts.ranCount() != 1 {
+		t.Errorf("expected the part to run once, at the tip, it ran %d time(s)", d.parts.ranCount())
+	}
+}

@@ -150,20 +150,21 @@ func (k Check) checkPartDetached(ctx context.Context, report CheckReport, c *clo
 	began := k.began
 	runName := CheckPartRunFileName(report.Attempt, k.Part)
 	run, outstanding := k.partRunOf(ctx, c.id, runName)
+	earlier := k.earlierPass(ctx, c, report.Attempt, tip)
 	if !outstanding {
 		wait := began
 		left := func() time.Duration {
 			return max((k.partSlotWait() - k.callNow().Sub(wait)).Round(time.Millisecond), 0)
 		}
 		if _, err := k.calmForPart(ctx, c, report.Attempt, k.Part, label, left); err != nil {
-			return report, fmt.Errorf("checking %s: %w", c.id, err)
+			return report, earlier.told(label, fmt.Errorf("checking %s: %w", c.id, err))
 		}
 		var err error
 		if run, err = k.startPart(ctx, report, c, label, part, tip); err != nil {
-			return report, fmt.Errorf("checking %s: %w", c.id, err)
+			return report, earlier.told(label, fmt.Errorf("checking %s: %w", c.id, err))
 		}
 	}
-	return report, k.waitForPart(ctx, report, c, label, run, began)
+	return report, k.waitForPart(ctx, report, c, label, run, began, tip)
 }
 
 // startPart starts the process of the part. Its record is made to say that the
@@ -202,7 +203,7 @@ func (k Check) startPart(ctx context.Context, report CheckReport, c *closeOut, l
 // waitForPart waits for the part's process to end, no longer than what is left of
 // the call, and then says how it ended, or that it is still running and the one
 // command that waits for it.
-func (k Check) waitForPart(ctx context.Context, report CheckReport, c *closeOut, label string, run partRun, began time.Time) error {
+func (k Check) waitForPart(ctx context.Context, report CheckReport, c *closeOut, label string, run partRun, began time.Time, tip string) error {
 	budget := k.CallBudget
 	if budget <= 0 {
 		budget = CheckCallBudget
@@ -212,7 +213,7 @@ func (k Check) waitForPart(ctx context.Context, report CheckReport, c *closeOut,
 	defer tick.Stop()
 	for {
 		if !k.PartStarter.Alive(run.pid) {
-			return k.partEnded(ctx, report, c, label)
+			return k.partEnded(ctx, report, c, label, tip)
 		}
 		if idle, ceiling := k.partSilence(ctx, report, c, run); idle > ceiling {
 			return k.killHungPart(ctx, report, c, label, run, idle, ceiling)
@@ -285,15 +286,22 @@ func (k Check) partStillRunningLine(ctx context.Context, c *closeOut, label stri
 
 // partEnded tells how the part's process ended, from what it kept: what it said,
 // and an error when it did not pass. The process is then told of, so that the next
-// call starts the part afresh rather than reading this result again.
-func (k Check) partEnded(ctx context.Context, report CheckReport, c *closeOut, label string) error {
+// call starts the part afresh rather than reading this result again. A process that
+// passed at a commit other than tip, the commit this call checks (one a call at an
+// earlier commit started and none told of), is not a pass of this call: nothing it
+// said is shown, and the call says the part has not run at this commit and names
+// the commit it passed at (mw-gq6.1304).
+func (k Check) partEnded(ctx context.Context, report CheckReport, c *closeOut, label, tip string) error {
 	defer func() {
 		_, _ = k.Records.PutRunFile(ctx, c.id, CheckPartRunFileName(report.Attempt, k.Part), "told\n")
 	}()
+	record, err := k.Records.ReadRunFile(ctx, c.id, CheckPartFileName(report.Attempt, k.Part))
+	if earlier := earlierPassOf(record, tip); err == nil && earlier != "" {
+		return fmt.Errorf("checking %s: %s: run the same part again with `mw check %s --part %d` to run it at this commit", c.id, earlier.said(label), c.id, k.Part)
+	}
 	if said, err := k.Records.ReadRunFile(ctx, c.id, CheckPartOutFileName(report.Attempt, k.Part)); err == nil && k.Out != nil {
 		fmt.Fprint(k.Out, said)
 	}
-	record, err := k.Records.ReadRunFile(ctx, c.id, CheckPartFileName(report.Attempt, k.Part))
 	lines := strings.Split(record, "\n")
 	if err != nil || len(lines) < 2 {
 		return fmt.Errorf("checking %s: %s ended without keeping a result (its process was stopped?): run the same part again with `mw check %s --part %d` to start it again", c.id, label, c.id, k.Part)

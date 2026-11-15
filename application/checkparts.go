@@ -222,9 +222,10 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	left := func() time.Duration {
 		return max((k.partSlotWait() - k.callNow().Sub(began)).Round(time.Millisecond), 0)
 	}
+	earlier := k.earlierPass(ctx, c, report.Attempt, tip)
 	before, err := k.calmForPart(ctx, c, report.Attempt, k.Part, label, left)
 	if err != nil {
-		return report, fmt.Errorf("checking %s: %w", c.id, err)
+		return report, earlier.told(label, fmt.Errorf("checking %s: %w", c.id, err))
 	}
 
 	if k.Slot != nil && PartNeedsSlot(part) {
@@ -235,17 +236,63 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 			again:  fmt.Sprintf("run the same part again with `mw check %s --part %d`", c.id, k.Part),
 		})
 		if err != nil {
-			return report, fmt.Errorf("checking %s: %w", c.id, err)
+			return report, earlier.told(label, fmt.Errorf("checking %s: %w", c.id, err))
 		}
 		defer holding.Release(ctx)
 	}
 	if fit != nil && fit.late() {
 		// A wait for a calm host of minutes can have eaten the call (a part that
 		// took the slot was asked this when it won it).
-		return report, fmt.Errorf("checking %s: %s did not start: the part needs about %s and only %s is left in this call, after waiting for %s to calm; nothing was run: run the same part again with `mw check %s --part %d`",
-			c.id, label, gateWaited(fit.expected), gateWaited(fit.left()), k.Host, c.id, k.Part)
+		return report, earlier.told(label, fmt.Errorf("checking %s: %s did not start: the part needs about %s and only %s is left in this call, after waiting for %s to calm; nothing was run: run the same part again with `mw check %s --part %d`",
+			c.id, label, gateWaited(fit.expected), gateWaited(fit.left()), k.Host, c.id, k.Part))
 	}
 	return k.runPart(ctx, report, c, label, part, tip, fit, before)
+}
+
+// earlierPass is the commit a part's record says it passed at when that is not
+// the commit at the tip the call checks (empty when it says no such thing): a pass
+// of an earlier commit is not a pass of this one, and a call that did not run the
+// part at the tip must not say or print that it passed (mw-gq6.1304).
+type earlierPass string
+
+// earlierPass reads the record of this check's part for a pass at a commit other
+// than tip. A record with no commit (the worktree held uncommitted work), or one
+// of a failure, a hung part or a hand-back, is not one.
+func (k Check) earlierPass(ctx context.Context, c *closeOut, attempt int, tip string) earlierPass {
+	if k.Records == nil {
+		return ""
+	}
+	text, err := k.Records.ReadRunFile(ctx, c.id, CheckPartFileName(attempt, k.Part))
+	if err != nil {
+		return ""
+	}
+	return earlierPassOf(text, tip)
+}
+
+func earlierPassOf(record, tip string) earlierPass {
+	lines := strings.Split(record, "\n")
+	if len(lines) < 2 || strings.TrimSpace(lines[1]) != partPassed {
+		return ""
+	}
+	at := strings.Fields(lines[0])
+	if len(at) != 2 || at[0] != partTipWord || at[1] == partNoTip || at[1] == tip {
+		return ""
+	}
+	return earlierPass(at[1])
+}
+
+// said is the words a call that did not run the part at this commit ends with.
+func (e earlierPass) said(label string) string {
+	return fmt.Sprintf("%s has not run at this commit (last passed at %s)", label, shortCommit(string(e)))
+}
+
+// told is err, a part's not having started, with that said after it when the
+// part's record is of a pass at an earlier commit.
+func (e earlierPass) told(label string, err error) error {
+	if e == "" {
+		return err
+	}
+	return fmt.Errorf("%w; %s", err, e.said(label))
 }
 
 // runPartWorker is the process a call started for the part. It waits for no calm
