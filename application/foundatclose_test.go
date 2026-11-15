@@ -578,3 +578,96 @@ func TestAFoundStoryOfAnEpicWithAHostWhyKeepsTheEpicsHost(t *testing.T) {
 		t.Errorf("expected the epic's host=laptop and its why, got host=%q host_why=%q", got.Host, got.HostWhy)
 	}
 }
+
+// aFindingOfAnotherRigRun files the findings text said by a story of lampas
+// (rig lampas, branch main, formula tdd-feature, files package.json) and
+// returns the bugs filed. A story of cairn sits in the tracker with its own
+// branch, formula and model, as the only place the rig's defaults are read from.
+func aFindingOfAnotherRigRun(t *testing.T, finding string) []domain.Path {
+	t.Helper()
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-c", domain.Path{Rig: "cairn", Branch: "trunk", Harness: domain.HarnessClaude, Model: "opus", Effort: "medium", Formula: "plain", Host: "laptop"})
+	tracker.AddStory("mw-c", domain.Story{ID: "mw-c.1", Title: "A cairn story", Overrides: domain.Path{Files: "src/a.ts"}})
+	tracker.AddEpic("mw-x", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{Files: "package.json"}})
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+finding+"\nFor the rig memory: nothing"))
+	before := tracker.Stories()
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"lampas": "/rigs/lampas", "cairn": "/rigs/Cairn", "legend": "/rigs/legend"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+	var paths []domain.Path
+	for _, d := range theTestersFiled(t, tracker, before) {
+		paths = append(paths, d.Merged())
+	}
+	return paths
+}
+
+// A finding that names a file of another rig by that rig's directory is filed
+// in that rig, with that rig's defaults and the file without the prefix, not
+// with the reporting story's rig (mw-6ww.175.72, mw-gq6.1317).
+func TestFoundAtCloseFindingNamingAnotherRigsFileIsFiledInThatRig(t *testing.T) {
+	filed := aFindingOfAnotherRigRun(t, "Cairn carries the same fault (Cairn/vite.config.ts:19). AC: go test ./application passes. By design? no")
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d", len(filed))
+	}
+	got := filed[0]
+	if got.Rig != "cairn" || got.Files != "vite.config.ts" {
+		t.Errorf("expected rig=cairn files=vite.config.ts, got rig=%q files=%q", got.Rig, got.Files)
+	}
+	if got.Branch != "trunk" || got.Formula != "plain" || got.Model != "opus" || got.Effort != "medium" {
+		t.Errorf("expected the defaults of cairn's own story (branch trunk, formula plain, opus, medium), got %s", got.Summary())
+	}
+	if got.Host != domain.HostAuto {
+		t.Errorf("expected host auto, got %q", got.Host)
+	}
+}
+
+// A finding of another rig named in its words, its files bare, is that rig's.
+func TestFoundAtCloseFindingNamingAnotherRigInItsWordsIsFiledInThatRig(t *testing.T) {
+	filed := aFindingOfAnotherRigRun(t, "In legend the build config drops the base (vite.config.ts:31). AC: go test ./application passes. By design? no")
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d", len(filed))
+	}
+	if got := filed[0]; got.Rig != "legend" || got.Files != "vite.config.ts" {
+		t.Errorf("expected rig=legend files=vite.config.ts, got rig=%q files=%q", got.Rig, got.Files)
+	}
+}
+
+// A finding whose rig cannot be told is filed with no rig, never the reporting
+// story's: its files name two other rigs, or one of them and one of its own.
+func TestFoundAtCloseFindingWhoseRigCannotBeToldIsFiledWithNoRig(t *testing.T) {
+	for name, finding := range map[string]string{
+		"two other rigs":          "Both carry it (Cairn/vite.config.ts:19 and legend/vite.config.ts:31). AC: go test ./application passes. By design? no",
+		"another rig and its own": "The fault is in Cairn/vite.config.ts:19 and in package.json:3. AC: go test ./application passes. By design? no",
+	} {
+		t.Run(name, func(t *testing.T) {
+			filed := aFindingOfAnotherRigRun(t, finding)
+			if len(filed) != 1 {
+				t.Fatalf("expected 1 bug filed, got %d", len(filed))
+			}
+			if got := filed[0]; got.Rig != "" {
+				t.Errorf("expected no rig, got rig=%q (%s)", got.Rig, got.Summary())
+			}
+		})
+	}
+}
+
+// A finding that names only the reporting rig's own files is filed as before.
+func TestFoundAtCloseFindingNamingOnlyTheReportingRigsFilesKeepsItsRig(t *testing.T) {
+	filed := aFindingOfAnotherRigRun(t, "The config drops the base (package.json:3). AC: go test ./application passes. By design? no")
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d", len(filed))
+	}
+	if got := filed[0]; got.Rig != "lampas" || got.Files != "package.json" || got.Branch != "main" {
+		t.Errorf("expected rig=lampas files=package.json branch=main, got %s", got.Summary())
+	}
+}
