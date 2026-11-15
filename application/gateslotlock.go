@@ -16,7 +16,9 @@ import (
 // check that took the slot shared, and a whole check that took it waits for the
 // lock the landing holds. Neither moves until the check's wait runs out
 // (mw-gq6.1316). So a landing holding the gate lock gives it back before it takes
-// the slot alone again, and asks for it again once it has the slot.
+// the slot alone again, and asks for it again once it has the slot, but only when
+// somebody is queued for the lock (LockWaiters): with nobody queued the lock keeps
+// its place and no gate queued meanwhile is let in ahead of it (mw-gq6.1319).
 
 // slotAndLockTries is how many times a close-out that gives its merge slot up for
 // a wait for the gate lock gives the lock back to take the slot alone again, and
@@ -56,7 +58,7 @@ func (n Next) takeGateLockUnderTheSlot(ctx context.Context, c *closeOut, report 
 		if resume == nil {
 			break
 		}
-		if err == nil && turn.Holding != nil {
+		if err == nil && turn.Holding != nil && othersWaitFor(turn.Holding) {
 			n.giveBackBeforeTheSlot(report, turn.Holding)
 			resume()
 			continue
@@ -66,6 +68,13 @@ func (n Next) takeGateLockUnderTheSlot(ctx context.Context, c *closeOut, report 
 	}
 	turn.Waited, turn.For = waited, waitedFor
 	return turn, err
+}
+
+// othersWaitFor says whether anybody is queued for the gate lock lock holds. A lock
+// that cannot say is taken to have waiters, and is given back as before.
+func othersWaitFor(lock Holding) bool {
+	waiters, ok := lock.(LockWaiters)
+	return !ok || waiters.Waiting() > 0
 }
 
 // giveBackBeforeTheSlot gives the gate lock back when the merge slot is about to
@@ -121,11 +130,18 @@ func (l *slotYieldingLock) HeldBy() string {
 // (SlotYield): resume takes the slot alone again, and the gate lock the close-out
 // holds is given back for it and asked for once the slot is held, so that a check
 // that took the slot shared meanwhile and waits for the lock is not waited for
-// with the lock held (mw-gq6.1316). A lock that cannot be asked for again is said,
+// with the lock held (mw-gq6.1316), and only when somebody is queued for the lock
+// (LockWaiters). A lock that cannot be asked for again is said,
 // as a lock that could not be taken is, and the close-out goes on without it.
 func (n Next) resumeSlot(ctx context.Context, c *closeOut, report *NextReport, resume func()) {
 	held := c.gateHold
 	if held == nil || held.inner == nil {
+		resume()
+		return
+	}
+	if !othersWaitFor(held.inner) {
+		// Nobody is queued for the lock, so no check can wait for it beside the
+		// slot: the lock is kept and keeps its place (mw-gq6.1319).
 		resume()
 		return
 	}

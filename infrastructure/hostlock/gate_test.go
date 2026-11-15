@@ -408,3 +408,36 @@ func TestAHoldingThatWasAskedToKeepAPlaceKeepsItAfterTheLockWasWon(t *testing.T)
 	}
 	plain.Holding.Release(context.Background())
 }
+
+// A gate lock's holding says how many are queued behind it, so that a landing
+// that took the lock at the end of a wait gives it back only for a waiter
+// (mw-gq6.1319).
+func TestAGateLockHoldingSaysHowManyAreQueuedBehindIt(t *testing.T) {
+	dir := t.TempDir()
+	first, err := hostlock.NewGate(dir, hostlock.WithGatePoll(5*time.Millisecond)).Take(context.Background(), "mw-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Holding.Release(context.Background())
+	waiters, ok := first.Holding.(application.LockWaiters)
+	if !ok {
+		t.Fatal("expected the gate lock's holding to say how many wait behind it")
+	}
+	if got := waiters.Waiting(); got != 0 {
+		t.Errorf("expected nobody queued behind a lock nobody waits for, got %d", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		hostlock.NewGate(dir, hostlock.WithGatePoll(5*time.Millisecond)).Take(ctx, "mw-b", nil)
+	}()
+	for deadline := time.Now().Add(5 * time.Second); waiters.Waiting() != 1; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("expected one queued behind the lock, got %d", waiters.Waiting())
+		}
+	}
+	cancel()
+	<-ended
+}

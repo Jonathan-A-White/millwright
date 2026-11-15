@@ -38,6 +38,14 @@ type GateLock interface {
 	Take(ctx context.Context, holder string, held func(by string)) (GateTurn, error)
 }
 
+// LockWaiters is what a gate lock's Holding may also say: how many others are
+// queued for the lock behind it. It is what tells a landing that took the lock
+// at the end of a wait of its own whether a check may be waiting for it
+// (mw-gq6.1319).
+type LockWaiters interface {
+	Waiting() int
+}
+
 // GateLockHandBack is what a GateLock's Take returns to end the gate it was
 // asked for, in place of letting the tests run without the lock: a mw check
 // whose wait for the lock ran out in its foreground budget (mw-gq6.906). A
