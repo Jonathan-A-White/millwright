@@ -70,7 +70,7 @@ func bringUpDeputy(ctx context.Context, reason string, out io.Writer) (applicati
 	windows := seatWindows()
 	return application.Deputy{
 		Seats:    vault.New(dir),
-		Windows:  windows,
+		Windows:  readyWindows(windows, host),
 		Harness:  claudeHarness(dir, host, sessionTuning{}),
 		Terminal: windows,
 		Armer:    reaper.New(exe),

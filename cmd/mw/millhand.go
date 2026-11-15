@@ -74,7 +74,7 @@ func bringUpMillhand(ctx context.Context, wake application.Wake, reason string, 
 	windows := seatWindows()
 	return application.Millhand{
 		Seats:    vault.New(dir),
-		Windows:  windows,
+		Windows:  readyWindows(windows, host),
 		Harness:  claudeHarness(dir, host, sessionTuning{}),
 		Terminal: windows,
 		Armer:    reaper.New(exe),

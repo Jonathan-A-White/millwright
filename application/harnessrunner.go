@@ -181,6 +181,11 @@ func (r HarnessReadyRunner) awaitClaude(ctx context.Context, spec SessionSpec) e
 	if r.Ready == nil || !runsClaude(spec) {
 		return nil
 	}
+	return r.waitForClaude(ctx)
+}
+
+// waitForClaude asks Ready until claude answers or the asks run out.
+func (r HarnessReadyRunner) waitForClaude(ctx context.Context) error {
 	tries, poll, wait := r.Tries, r.Poll, r.Sleep
 	if tries < 1 {
 		tries = DefaultHarnessTries

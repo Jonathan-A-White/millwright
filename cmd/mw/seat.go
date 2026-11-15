@@ -109,7 +109,7 @@ func newSeatUpCmd() *cobra.Command {
 			windows := seatWindows()
 			_, err = application.SeatUp{
 				Seats:   vault.New(dir),
-				Windows: windows,
+				Windows: readyWindows(windows, host),
 				Harness: harness,
 				Seat:    args[0],
 				Host:    host,
