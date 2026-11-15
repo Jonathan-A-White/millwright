@@ -925,7 +925,9 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		}
 		if fixed, how := n.findingOnMain(ctx, c, report, bug); fixed {
 			said := strings.Join(bug.said(), " ")
-			report.Notes = append(report.Notes, fmt.Sprintf("already fixed on main: %s (%s; %s's finding, so no bug is filed)", said, how, c.id))
+			dropped := fmt.Sprintf("already fixed on main: %s (%s; %s's finding, so no bug is filed)", said, how, c.id)
+			n.keepJoin(ctx, c, report, dropped)
+			report.Notes = append(report.Notes, dropped)
 			block = append(block, "already fixed on main: "+said)
 			continue
 		}
