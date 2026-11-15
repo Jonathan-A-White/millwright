@@ -184,3 +184,95 @@ func TestTheHostsTestRunnerLimit(t *testing.T) {
 		}
 	})
 }
+
+// aWaiterAtTheSlots is one start waiting for a test-runner slot, as a mw of its
+// own would be: its own TestRuns on the host's shared directory, whose every
+// wait stops at a step the test lets go of.
+type aWaiterAtTheSlots struct {
+	waiting chan struct{} // told each time the start has looked, found no slot, and is about to wait
+	go_     chan struct{} // the test lets the wait end
+	done    chan error    // the start's own result, once it has a slot
+	release func()
+}
+
+func startAWaiter(t *testing.T, dir, name string, at time.Time) *aWaiterAtTheSlots {
+	t.Helper()
+	w := &aWaiterAtTheSlots{waiting: make(chan struct{}, 100), go_: make(chan struct{}), done: make(chan error, 1)}
+	runs := rig.NewTestRuns(dir, 1, rig.WithTestRunsClock(
+		func() time.Time { return at },
+		func(ctx context.Context, d time.Duration) error {
+			w.waiting <- struct{}{}
+			select {
+			case <-w.go_:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}))
+	go func() {
+		release, err := runs.Take(context.Background(), name)
+		w.release = release
+		w.done <- err
+	}()
+	return w
+}
+
+func (w *aWaiterAtTheSlots) lookedAndWaited(t *testing.T, what string) {
+	t.Helper()
+	select {
+	case <-w.waiting:
+	case err := <-w.done:
+		t.Fatalf("%s: the start took a slot (%v) when it should have waited", what, err)
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s: the start never looked at the slots", what)
+	}
+}
+
+func TestATestRunnerSlotIsGivenToTheOldestWaiter(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	holder, err := rig.NewTestRuns(dir, 1, rig.WithTestRunsClock(func() time.Time { return start }, nil)).Take(context.Background(), "a run going")
+	if err != nil {
+		t.Fatalf("taking the one slot: %v", err)
+	}
+
+	first := startAWaiter(t, dir, "the first to wait", start.Add(time.Second))
+	first.lookedAndWaited(t, "the first")
+	second := startAWaiter(t, dir, "the second to wait", start.Add(2*time.Second))
+	second.lookedAndWaited(t, "the second")
+
+	// The slot is free, and the later waiter looks at it first.
+	holder()
+	second.go_ <- struct{}{}
+	select {
+	case err := <-second.done:
+		t.Fatalf("the second to wait took the slot ahead of the first (%v)", err)
+	case <-second.waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second start neither took a slot nor waited again")
+	}
+
+	// The first looks and starts.
+	first.go_ <- struct{}{}
+	select {
+	case err := <-first.done:
+		if err != nil {
+			t.Fatalf("the first to wait: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first to wait did not take the free slot when it looked")
+	}
+
+	// Then, its run over, the second does.
+	first.release()
+	second.go_ <- struct{}{}
+	select {
+	case err := <-second.done:
+		if err != nil {
+			t.Fatalf("the second to wait: %v", err)
+		}
+		second.release()
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second to wait did not take the slot once the first's run ended")
+	}
+}
