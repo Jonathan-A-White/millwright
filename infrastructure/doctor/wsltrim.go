@@ -3,8 +3,12 @@ package doctor
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -221,4 +225,160 @@ func lastTrigger(value string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return time.Unix(secs, 0), true
+}
+
+var _ application.DoctorCheck = (*WSLDriveFree)(nil)
+
+// WSLDriveFreeName is what the check is called: in the log, and on the command
+// line as `mw doctor wsl-drive-free`.
+const WSLDriveFreeName = "wsl-drive-free"
+
+// WSLDriveFreeMin is the free space on the Windows drive holding the vhdx
+// under which the check is faulty: 5 GB. The desktop's D: reached 0.01 GB free
+// and WSL would not start (E_FAIL) with nothing in the doctor able to see it
+// (mw-gq6.1366).
+const WSLDriveFreeMin int64 = 5 << 30
+
+// WSLDriveFreeMaxAge is how old the Windows task's report may be before the
+// doctor says the task has stopped: the task writes every 2 minutes.
+const WSLDriveFreeMaxAge = 24 * time.Hour
+
+// WSLDriveFreeFile and WSLDriveFreeDir are where, under $HOME, the Windows task
+// (contrib/windows/wsl-flag-watch.ps1) writes its report from outside WSL: one
+// line, "<drive> <free bytes> <unix seconds>", for example "D: 10737418240
+// 1763245200". WSL on the desktop is sealed from Windows, so a file written into
+// WSL is the one way the host sees its Windows drive.
+const (
+	WSLDriveFreeFile = "windows-drive-free"
+	WSLDriveFreeDir  = ".local/state/mw"
+)
+
+// The wsl-drive-free check's damper: a note to the Mayor at most every 6 hours,
+// and nothing on the host to cap.
+const (
+	WSLDriveFreeDamperWait = 6 * time.Hour
+	WSLDriveFreeDamperCap  = 0
+)
+
+// WSLDriveFree is the check that the Windows drive holding a WSL host's vhdx
+// has room: faulty under WSLDriveFreeMin. It reads the report the Windows task
+// writes into WSL; with none, or one it cannot read, it cannot tell and says
+// how the report is installed. Inert on a host that is not WSL. Its cure is one
+// note to the Mayor: freeing a Windows drive is the Governor's hands.
+type WSLDriveFree struct {
+	// Path is the report file. Empty reads WSLDriveFreeDir/WSLDriveFreeFile
+	// under the home directory.
+	Path string
+	// DetectVirt says what systemd-detect-virt prints. Nil runs the real one.
+	DetectVirt func(ctx context.Context) (string, error)
+	// Now is the clock. Nil reads the wall clock.
+	Now func() time.Time
+	// Note puts text in the Mayor's way. Nil writes nothing.
+	Note func(ctx context.Context, text string) error
+}
+
+// NewWSLDriveFree is the check over the real report file and systemd-detect-virt.
+func NewWSLDriveFree() *WSLDriveFree { return &WSLDriveFree{} }
+
+// Name implements application.DoctorCheck.
+func (w *WSLDriveFree) Name() string { return WSLDriveFreeName }
+
+// Probe implements application.DoctorCheck.
+func (w *WSLDriveFree) Probe(ctx context.Context) (application.Verdict, string) {
+	virt, err := (&WSLTrim{DetectVirt: w.DetectVirt}).detectVirt(ctx)
+	if err != nil {
+		return application.DoctorOK, "n/a: systemd-detect-virt could not be run, so this host is not told to be WSL"
+	}
+	if virt != "wsl" {
+		return application.DoctorOK, "n/a: not a WSL host (systemd-detect-virt says " + virt + ")"
+	}
+	path, err := w.path()
+	if err != nil {
+		return application.DoctorCannotTell, err.Error()
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return application.DoctorCannotTell, "no report of the Windows drive's free space at " + path +
+			": nothing on this WSL host can see it; the Windows task writes it, and `mw host wsl-flag --install-line` prints the line that installs or updates the task"
+	}
+	if err != nil {
+		return application.DoctorCannotTell, fmt.Sprintf("the report of the Windows drive's free space could not be read: %v", err)
+	}
+	drive, free, at, ok := parseDriveFree(string(raw))
+	if !ok {
+		return application.DoctorCannotTell, fmt.Sprintf("the report of the Windows drive's free space at %s is not '<drive> <free bytes> <unix seconds>': %q", path, strings.TrimSpace(string(raw)))
+	}
+	age := w.now().Sub(at)
+	if free < WSLDriveFreeMin {
+		return application.DoctorFaulty, fmt.Sprintf("%s has %.1f GB free, under the %d GB the WSL vhdx needs to grow and start (report %s); cure: free space on it, then `wsl --shutdown` and start WSL; `mw host wsl-flag compact` gives back what the trim freed",
+			drive, float64(free)/(1<<30), WSLDriveFreeMin>>30, reportAge(age))
+	}
+	if age > WSLDriveFreeMaxAge {
+		return application.DoctorCannotTell, fmt.Sprintf("the report of the Windows drive's free space is %s: the Windows task has stopped writing it; `mw host wsl-flag --install-line` prints the line that installs the task", reportAge(age))
+	}
+	return application.DoctorOK, fmt.Sprintf("%s has %d GB free", drive, free>>30)
+}
+
+// reportAge says how old a report is, in days when it is over a day.
+func reportAge(age time.Duration) string {
+	if age >= 24*time.Hour {
+		return fmt.Sprintf("%d days old", int(age/(24*time.Hour)))
+	}
+	return "current"
+}
+
+// Cure implements application.DoctorCheck: one note to the Mayor, nothing on
+// the host changed. A note that cannot be written fails the cure, so the
+// damper tries again.
+func (w *WSLDriveFree) Cure(ctx context.Context) error {
+	if w.Note == nil {
+		return nil
+	}
+	return w.Note(ctx, fmt.Sprintf("wsl-drive-free: the Windows drive holding this WSL host's vhdx has under %d GB free; "+
+		"at 0 WSL will not start (E_FAIL, the desktop's D: on 2026-11-15). Free space on it, or run `mw host trim-setup --check` to see which WSL hosts have no trim step yet.", WSLDriveFreeMin>>30))
+}
+
+// Damper implements application.DoctorCheck.
+func (w *WSLDriveFree) Damper() (time.Duration, int) {
+	return WSLDriveFreeDamperWait, WSLDriveFreeDamperCap
+}
+
+// WayBack implements application.DoctorCheck.
+func (w *WSLDriveFree) WayBack() string {
+	return "nothing was changed on the host; the note it wrote is cleared by the Mayor"
+}
+
+func (w *WSLDriveFree) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now()
+}
+
+func (w *WSLDriveFree) path() (string, error) {
+	if w.Path != "" {
+		return w.Path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to read the Windows drive's free-space report in: %w", err)
+	}
+	return filepath.Join(home, WSLDriveFreeDir, WSLDriveFreeFile), nil
+}
+
+// parseDriveFree reads "<drive> <free bytes> <unix seconds>".
+func parseDriveFree(text string) (drive string, free int64, at time.Time, ok bool) {
+	fields := strings.Fields(text)
+	if len(fields) != 3 {
+		return "", 0, time.Time{}, false
+	}
+	free, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil || free < 0 {
+		return "", 0, time.Time{}, false
+	}
+	secs, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil || secs <= 0 {
+		return "", 0, time.Time{}, false
+	}
+	return fields[0], free, time.Unix(secs, 0), true
 }

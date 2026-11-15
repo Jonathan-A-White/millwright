@@ -201,3 +201,109 @@ func TestWSLTrimProbeScriptSaysWSLAndDropIn(t *testing.T) {
 		}
 	}
 }
+
+// driveFreeCheck is the check over a report file in a temp dir holding text
+// (nothing when text is empty and missing is true).
+func driveFreeCheck(t *testing.T, virt string, text string, missing bool) *doctor.WSLDriveFree {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "windows-drive-free")
+	if !missing {
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatalf("writing the report: %v", err)
+		}
+	}
+	return &doctor.WSLDriveFree{Path: path, DetectVirt: detectVirt(virt), Now: func() time.Time { return trimNow }}
+}
+
+// report is a line the Windows task writes: the drive, its free bytes, and the
+// unix second it was read.
+func report(drive string, freeGB float64, ago time.Duration) string {
+	return fmt.Sprintf("%s %d %d\n", drive, int64(freeGB*(1<<30)), trimNow.Add(-ago).Unix())
+}
+
+// The desktop's D: sat at 0.01 GB free with nothing in the doctor able to see
+// it (mw-gq6.1366): a free figure under 5 GB is the alarm.
+func TestWSLDriveFreeIsFaultyUnderFiveGigabytes(t *testing.T) {
+	check := driveFreeCheck(t, "wsl", report("D:", 0.01, time.Minute), false)
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty for 0.01 GB free, got %v %q", verdict, reason)
+	}
+	for _, want := range []string{"D:", "0.0 GB free", "5 GB", "wsl --shutdown"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("expected the reason to hold %q, got %q", want, reason)
+		}
+	}
+}
+
+func TestWSLDriveFreeIsOkAtFiveGigabytesAndSaysTheFigure(t *testing.T) {
+	check := driveFreeCheck(t, "wsl", report("D:", 42, time.Minute), false)
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.Contains(reason, "D:") || !strings.Contains(reason, "42 GB free") {
+		t.Fatalf("expected ok saying D: has 42 GB free, got %v %q", verdict, reason)
+	}
+	check = driveFreeCheck(t, "wsl", report("C:", 5, time.Minute), false)
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok at exactly 5 GB, got %v %q", verdict, reason)
+	}
+}
+
+func TestWSLDriveFreeIsInertOnAHostThatIsNotWSL(t *testing.T) {
+	check := driveFreeCheck(t, "none", "", true)
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.HasPrefix(reason, "n/a") {
+		t.Fatalf("expected an n/a ok off WSL, got %v %q", verdict, reason)
+	}
+}
+
+// A WSL host with no report is a host whose Windows drive nothing can see:
+// said, with the line that installs the task that writes it.
+func TestWSLDriveFreeCannotTellWithoutAReport(t *testing.T) {
+	check := driveFreeCheck(t, "wsl", "", true)
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorCannotTell {
+		t.Fatalf("expected cannot-tell with no report, got %v %q", verdict, reason)
+	}
+	if !strings.Contains(reason, "mw host wsl-flag --install-line") {
+		t.Errorf("expected the reason to name the install line, got %q", reason)
+	}
+}
+
+func TestWSLDriveFreeCannotTellFromAReportItCannotReadOrOneThatIsStale(t *testing.T) {
+	for name, text := range map[string]string{
+		"garbage":       "not a report\n",
+		"no number":     "D: lots " + fmt.Sprint(trimNow.Unix()) + "\n",
+		"stale by days": report("D:", 100, 3*24*time.Hour),
+	} {
+		verdict, reason := driveFreeCheck(t, "wsl", text, false).Probe(context.Background())
+		if verdict != application.DoctorCannotTell {
+			t.Errorf("%s: expected cannot-tell, got %v %q", name, verdict, reason)
+		}
+	}
+}
+
+// A stale report does not hide a full drive: what it last said is still said.
+func TestWSLDriveFreeStaleReportStillSaysAFullDrive(t *testing.T) {
+	verdict, reason := driveFreeCheck(t, "wsl", report("D:", 0.01, 3*24*time.Hour), false).Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "3 days old") {
+		t.Fatalf("expected faulty naming the report's age, got %v %q", verdict, reason)
+	}
+}
+
+func TestWSLDriveFreeCureWritesOneNoteAndChangesNothingElse(t *testing.T) {
+	check := driveFreeCheck(t, "wsl", report("D:", 0.01, time.Minute), false)
+	var notes []string
+	check.Note = func(_ context.Context, text string) error { notes = append(notes, text); return nil }
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("cure: %v", err)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "5 GB") {
+		t.Fatalf("expected one note naming the threshold, got %q", notes)
+	}
+	if wait, cap := check.Damper(); wait <= 0 || cap != 0 {
+		t.Errorf("expected a wait and no cap for a note-only cure, got %v %d", wait, cap)
+	}
+	if check.Name() != "wsl-drive-free" || check.WayBack() == "" {
+		t.Errorf("unexpected name %q or empty way back", check.Name())
+	}
+}

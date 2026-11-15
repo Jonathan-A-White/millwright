@@ -15,7 +15,11 @@
 # are written to wsl-flag.result beside it: '<UTC time> <action> ok|failed: ...'.
 # `mw host wsl-flag restart|compact` writes the flag and waits for that file;
 # `mw host wsl-flag --install-line` prints the one admin-PowerShell line that
-# installs this file and registers the task. Log: %LOCALAPPDATA%\millwright\wsl-flag-watch.log
+# installs this file and registers the task. Every tick, before it looks at the
+# flag, it also writes one line, '<drive> <free bytes> <unix seconds>', to
+# windows-drive-free beside the flag: the free space of the vhdx's drive, which
+# nothing inside WSL can read; the wsl-drive-free check of `mw doctor` alarms
+# under 5 GB (mw-gq6.1366). Log: %LOCALAPPDATA%\millwright\wsl-flag-watch.log
 # Way back: Unregister-ScheduledTask -TaskName millwright-wsl-flag-watch -Confirm:$false;
 #           Remove-Item "$env:ProgramData\millwright\wsl-flag-watch.ps1"   (no WSL change)
 
@@ -23,6 +27,7 @@ $env:WSL_UTF8 = '1'
 $distro  = 'Ubuntu-24.04'
 $dir     = "\\wsl.localhost\$distro\home\jwhite\.local\state\mw"
 $flag    = "$dir\wsl-flag"
+$driveFree = "$dir\windows-drive-free"
 $result  = "$dir\wsl-flag.result"
 $vhdx    = 'D:\wsl\Ubuntu-24.04\ext4.vhdx'
 $startTask = 'Start WSL (millwright)'
@@ -64,6 +69,14 @@ function Start-Wsl {
     Start-ScheduledTask -TaskName $startTask
     Start-Sleep 20
 }
+
+# Report the vhdx drive's free space into WSL (a failure is logged, never fatal).
+try {
+    $letter = (Split-Path -Qualifier $vhdx).TrimEnd(':')
+    $report = "$($letter): $((Get-PSDrive $letter -ErrorAction Stop).Free) $([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+    $w = Within 30 { param($f, $t) Set-Content -LiteralPath $f -Value $t -ErrorAction Stop } @($driveFree, $report)
+    if (-not $w.Done) { Log 'the drive-free report did not finish in 30 seconds' }
+} catch { Log "the drive-free report failed: $($_.Exception.Message)" }
 
 $read = Within 60 { param($f) if (Test-Path -LiteralPath $f) { Get-Content -LiteralPath $f -Raw } } $flag
 if (-not $read.Done -or $null -eq $read.Out) { exit 0 }

@@ -429,6 +429,10 @@ func newDoctorCmd() *cobra.Command {
 			wslTrim.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLTrimName), text)
 			}
+			wslDriveFree := doctor.NewWSLDriveFree()
+			wslDriveFree.Note = func(ctx context.Context, text string) error {
+				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLDriveFreeName), text)
+			}
 			dampers, err := doctorDamperSurvey(vault, host)
 			if err != nil {
 				return err
@@ -548,6 +552,7 @@ func newDoctorCmd() *cobra.Command {
 				tmpLeftovers,
 				rootDisk,
 				wslTrim,
+				wslDriveFree,
 				mayorStuck,
 				mayorStale,
 				mayorGone,

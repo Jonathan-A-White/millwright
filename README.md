@@ -4356,7 +4356,21 @@ it) whether it is WSL and has both drop-ins, and files one `mw hands add` step a
 root (`wsl-fstrim-<host>`, with its way back) on the bead for each that lacks
 them; a host it cannot ask is said and skipped. The `wsl-trim` check of `mw
 doctor` is faulty on a WSL host whose `fstrim.timer` never ran or last ran over
-8 days ago, and names this command.
+8 days ago, and names this command. `mw host trim-setup --check` prints no line and
+files nothing: it lists `pending trim step: <host>` for every WSL host (this one and
+each of `[hands_hosts]`) that lacks the drop-ins and exits non-zero while any is
+listed, so a host that never got its step is found by running it (the desktop's
+`D:` filled to 0.01 GB free and WSL would not start, E_FAIL, 2026-11-15, mw-gq6.1366).
+
+**The Windows drive's free space (mw-gq6.1366).** Nothing inside WSL can read the
+Windows drive that holds the vhdx, so every tick of the `wsl-flag-watch.ps1` task
+also writes one line, `<drive> <free bytes> <unix seconds>`, to
+`~/.local/state/mw/windows-drive-free` inside WSL. The `wsl-drive-free` check of
+`mw doctor` reads it: faulty under 5 GB free (a note to the Mayor, at most every 6
+hours), cannot-tell when there is no report or it is over a day old (naming `mw host
+wsl-flag --install-line`, which installs the task again with the new script), inert
+off WSL. A task installed before this change writes no report until its line is run
+again. Test: `go test ./infrastructure/doctor -run WSLDriveFree`.
 
 **Restart or compact WSL with no visit to the desk (mw-gq6.1039).** WSL on the
 desktop is sealed from Windows, so nothing inside it can start a Windows program;
