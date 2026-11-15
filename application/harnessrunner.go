@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 	"time"
 )
@@ -36,9 +37,136 @@ type HarnessReadyRunner struct {
 	Out   io.Writer
 }
 
-// runsClaude says whether a session's command starts claude.
+// runsClaude says whether a session's command starts claude: a command of the
+// session's own whose program is claude, as the story's shell line has it
+// (`nice -n 10 claude --print ...`), or a bare argv. A word
+// that merely says claude, in a path, a file's name or the kickoff's text, does
+// not count (mw-gq6.1329): a Codex session's line is full of them.
 func runsClaude(spec SessionSpec) bool {
-	return strings.Contains(strings.Join(spec.Command, " "), "claude")
+	argv := spec.Command
+	if len(argv) >= 3 && isShell(argv[0]) && argv[1] == "-c" {
+		return programIsClaude(shellCommands(argv[2]))
+	}
+	return programIsClaude([][]string{argv})
+}
+
+func isShell(program string) bool {
+	switch path.Base(program) {
+	case "sh", "bash", "dash", "zsh":
+		return true
+	}
+	return false
+}
+
+// programIsClaude says whether any of the commands, each a list of words, runs
+// claude once the words that only wrap a program are set aside.
+func programIsClaude(commands [][]string) bool {
+	for _, words := range commands {
+		for len(words) > 0 {
+			word := words[0]
+			switch path.Base(word) {
+			case "nice", "timeout", "exec", "env", "command":
+				words = skipWrapper(path.Base(word), words[1:])
+				continue
+			}
+			if path.Base(word) == "claude" {
+				return true
+			}
+			break
+		}
+	}
+	return false
+}
+
+// skipWrapper drops what a wrapping program takes before the program it runs:
+// nice's -n and its number, timeout's duration, env's assignments.
+func skipWrapper(wrapper string, words []string) []string {
+	for len(words) > 0 {
+		word := words[0]
+		switch {
+		case wrapper == "nice" && word == "-n" && len(words) > 1:
+			words = words[2:]
+		case strings.HasPrefix(word, "-"):
+			words = words[1:]
+		case wrapper == "timeout":
+			// The duration, 90m, is the one word before the program.
+			return words[1:]
+		case wrapper == "env" && strings.Contains(word, "="):
+			words = words[1:]
+		default:
+			return words
+		}
+	}
+	return words
+}
+
+// shellCommands splits a shell line into its simple commands, each a list of
+// words: quotes make one word of what they hold, and ; & | ( ) and a newline end
+// a command. Words such as if, then, do and else begin nothing of their own, so
+// they are dropped from the front of a command; a test's [ ... ] is a command of
+// its own whose program is [.
+func shellCommands(line string) [][]string {
+	var commands [][]string
+	var words []string
+	var word strings.Builder
+	inWord := false
+	endWord := func() {
+		if inWord {
+			words = append(words, word.String())
+			word.Reset()
+			inWord = false
+		}
+	}
+	endCommand := func() {
+		endWord()
+		for len(words) > 0 && isShellKeyword(words[0]) {
+			words = words[1:]
+		}
+		if len(words) > 0 {
+			commands = append(commands, words)
+		}
+		words = nil
+	}
+	runes := []rune(line)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case r == '\'':
+			inWord = true
+			for i++; i < len(runes) && runes[i] != '\''; i++ {
+				word.WriteRune(runes[i])
+			}
+		case r == '"':
+			inWord = true
+			for i++; i < len(runes) && runes[i] != '"'; i++ {
+				if runes[i] == '\\' && i+1 < len(runes) {
+					i++
+				}
+				word.WriteRune(runes[i])
+			}
+		case r == '\\' && i+1 < len(runes):
+			inWord = true
+			i++
+			word.WriteRune(runes[i])
+		case r == ' ' || r == '\t':
+			endWord()
+		case r == ';' || r == '&' || r == '|' || r == '(' || r == ')' || r == '\n':
+			endCommand()
+		default:
+			inWord = true
+			word.WriteRune(r)
+		}
+	}
+	endCommand()
+	return commands
+}
+
+func isShellKeyword(word string) bool {
+	switch word {
+	case "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "{", "}", "!":
+		return true
+	}
+	return false
 }
 
 // Start implements Runner: it waits for claude to answer, then starts the session.
