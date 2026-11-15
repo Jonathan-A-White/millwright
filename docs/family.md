@@ -95,6 +95,9 @@ anything (a free port, an empty vault directory, a dolt on the `PATH`), and it w
 | the Dolt data directory the unit serves | `~/.local/share/mw/dolt-beads` |
 | the vault: a git repository, one commit, laid from the starter kit (`seats/`, `CLAUDE.md`), its beads database made on that server | `~/luke-vault` |
 
+On a host that runs tests beside the served beads, `sh scripts/install-dolt-priority.sh` adds the
+`CPUWeight=1000` drop-in (`contrib/dolt-beads/priority.conf`) to that unit and reads the weight back.
+
 The Dolt data lives outside the vault on purpose: a `.beads/dolt` directory that `bd` did not
 make itself is taken for a legacy workspace and refused. The beads database is made with
 `bd init` against the server that is already running (`--server --external`), never `bd migrate`:
