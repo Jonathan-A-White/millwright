@@ -236,6 +236,18 @@ func (h *gateHolding) KeepPlace(kept time.Duration) (place, of int, ok bool) {
 	return place, of, err == nil
 }
 
+// Waiting implements application.LockWaiters: how many live tickets are queued
+// for the lock behind its holder (mw-gq6.1319). The holder's own ticket was
+// dropped when it took the lock, so Place finds it absent and counts one past
+// the others.
+func (h *gateHolding) Waiting() int {
+	if h.tickets == nil || h.gone {
+		return 0
+	}
+	_, of := h.tickets.Place(h.ticket)
+	return of - 1
+}
+
 // Release implements application.Holding. Releasing twice is harmless.
 func (h *gateHolding) Release(context.Context) error {
 	if h.gone {
