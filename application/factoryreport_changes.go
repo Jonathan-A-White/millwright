@@ -27,6 +27,15 @@ const (
 // before, and not be called WORSE (PROVISIONAL, the Governor to confirm).
 const ChangeBand = 0.10
 
+// ChangeRateFloor is how many percentage points a rate (a share, in percent)
+// must move, as well as the ChangeBand, to be called WORSE: on a rate near 10%
+// one point is already past the relative band, and is load, not a change.
+const ChangeRateFloor = 2.0
+
+// rateMetrics are the metrics that are a share in percent, which the
+// ChangeRateFloor holds too.
+var rateMetrics = map[string]bool{"refusals": true}
+
 // The verdicts of a factory change: KEPT when its metric moved the way its
 // story expected or held inside the ChangeBand, WORSE when it went the other way
 // past it, NONE when the story expected to move none. ChangeLevel is how mw
@@ -157,9 +166,10 @@ type FactoryChange struct {
 
 // judgeChange says whether a metric moved the way a story expected or held
 // inside the ChangeBand of the days before, KEPT, or went the other way past it,
-// WORSE.
+// WORSE. A rate holds, too, inside ChangeRateFloor points.
 func judgeChange(e domain.Expect, before, after float64) string {
-	held := math.Abs(after-before) <= ChangeBand*math.Abs(before)+1e-9
+	moved := math.Abs(after - before)
+	held := moved <= ChangeBand*math.Abs(before)+1e-9 || (rateMetrics[e.Metric] && moved <= ChangeRateFloor+1e-9)
 	if held || (after > before) == (e.Direction == "up") {
 		return ChangeKept
 	}
@@ -254,6 +264,7 @@ func entriesBetween(all []reportEntry, from, to time.Time) []reportEntry {
 func writeChanges(b *strings.Builder, changes []FactoryChange) {
 	fmt.Fprintf(b, "\nFACTORY CHANGES (millwright landings, %d days)\n", ChangeDays)
 	fmt.Fprintf(b, "  %d days before vs %d after; WORSE past a %.0f%% band\n", ChangeVerdictDays, ChangeVerdictDays, ChangeBand*100)
+	fmt.Fprintf(b, "  and, for a rate, past %.0f points\n", ChangeRateFloor)
 	if len(changes) == 0 {
 		b.WriteString("  none landed\n")
 		return
@@ -397,14 +408,14 @@ func (r FactoryReport) takeSnapshot(all []reportEntry, review *ReviewTime, seats
 }
 
 // record writes what a report that was given the means to write does: it tells
-// the Mayor, once, of each change that is WORSE, and keeps the day's snapshot
+// the Mayor, once, of each change that is WORSE (changes of one day and metric in one mail), and keeps the day's snapshot
 // of the key metrics if today's is not kept yet. A report with none of the
 // means, or one narrowed to a rig or host, writes nothing.
 func (r FactoryReport) record(ctx context.Context, result FactoryReportResult, all []reportEntry, sessions []SeatSession, now time.Time) error {
 	var problems []string
 	if r.Notes != nil && r.Mailbox != nil {
-		for _, c := range worse(result.Changes) {
-			if err := r.tellMayor(ctx, c, result.Window.Until); err != nil {
+		for _, group := range sameDayWorse(worse(result.Changes)) {
+			if err := r.tellMayor(ctx, group, result.Window.Until); err != nil {
 				problems = append(problems, err.Error())
 			}
 		}
@@ -420,32 +431,88 @@ func (r FactoryReport) record(ctx context.Context, result FactoryReportResult, a
 	return nil
 }
 
-// tellMayor mails the Mayor that a change is WORSE, unless a note says it did.
-// The note is made first, so a mail that is sent and then not remembered is not
-// sent twice; a mail that could not be sent clears the note, to be tried again.
-func (r FactoryReport) tellMayor(ctx context.Context, c FactoryChange, at time.Time) error {
-	key := ChangeWorseKey(c.Story)
-	told, err := r.Notes.Note(ctx, key)
-	if err != nil {
-		return fmt.Errorf("%s: whether the Mayor was told: %w", c.Story, err)
+// sameDayWorse groups the changes of worse that landed the same day expecting
+// the same of the same metric: their before and after are the same days of the
+// whole factory, so they are one swing and the Mayor is told of it once. The
+// groups, and the changes in each, keep their order.
+func sameDayWorse(changes []FactoryChange) [][]FactoryChange {
+	var groups [][]FactoryChange
+	at := map[string]int{}
+	for _, c := range changes {
+		key := c.Landed + "|" + c.Expect.String()
+		if i, ok := at[key]; ok {
+			groups[i] = append(groups[i], c)
+			continue
+		}
+		at[key] = len(groups)
+		groups = append(groups, []FactoryChange{c})
 	}
-	if told != "" {
+	return groups
+}
+
+// tellMayor mails the Mayor that a group of changes (one, or several that landed
+// the same day on the same metric) is WORSE, unless a note says it did, change
+// by change. The notes are made first, so a mail that is sent and then not
+// remembered is not sent twice; a mail that could not be sent clears them, to be
+// tried again.
+func (r FactoryReport) tellMayor(ctx context.Context, group []FactoryChange, at time.Time) error {
+	var due []FactoryChange
+	var noted []string
+	clear := func() {
+		for _, key := range noted {
+			r.Notes.SetNote(ctx, key, "")
+		}
+	}
+	for _, c := range group {
+		key := ChangeWorseKey(c.Story)
+		told, err := r.Notes.Note(ctx, key)
+		if err != nil {
+			clear()
+			return fmt.Errorf("%s: whether the Mayor was told: %w", c.Story, err)
+		}
+		if told != "" {
+			continue
+		}
+		if err := r.Notes.SetNote(ctx, key, at.UTC().Format(LedgerDate)); err != nil {
+			clear()
+			return fmt.Errorf("%s: noting that the Mayor is told: %w", c.Story, err)
+		}
+		noted = append(noted, key)
+		due = append(due, c)
+	}
+	if len(due) == 0 {
 		return nil
 	}
-	if err := r.Notes.SetNote(ctx, key, at.UTC().Format(LedgerDate)); err != nil {
-		return fmt.Errorf("%s: noting that the Mayor is told: %w", c.Story, err)
+	first := due[0]
+	format := formatOf(first.Expect.Metric)
+	var named, ids []string
+	for _, c := range due {
+		named = append(named, fmt.Sprintf("%s (%s)", c.Title, c.Story))
+		ids = append(ids, c.Story)
 	}
-	format := formatOf(c.Expect.Metric)
-	body := fmt.Sprintf("%s (%s) landed %s expecting %s, and %s went the other way past the %.0f%% band: "+
+	subject := first.Title
+	landed := named[0] + " landed"
+	if len(due) > 1 {
+		subject = fmt.Sprintf("%d changes of %s", len(due), first.Landed)
+		landed = "These changes landed:\n- " + strings.Join(named, "\n- ") + "\nThey landed"
+	}
+	floor := ""
+	if rateMetrics[first.Expect.Metric] {
+		floor = fmt.Sprintf(" and %.0f points", ChangeRateFloor)
+	}
+	body := fmt.Sprintf("%s %s expecting %s, and %s went the other way past the %.0f%%%s band: "+
 		"%s in the %d days before, %s in the %d days after (the whole factory, %s to %s).\n\n"+
 		"Look at it, and either fix it, take it back, or say the measure was noise: mw report shows FACTORY CHANGES.\n",
-		c.Title, c.Story, c.Landed, c.Expect, c.Expect.Metric, ChangeBand*100,
-		format(*c.Before), ChangeVerdictDays, format(*c.After), ChangeVerdictDays,
-		c.Landed, c.AfterEnds)
+		landed, first.Landed, first.Expect, first.Expect.Metric, ChangeBand*100, floor,
+		format(*first.Before), ChangeVerdictDays, format(*first.After), ChangeVerdictDays,
+		first.Landed, first.AfterEnds)
+	if len(due) > 1 {
+		body = strings.Replace(body, "They landed "+first.Landed+" expecting", "They landed "+first.Landed+", each expecting", 1)
+	}
 	if _, err := r.Mailbox.Send(ctx, NewMessage{From: MwSeat, To: MayorMailbox,
-		Subject: MailFactoryChange + ": " + c.Title + " made " + c.Expect.Metric + " worse", Body: body}); err != nil {
-		r.Notes.SetNote(ctx, key, "")
-		return fmt.Errorf("%s: the mail to %s could not be sent: %w", c.Story, MayorMailbox, err)
+		Subject: MailFactoryChange + ": " + subject + " made " + first.Expect.Metric + " worse", Body: body}); err != nil {
+		clear()
+		return fmt.Errorf("%s: the mail to %s could not be sent: %w", strings.Join(ids, ", "), MayorMailbox, err)
 	}
 	return nil
 }

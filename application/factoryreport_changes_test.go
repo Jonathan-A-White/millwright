@@ -463,3 +463,78 @@ func TestAReportWithNoReviewCountsLeavesHisTimeOut(t *testing.T) {
 		t.Errorf("snapshots %+v, want his time left out", got)
 	}
 }
+
+// A rate is judged past an absolute floor as well as the relative band, so one
+// point on a rate near 10% is not an alarm (mw-gq6.1320).
+func TestARateIsWorseOnlyPastTheFloorInPointsAsWellAsTheBand(t *testing.T) {
+	if application.ChangeRateFloor < 2 {
+		t.Fatalf("the floor is %v points, the story says at least 2", application.ChangeRateFloor)
+	}
+	for _, c := range []struct {
+		name             string
+		beforeL, beforeR int
+		afterL, afterR   int
+		verdict          string
+	}{
+		{"10% to 11% is held", 90, 10, 89, 11, application.ChangeKept},
+		{"8% to 9% is a point past the 10% band, and held", 92, 8, 91, 9, application.ChangeKept},
+		{"10% to 12% is two points, on the floor, and held", 90, 10, 88, 12, application.ChangeKept},
+		{"10% to 13% is worse", 90, 10, 87, 13, application.ChangeWorse},
+	} {
+		f := newChangeFactory(t)
+		f.rows("2026-09-27", "lampas", c.beforeL, c.beforeR)
+		f.rows("2026-10-05", "lampas", c.afterL, c.afterR)
+		f.change("Expect: refusals down", "2026-10-01")
+		result, _ := f.report(false)
+		if len(result.Changes) != 1 || result.Changes[0].Verdict != c.verdict {
+			t.Errorf("%s: changes %+v, want the verdict %q", c.name, result.Changes, c.verdict)
+		}
+	}
+}
+
+func TestTheChangesHeaderSaysTheFloorBesideTheBand(t *testing.T) {
+	f := newChangeFactory(t)
+	f.rows("2026-09-27", "lampas", 4, 1)
+	f.rows("2026-10-05", "lampas", 5, 0)
+	f.change("Expect: refusals down", "2026-10-01")
+	_, printed := f.report(false)
+	if !strings.Contains(printed, "WORSE past a 10% band\n  and, for a rate, past 2 points\n") {
+		t.Errorf("the header does not say the floor beside the band:\n%s", printed)
+	}
+}
+
+func TestChangesLandedTheSameDayOnTheSameMetricAreOneMailThatNamesThemAll(t *testing.T) {
+	f := newChangeFactory(t)
+	f.rows("2026-09-27", "lampas", 4, 1)
+	f.rows("2026-10-05", "lampas", 2, 2)
+	f.change("Expect: refusals down", "2026-10-01")
+	f.story("mw-c.2", "Make refusals rarer still", "millwright", "Expect: refusals down")
+	f.ledger(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "mw-c.2", "landed on main")
+	// A third change of the same day that expects another metric is its own mail.
+	f.story("mw-c.3", "Make attempts fewer", "millwright", "Expect: attempts/landing down")
+	f.ledger(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), "mw-c.3", "landed on main")
+
+	f.report(true)
+	f.report(true)
+	inbox, err := f.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refusals []string
+	for _, m := range inbox {
+		if strings.Contains(m.Subject, "refusals") {
+			refusals = append(refusals, m.Subject+"\n"+m.Body)
+		}
+	}
+	if len(refusals) != 1 {
+		t.Fatalf("the Mayor got %d mails on refusals, want 1: %+v", len(refusals), inbox)
+	}
+	for _, want := range []string{"mw-c.1", "mw-c.2", "Make refusals rarer", "Make refusals rarer still", "20%", "50%"} {
+		if !strings.Contains(refusals[0], want) {
+			t.Errorf("the one mail does not say %q:\n%s", want, refusals[0])
+		}
+	}
+	if strings.Contains(refusals[0], "mw-c.3") {
+		t.Errorf("the mail names a change of another metric:\n%s", refusals[0])
+	}
+}
