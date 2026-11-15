@@ -431,3 +431,53 @@ func TestASuiteReadsAVitestFindingAfterTheRigsInstall(t *testing.T) {
 		})
 	}
 }
+
+// A finding dropped as fixed on main is said in the close-out's log,
+// runs/<story>/next-<n>.log, with the finding and how main showed it fixed, so
+// that a finding wrongly dropped can be found afterwards (mw-gq6.1311).
+func TestAFindingFixedOnMainIsWrittenInTheCloseOutsLog(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+lintFinding+"\nFor the rig memory: nothing"))
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	vault.written["mw-x.1/next-1.log"] = "close-out started 2026-11-13T10:00:00Z\n"
+	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
+	main := &stubFindingChecks{answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: "ok"}}
+	report, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: &scriptedChecks{passes: []bool{true}}, Slot: aSlot{}, Mailbox: apptest.NewFakeMailbox(),
+		RetryWait: func(context.Context, time.Duration) error { return nil },
+		Seat:      "builder", Host: "laptop",
+		Rigs:          map[string]string{"millwright": "/rigs/millwright"},
+		FindingChecks: main,
+		Out:           io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	if err != nil || report.Refused || !report.Landed {
+		t.Fatalf("expected the story landed, got err %v and %+v", err, report)
+	}
+
+	log := vault.written["mw-x.1/next-1.log"]
+	if !strings.HasPrefix(log, "close-out started 2026-11-13T10:00:00Z\n") {
+		t.Errorf("expected what the log held kept, got %q", log)
+	}
+	var line string
+	for _, l := range strings.Split(log, "\n") {
+		if strings.Contains(l, "already fixed on main") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("expected a line of the log to say the finding is already fixed on main, got %q", log)
+	}
+	for _, want := range []string{"make lint refuses application/status.go", "make lint passes at 21bc605c"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("expected the line to say %q, got %q", want, line)
+		}
+	}
+	if strings.Count(log, "already fixed on main") != 1 {
+		t.Errorf("expected exactly one such line, got %q", log)
+	}
+}
