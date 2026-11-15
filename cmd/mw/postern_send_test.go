@@ -206,14 +206,14 @@ func lengthSend(t *testing.T, args ...string) (plaintexts []string, stderr strin
 
 func nWords(n int) string { return strings.TrimSpace(strings.Repeat("word ", n)) }
 
-// A message over 200 words is refused with the count, the limit and --long
+// A message over 120 words is refused with the count, the limit and --long
 // named, and nothing is sent (mw-t5shinh.5).
-func TestPosternSendRefusesAMessageOver200Words(t *testing.T) {
-	plaintexts, _, err := lengthSend(t, nWords(201))
+func TestPosternSendRefusesAMessageOver120Words(t *testing.T) {
+	plaintexts, _, err := lengthSend(t, nWords(121))
 	if err == nil {
-		t.Fatal("expected 201 words to be refused")
+		t.Fatal("expected 121 words to be refused")
 	}
-	for _, want := range []string{"201 words", "200", "--long"} {
+	for _, want := range []string{"121 words", "120", "--long"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected the refusal to name %q, got: %v", want, err)
 		}
@@ -270,11 +270,11 @@ func TestPosternSendLongSendsPastBothLimits(t *testing.T) {
 
 func TestPosternSendCountsAFilesTextLikeAnArgument(t *testing.T) {
 	long := filepath.Join(t.TempDir(), "long.txt")
-	if err := os.WriteFile(long, []byte(nWords(201)+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(long, []byte(nWords(121)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if plaintexts, _, err := lengthSend(t, "--file", long); err == nil || !strings.Contains(err.Error(), "201 words") || len(plaintexts) != 0 {
-		t.Fatalf("expected a 201-word file refused, got %d sent, %v", len(plaintexts), err)
+	if plaintexts, _, err := lengthSend(t, "--file", long); err == nil || !strings.Contains(err.Error(), "121 words") || len(plaintexts) != 0 {
+		t.Fatalf("expected a 121-word file refused, got %d sent, %v", len(plaintexts), err)
 	}
 	warned := filepath.Join(t.TempDir(), "warn.txt")
 	if err := os.WriteFile(warned, []byte(nWords(81)+"\n"), 0o600); err != nil {
@@ -294,7 +294,7 @@ func TestPosternSendHelpNamesTheFourLimitsAndLong(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--long", "80", "200", "60", "120"} {
+	for _, want := range []string{"--long", "80", "120", "60"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("expected --help to name %q:\n%s", want, out.String())
 		}

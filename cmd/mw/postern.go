@@ -627,10 +627,10 @@ func newPosternSendCmd() *cobra.Command {
 			"(cat > post.txt <<'EOF') and send that. It is refused with a text argument, with a\n" +
 			"file that cannot be read and with one that holds nothing.\n\n" +
 			"The text is counted in words, split on white space, a card's question alone (--class\n" +
-			"decision-needed), not its options. Over 80 words (a card's question over 60) it prints one\n" +
-			"warning line to stderr and sends; over 200 (a card's question over 120) it refuses and\n" +
-			"sends nothing: trim, put the detail on the bead, or give --long, which sends past both\n" +
-			"limits.\n\n" +
+			"decision-needed), not its options, and not the words inside a fenced code block (```). Over\n" +
+			"80 words (a card's question over 60) it prints one warning line to stderr and sends;\n" +
+			"over 120 (a card's question too) it refuses and sends nothing: trim, put the detail on\n" +
+			"the bead, or give --long, which sends past both limits.\n\n" +
 			"His review queue (open cards, open demos and unrun hands steps, as mw status DAMPERS counts it)\n" +
 			"has a limit, [dampers] review_queue (default 8). A card (--class decision-needed with --bead) asked\n" +
 			"while the queue is over it is not sent: the question, every --option and the --recommend are\n" +
@@ -763,7 +763,7 @@ func newPosternSendCmd() *cobra.Command {
 		_ = cmd.Flags().MarkDeprecated(flag, use)
 	}
 	cmd.Flags().BoolVar(&newPost, "new", false, "post top-level in Factory on purpose, though the Governor's newest Factory post has no answer yet")
-	cmd.Flags().BoolVar(&long, "long", false, "send past the word limits (80 warns and 200 refuses; a card's question 60 and 120)")
+	cmd.Flags().BoolVar(&long, "long", false, "send past the word limits (80 warns and 120 refuses; a card's question 60 and 120)")
 	cmd.Flags().BoolVar(&chain, "chain", false, "also broadcast the message on chain, for a phone that cannot reach the backend")
 	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare; with no channel flag the reply goes to its channel (refused with --bead)")
 	return cmd

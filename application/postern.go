@@ -2634,18 +2634,20 @@ func (s PosternSend) printf(format string, args ...any) {
 // The word limits of a message mw postern send puts on a phone screen: past
 // the warn limit the command line says so and sends, past the refuse limit it
 // sends nothing unless --long is given. A card (class decision-needed) counts
-// its question alone, not its options. Only the command line checks them
+// its question alone, not its options, and the words inside a fenced code block
+// (a paste for him is long by nature) do not count. Only the command line checks them
 // (PosternSendRequest.CheckLength): PosternSend.Run, which mw's own sends use,
 // does not.
 const (
 	PosternWarnWords       = 80
-	PosternRefuseWords     = 200
+	PosternRefuseWords     = 120
 	PosternCardWarnWords   = 60
 	PosternCardRefuseWords = 120
 )
 
 // CheckLength counts the words of the text the command line sends, split on
-// white space. Over the warn limit it returns a one-line warning to print and
+// white space, leaving out a closed fenced code block and its fence lines (an
+// unclosed fence hides nothing: its words count). Over the warn limit it returns a one-line warning to print and
 // goes on; over the refuse limit it returns an error naming the count, the
 // limit and --long. long skips both.
 func (r PosternSendRequest) CheckLength(long bool) (warning string, err error) {
@@ -2656,10 +2658,10 @@ func (r PosternSendRequest) CheckLength(long bool) (warning string, err error) {
 	if r.Class == "decision-needed" {
 		warn, refuse, what = PosternCardWarnWords, PosternCardRefuseWords, "card question"
 	}
-	n := len(strings.Fields(r.Text))
+	n := wordsOutsideFences(r.Text)
 	switch {
 	case n > refuse:
-		return "", fmt.Errorf("mw postern send: %d words, over the %d a %s may run: trim it, put the detail on the bead, or give --long to send past the limits", n, refuse, what)
+		return "", fmt.Errorf("mw postern send: %d words, over the %d a %s may run: trim it, put the detail on the bead, or send it as it is with `mw postern send --long <text>`", n, refuse, what)
 	case n > warn:
 		return fmt.Sprintf("mw postern send: %d words; a phone shows about %d: trim, or say it in the bead", n, warn), nil
 	}

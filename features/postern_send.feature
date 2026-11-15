@@ -428,10 +428,10 @@ Feature: mw postern send
     And the broadcast record has no "channel" key
     And the broadcast record has no "bead" key
 
-  Scenario: a message over 200 words from the command line is refused, naming the count, the limit and --long
+  Scenario: a message over 120 words from the command line is refused, naming the count, the limit and --long
     Given the postern channel is "direct"
-    When mw postern send "message" of 201 words is run from the command line
-    Then it is refused, naming 201 words, the limit of 200 and --long
+    When mw postern send "message" of 121 words is run from the command line
+    Then it is refused, naming 121 words, the limit of 120 and --long
     And it is refused, and nothing was uploaded or sent
 
   Scenario: a message of 81 words is sent with one warning
