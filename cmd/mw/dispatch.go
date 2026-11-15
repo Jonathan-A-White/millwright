@@ -509,10 +509,14 @@ func newDispatchCmd() *cobra.Command {
 					fmt.Fprintf(cmd.ErrOrStderr(), "no self-update this tick: %v\n", err)
 				} else if deploySteps, err := afterLandingDeploySteps(afterLanding); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "no self-update this tick: %v\n", err)
+				} else if nice, err := config.BuilderNice(); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "no self-update this tick: %v\n", err)
+				} else if jobs, err := config.BuilderJobs(); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "no self-update this tick: %v\n", err)
 				} else if home, err := os.UserHomeDir(); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "no self-update this tick: there is no home directory to remember a build in: %v\n", err)
 				} else {
-					dispatch.SelfUpdate = hostSelfUpdate(gateway, rigs, afterLanding, afterLimits, deploySteps, home, files, host)
+					dispatch.SelfUpdate = hostSelfUpdate(gateway, rigs, afterLanding, afterLimits, deploySteps, nice, jobs, home, files, host)
 				}
 				dispatch.Backend = hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr())
 			}
