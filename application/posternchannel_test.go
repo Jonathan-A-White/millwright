@@ -158,17 +158,39 @@ func TestPosternInboxReplyAnswerNamesNoChannelFlag(t *testing.T) {
 	}
 }
 
-// A root mw has not seen, answered with --re and no channel flag, is posted
-// to Factory — the one channel that has no flag to name — with the note that
-// says so and how to send it elsewhere; the refusal that named only
-// --bead-channel and --channel left a Factory root unanswerable
-// (mw-gq6.1161).
-func TestPosternSendReOfAnUnseenRootPostsToFactoryAndSaysSo(t *testing.T) {
+// A root mw has not seen, answered with --re and no channel flag, is refused
+// and nothing is sent: the txid may be a talk turn's, and a reply that fell to
+// Factory landed outside the Governor's thread. The refusal names the way to
+// answer a talk turn, the flags for another channel and the way to answer a
+// root in Factory, which has no channel flag of its own (mw-gq6.1161,
+// mw-gq6.1327).
+func TestPosternSendReOfAnUnseenRootIsRefusedAndSendsNothing(t *testing.T) {
 	f := newSendFixture()
 	send := f.send("direct")
 	send.Threads = apptest.NewFakePosternThreadIndex()
 
 	_, err := send.Run(context.Background(), application.PosternSendRequest{Class: "message", Text: "Yes.", Re: "direct:unseen"})
+	if err == nil {
+		t.Fatalf("expected the reply to an unseen root to be refused, it was sent")
+	}
+	for _, say := range []string{"direct:unseen", "not a post mw knows", "mw talk say --talk <id> --turn <n>", "--bead-channel <id>", "--channel <name>", "--factory"} {
+		if !strings.Contains(err.Error(), say) {
+			t.Errorf("expected the refusal to say %q, got: %v", say, err)
+		}
+	}
+	if n := len(f.backend.Delivered()); n != 0 {
+		t.Fatalf("expected nothing sent, %d were", n)
+	}
+}
+
+// --factory says the root is in Factory, the one channel with no flag to name:
+// the reply to a root mw has not seen is then sent there, with no note.
+func TestPosternSendReWithFactoryAnswersAnUnseenRootInFactory(t *testing.T) {
+	f := newSendFixture()
+	send := f.send("direct")
+	send.Threads = apptest.NewFakePosternThreadIndex()
+
+	_, err := send.Run(context.Background(), application.PosternSendRequest{Class: "message", Text: "Yes.", Re: "direct:unseen", InFactory: true})
 	if err != nil {
 		t.Fatalf("expected the reply to be sent, got %v", err)
 	}
@@ -177,9 +199,22 @@ func TestPosternSendReOfAnUnseenRootPostsToFactoryAndSaysSo(t *testing.T) {
 	if plaintext != want {
 		t.Fatalf("expected the plaintext %s, got %s", want, plaintext)
 	}
-	for _, say := range []string{"direct:unseen", "Factory", "--bead-channel", "--channel"} {
-		if !strings.Contains(f.out.String(), say) {
-			t.Errorf("expected the note to say %q, got:\n%s", say, f.out.String())
-		}
+}
+
+// --factory is for a root in Factory: a root mw knows to be in another channel
+// is not answered in Factory because it was given.
+func TestPosternSendFactoryFlagDoesNotMoveAKnownRoot(t *testing.T) {
+	f := newSendFixture()
+	send := f.send("direct")
+	send.Threads = apptest.NewFakePosternThreadIndex()
+	if err := send.Threads.Remember("direct:root", application.PosternThread{Topic: "roadmap"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := send.Run(context.Background(), application.PosternSendRequest{Class: "message", Text: "x", Re: "direct:root", InFactory: true}); err != nil {
+		t.Fatalf("expected the reply to be sent, got %v", err)
+	}
+	_, plaintext := f.delivered(t, 0)
+	if want := `{"thread":{"topic":"roadmap"},"text":"x","re":"direct:root"}`; plaintext != want {
+		t.Fatalf("expected %s, got %s", want, plaintext)
 	}
 }

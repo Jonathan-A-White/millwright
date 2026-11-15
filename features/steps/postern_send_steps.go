@@ -146,8 +146,8 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the broadcast record's plaintext is in channel "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsOnTopic)
 	ctx.Given(`^mw has seen the post "([^"]*)" in the channel of bead "([^"]*)"$`, c.mwHasSeenThePostInBeadChannel)
 	ctx.Given(`^mw has seen the post "([^"]*)" in channel "([^"]*)"$`, c.mwHasSeenThePostInChannel)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" answering "([^"]*)" in Factory is run$`, c.mwPosternSendAnsweringInFactoryIsRun)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" answering "([^"]*)" is run$`, c.mwPosternSendAnsweringIsRun)
-	ctx.Then(`^it said the root is unseen, so the reply went to Factory, naming --bead-channel and --channel$`, c.itSaidTheRootIsUnseenAndTheReplyWentToFactory)
 	ctx.Then(`^the broadcast record's plaintext answers "([^"]*)" with text "([^"]*)" in no channel$`, c.theBroadcastRecordsPlaintextAnswersInNoChannel)
 	ctx.Then(`^it is refused, saying --channel and --bead-channel cannot both be set$`, c.itIsRefusedSayingThreadAndTopicCannotBothBeSet)
 	ctx.Then(`^it is refused, saying --channel and --bead-channel are refused with a decision-needed question$`, c.itIsRefusedSayingThreadRefusedWithQuestion)
@@ -1014,12 +1014,8 @@ func (c *posternSendContext) mwPosternSendAnsweringIsRun(class, text, re string)
 	return nil
 }
 
-func (c *posternSendContext) itSaidTheRootIsUnseenAndTheReplyWentToFactory() error {
-	for _, want := range []string{"has not seen", "goes to Factory", "--bead-channel", "--channel"} {
-		if !strings.Contains(c.said.String(), want) {
-			return fmt.Errorf("expected the note to say %q, got: %q", want, c.said.String())
-		}
-	}
+func (c *posternSendContext) mwPosternSendAnsweringInFactoryIsRun(class, text, re string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Re: re, InFactory: true})
 	return nil
 }
 
