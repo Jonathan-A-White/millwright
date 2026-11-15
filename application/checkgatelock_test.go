@@ -1255,13 +1255,14 @@ func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRu
 	}
 }
 
-// A part that fits what is left of the call, or has no figure, or whose time is
-// longer than a whole call, is started as it always was.
+// A part that fits what is left of the call, or has no figure, is started as it
+// always was. One whose time is a whole call or more is run by a process of its
+// own, or ends in one line when the check has none to start
+// (TestAForegroundPartThatTakesTheSlotAndNoWayToDetachEndsInOneLine).
 func TestAForegroundPartThatFitsOrHasNoFigureIsStarted(t *testing.T) {
 	for name, expected := range map[string]time.Duration{
-		"fits":                 2 * time.Second,
-		"no figure":            0,
-		"figure past the call": time.Hour,
+		"fits":      2 * time.Second,
+		"no figure": 0,
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := newPartBesideTheMergeSlot(t)

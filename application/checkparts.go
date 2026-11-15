@@ -212,6 +212,9 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	if k.detachesPart(part, fit) {
 		return k.checkPartDetached(ctx, report, c, label, part, tip)
 	}
+	if k.cannotHoldSlotPastCall(part, fit) {
+		return report, k.earlierPass(ctx, c, report.Attempt, tip).told(label, errors.New(k.cannotDetachLine(c, label, fit)))
+	}
 
 	// The part waits for a calm host, as a whole check does, before anything else
 	// of it, and what the wait leaves is what the merge slot is waited for in

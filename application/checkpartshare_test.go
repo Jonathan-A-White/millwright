@@ -536,3 +536,44 @@ func TestWholeGateVerdictLineOfEachStateOfAPartsRecord(t *testing.T) {
 		})
 	}
 }
+
+// A foreground part that takes the merge slot and usually takes at least a whole
+// call is run by a process of its own that holds the slot past the call. A check
+// with no way to start one (no PartStarter, no Logs, as with --log-is-stdout)
+// cannot, and a call cannot go on holding the slot after it ends: it ends in one
+// line before it takes the slot or runs the part, saying how to run it
+// (mw-gq6.1322).
+func TestAForegroundPartThatTakesTheSlotAndNoWayToDetachEndsInOneLine(t *testing.T) {
+	for name, expected := range map[string]time.Duration{
+		"as long as the call":  time.Minute,
+		"longer than the call": time.Hour,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPartBesideTheMergeSlot(t)
+			_, err := p.checkPart(1, time.Minute, time.Minute, func(int) time.Duration { return expected })
+			if err == nil {
+				t.Fatal("expected the part not to be started by a call that cannot hold the slot past its end")
+			}
+			for _, want := range []string{
+				"part 1 of 2 (lint) did not start",
+				"takes the merge slot of millwright",
+				"nothing was run",
+				"run it without --log-is-stdout",
+				"`mw check mw-x.1 --part 1`",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("expected the line to say %q, got %q", want, err.Error())
+				}
+			}
+			if strings.Contains(err.Error(), "\n") {
+				t.Errorf("expected one line, got %q", err.Error())
+			}
+			if p.parts.ranCount() != 0 {
+				t.Errorf("expected the part not to run, it ran %d time(s)", p.parts.ranCount())
+			}
+			if got := p.queued(); got != 0 {
+				t.Errorf("expected no place kept in the queue, it holds %d", got)
+			}
+		})
+	}
+}
