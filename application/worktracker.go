@@ -689,7 +689,7 @@ type NewEpic struct {
 	Description     string
 	SuccessCriteria string
 	Priority        int
-	// MostUrgent files the epic at priority 0 (P0) whatever Priority holds.
+	// MostUrgent files the epic at priority 0 (P0); Priority is then left zero.
 	MostUrgent bool
 	Defaults   domain.Path
 }
@@ -713,7 +713,7 @@ type NewStory struct {
 	Description string
 	Acceptance  string
 	Priority    int
-	// MostUrgent files the story at priority 0 (P0) whatever Priority holds.
+	// MostUrgent files the story at priority 0 (P0); Priority is then left zero.
 	MostUrgent      bool
 	EstimateMinutes int
 	Overrides       domain.Path

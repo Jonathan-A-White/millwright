@@ -425,7 +425,7 @@ func (f *FakeTracker) CreateEpic(_ context.Context, epic application.NewEpic) (s
 	f.defaults[id] = epic.Defaults
 	f.titles[id] = epic.Title
 	f.epicDesc[id] = epic.Description
-	if epic.MostUrgent || epic.Priority > 0 {
+	if epic.MostUrgent || epic.Priority > 0 { // else the default stands
 		f.epicSays[id] = epicFacts{status: StatusOpen, priority: priorityOr(epic.Priority, epic.MostUrgent)}
 	}
 	return id, nil
@@ -2776,13 +2776,9 @@ var (
 )
 
 // priorityOr is a priority a story was filed with, or the default when it was
-// filed with none: zero means "unset" in a NewStory, as it does for the tracker,
-// unless the story was filed MostUrgent, which is P0.
+// filed with none: zero means "unset" in a NewStory, unless it is MostUrgent (P0).
 func priorityOr(priority int, mostUrgent bool) int {
-	if mostUrgent {
-		return 0
-	}
-	if priority == 0 {
+	if priority == 0 && !mostUrgent {
 		return application.DefaultPriority
 	}
 	return priority

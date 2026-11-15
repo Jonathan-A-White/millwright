@@ -68,7 +68,11 @@ func newFileCmd() *cobra.Command {
 			"more than one session finishes. Never a refusal.\n\n" +
 			"--check runs every one of these checks and files nothing: it prints every refusal across\n" +
 			"every story of the plan at once, exits non-zero if there is any, and otherwise prints\n" +
-			"'ok: <n> stories would be filed'. --waive and --guest-ask count as they do when filing.",
+			"the priority each story would be filed at (P0 to P4) and 'ok: <n> stories would be filed'.\n" +
+			"--waive and --guest-ask count as they do when filing.\n\n" +
+			"An epic's or a story's \"priority\" is 0 (P0, the most urgent) to 4; absent, the tracker's\n" +
+			"default (P2) stands. Any other number is refused, naming the story. The tree mw file prints\n" +
+			"says each story's priority beside its state.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			written, err := os.ReadFile(args[0])
