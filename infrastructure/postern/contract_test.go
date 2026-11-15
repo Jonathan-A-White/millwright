@@ -56,23 +56,18 @@ func sameSet(t *testing.T, name string, got, want []string) {
 }
 
 // TestPosternContractMessageClasses holds the classes millwright sends or reads
-// to the contract's message_classes. talk and call are the application
-// package's unexported talkRecordClass and callRecordClass, said here by hand.
+// to the contract's message_classes.
 func TestPosternContractMessageClasses(t *testing.T) {
 	ours := append([]string{}, application.PosternClasses...)
 	ours = append(ours, application.CardClass, application.CardUpdateClass,
-		application.PosternClassMoveHome, application.EventsClass, "talk", "call")
+		application.PosternClassMoveHome, application.EventsClass,
+		application.PosternTalkClass, application.PosternCallClass)
 	sameSet(t, "message_classes", ours, contractList(t, "message_classes"))
 }
 
 // TestPosternContractNeedKinds holds the kinds of need the view lists to the
 // contract's need_kinds.
 func TestPosternContractNeedKinds(t *testing.T) {
-	ours := []string{
-		application.PosternNeedQuestion, application.PosternNeedApprove, application.PosternNeedVerify,
-		application.PosternNeedStale, application.PosternNeedDemo, application.PosternNeedHands,
-		application.PosternNeedReview, application.PosternNeedDecision, application.PosternNeedWaiting,
-		application.PosternNeedChase, application.PosternNeedAlarm,
-	}
+	ours := application.PosternNeedKinds
 	sameSet(t, "need_kinds", ours, contractList(t, "need_kinds"))
 }
