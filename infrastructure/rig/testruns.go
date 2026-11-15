@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/ticketq"
 )
 
 // TestRunsPoll is how often a start that waits for a test-runner slot looks
@@ -23,6 +24,14 @@ const (
 
 // TestRunsPrefix names a slot's lock file inside the slots' directory.
 const TestRunsPrefix = "test-run-"
+
+// TestRunsQueueDir is the directory inside the slots' directory where each start
+// that waits keeps its ticket (mw-gq6.1312), and TestRunsCap the most a wait
+// counts in the queue: a ticket whose wait began longer ago was given up on.
+const (
+	TestRunsQueueDir = "test-run.queue"
+	TestRunsCap      = 3 * time.Hour
+)
 
 // TestRuns is this host's limit on how many test runners mw has going at once
 // (builder_test_runs, mw-gq6.1303): a gate's part, an after-landing command and a
@@ -84,6 +93,10 @@ func (t *TestRuns) path(n int) string {
 // the gate lock's wait does: who, since when and how long ago. It ends with the
 // context's error when the context does, taking nothing.
 //
+// A slot flock has no turn-taking of its own, so starts that wait queue by
+// ticket, as the gate lock's waiters do (infrastructure/ticketq): only the
+// oldest live ticket looks at the slots, so a start is not passed by later ones.
+//
 // The wait is not counted against any time of the run's own: a caller takes the
 // slot before it starts its limit.
 func (t *TestRuns) Take(ctx context.Context, holder string) (func(), error) {
@@ -94,16 +107,26 @@ func (t *TestRuns) Take(ctx context.Context, holder string) (func(), error) {
 		return nil, fmt.Errorf("making the directory this host's test-runner slots belong in: %w", err)
 	}
 	var began, lastSaid time.Time
+	tickets := &ticketq.Queue{Dir: filepath.Join(t.dir, TestRunsQueueDir), Cap: TestRunsCap, Now: t.now}
+	ticket, err := tickets.Join(holder, t.now())
+	if err != nil {
+		return nil, err
+	}
+	// Whatever way the wait ends, the ticket goes: a slot is taken, or the wait is over.
+	defer ticket.Drop()
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("waiting for one of this host's %d test-runner slots: %w", t.limit, err)
 		}
-		release, err := t.tryEach(holder)
-		if err != nil {
-			return nil, err
-		}
-		if release != nil {
-			return release, nil
+		// Only the oldest live ticket looks at the slots.
+		if head, _ := tickets.Head(ticket.Name()); head {
+			release, err := t.tryEach(holder)
+			if err != nil {
+				return nil, err
+			}
+			if release != nil {
+				return release, nil
+			}
 		}
 		now := t.now()
 		if began.IsZero() {

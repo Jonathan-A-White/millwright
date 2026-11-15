@@ -2,7 +2,8 @@
 // advisory flock take it first come, first served (mw-gq6.585, mw-gq6.586). A
 // flock has no turn-taking of its own: whoever polls it first after it is let go
 // takes it, and a waiter can be overtaken again and again. The gate lock and a
-// rig's merge slot each keep a queue and let only the head try their flock.
+// rig's merge slot each keep a queue and let only the head try their flock, as do a
+// host's test-runner slots.
 package ticketq
 
 import (
