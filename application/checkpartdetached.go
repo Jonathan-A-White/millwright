@@ -109,12 +109,14 @@ func (k Check) partPoll() time.Duration {
 // cannot go on holding the slot after it ends, so a part that fits a call and
 // takes the slot is run in the call; one that outruns every call is run by a
 // process that takes the slot itself and holds it until the part is done
-// (mw-gq6.1289).
-func (k Check) detachesPart(part GatePart, fit *callFit) bool {
+// (mw-gq6.1289). A part that takes the slot and has no figure on this host
+// (unknown, as partFitOf says) may outrun a call as well, and nothing says it does
+// not, so it is run by such a process too (mw-gq6.1331).
+func (k Check) detachesPart(part GatePart, fit *callFit, unknown bool) bool {
 	if k.PartStarter == nil || k.Logs == nil || k.Records == nil {
 		return false
 	}
-	return k.Slot == nil || !PartNeedsSlot(part) || fit.outrunsACall()
+	return k.Slot == nil || !PartNeedsSlot(part) || fit.outrunsACall() || unknown
 }
 
 // cannotHoldSlotPastCall says a part would be run in the call though it takes the
@@ -124,7 +126,17 @@ func (k Check) detachesPart(part GatePart, fit *callFit) bool {
 // slot after it ends, and it would be cut off with the part half run, so the call
 // ends before it takes the slot or runs anything (mw-gq6.1322).
 func (k Check) cannotHoldSlotPastCall(part GatePart, fit *callFit) bool {
-	return k.Slot != nil && PartNeedsSlot(part) && fit.outrunsACall() && !k.detachesPart(part, fit)
+	return k.Slot != nil && PartNeedsSlot(part) && fit.outrunsACall() && !k.detachesPart(part, fit, false)
+}
+
+// noFigurePartLine is the one line a foreground part that takes the merge slot says
+// before it starts when its length on this host is not known and it cannot hand
+// itself to a process of its own: a part that outlasts the call is cut off by the
+// tool with nothing said, with the slot held until the call's process is gone
+// (mw-gq6.1331).
+func (k Check) noFigurePartLine(c *closeOut, label string) string {
+	return fmt.Sprintf("there is no figure for %s on %s, so how long it takes is not known here: it is started in this call, which is cut off with nothing said if the part outlasts its %s; to run it so that it outlives the call, run it without --log-is-stdout, as a foreground call from a Builder's session, with `mw check %s --part %d`",
+		label, k.Host, gateWaited(k.CallBudget), c.id, k.Part)
 }
 
 // cannotDetachLine is the one line such a call ends with.

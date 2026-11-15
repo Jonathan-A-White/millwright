@@ -236,15 +236,21 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	if k.PartWorker {
 		return k.runPartWorker(ctx, report, c, label, part, tip)
 	}
-	fit := k.partFitOf(ctx, c.path.Rig, k.Part, k.began)
+	fit, unknown := k.partFitOf(ctx, c.path.Rig, k.Part, k.began)
 	if fit != nil && k.refusedLate(ctx, c, report.Attempt) {
 		fit.refusedBefore = true
 	}
-	if k.detachesPart(part, fit) {
+	if k.detachesPart(part, fit, unknown) {
 		return k.checkPartDetached(ctx, report, c, label, part, tip)
 	}
 	if k.cannotHoldSlotPastCall(part, fit) {
 		return report, k.earlierPass(ctx, c, report.Attempt, tip).told(label, errors.New(k.cannotDetachLine(c, label, fit)))
+	}
+
+	if unknown && k.Slot != nil && PartNeedsSlot(part) && k.Out != nil {
+		// It cannot start a process: the part is run in the call as it was, and the
+		// call says before it starts that it may be cut off (mw-gq6.1331).
+		fmt.Fprintf(k.Out, "  note    %s\n", k.noFigurePartLine(c, label))
 	}
 
 	// The part waits for a calm host, as a whole check does, before anything else
@@ -532,16 +538,18 @@ func (k Check) takeSlotFit(ctx context.Context, c *closeOut, fit *callFit, withi
 
 // partFitOf is the fit of part n of the rig's gate to the call this check began,
 // nil when the check is not asked to keep to a call (no CallBudget) or no figure
-// for the part is known (mw-gq6.944).
-func (k Check) partFitOf(ctx context.Context, rig string, n int, began time.Time) *callFit {
+// for the part is known (mw-gq6.944). unknown says it is the second: the check is
+// kept to a call and the host has no figure for the part, so that nothing says
+// whether the part ends inside the call (mw-gq6.1331).
+func (k Check) partFitOf(ctx context.Context, rig string, n int, began time.Time) (fit *callFit, unknown bool) {
 	if k.CallBudget <= 0 || k.PartExpected == nil {
-		return nil
+		return nil, false
 	}
 	expected := k.PartExpected(ctx, rig, n)
 	if expected <= 0 {
-		return nil
+		return nil, true
 	}
-	return &callFit{began: began, budget: k.CallBudget, expected: expected, now: k.CallNow}
+	return &callFit{began: began, budget: k.CallBudget, expected: expected, now: k.CallNow}, false
 }
 
 // slotRefusal is the one line a check ends with when the merge slot could not be

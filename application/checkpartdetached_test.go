@@ -703,3 +703,76 @@ func TestAPartPassedAtAnEarlierCommitIsNotReportedAsPassedAtTheTipInAProcessOfIt
 		t.Errorf("expected the part to run once, at the tip, it ran %d time(s)", d.parts.ranCount())
 	}
 }
+
+// A foreground --part that takes the merge slot on a host with no figure for the
+// part (a new host, or one with no bench rows) is never cut off silently with the
+// call either (mw-gq6.1331). With a way to start a process of its own the part is
+// run there, which takes the slot itself and outlives the call; without one, the
+// call says in one line before it starts that how long the part takes is not
+// known here and how to run it so that it outlives the call.
+func TestAForegroundPartWithNoFigureIsNotCutOffWithTheCall(t *testing.T) {
+	t.Run("it can start a process of its own", func(t *testing.T) {
+		d := aDetachedPartRig(t, true)
+		d.parts.command = "npm run gate:shots"
+		slots := rig.NewSlots(rig.WithSlotPoll(5 * time.Millisecond))
+		d.tune = func(k *application.Check) {
+			k.Slot = slots
+			k.PartSlotWait = time.Minute
+			k.PartExpected = func(context.Context, string, int) time.Duration { return 0 }
+		}
+		landing, err := slots.Take(context.Background(), d.rigDir, "mw land on laptop, landing a batch of millwright")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = d.check(150 * time.Millisecond)
+		if err == nil {
+			t.Fatal("expected a call that ended before the part did to say so, not to pass")
+		}
+		if !strings.Contains(err.Error(), "part 1 of 1 (vitest 5/6) is still running") {
+			t.Errorf("expected the line to say the part is still running, got %q", err.Error())
+		}
+		if d.starter.startedCount() != 1 || !d.starter.lastTookSlot() {
+			t.Fatalf("expected the part handed to a process of its own that takes the slot, %d started", d.starter.startedCount())
+		}
+		if d.parts.ranCount() != 0 {
+			t.Errorf("expected the part not to run in the call, it ran %d time(s)", d.parts.ranCount())
+		}
+		landing.Release(context.Background())
+		select {
+		case <-d.parts.started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("expected the process to run the part once the slot was free")
+		}
+		close(d.parts.release)
+		if err := d.check(30 * time.Second); err != nil {
+			t.Fatalf("expected the call run again to read the part's pass, got %v", err)
+		}
+		if d.parts.ranCount() != 1 || d.starter.startedCount() != 1 {
+			t.Errorf("expected one run by one process, ran %d time(s) in %d process(es)", d.parts.ranCount(), d.starter.startedCount())
+		}
+	})
+	t.Run("it cannot", func(t *testing.T) {
+		p := newPartBesideTheMergeSlot(t)
+		_, err := p.checkPart(1, time.Minute, 10*time.Second, func(int) time.Duration { return 0 })
+		if err != nil {
+			t.Fatalf("expected the part to be started as it always was, got %v", err)
+		}
+		if p.parts.ranCount() != 1 {
+			t.Fatalf("expected the part run once in the call, it ran %d time(s)", p.parts.ranCount())
+		}
+		line := ""
+		for _, l := range strings.Split(p.told.String(), "\n") {
+			if strings.Contains(l, "no figure for part 1 of 2 (lint) on laptop") {
+				line = l
+			}
+		}
+		if line == "" {
+			t.Fatalf("expected one line saying the part's length is not known here, got %q", p.told.String())
+		}
+		for _, want := range []string{"not known", "--log-is-stdout", "`mw check mw-x.1 --part 1`", "outlive"} {
+			if !strings.Contains(line, want) {
+				t.Errorf("expected the line to say %q, got %q", want, line)
+			}
+		}
+	})
+}
