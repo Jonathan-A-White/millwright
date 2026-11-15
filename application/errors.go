@@ -265,7 +265,7 @@ func (c ErrorClass) seenLine() string {
 // questionLine is the question for the Mayor, with the command that records
 // his verdict.
 func (c ErrorClass) questionLine() string {
-	return fmt.Sprintf("%s: %s? weigh it, then: mw errors shared %s none|candidate|'exists <where>'",
+	return fmt.Sprintf("%s: %s? weigh it, then one of: mw errors shared %[3]s none, mw errors shared %[3]s candidate, mw errors shared %[3]s exists <where>",
 		c.seenLine(), SharedComponentQuestion, c.Slug)
 }
 

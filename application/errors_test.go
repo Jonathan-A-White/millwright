@@ -507,3 +507,31 @@ func TestParseCommonErrorsStopsAtABlankLineAfterNothing(t *testing.T) {
 		t.Errorf("nothing on its own line: got %+v", got.Lines)
 	}
 }
+
+func TestQuestionLineListsTheThreeVerdictsAsSeparateCommands(t *testing.T) {
+	files := &apptest.FakeErrorFiles{}
+	var out bytes.Buffer
+	register := errorsOn(files, &out)
+	ctx := context.Background()
+	if err := register.Add(ctx, application.ErrorAdd{Slug: "one-class", Symptom: "s",
+		Kinds: []string{"quiz"}, Found: "lampas:mw-1"}); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := register.Checked(ctx, "one-class", "spell-forge", "found:mw-2"); err != nil {
+		t.Fatal(err)
+	}
+	said := out.String()
+	if strings.Contains(said, "none|candidate") {
+		t.Errorf("the verdicts are not run together with a bar, got %q", said)
+	}
+	for _, want := range []string{
+		"mw errors shared one-class none",
+		"mw errors shared one-class candidate",
+		"mw errors shared one-class exists <where>",
+	} {
+		if !strings.Contains(said, want) {
+			t.Errorf("the question line should list %q as its own command, got %q", want, said)
+		}
+	}
+}
