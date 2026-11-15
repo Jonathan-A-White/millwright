@@ -22,6 +22,10 @@ import (
 // docs/protocol.md section 20.
 const talkRecordClass = "talk"
 
+// PosternTalkClass is talkRecordClass for a caller outside application, such
+// as the contract test of infrastructure/postern.
+const PosternTalkClass = talkRecordClass
+
 // TalkWaitCursorKey is the note key TalkWait keeps its cursor under: the
 // highest sequence number of every record it has paged past. It is its own, so
 // that the postern inbox's cursor and this one never move each other.

@@ -98,14 +98,25 @@ const (
 // demo need while it is open.
 const LabelDemo = "demo"
 
-// posternNeedRank orders needs of different kinds that tie on blocks and
-// since, so the view comes out the same every run.
-var posternNeedRank = map[string]int{
-	PosternNeedAlarm: 0, PosternNeedQuestion: 1, PosternNeedApprove: 2,
-	PosternNeedDecision: 3, PosternNeedReview: 4, PosternNeedHands: 5,
-	PosternNeedVerify: 6, PosternNeedStale: 7, PosternNeedDemo: 8,
-	PosternNeedChase: 9, PosternNeedWaiting: 10,
+// PosternNeedKinds is every kind of need the view lists, in the order they
+// rank when they tie on blocks and since, so the view comes out the same every
+// run. A new PosternNeed constant goes here, and
+// TestPosternNeedKindsListsEveryConstant fails until it does.
+var PosternNeedKinds = []string{
+	PosternNeedAlarm, PosternNeedQuestion, PosternNeedApprove,
+	PosternNeedDecision, PosternNeedReview, PosternNeedHands,
+	PosternNeedVerify, PosternNeedStale, PosternNeedDemo,
+	PosternNeedChase, PosternNeedWaiting,
 }
+
+// posternNeedRank is each of PosternNeedKinds' place in that order.
+var posternNeedRank = func() map[string]int {
+	rank := make(map[string]int, len(PosternNeedKinds))
+	for i, k := range PosternNeedKinds {
+		rank[k] = i
+	}
+	return rank
+}()
 
 // PosternViewDoc is the live view's plaintext, postern's docs/protocol.md §11.
 type PosternViewDoc struct {

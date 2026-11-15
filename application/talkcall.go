@@ -15,6 +15,10 @@ import (
 // docs/protocol.md section 21.
 const callRecordClass = "call"
 
+// PosternCallClass is callRecordClass for a caller outside application, such
+// as the contract test of infrastructure/postern.
+const PosternCallClass = callRecordClass
+
 // The roles of a call record: the Governor sends a request, and a later on a
 // ring; the Mayor sends the ring.
 const (
