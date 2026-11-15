@@ -1176,6 +1176,17 @@ func newPartBesideTheMergeSlot(t *testing.T) *aPartBesideTheMergeSlot {
 }
 
 func (p *aPartBesideTheMergeSlot) checkPart(n int, wait, budget time.Duration, expected func(part int) time.Duration) (application.CheckReport, error) {
+	return p.checkPartAfterAStart(n, wait, budget, 0, expected)
+}
+
+// checkPartAfterAStart is checkPart in a call whose command began startup before
+// the check did (CallBegan), as a real call's start (reading the configuration, the
+// story, the host's load) does.
+func (p *aPartBesideTheMergeSlot) checkPartAfterAStart(n int, wait, budget, startup time.Duration, expected func(part int) time.Duration) (application.CheckReport, error) {
+	var began time.Time
+	if startup > 0 {
+		began = p.clock.Now().Add(-startup)
+	}
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "One"})
@@ -1183,7 +1194,7 @@ func (p *aPartBesideTheMergeSlot) checkPart(n int, wait, budget time.Duration, e
 		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
 		Slot: p.slots, Parts: p.parts, Records: p.records, Part: n, PartSlotWait: wait,
 		KeepPlace:  10 * time.Minute,
-		CallBudget: budget, CallNow: p.clock.Now,
+		CallBudget: budget, CallNow: p.clock.Now, CallBegan: began,
 		PartExpected: func(_ context.Context, _ string, part int) time.Duration {
 			if expected == nil {
 				return 0
@@ -1246,6 +1257,37 @@ func TestAForegroundPartThatGetsTheMergeSlotTooLateForItKeepsItsPlaceAndSaysToRu
 	}
 	if _, err := p.checkPart(2, time.Minute, 12*time.Second, expected); err != nil {
 		t.Fatalf("expected the second call to run the part, got %v", err)
+	}
+	if p.parts.ranCount() != 1 {
+		t.Errorf("expected the part to run once, it ran %d time(s)", p.parts.ranCount())
+	}
+	if got := p.queued(); got != 0 {
+		t.Errorf("expected the place to be used up by the run, the queue holds %d", got)
+	}
+}
+
+// A part whose usual time is just under the call's budget, less what the call's
+// start took, fits no call: every fresh call is late for it by the start. It is
+// refused once, with its place kept and the way to run it again said, and the
+// call that runs it again starts it instead of refusing it for ever, since no
+// fresh call would leave it more time (mw-gq6.1324).
+func TestAPartJustUnderTheCallStarts(t *testing.T) {
+	p := newPartBesideTheMergeSlot(t)
+	expected := func(part int) time.Duration {
+		if part == 2 {
+			return 11 * time.Second
+		}
+		return 0
+	}
+	// 12 s of call, 2 s taken by its start: 10 s are left to a part of 11 s.
+	if _, err := p.checkPartAfterAStart(2, time.Minute, 12*time.Second, 2*time.Second, expected); err == nil || !strings.Contains(err.Error(), "did not start") {
+		t.Fatalf("expected the first call to refuse the part as late, got %v", err)
+	}
+	if p.parts.ranCount() != 0 {
+		t.Fatalf("expected the part not to run in the first call, it ran %d time(s)", p.parts.ranCount())
+	}
+	if _, err := p.checkPartAfterAStart(2, time.Minute, 12*time.Second, 2*time.Second, expected); err != nil {
+		t.Fatalf("expected the second call, as late as the first, to start the part, got %v", err)
 	}
 	if p.parts.ranCount() != 1 {
 		t.Errorf("expected the part to run once, it ran %d time(s)", p.parts.ranCount())

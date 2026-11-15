@@ -157,6 +157,11 @@ type callFit struct {
 	expected time.Duration
 	// now is the clock the fit is read by, the real one when it is nil.
 	now func() time.Time
+	// refusedBefore is that a call of this attempt already refused the part as late
+	// and kept its place: a part just under the budget, less what a call's start
+	// takes, is late in every fresh call, so the call that runs it again starts it
+	// (mw-gq6.1324).
+	refusedBefore bool
 }
 
 // callNow is the time the call is said to begin at, by Check.CallNow.
@@ -208,7 +213,13 @@ func (f *callFit) left() time.Duration {
 // the merge slot the same (Check.detachesPart, mw-gq6.1289); neither gets here with
 // it; one that cannot start a process runs a whole check as it always was, and a
 // part that takes the merge slot ends in one line (cannotHoldSlotPastCall).
-func (f *callFit) late() bool { return f.expected < f.budget && f.expected > f.left() }
+//
+// A part already refused as late in this attempt is not late again: a refusal
+// that said to run the part again must not be the same refusal for ever when the
+// part's time is within what a call's start takes of the budget (mw-gq6.1324).
+func (f *callFit) late() bool {
+	return !f.refusedBefore && f.expected < f.budget && f.expected > f.left()
+}
 
 // tooLateLine is the one line a foreground check ends with when it won the gate
 // lock too late for the gate to end inside its call and kept its place instead.

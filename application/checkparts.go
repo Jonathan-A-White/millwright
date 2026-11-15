@@ -112,6 +112,34 @@ const (
 	partHung = "hung"
 )
 
+// CheckPartLateFileName is the name of the record that a call refused part n of a
+// story's attempt as late for the call, and kept its place: the next call of the
+// attempt starts the part rather than refuse it as late again, because a part
+// whose time is just under the call's budget, less what a call's start takes, is
+// late in every fresh call (mw-gq6.1324).
+func CheckPartLateFileName(attempt, n int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return fmt.Sprintf("check-%d-part-%d.late", attempt, n)
+}
+
+// refusedLate says an earlier call of this attempt refused part n as late.
+func (k Check) refusedLate(ctx context.Context, c *closeOut, attempt int) bool {
+	if k.Records == nil {
+		return false
+	}
+	_, err := k.Records.ReadRunFile(ctx, c.id, CheckPartLateFileName(attempt, k.Part))
+	return err == nil
+}
+
+// keepRefusedLate keeps that this call refused the part as late (refusedLate).
+func (k Check) keepRefusedLate(ctx context.Context, c *closeOut, attempt int) {
+	if k.Records != nil {
+		_, _ = k.Records.PutRunFile(context.WithoutCancel(ctx), c.id, CheckPartLateFileName(attempt, k.Part), "refused as late\n")
+	}
+}
+
 // CheckPartHeldFileName is the name of the record of the waits of part n of a
 // story's attempt on the merge slot, in the story's run directory: one file for
 // the part and the attempt, written again by each wait, so that a part handed
@@ -209,6 +237,9 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 		return k.runPartWorker(ctx, report, c, label, part, tip)
 	}
 	fit := k.partFitOf(ctx, c.path.Rig, k.Part, k.began)
+	if fit != nil && k.refusedLate(ctx, c, report.Attempt) {
+		fit.refusedBefore = true
+	}
 	if k.detachesPart(part, fit) {
 		return k.checkPartDetached(ctx, report, c, label, part, tip)
 	}
@@ -236,6 +267,7 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 			label:  label,
 			noun:   "part",
 			record: CheckPartHeldFileName(report.Attempt, k.Part),
+			late:   CheckPartLateFileName(report.Attempt, k.Part),
 			again:  fmt.Sprintf("run the same part again with `mw check %s --part %d`", c.id, k.Part),
 		})
 		if err != nil {
@@ -246,6 +278,7 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 	if fit != nil && fit.late() {
 		// A wait for a calm host of minutes can have eaten the call (a part that
 		// took the slot was asked this when it won it).
+		k.keepRefusedLate(ctx, c, report.Attempt)
 		return report, earlier.told(label, fmt.Errorf("checking %s: %s did not start: the part needs about %s and only %s is left in this call, after waiting for %s to calm; nothing was run: run the same part again with `mw check %s --part %d`",
 			c.id, label, gateWaited(fit.expected), gateWaited(fit.left()), k.Host, c.id, k.Part))
 	}
@@ -462,7 +495,10 @@ type slotTry struct {
 	label  string
 	noun   string
 	record string
-	again  string
+	// late, when it is set, is the run file a refusal as late is kept in
+	// (CheckPartLateFileName).
+	late  string
+	again string
 }
 
 // takeSlotFor is takeSlotWithin for a wait of within.
@@ -484,6 +520,9 @@ func (k Check) takeSlotFit(ctx context.Context, c *closeOut, fit *callFit, withi
 	holding, err := takeForCheck(waitCtx, k.Slot, c.rigDir, fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), c.id))
 	if err != nil {
 		if errors.Is(err, ErrPlaceKeptLate) {
+			if try.late != "" {
+				_, _ = k.Records.PutRunFile(context.WithoutCancel(ctx), c.id, try.late, "refused as late\n")
+			}
 			return nil, errors.New(k.tooLatePartLine(try, c.path.Rig, fit, ask))
 		}
 		return nil, k.slotRefusal(ctx, c, try, err, ask)
