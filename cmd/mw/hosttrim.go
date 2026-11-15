@@ -71,8 +71,9 @@ func newHostCmd() *cobra.Command {
 func newHostTrimSetupCmd() *cobra.Command {
 	var bead string
 	var only []string
+	var check bool
 	cmd := &cobra.Command{
-		Use:   "trim-setup [--bead <bead>] [--host <host>]...",
+		Use:   "trim-setup [--check | --bead <bead>] [--host <host>]...",
 		Short: "Make a WSL host trim its disk: print the one PowerShell line, and file the root step on each WSL host that lacks it",
 		Long: "On WSL, systemd skips fstrim.timer and fstrim.service (ConditionVirtualization=!container), so the\n" +
 			"weekly trim never runs and the vhdx only grows until the Windows drive fills (the desktop's D:,\n" +
@@ -82,7 +83,10 @@ func newHostTrimSetupCmd() *cobra.Command {
 			"(--host limits it to the hosts named). With --bead it files, for each WSL host that lacks them,\n" +
 			"one `mw hands add` step as root on that bead (id " + hostTrimStepPrefix + "<host>), which the\n" +
 			"Governor approves in Postern. A host that cannot be asked is said, not failed. The wsl-trim check\n" +
-			"of mw doctor names this command when fstrim.timer has not run in 8 days.",
+			"of mw doctor names this command when fstrim.timer has not run in 8 days.\n\n" +
+			"With --check it prints no PowerShell line and files nothing: it lists, one per line, `pending trim\n" +
+			"step: <host>` for each WSL host that lacks the drop-ins, and fails while any is listed, so a host\n" +
+			"that never got its step (the desktop's D: filled, mw-gq6.1366) is found by running it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			here, reach, err := hostTrimHostsFn()
@@ -90,7 +94,9 @@ func newHostTrimSetupCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Once per WSL host, in Windows PowerShell:\n\n%s\n\n", doctor.WSLTrimPowerShellLine())
+			if !check {
+				fmt.Fprintf(out, "Once per WSL host, in Windows PowerShell:\n\n%s\n\n", doctor.WSLTrimPowerShellLine())
+			}
 
 			names := []string{here}
 			var others []string
@@ -102,7 +108,7 @@ func newHostTrimSetupCmd() *cobra.Command {
 			sort.Strings(others)
 			names = append(names, others...)
 
-			var failed []string
+			var failed, pending []string
 			for _, name := range names {
 				if len(only) > 0 && !slices.Contains(only, name) {
 					continue
@@ -122,6 +128,11 @@ func newHostTrimSetupCmd() *cobra.Command {
 				case doctor.WSLTrimHasDropIn:
 					fmt.Fprintf(out, "%s: already has the drop-in\n", name)
 				case doctor.WSLTrimLacksDropIn:
+					if check {
+						fmt.Fprintf(out, "pending trim step: %s\n", name)
+						pending = append(pending, name)
+						continue
+					}
 					if bead == "" {
 						fmt.Fprintf(out, "%s: WSL, lacks the drop-in; run again with --bead <bead> to file its step\n", name)
 						continue
@@ -135,6 +146,9 @@ func newHostTrimSetupCmd() *cobra.Command {
 					fmt.Fprintf(out, "%s: answered %q, not understood, skipped\n", name, state)
 				}
 			}
+			if len(pending) > 0 {
+				return fmt.Errorf("a trim step is pending for %s: `mw host trim-setup --bead <bead>` files it", strings.Join(pending, ", "))
+			}
 			if len(failed) > 0 {
 				return fmt.Errorf("the step was not filed for %s", strings.Join(failed, ", "))
 			}
@@ -142,6 +156,8 @@ func newHostTrimSetupCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&bead, "bead", "", "file the root step for each WSL host that lacks the drop-in on this bead")
+	cmd.Flags().BoolVar(&check, "check", false, "list each WSL host that lacks the drop-in as a pending trim step, file nothing, and fail while any is listed")
+	cmd.MarkFlagsMutuallyExclusive("check", "bead")
 	cmd.Flags().StringArrayVar(&only, "host", nil, "ask only this host (repeatable)")
 	return cmd
 }

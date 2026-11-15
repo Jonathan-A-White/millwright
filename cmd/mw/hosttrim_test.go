@@ -92,3 +92,44 @@ func TestHostTrimSetupWithoutABeadFilesNothingAndSaysHowToFileIt(t *testing.T) {
 		t.Errorf("expected the lacking host named and --bead offered, got %q", out)
 	}
 }
+
+// --check lists, for each WSL host without the drop-in, a pending trim step,
+// and fails so a script sees it; a host with the drop-in or off WSL is said
+// and not listed. It files nothing and prints no PowerShell line.
+func TestHostTrimSetupCheckNamesEachWSLHostLackingTheDropIn(t *testing.T) {
+	log := bdRecording(t, `[]`)
+	hostTrimStates(t, "laptop", map[string]string{
+		"laptop":  doctor.WSLTrimLacksDropIn,
+		"desktop": doctor.WSLTrimLacksDropIn,
+		"done":    doctor.WSLTrimHasDropIn,
+		"vps":     doctor.WSLTrimNotWSL,
+	})
+	out, err := runMw(t, "host", "trim-setup", "--check")
+	if err == nil {
+		t.Errorf("expected a failure while a host lacks the drop-in, got %q", out)
+	}
+	for _, host := range []string{"laptop", "desktop"} {
+		if !strings.Contains(out, "pending trim step: "+host+"\n") {
+			t.Errorf("expected %s listed as pending, got %q", host, out)
+		}
+	}
+	for _, host := range []string{"done", "vps"} {
+		if strings.Contains(out, "pending trim step: "+host) {
+			t.Errorf("expected %s not listed, got %q", host, out)
+		}
+	}
+	if strings.Contains(out, "wsl -d ") {
+		t.Errorf("expected no PowerShell line with --check, got %q", out)
+	}
+	if calls, _ := os.ReadFile(log); len(calls) != 0 {
+		t.Errorf("expected no bd call with --check, got %s", calls)
+	}
+}
+
+func TestHostTrimSetupCheckPassesWhenEveryWSLHostHasTheDropIn(t *testing.T) {
+	hostTrimStates(t, "laptop", map[string]string{"laptop": doctor.WSLTrimHasDropIn, "vps": doctor.WSLTrimNotWSL})
+	out, err := runMw(t, "host", "trim-setup", "--check")
+	if err != nil || strings.Contains(out, "pending trim step") {
+		t.Fatalf("expected a pass with nothing pending, got %v %q", err, out)
+	}
+}
