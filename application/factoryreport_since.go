@@ -240,17 +240,25 @@ func (l *ReportLanding) measure(entries []reportEntry, rig, host string) {
 			if m.perDay {
 				was, is = fraction(was, float64(l.BeforeDays)), fraction(is, float64(l.AfterDays))
 			}
-			row.Change = landingChange(was, is, m.lowerIsBetter)
+			row.Change = landingChange(was, is, m.lowerIsBetter, rateLandingMeasures[m.name])
 		}
 		l.Rows = append(l.Rows, row)
 	}
 }
 
-// landingChange is how a measure moved: "level" inside the ArrowBand, else
-// the change as a share of the days before with better or worse by the
-// measure, or only better or worse when the days before had none of it.
-func landingChange(before, after float64, lowerIsBetter bool) string {
+// rateLandingMeasures are the rows of the side by side that are a share in
+// percent, which hold level inside RateFloor points too.
+var rateLandingMeasures = map[string]bool{"refusal rate": true}
+
+// landingChange is how a measure moved: "level" inside the ArrowBand (and, for
+// a rate, RateFloor points), else the change as a share of the days before with
+// better or worse by the measure, or only better or worse when the days before
+// had none of it.
+func landingChange(before, after float64, lowerIsBetter, rate bool) string {
 	t := NewTrend(after, before, lowerIsBetter)
+	if rate {
+		t = NewRateTrend(after, before, lowerIsBetter)
+	}
 	switch {
 	case t.Verdict == "":
 		return ChangeLevel
