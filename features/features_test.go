@@ -136,6 +136,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeBackendSwapScenario(ctx)
 	steps.InitializeAskScenario(ctx)
 	steps.InitializeGdriveSelftestScenario(ctx)
+	steps.InitializeBrowserScenario(ctx)
 	steps.InitializePathSetScenario(ctx)
 	steps.InitializeBdRetryScenario(ctx)
 	steps.InitializeBriefScenario(ctx)
