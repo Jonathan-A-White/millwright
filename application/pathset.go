@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -261,6 +262,14 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 			fmt.Fprintln(s.Err, line)
 		}
 	}
+	// A criterion only the Mayor's after-landing check can run is said now and not
+	// by a Builder handing the story back (mw-gq6.1271).
+	if s.Err != nil {
+		now := story.Merged().Overlay(path)
+		if line := s.notRunnableWarning(ctx, id, now.Rig, story.Acceptance); line != "" {
+			fmt.Fprintln(s.Err, line)
+		}
+	}
 	// Only a path written with a host or a rig (--from writes both) is judged: a
 	// model= set on a story already pinned is not this warning's to repeat.
 	if s.Err != nil && (from != "" || named.Host != "" || named.Rig != "") {
@@ -512,4 +521,46 @@ func orNoAssignee(assignee string) string {
 		return "a session with no assignee named"
 	}
 	return assignee
+}
+
+var (
+	// liveServedURL is an address on a served rig's domain; a rig's own site_url
+	// is read from its file and added to it.
+	liveServedURL = regexp.MustCompile(`(?i)https?://[^\s"'<>)]*\.allmymind\.org\b`)
+	// afterLandingWords say a criterion is judged only once the change is live.
+	afterLandingWords = regexp.MustCompile(`(?i)\b(after the fix lands|after landing|once it is live)\b`)
+	// aTestOrFixture marks a criterion that names a URL or those words as part of
+	// a test or a fixture, which a Builder can run before landing.
+	aTestOrFixture = regexp.MustCompile(`(?i)\b(tests?|fixtures?|testdata)\b|_test\.go|features/`)
+)
+
+// notRunnableWarning is the one warning, empty for none, of a story whose
+// acceptance has a criterion that names a live URL of a served rig (an
+// allmymind.org address or the rig's site_url) or says it is judged after the fix
+// lands, after landing or once it is live: a Builder cannot run that before
+// landing, and it is the Mayor's after-landing check (Verify strings, mw verify).
+// A criterion that names a test or a fixture is not warned of. A warning only.
+func (s PathSet) notRunnableWarning(ctx context.Context, id, rig, acceptance string) string {
+	site := ""
+	if s.Rules != nil && strings.TrimSpace(rig) != "" {
+		if requirements, err := s.Rules.EpicRequirements(ctx, rig); err == nil {
+			site = strings.ToLower(strings.TrimRight(strings.TrimSpace(requirements.SiteURL), "/"))
+		}
+	}
+	var numbers []string
+	for _, criterion := range domain.AcceptanceCriteria(acceptance) {
+		if aTestOrFixture.MatchString(criterion.Text) {
+			continue
+		}
+		if liveServedURL.MatchString(criterion.Text) || afterLandingWords.MatchString(criterion.Text) ||
+			(site != "" && strings.Contains(strings.ToLower(criterion.Text), site)) {
+			numbers = append(numbers, fmt.Sprint(criterion.Number))
+		}
+	}
+	if len(numbers) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("WARN: %s: criterion %s of its acceptance names a live URL of a served rig or says it is judged after the fix lands, "+
+		"which no Builder can run before landing; move it out of the acceptance and into the Mayor's after-landing check "+
+		"(a Verify strings: line, or mw verify)", id, strings.Join(numbers, ", "))
 }

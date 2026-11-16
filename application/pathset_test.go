@@ -533,3 +533,72 @@ func TestAStoryOfAnEpicWithAHostWhyKeepsItsHost(t *testing.T) {
 		t.Errorf("host = %q, want laptop kept", got)
 	}
 }
+
+// aStoryWithAcceptance is the vault of aFilesExpectedRig(false) whose target
+// story, mw-gq6.2, carries the given acceptance criteria and whose rig names a
+// site_url.
+func aStoryWithAcceptance(t *testing.T, acceptance string) (*apptest.FakeTracker, *apptest.FakeEpicRules) {
+	t.Helper()
+	tracker, rules := aFilesExpectedRig(false)
+	rules.Require("millwright", domain.EpicRequirements{SiteURL: "https://mill.example.net/"})
+	if err := tracker.SetAcceptance("mw-gq6.2", acceptance); err != nil {
+		t.Fatal(err)
+	}
+	return tracker, rules
+}
+
+func TestPathSetWarnsOfACriterionThatNeedsTheLiveSiteOrALandedFix(t *testing.T) {
+	const moved = "move it out of the acceptance and into the Mayor's after-landing check"
+	for name, c := range map[string]struct {
+		acceptance string
+		line       string
+	}{
+		"a served rig's live page": {"1. curl https://postern.allmymind.org/ shows the new banner", "criterion 1"},
+		"the rig's site_url":       {"1. it builds.\n2. https://mill.example.net/status answers 200", "criterion 2"},
+		"after the fix lands":      {"1. the page shows the banner after the fix lands", "criterion 1"},
+		"after landing":            {"1. the page shows the banner After Landing", "criterion 1"},
+		"once it is live":          {"1. the banner shows once it is live", "criterion 1"},
+	} {
+		tracker, rules := aStoryWithAcceptance(t, c.acceptance)
+		var errOut strings.Builder
+		if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+			t.Fatalf("%s: nothing is refused for it, got %v", name, err)
+		}
+		got := errOut.String()
+		if strings.Count(got, "WARN") != 1 || !strings.Contains(got, "mw-gq6.2") || !strings.Contains(got, c.line) ||
+			!strings.Contains(got, moved) || !strings.Contains(got, "Verify strings") {
+			t.Errorf("%s: expected one warning naming the story and %s, and saying to %s; got %q", name, c.line, moved, got)
+		}
+	}
+}
+
+func TestPathSetWarnsOnceOfAnAcceptanceWithTwoSuchCriteria(t *testing.T) {
+	tracker, rules := aStoryWithAcceptance(t, "1. curl https://postern.allmymind.org/ shows it\n2. it is live once it is live")
+	var errOut strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := errOut.String(); strings.Count(got, "WARN") != 1 || !strings.Contains(got, "criterion 1, 2") {
+		t.Errorf("expected one warning naming both criteria, got %q", got)
+	}
+}
+
+func TestPathSetSaysNothingOfACriterionAnyBuilderCanRun(t *testing.T) {
+	for name, acceptance := range map[string]string{
+		"neither":              "1. go test ./application passes\n2. mw path show prints the key",
+		"a URL in a test":      "1. A test in a_test.go fakes a page at https://postern.allmymind.org/ and sees the banner",
+		"a URL in a fixture":   "1. the fixture holds https://mill.example.net/ and the parser reads it",
+		"a Verify line":        "1. it builds.\nVerify strings: the banner",
+		"a landing in a test":  "1. a test of the order after landing passes",
+		"a URL of no live rig": "1. curl http://localhost:8080/ answers",
+	} {
+		tracker, rules := aStoryWithAcceptance(t, acceptance)
+		var errOut strings.Builder
+		if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if errOut.Len() != 0 {
+			t.Errorf("%s: expected no warning, got %q", name, errOut.String())
+		}
+	}
+}
