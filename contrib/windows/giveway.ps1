@@ -19,7 +19,8 @@
 #                   if a session of some user is still at the screen, nothing (the tick keeps
 #                   the give way going); otherwise as lock, by windows-logoff.
 #   -Event tick     every 5 minutes: freeze mode, a session of ANY user active at the screen
-#                   (console or remote, its lock screen not up) and WSL running: mw giveway on (a
+#                   (console or remote, its lock screen not up; quser.exe, or the console session on
+#                   a Windows Home that has none) and WSL running: mw giveway on (a
 #                   renew). Otherwise nothing. Shutdown mode: nothing (a renew would start WSL).
 #   -DryRun         prints the commands it would run, in order, and runs none; writes no state
 #                   and no log. -AssumeWsl up|down (default up) says what the WSL check would
@@ -99,20 +100,54 @@ function Mw-Giveway([string]$label, [string[]]$more) {
     return (Wsl-Run $label (@('-d', $distro, '-u', $wslUser, '--exec', $mw) + $more))
 }
 
+# The console session's id (Win32 WTSGetActiveConsoleSessionId), or -1 when it cannot be had.
+function Console-SessionId {
+    try {
+        if (-not ('GiveWay.Native' -as [type])) {
+            Add-Type -Namespace 'GiveWay' -Name 'Native' -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern uint WTSGetActiveConsoleSessionId();'
+        }
+        return [int][GiveWay.Native]::WTSGetActiveConsoleSessionId()
+    } catch { return -1 }
+}
+
+# The user signed in at the console (Win32_ComputerSystem.UserName), or '' when none is.
+# Throws when it cannot be read.
+function Console-User {
+    return ((Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop).UserName + '').Trim()
+}
+
 # Someone is at the screen: a session of ANY user, on the console or remote, is Active and its
-# lock screen (a LogonUI in that session) is not up.
+# lock screen (a LogonUI in that session) is not up. quser.exe is the first choice (it sees remote
+# sessions); Windows Home has no quser.exe (mw-gq6.1369), and there a user signed in at the console
+# whose session shows no LogonUI is at the screen. The method that decided goes in the log line
+# (screen=quser, screen=console), and a check that throws says screen=error(...) and gives way
+# when a user is signed in at the console: never a silent 'nobody'.
 function Screen-Occupied {
     if ($DryRun) {
         $yes = if ($AssumeScreen) { $AssumeScreen -eq 'occupied' } else { $Event -eq 'tick' }
-        Write-Host ("DRYRUN check a session of some user is active at the screen: assumed " + $(if ($yes) { 'occupied' } else { 'empty' }))
+        Write-Host ("DRYRUN check a session of some user is active at the screen (quser.exe, or on a Windows with none the console session): assumed " + $(if ($yes) { 'occupied' } else { 'empty' }))
         return $yes
     }
-    try { $rows = @(& quser.exe 2>$null) } catch { return $false }
-    $locked = @(Get-Process -Name LogonUI -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
-    foreach ($r in $rows) {
-        if ($r -match '\s(\d+)\s+Active\b' -and ($locked -notcontains [int]$Matches[1])) { return $true }
+    $locked = @()
+    try { $locked = @(Get-Process -Name LogonUI -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId }) } catch { }
+    try {
+        if (Get-Command quser.exe -CommandType Application -ErrorAction SilentlyContinue) {
+            $rows = @(& quser.exe 2>$null)
+            $steps.Add('screen=quser')
+            foreach ($r in $rows) {
+                if ($r -match '\s(\d+)\s+Active\b' -and ($locked -notcontains [int]$Matches[1])) { return $true }
+            }
+            return $false
+        }
+        $steps.Add('screen=console')
+        if (-not (Console-User)) { return $false }
+        $id = Console-SessionId
+        if ($id -lt 0) { return ($locked.Count -eq 0) }
+        return ($locked -notcontains $id)
+    } catch {
+        $steps.Add("screen=error($($_.Exception.Message))")
+        try { return [bool](Console-User) } catch { return $true }
     }
-    return $false
 }
 
 # WSL is running: the WSL 2 virtual machine has a process. This takes some tens of ms (asking

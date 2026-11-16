@@ -31,7 +31,7 @@ script: `freeze` (the default, and what a missing or unreadable file means) or `
 | unlock | At once: `mw giveway on --by windows-unlock --note windows_free_mb=<Windows' Available MBytes> --note windows_ms=<ms since the script's process started>`. Then the state file says `unlocked`. Then, after the freeze and not before, as root in WSL: `sync` and drop the page cache (so the guest hands memory back to Windows); 10 s later `mw giveway mark` with `windows_free_mb` again. If a lock came meanwhile, the drop and the mark are skipped. | `mw giveway on`, the state file says `unlocked`, then `wsl.exe --terminate Ubuntu-24.04`. |
 | lock | The state file says `locked`; `mw giveway off --by windows-lock` (continues what was stopped, retries the sessions that died). | The state file says `locked`; WSL is started again as the task `Start WSL (millwright)` does (that task is started; if it is missing, a hidden `sleep infinity` is); the script waits up to 2 minutes until WSL answers; then `mw giveway off`. |
 | logoff | After a pause of 3 s (the event comes as the session ends): if a session of some user is still at the screen, nothing (the tick keeps the give way going); otherwise as lock, by `windows-logoff`. | The same, then as lock. |
-| tick (every 5 minutes) | When a session of ANY user, on the console or remote, is active at the screen (`quser` shows `Active` for it, and no lock screen, `LogonUI`, is up in that session) and WSL is running: `mw giveway on --by windows-tick`, a renew. Otherwise nothing. | Nothing: a renew would start WSL again. |
+| tick (every 5 minutes) | When a session of ANY user, on the console or remote, is active at the screen (`quser` shows `Active` for it, and no lock screen, `LogonUI`, is up in that session; on a Windows with no `quser.exe`, Home, a user signed in at the console whose session shows no `LogonUI`) and WSL is running: `mw giveway on --by windows-tick`, a renew. Otherwise nothing. The Windows log line says which method decided: `screen=quser` or `screen=console`; a check that threw says `screen=error(<message>)` and counts as occupied when a user is signed in at the console (give way rather than not). | Nothing: a renew would start WSL again. |
 
 The unlock task fires on workstation unlock, console connect and remote connect (remote desktop) of ANY
 user's session, and at logon of any user. The lock task fires on workstation lock, console disconnect and
@@ -180,6 +180,11 @@ is at the screen. So that the home does not take that silence for a fault, the h
   and a marker it writes cannot be read from a sealed WSL (no `/mnt/c`). If the desktop ever keeps WSL up
   with the owner signed off (an `S4U` keeper), this needs doing: make the four tasks `S4U` after trying
   `wsl.exe` under it, and never store a password.
+- **A remote session on Windows Home (mw-gq6.1369).** Home has no `quser.exe` (the desktop runs Home, and until this
+  fix every tick there logged `nobody at the screen` and the freeze expired 15 minutes after each unlock). Without
+  it the check sees only the console session: a user signed in at the console (`Win32_ComputerSystem.UserName`) with
+  no lock screen in the console session. Home cannot host a Remote Desktop session anyway, so nothing is missed
+  there; on Pro `quser` stays the first choice and sees remote sessions.
 - Anything the person does in WSL itself.
 - The factory's own processes that `mw giveway on` does not stop (its Found-not-fixed list is on the first
   story, mw-2891blf.1).

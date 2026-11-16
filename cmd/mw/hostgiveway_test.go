@@ -454,3 +454,31 @@ func assertElevationFirst(t *testing.T, what, line string) {
 		t.Errorf("%s: the first throw (%d) must be the elevation check's (%d)", what, i, check)
 	}
 }
+
+// Windows Home has no quser.exe (mw-gq6.1369): the screen check must have a branch for its
+// absence that asks another way, say which method decided in the log, and never answer
+// "nobody" silently when quser is missing or throws.
+func TestGiveWayScreenCheckHasABranchForAWindowsWithNoQuser(t *testing.T) {
+	s := millwright.GiveWayScript
+	i := strings.Index(s, "function Screen-Occupied")
+	if i < 0 {
+		t.Fatalf("no Screen-Occupied function")
+	}
+	rest := s[i+len("function Screen-Occupied"):]
+	end := strings.Index(rest, "\nfunction ")
+	if end < 0 {
+		t.Fatalf("cannot find the end of Screen-Occupied")
+	}
+	fn := rest[:end]
+	for _, want := range []string{"Get-Command", "Win32_ComputerSystem", "UserName", "LogonUI", "screen=quser", "screen=console", "screen=error("} {
+		if !strings.Contains(fn, want) {
+			t.Errorf("Screen-Occupied lacks %q: a Windows with no quser.exe (Home) needs its own branch", want)
+		}
+	}
+	if regexp.MustCompile(`catch\s*\{\s*return \$false\s*\}`).MatchString(fn) {
+		t.Errorf("Screen-Occupied answers false from a catch: a failed check must give way, not stay silent")
+	}
+	if strings.Index(fn, "screen=quser") > strings.Index(fn, "screen=console") {
+		t.Errorf("quser stays the first choice where it exists")
+	}
+}
