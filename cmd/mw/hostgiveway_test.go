@@ -460,12 +460,13 @@ func assertElevationFirst(t *testing.T, what, line string) {
 // "nobody" silently when quser is missing or throws.
 func TestGiveWayScreenCheckHasABranchForAWindowsWithNoQuser(t *testing.T) {
 	s := millwright.GiveWayScript
-	i := strings.Index(s, "function Screen-Occupied")
-	if i < 0 {
-		t.Fatalf("no Screen-Occupied function")
+	// the check and its two helpers (Console-SessionId, Console-User) come before Wsl-Running
+	i := strings.Index(s, "function Console-SessionId")
+	if i < 0 || i > strings.Index(s, "function Screen-Occupied") {
+		t.Fatalf("no Console-SessionId helper before Screen-Occupied")
 	}
-	rest := s[i+len("function Screen-Occupied"):]
-	end := strings.Index(rest, "\nfunction ")
+	rest := s[i+len("function Console-SessionId"):]
+	end := strings.Index(rest, "\nfunction Wsl-Running")
 	if end < 0 {
 		t.Fatalf("cannot find the end of Screen-Occupied")
 	}
