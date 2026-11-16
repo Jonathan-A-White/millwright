@@ -1255,3 +1255,44 @@ func TestCarryCallsACommitWhoseChangeTheBranchHasAlreadyNothingToDo(t *testing.T
 		t.Errorf("expected the worktree put back at %s, got %s", fixer, got)
 	}
 }
+
+// batch 540 of lampas: the fixer's mend of a story was a merge of the story's
+// branch into the batch, and the pick of it stopped with 'is a merge but no -m
+// option was given', so the next batch paid a fixer for the same conflict
+// (mw-gq6.1367).
+func TestCarryPicksAFixersMergeCommitByItsFirstParent(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	_, _ = aStoryAndItsFixer(t, here)
+	batchTip := run(t, here, "git", "rev-parse", "HEAD")
+	// the story's branch moved on at the origin after the batch merged it
+	run(t, here, "git", "checkout", "-q", "mw/story")
+	write(t, here, "later.md", "the story's later work\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The story moves on")
+	run(t, here, "git", "push", "-q", "origin", "mw/story")
+	run(t, here, "git", "checkout", "-q", "--detach", batchTip)
+	// the fixer merges the branch as the origin has it, and resolves it its own way
+	run(t, here, "git", "fetch", "-q", "origin")
+	run(t, here, "git", "merge", "-q", "--no-ff", "--no-commit", "origin/mw/story")
+	write(t, here, "story.md", "the story's work, as the fixer mended it\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Merge origin/mw/story, resolved")
+	merge := run(t, here, "git", "rev-parse", "HEAD")
+
+	tip, err := worktrees.Carry(ctx, here, "origin", []string{merge}, "origin/mw/story", "mw/story")
+	if err != nil {
+		t.Fatalf("expected the merge's resolution to be carried, got %v", err)
+	}
+	run(t, here, "git", "fetch", "-q", "origin")
+	if at := run(t, here, "git", "rev-parse", "origin/mw/story"); at != tip {
+		t.Errorf("expected the branch moved to %s, got %s", tip, at)
+	}
+	if got := run(t, here, "git", "show", tip+":story.md"); got != "the story's work, as the fixer mended it" {
+		t.Errorf("expected the fixer's resolution on the branch, got %q", got)
+	}
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got != merge {
+		t.Errorf("expected the worktree put back at %s, got %s", merge, got)
+	}
+}

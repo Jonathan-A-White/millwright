@@ -587,8 +587,8 @@ func (f BatchFixing) carriedLines() string {
 // on no branch, and a batch landed again would meet the red the fixer mended. A
 // commit belongs to a story when the files of the story's branch (against the
 // batch's base) hold every file it touches and no other story's do; one that
-// belongs to none or to two, or a merge of the fixer's, stays in the bundle
-// alone. A story's commits go together, in order, or not at all: trouble is a
+// belongs to none or to two stays in the bundle alone. A merge of the fixer's is
+// picked against its first parent (mw-gq6.1367). A story's commits go together, in order, or not at all: trouble is a
 // line of the records, never another hold (mw-gq6.1014).
 func (b BatchLand) carryFixer(ctx context.Context, dir string, report *BatchReport, commits []Commit) {
 	f := report.Fixer

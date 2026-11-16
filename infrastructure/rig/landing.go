@@ -549,7 +549,8 @@ func (w *Worktrees) OnBranch(ctx context.Context, dir, commit, ref string) (bool
 
 // Carry implements application.Landing: the worktree is detached onto onto,
 // each commit is cherry-picked, the head is pushed as branch by Push (no
-// force), and the worktree is detached back onto where it stood. A pick that
+// force), and the worktree is detached back onto where it stood. A merge
+// commit is picked against its first parent (-m 1). A pick that
 // conflicts is aborted before the error comes back; a commit onto holds
 // already, or whose pick comes out empty, is skipped (mw-gq6.1055).
 func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []string, onto, branch string) (string, error) {
@@ -579,7 +580,15 @@ func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []str
 		} else if held {
 			continue
 		}
-		if _, err := w.git(ctx, dir, "cherry-pick", commit); err != nil {
+		pick := []string{"cherry-pick"}
+		if merge, err := w.isMerge(ctx, dir, commit); err != nil {
+			return "", err
+		} else if merge {
+			// a fixer's merge of the story's branch: what it brought in over
+			// the batch is the change to pick (mw-gq6.1367).
+			pick = append(pick, "-m", "1")
+		}
+		if _, err := w.git(ctx, dir, append(pick, commit)...); err != nil {
 			if !w.pickIsEmpty(ctx, dir) {
 				return "", err
 			}
@@ -596,6 +605,15 @@ func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []str
 		return "", err
 	}
 	return strings.TrimSpace(tip), nil
+}
+
+// isMerge says commit has more than one parent.
+func (w *Worktrees) isMerge(ctx context.Context, dir, commit string) (bool, error) {
+	out, err := w.git(ctx, dir, "rev-list", "--parents", "-n", "1", commit)
+	if err != nil {
+		return false, err
+	}
+	return len(strings.Fields(out)) > 2, nil
 }
 
 // pickIsEmpty says a cherry-pick that stopped has nothing left to apply: no

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -181,5 +182,24 @@ func TestCarryFixerCarriesNothingWhenTheBranchHoldsEveryCommit(t *testing.T) {
 	lines := report.Fixer.carriedLines()
 	if !strings.Contains(lines, "already on") || strings.Contains(lines, "No commit of its touched") {
 		t.Fatalf("expected the mail to say the commit is already on the branch, got:\n%s", lines)
+	}
+}
+
+// A merge commit of the fixer's that cannot be pushed to the story's branch is
+// said in the records with git's own reason, and the Held mail carries the line
+// (mw-gq6.1367).
+func TestCarryFixerSaysAMergeItCouldNotPushWithTheReason(t *testing.T) {
+	landing := &carryLanding{files: map[string][]string{}, err: errors.New("git cherry-pick -m 1 bb243d608: exit status 1: CONFLICT (content): Merge conflict in a.go")}
+	b, report, commits := aFixedBatch(landing, "bb243d608")
+
+	b.carryFixer(context.Background(), "dir", report, commits)
+
+	if len(report.Fixer.Carried) != 0 || len(report.Fixer.CarryTrouble) != 1 {
+		t.Fatalf("expected one line of trouble and nothing carried, got %+v", report.Fixer)
+	}
+	for _, want := range []string{"bb243d608", "could not be pushed to its branch mw/mw-1", "Merge conflict in a.go"} {
+		if !strings.Contains(report.Fixer.carriedLines(), want) {
+			t.Errorf("expected the Held mail's lines to say %q, got:\n%s", want, report.Fixer.carriedLines())
+		}
 	}
 }
