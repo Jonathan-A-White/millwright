@@ -67,14 +67,14 @@ func gdriveSession() (gdrive.Session, error) {
 func newGdriveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gdrive",
-		Short: "Read and write his Google Drive and Sheets, signed in as him (auth, find, read, write, revoke)",
+		Short: "Read and write his Google Drive and Sheets, signed in as him (auth, find, read, write, selftest, revoke)",
 		Long: "gdrive reads and writes his Google Drive and Sheets, signed in as him through his own Desktop\n" +
 			"OAuth client (scopes " + gdrive.DriveScope + ",\n" + gdrive.SheetsScope + " and " + gdrive.GmailScope + ", the last for mw gmail).\n" +
 			"Nothing is mirrored: a file is fetched only when a command names it. The client and the\n" +
 			"refresh token are kept in ~/.config/mw/gdrive/ (the directory mode 700, the files 600) and\n" +
 			"are never printed or logged.",
 	}
-	cmd.AddCommand(newGdriveAuthCmd(), newGdriveFindCmd(), newGdriveReadCmd(), newGdriveWriteCmd(), newGdriveRevokeCmd())
+	cmd.AddCommand(newGdriveAuthCmd(), newGdriveFindCmd(), newGdriveReadCmd(), newGdriveWriteCmd(), newGdriveSelftestCmd(), newGdriveRevokeCmd())
 	return cmd
 }
 
@@ -256,6 +256,39 @@ func newGdriveWriteCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "write to a file whose name contains 'Budget'")
 	return cmd
+}
+
+func newGdriveSelftestCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "selftest",
+		Short: "Prove a write: make a sheet 'millwright write test', write one cell, read it back, trash it",
+		Long: "selftest creates a spreadsheet named '" + gdrive.SelftestName + "' in his Drive, writes the UTC time to\n" +
+			gdrive.SelftestCell + ", reads it back, and prints both. It then moves that spreadsheet to the Drive\n" +
+			"trash and prints its id and 'trashed'. It trashes only the file it made in the same run, by id, and\n" +
+			"trashes it even when the write or the read failed. It uses the scopes already granted.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := gdriveSession()
+			if err != nil {
+				return err
+			}
+			done, err := s.Selftest(cmd.Context())
+			out := cmd.OutOrStdout()
+			if done.ID != "" {
+				fmt.Fprintf(out, "created %q (%s)\n", gdrive.SelftestName, done.ID)
+			}
+			if done.Wrote != "" {
+				fmt.Fprintf(out, "wrote %s: %s\n", gdrive.SelftestCell, done.Wrote)
+			}
+			if done.ReadBack != "" {
+				fmt.Fprintf(out, "read back %s: %s\n", gdrive.SelftestCell, done.ReadBack)
+			}
+			if done.Trashed {
+				fmt.Fprintf(out, "%s trashed\n", done.ID)
+			}
+			return err
+		},
+	}
 }
 
 func newGdriveRevokeCmd() *cobra.Command {

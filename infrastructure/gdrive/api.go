@@ -323,3 +323,85 @@ func (s Session) Write(ctx context.Context, id, a1 string, values []string, yes 
 	}
 	return Written{Title: title, Range: out.UpdatedRange, Cells: out.UpdatedCells, Before: before, After: [][]string{values}}, nil
 }
+
+// SelftestName is the name of the scratch spreadsheet mw gdrive selftest makes.
+const SelftestName = "millwright write test"
+
+// SelftestCell is the cell the selftest writes and reads back.
+const SelftestCell = "Sheet1!A1"
+
+// Selftested is what one selftest did. ID is the spreadsheet it created; the
+// selftest trashes that id and no other.
+type Selftested struct {
+	ID       string
+	Wrote    string
+	ReadBack string
+	Trashed  bool
+}
+
+// Selftest creates a spreadsheet named SelftestName, writes one cell holding
+// the UTC time, reads it back, and moves that spreadsheet, by the id Google
+// gave it, to the Drive trash. A failed write or read still trashes the file it
+// created. It needs no scope beyond the Drive and Sheets ones already granted.
+func (s Session) Selftest(ctx context.Context) (Selftested, error) {
+	var created struct {
+		ID string `json:"spreadsheetId"`
+	}
+	body := map[string]any{"properties": map[string]any{"title": SelftestName}}
+	if err := s.call(ctx, http.MethodPost, s.Endpoints.Sheets+"/v4/spreadsheets", body, &created); err != nil {
+		return Selftested{}, fmt.Errorf("creating the scratch spreadsheet: %w", err)
+	}
+	if created.ID == "" {
+		return Selftested{}, fmt.Errorf("Google created a spreadsheet but gave no id, so there is nothing to trash")
+	}
+	got := Selftested{ID: created.ID}
+	runErr := s.selftestCell(ctx, &got)
+	if err := s.trash(ctx, got.ID); err != nil {
+		trashErr := fmt.Errorf("trashing the scratch spreadsheet %s: %w", got.ID, err)
+		if runErr != nil {
+			return got, fmt.Errorf("%w; and %v", runErr, trashErr)
+		}
+		return got, trashErr
+	}
+	got.Trashed = true
+	return got, runErr
+}
+
+// selftestCell writes the time to the test cell and reads it back.
+func (s Session) selftestCell(ctx context.Context, got *Selftested) error {
+	value := s.Now
+	if value == nil {
+		value = time.Now
+	}
+	got.Wrote = value().UTC().Format(time.RFC3339)
+	if _, err := s.Write(ctx, got.ID, SelftestCell, []string{got.Wrote}, false); err != nil {
+		return fmt.Errorf("writing the test cell: %w", err)
+	}
+	rows, err := s.values(ctx, got.ID, SelftestCell)
+	if err != nil {
+		return fmt.Errorf("reading the test cell back: %w", err)
+	}
+	if len(rows) > 0 && len(rows[0]) > 0 {
+		got.ReadBack = rows[0][0]
+	}
+	if got.ReadBack != got.Wrote {
+		return fmt.Errorf("the test cell read back %q, not the %q written", got.ReadBack, got.Wrote)
+	}
+	return nil
+}
+
+// trash moves the file with this id to the Drive trash; nothing is deleted for
+// good.
+func (s Session) trash(ctx context.Context, id string) error {
+	address := s.Endpoints.Drive + "/drive/v3/files/" + url.PathEscape(id) + "?supportsAllDrives=true&fields=id,trashed"
+	var out struct {
+		Trashed bool `json:"trashed"`
+	}
+	if err := s.call(ctx, http.MethodPatch, address, map[string]any{"trashed": true}, &out); err != nil {
+		return err
+	}
+	if !out.Trashed {
+		return fmt.Errorf("Google did not say the file is trashed")
+	}
+	return nil
+}

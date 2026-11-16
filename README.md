@@ -2535,6 +2535,7 @@ a Done card files write no `Text:` line, so they make no lookup. The tests are
     mw gdrive read FILE_ID                 # the tabs of a spreadsheet
     mw gdrive read FILE_ID --sheet Main --range A1:Z99   # cells as CSV
     mw gdrive write FILE_ID 'Main!A1:C1' a b =1+1        # update cells in place
+    mw gdrive selftest                     # make a scratch sheet, write and read one cell, trash it
     mw gdrive revoke                       # delete the kept client and token
 
 `mw gdrive` reads and writes his Google Drive and Sheets signed in as him,
@@ -2554,8 +2555,14 @@ new one saved. `read` with neither `--sheet` nor `--range` lists the tabs.
 the cells' old and new contents; a file whose name contains `Budget` (any case)
 is refused unless `--yes` is given. `revoke` deletes the two files and prints
 `https://myaccount.google.com/permissions`, where he takes mw's access back.
+`selftest` creates a spreadsheet named `millwright write test`, writes the UTC
+time to `Sheet1!A1`, reads it back and prints both, then moves that file to the
+Drive trash, by the id Google gave it and no other, and prints the id and
+`trashed`; a failed write still trashes it. It needs no scope beyond those
+granted.
 No token or secret is printed or logged. The tests are
-`infrastructure/gdrive/gdrive_test.go` and `cmd/mw/gdrive_test.go`.
+`infrastructure/gdrive/gdrive_test.go`, `cmd/mw/gdrive_test.go` and
+`features/gdrive_selftest.feature`.
 
 ### Reading his Gmail (mw gmail)
 

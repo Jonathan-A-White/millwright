@@ -446,3 +446,162 @@ func TestRemoveDeletesTheFilesAndNothingElse(t *testing.T) {
 		t.Fatalf("a second remove: %v %v", gone, err)
 	}
 }
+
+// driveWithSelftest is a Drive and Sheets that make one spreadsheet on a POST,
+// keep what is written to it, and note each call and each file trashed. A file
+// with the test's name already sits in the Drive (id "id-other") and must stay.
+type driveWithSelftest struct {
+	mu       sync.Mutex
+	calls    []string
+	trashed  []string
+	cell     string
+	failPut  bool
+	failBack bool
+}
+
+func (d *driveWithSelftest) serve(t *testing.T) gdrive.Endpoints {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v4/spreadsheets", func(w http.ResponseWriter, r *http.Request) {
+		d.note(r)
+		var in struct {
+			Properties struct {
+				Title string `json:"title"`
+			} `json:"properties"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		if r.Method != http.MethodPost || in.Properties.Title != gdrive.SelftestName {
+			http.Error(w, `{"error":{"message":"unexpected"}}`, http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"spreadsheetId":"id-made","properties":{"title":"` + in.Properties.Title + `"}}`))
+	})
+	mux.HandleFunc("/v4/spreadsheets/", func(w http.ResponseWriter, r *http.Request) {
+		d.note(r)
+		_, values, hasValues := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v4/spreadsheets/"), "/values/")
+		_ = values
+		switch {
+		case !hasValues:
+			_, _ = w.Write([]byte(`{"properties":{"title":"` + gdrive.SelftestName + `"}}`))
+		case r.Method == http.MethodPut:
+			if d.failPut {
+				http.Error(w, `{"error":{"message":"write refused"}}`, http.StatusForbidden)
+				return
+			}
+			var in struct {
+				Values [][]string `json:"values"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			d.mu.Lock()
+			d.cell = in.Values[0][0]
+			d.mu.Unlock()
+			_, _ = w.Write([]byte(`{"updatedRange":"Sheet1!A1","updatedCells":1}`))
+		default:
+			if d.failBack {
+				http.Error(w, `{"error":{"message":"read refused"}}`, http.StatusInternalServerError)
+				return
+			}
+			d.mu.Lock()
+			cell := d.cell
+			d.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"values": [][]string{{cell}}})
+		}
+	})
+	mux.HandleFunc("/drive/v3/files/", func(w http.ResponseWriter, r *http.Request) {
+		d.note(r)
+		id := strings.TrimPrefix(r.URL.Path, "/drive/v3/files/")
+		var in struct {
+			Trashed bool `json:"trashed"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		if r.Method != http.MethodPatch || !in.Trashed {
+			http.Error(w, `{"error":{"message":"unexpected"}}`, http.StatusBadRequest)
+			return
+		}
+		d.mu.Lock()
+		d.trashed = append(d.trashed, id)
+		d.mu.Unlock()
+		_, _ = w.Write([]byte(`{"id":"` + id + `","trashed":true}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return gdrive.Endpoints{Auth: "https://accounts.example/auth", Token: server.URL + "/token", Drive: server.URL, Sheets: server.URL}
+}
+
+func (d *driveWithSelftest) note(r *http.Request) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls = append(d.calls, r.Method+" "+r.URL.Path)
+}
+
+func freshSession(t *testing.T, ends gdrive.Endpoints) gdrive.Session {
+	t.Helper()
+	s, _ := session(t, ends, fixedNow.Add(time.Hour))
+	return s
+}
+
+func TestSelftestMakesWritesReadsBackAndTrashesItsOwnSheet(t *testing.T) {
+	d := &driveWithSelftest{}
+	s := freshSession(t, d.serve(t))
+
+	got, err := s.Selftest(context.Background())
+	if err != nil {
+		t.Fatalf("selftest: %v", err)
+	}
+	if got.ID != "id-made" || !got.Trashed {
+		t.Fatalf("expected id-made trashed, got %+v", got)
+	}
+	want := fixedNow.UTC().Format(time.RFC3339)
+	if got.Wrote != want || got.ReadBack != want {
+		t.Fatalf("expected %q written and read back, got %+v", want, got)
+	}
+	if len(d.trashed) != 1 || d.trashed[0] != "id-made" {
+		t.Fatalf("expected only id-made trashed, got %v", d.trashed)
+	}
+	for _, c := range d.calls {
+		if strings.HasPrefix(c, "GET /drive/v3/files") && !strings.HasPrefix(c, "GET /drive/v3/files/") {
+			t.Fatalf("the selftest looked files up by name: %v", d.calls)
+		}
+	}
+}
+
+func TestSelftestTrashesTheCreatedSheetEvenWhenTheWriteFails(t *testing.T) {
+	d := &driveWithSelftest{failPut: true}
+	s := freshSession(t, d.serve(t))
+
+	got, err := s.Selftest(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "write refused") {
+		t.Fatalf("expected the write's refusal, got %v", err)
+	}
+	if !got.Trashed || len(d.trashed) != 1 || d.trashed[0] != "id-made" {
+		t.Fatalf("expected the created sheet trashed after the failed write, got %+v %v", got, d.trashed)
+	}
+}
+
+func TestSelftestTrashesTheCreatedSheetEvenWhenTheReadBackFails(t *testing.T) {
+	d := &driveWithSelftest{failBack: true}
+	s := freshSession(t, d.serve(t))
+
+	_, err := s.Selftest(context.Background())
+	if err == nil {
+		t.Fatal("expected the read-back's failure")
+	}
+	if len(d.trashed) != 1 || d.trashed[0] != "id-made" {
+		t.Fatalf("expected only id-made trashed, got %v", d.trashed)
+	}
+}
+
+func TestSelftestNeverTrashesAnotherFileWithTheSameName(t *testing.T) {
+	d := &driveWithSelftest{}
+	s := freshSession(t, d.serve(t))
+	// "id-other" is a file of the same name already in his Drive; the selftest
+	// has no way to learn of it and so none to trash it.
+	if _, err := s.Selftest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range d.trashed {
+		if id == "id-other" {
+			t.Fatalf("trashed a file it did not create: %v", d.trashed)
+		}
+	}
+}

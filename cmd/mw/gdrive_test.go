@@ -28,6 +28,7 @@ type gdriveStandIn struct {
 	mu    sync.Mutex
 	calls []string
 	title string
+	cell  string // what a PUT to the selftest's sheet last wrote
 }
 
 func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
@@ -60,9 +61,22 @@ func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
 			return
 		}
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v4/spreadsheets":
+			_, _ = w.Write([]byte(`{"spreadsheetId":"made-1"}`))
+		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/drive/v3/files/"):
+			_, _ = w.Write([]byte(`{"id":"` + strings.TrimPrefix(r.URL.Path, "/drive/v3/files/") + `","trashed":true}`))
+		case strings.Contains(r.URL.Path, "/values/") && r.Method == http.MethodGet && g.cell != "":
+			_, _ = w.Write([]byte(`{"values":[["` + g.cell + `"]]}`))
 		case r.URL.Path == "/drive/v3/files":
 			_, _ = w.Write([]byte(`{"files":[{"id":"abc","name":"Chores","modifiedTime":"2026-11-10T08:00:00Z","mimeType":"application/vnd.google-apps.spreadsheet"}]}`))
 		case strings.Contains(r.URL.Path, "/values/") && r.Method == http.MethodPut:
+			var in struct {
+				Values [][]string `json:"values"`
+			}
+			_ = json.Unmarshal(body, &in)
+			if len(in.Values) > 0 && len(in.Values[0]) > 0 && strings.Contains(r.URL.Path, "made-1") {
+				g.cell = in.Values[0][0]
+			}
 			_, _ = w.Write([]byte(`{"updatedRange":"Sheet1!A1:B1","updatedCells":2}`))
 		case strings.Contains(r.URL.Path, "/values/"):
 			_, _ = w.Write([]byte(`{"values":[["a","b, c"],["1"]]}`))
@@ -71,6 +85,8 @@ func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
 		}
 	}
 	mux.HandleFunc("/drive/v3/files", api)
+	mux.HandleFunc("/drive/v3/files/", api)
+	mux.HandleFunc("/v4/spreadsheets", api)
 	mux.HandleFunc("/v4/spreadsheets/", api)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -346,5 +362,37 @@ func TestGdriveFindReadWriteRevoke(t *testing.T) {
 	said, err = runGdrive(t, "", "gdrive", "find", "chore")
 	if err == nil || !strings.Contains(said, "mw gdrive auth") {
 		t.Fatalf("expected a pointer to auth after revoke, got %q %v", said, err)
+	}
+}
+
+func TestGdriveSelftestMakesWritesReadsBackAndTrashes(t *testing.T) {
+	g, home := standInGdrive(t)
+	signedIn(t, home)
+
+	said, err := runGdrive(t, "", "gdrive", "selftest")
+	if err != nil {
+		t.Fatalf("selftest: %v %s", err, said)
+	}
+	for _, want := range []string{"millwright write test", "wrote Sheet1!A1: ", "read back Sheet1!A1: ", "made-1 trashed"} {
+		if !strings.Contains(said, want) {
+			t.Fatalf("selftest lacks %q: %s", want, said)
+		}
+	}
+	var created, trashed int
+	for _, c := range g.calls {
+		switch {
+		case strings.HasPrefix(c, "POST /v4/spreadsheets "):
+			created++
+			if !strings.Contains(c, `"title":"millwright write test"`) {
+				t.Fatalf("created under another name: %s", c)
+			}
+		case strings.HasPrefix(c, "PATCH /drive/v3/files/made-1"):
+			trashed++
+		case strings.HasPrefix(c, "PATCH ") || strings.HasPrefix(c, "DELETE "):
+			t.Fatalf("an unexpected call: %s", c)
+		}
+	}
+	if created != 1 || trashed != 1 {
+		t.Fatalf("expected one create and one trash, got %d and %d: %v", created, trashed, g.calls)
 	}
 }
