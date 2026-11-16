@@ -92,7 +92,7 @@ func ParseFactProposals(comment string) FactProposals {
 		if strings.Contains(strings.ToLower(raw), strings.ToLower(CommonErrorsMarker)) || isFoundNotFixedHeading(raw) || isDocsHeading(raw) {
 			break
 		}
-		text := strings.TrimSpace(domain.TrimListMarker(raw))
+		text := unfenced(strings.TrimSpace(domain.TrimListMarker(raw)))
 		if text == "" {
 			if saidNothing {
 				break
@@ -107,6 +107,19 @@ func ParseFactProposals(comment string) FactProposals {
 		}
 	}
 	return found
+}
+
+// unfenced strips one pair of enclosing backticks, single or triple, from a
+// trimmed section line, so a Builder's line written as code is read as the
+// line inside it (mw-2lh3hpu). A line with no matching pair is returned as it
+// is. Both the rig memory and the common errors sections read through it.
+func unfenced(text string) string {
+	for _, fence := range []string{"```", "`"} {
+		if len(text) > 2*len(fence) && strings.HasPrefix(text, fence) && strings.HasSuffix(text, fence) {
+			return strings.TrimSpace(text[len(fence) : len(text)-len(fence)])
+		}
+	}
+	return text
 }
 
 func parseFactProposal(text string) (FactProposal, bool) {

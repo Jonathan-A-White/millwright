@@ -1017,7 +1017,7 @@ func ParseCommonErrors(comment string) CommonErrorProposals {
 		if strings.Contains(strings.ToLower(raw), strings.ToLower(RigMemoryMarker)) || isFoundNotFixedHeading(raw) || isDocsHeading(raw) {
 			break
 		}
-		text := strings.TrimSpace(domain.TrimListMarker(raw))
+		text := unfenced(strings.TrimSpace(domain.TrimListMarker(raw)))
 		switch m := commonErrorForm.FindStringSubmatch(text); {
 		case text == "":
 			if saidNothing {
