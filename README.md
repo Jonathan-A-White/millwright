@@ -54,6 +54,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
   - [Finding a number in his contacts (mw contacts find)](#finding-a-number-in-his-contacts-mw-contacts-find)
   - [Reading and writing his Drive and Sheets (mw gdrive)](#reading-and-writing-his-drive-and-sheets-mw-gdrive)
   - [Reading his Gmail (mw gmail)](#reading-his-gmail-mw-gmail)
+- [A browser he signs into himself (mw browser)](#a-browser-he-signs-into-himself-mw-browser)
 - [Cloud boxes made by demand](#cloud-boxes-made-by-demand)
 - [Going easy on a metered network](#going-easy-on-a-metered-network)
 - [Stamping a rig's head by hand](#stamping-a-rigs-head-by-hand)
@@ -2582,6 +2583,31 @@ before Gmail was added to the sign-in makes both commands say `run mw gdrive
 auth again to add Gmail`, without a stack or a token. No token or secret is
 printed or logged. The tests are `infrastructure/gmail/gmail_test.go` and
 `cmd/mw/gmail_test.go`.
+
+## A browser he signs into himself (mw browser)
+
+    mw browser open https://example.org/login   # a VNC display and a Chromium on a fresh profile
+    mw browser status                           # up or not, the URL of each tab, the CDP endpoint
+    mw browser close                            # stop both and delete the profile, cookies and all
+
+`mw browser open` starts `Xtigervnc :5` listening on 127.0.0.1:5905 only, with
+no VNC password (only his ssh tunnel reaches it), and a Chromium on that display
+with a fresh profile in a new temp directory of mode 700, its DevTools port on
+127.0.0.1:9222 only. It prints the one line his phone runs,
+`ssh -L 5905:127.0.0.1:5905 lap` (`--ssh-host` names another host), and the
+address his VNC app opens, 127.0.0.1:5905. He signs in himself; the profile
+turns password saving off. A script then attaches with
+`chromium.connectOverCDP("http://127.0.0.1:9222")`. `mw browser close` stops
+Chromium and the display and deletes the profile, and with nothing open still
+deletes any profile a crash left in the temp directory. Chromium's and the
+display's logs are written inside the profile. The only file mw keeps is
+`~/.local/state/mw/browser/browser.json`: the pids, the ports and the profile's
+path, never a page, a cookie or a password. `--display`, `--vnc-port`,
+`--devtools-port` and `--geometry` change the defaults. Chromium is the first of
+chromium, chromium-browser or google-chrome on PATH, else the newest one
+Playwright installed in `~/.cache/ms-playwright`; Xtigervnc comes from
+tigervnc-standalone-server. See `features/browser.feature`,
+`infrastructure/browser/browser_test.go` and `cmd/mw/browser_test.go`.
 
 ## Cloud boxes made by demand
 
