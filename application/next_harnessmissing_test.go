@@ -60,3 +60,30 @@ func TestANoSuchFileLineThatIsNotClaudeStaysNoResult(t *testing.T) {
 		t.Fatalf("expected %s, got %q: %s", application.ReasonNoResult, run.report.Reason, run.report.Why)
 	}
 }
+
+// mw-gq6.1357: a Codex story's pane says "No such file or directory" for any file
+// of its own; only the missing claude program is a missing harness.
+func TestHarnessMissingIgnoresAnotherProgramsMissingFile(t *testing.T) {
+	for _, pane := range []string{
+		"cat: /home/jwhite/.claude/notes.txt: No such file or directory\n",
+		"bash: ./claude-notes.sh: No such file or directory\n",
+		"cat: docs/claude.md: No such file or directory\n",
+	} {
+		run := aCrashedCloseOut(t, 1, pane, nil, nil)
+		if run.report.Reason != application.ReasonNoResult {
+			t.Errorf("pane %q: expected %s, got %q: %s", pane, application.ReasonNoResult, run.report.Reason, run.report.Why)
+		}
+	}
+}
+
+func TestHarnessMissingStillReadsClaudeByPath(t *testing.T) {
+	for _, pane := range []string{
+		"bash: claude: No such file or directory\n",
+		"bash: /home/jwhite/.local/bin/claude: No such file or directory\n",
+	} {
+		run := aCrashedCloseOut(t, 1, pane, nil, nil)
+		if run.report.Reason == application.ReasonNoResult {
+			t.Errorf("pane %q: expected the story put back, got no-result: %s", pane, run.report.Why)
+		}
+	}
+}

@@ -34,11 +34,33 @@ func HarnessMissingFileNameForAttempt(attempt int) string {
 func harnessMissingLine(tail string) (string, bool) {
 	for _, line := range strings.Split(tail, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.Contains(line, "No such file or directory") && strings.Contains(line, "claude") {
+		if missingFileIsClaude(line) {
 			return line, true
 		}
 	}
 	return "", false
+}
+
+// missingFileIsClaude is whether a line says that the file the shell could not
+// find is the claude program itself: the word before "No such file or directory"
+// is claude, bare or at the end of a path, quoted or not. Another program's
+// missing file whose path merely contains claude (a notes file under .claude, a
+// claude-notes.sh) is not (mw-gq6.1357).
+func missingFileIsClaude(line string) bool {
+	const said = ": No such file or directory"
+	at := strings.Index(line, said)
+	if at < 0 {
+		return false
+	}
+	missing := line[:at]
+	if i := strings.LastIndex(missing, ": "); i >= 0 {
+		missing = missing[i+2:]
+	}
+	missing = strings.Trim(missing, "'\"`")
+	if i := strings.LastIndex(missing, "/"); i >= 0 {
+		missing = missing[i+1:]
+	}
+	return missing == "claude"
 }
 
 // harnessMissing is what a close-out does with a session that left no result and
