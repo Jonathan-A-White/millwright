@@ -247,3 +247,45 @@ func TestADrainedBoxThatIsIdleIsStillDestroyedAtIdleMinutes(t *testing.T) {
 		t.Errorf("expected the idle drained box destroyed at idle_minutes, got %+v", book.State.Boxes)
 	}
 }
+
+// mw-gq6.1334: the hand drain of 2026-11-14 left max_boxes 0 with no kept value; a drain of
+// it keeps 0, and undrain would bring the cloud back at 0 and say nothing of it.
+
+func TestADrainOfAMaxBoxesAlreadyZeroSaysUndrainLeavesItZero(t *testing.T) {
+	ctx := context.Background()
+	drain, files, _ := aCloudToDrain(t, "laptop", "laptop", 0, "cloud2")
+
+	report, err := drain.Drain(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(files.Writes, ","); got != "drain 0" {
+		t.Fatalf("expected the drain to keep 0, got %q", got)
+	}
+	for _, want := range []string{"already 0", "undrain leaves it at 0", "drained_max_boxes = <the old value>", "mw cloud undrain"} {
+		if !strings.Contains(report.String(), want) {
+			t.Errorf("expected the drain's report to say %q, got:\n%s", want, report)
+		}
+	}
+
+	undrain, err := drain.Undrain(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"max_boxes is 0", "drained_max_boxes"} {
+		if !strings.Contains(undrain.String(), want) {
+			t.Errorf("expected the undrain's report to say %q, got:\n%s", want, undrain)
+		}
+	}
+}
+
+func TestADrainOfARealMaxBoxesSaysNothingOfZero(t *testing.T) {
+	drain, _, _ := aCloudToDrain(t, "laptop", "laptop", 4, "cloud2")
+	report, err := drain.Drain(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(report.String(), "drained_max_boxes") {
+		t.Errorf("expected no word of the kept value to be said, got:\n%s", report)
+	}
+}

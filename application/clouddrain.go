@@ -96,8 +96,37 @@ type CloudDrainReport struct {
 	Already bool
 }
 
+// zeroKeptSaid is said when the value a drain keeps is 0, as a drain of a hand
+// drain's max_boxes 0 does: undrain would put 0 back, and the old value must be said.
+const zeroKeptSaid = "max_boxes was already 0, so undrain leaves it at 0. To say the old value, set drained_max_boxes = <the old value>\n" +
+	"beside max_boxes in the [cloud] table of the home's ~/.config/mw/config.toml and of the vault's hosts/vultr/cloud-table.toml, then run mw cloud undrain."
+
+// undrainZeroSaid is said when an undrain put 0 back: the drain had kept no value.
+const undrainZeroSaid = "The value the drain kept was 0, so max_boxes stays 0 and no box is made. Set max_boxes in the [cloud] table of\n" +
+	"the home's ~/.config/mw/config.toml and of the vault's hosts/vultr/cloud-table.toml; a later drain keeps it as drained_max_boxes."
+
 // String is the report, with the way back.
 func (r CloudDrainReport) String() string {
+	text := r.say()
+	if r.zeroKept() {
+		if r.Undrain {
+			text += "\n" + undrainZeroSaid
+		} else {
+			text += "\n" + zeroKeptSaid
+		}
+	}
+	return text
+}
+
+// zeroKept is a drain that keeps 0, or an undrain that puts 0 back: the old value was never said.
+func (r CloudDrainReport) zeroKept() bool {
+	if r.Undrain {
+		return !r.Already && r.Now == 0
+	}
+	return r.Was == 0
+}
+
+func (r CloudDrainReport) say() string {
 	boxes := "no box is up"
 	if len(r.Boxes) > 0 {
 		boxes = strings.Join(r.Boxes, ", ")
