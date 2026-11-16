@@ -255,7 +255,7 @@ func TestWSLFlagInstallLinePrintsTheFencedLineAndItsWayBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mw host wsl-flag --install-line failed: %v\n%s", err, out)
 	}
-	for _, want := range []string{"```\nPS C:\\", "Register-ScheduledTask -TaskName 'millwright-wsl-flag-watch'",
+	for _, want := range []string{"Register-ScheduledTask -TaskName 'millwright-wsl-flag-watch'",
 		"-RunLevel Highest", "-Minutes 2", "Unregister-ScheduledTask -TaskName millwright-wsl-flag-watch"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in the install output:\n%s", want, out)
@@ -265,6 +265,49 @@ func TestWSLFlagInstallLinePrintsTheFencedLineAndItsWayBack(t *testing.T) {
 	for _, l := range strings.Split(out, "\n") {
 		if strings.Contains(l, "Register-ScheduledTask") && !strings.Contains(l, "-Force") {
 			t.Errorf("the Register-ScheduledTask line must be whole on one line: %.80q", l)
+		}
+	}
+}
+
+// A whole-block Copy from Postern copies a fence's exact text, so a fenced
+// block holds only the command: a leading PowerShell prompt would be read
+// as Get-Process and a redirect to a file named "if". The window and its prompt
+// are named in the prose before the fence.
+func TestWSLFlagInstallLineFencesHoldOnlyTheCommandAndTheProseNamesThePrompt(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	out, err := runMw(t, "host", "wsl-flag", "--install-line")
+	if err != nil {
+		t.Fatalf("mw host wsl-flag --install-line failed: %v\n%s", err, out)
+	}
+	lines := strings.Split(out, "\n")
+	var firsts []string
+	inFence, prose := false, ""
+	for i, l := range lines {
+		if l == "```" {
+			if !inFence && len(firsts) == 0 {
+				prose = strings.Join(lines[:i], "\n")
+			}
+			if !inFence && i+1 < len(lines) {
+				firsts = append(firsts, lines[i+1])
+			}
+			inFence = !inFence
+			continue
+		}
+		if inFence && strings.HasPrefix(l, "PS ") {
+			t.Errorf("a fenced line begins with a prompt: %.60q", l)
+		}
+	}
+	if len(firsts) != 2 {
+		t.Fatalf("expected two fenced blocks, got %d:\n%s", len(firsts), out)
+	}
+	for _, f := range firsts {
+		if !strings.HasPrefix(f, "if (-not (") {
+			t.Errorf("a fenced block must begin with the command, got %.60q", f)
+		}
+	}
+	for _, want := range []string{"NEW admin Windows PowerShell", "PS C:\\WINDOWS\\system32>"} {
+		if !strings.Contains(prose, want) {
+			t.Errorf("expected %q in the prose before the first fence:\n%s", want, prose)
 		}
 	}
 }

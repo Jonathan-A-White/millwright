@@ -195,9 +195,11 @@ func newHostWSLFlagCmd() *cobra.Command {
 						return err
 					}
 				}
-				fmt.Fprintf(out, "Once, in an admin Windows PowerShell on the host, as the Windows user that owns the WSL distro:\n\n"+
-					"```\nPS C:\\WINDOWS\\system32> %s\n```\n\n"+
-					"Way back (changes nothing inside WSL):\n\n```\nPS C:\\WINDOWS\\system32> %s\n```\n",
+				// The window and its prompt are named in the prose: a fenced block
+				// is copied whole, so it holds only the command.
+				fmt.Fprintf(out, "Once, in a NEW admin Windows PowerShell (its prompt reads `PS C:\\WINDOWS\\system32>`) on the host, as the Windows user that owns the WSL distro:\n\n"+
+					"```\n%s\n```\n\n"+
+					"Way back, in the same kind of window (changes nothing inside WSL):\n\n```\n%s\n```\n",
 					line, WSLFlagWayBack())
 				return nil
 			}
