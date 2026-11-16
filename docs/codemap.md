@@ -26,8 +26,7 @@
 | MemberHost | application/member.go | member |
 | TickLog, Notifier, HomeMoveHost, OldHome, {Vault,Tracker}Birth | application/{millhandtick,homemove,init}.go | {ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go |
 | Landing, Checks, SpecChecks, RelatedChecks, NamedChecks, MergeSlot, Batch*, LandProcesses | application/landing.go, application/mainred.go, application/batchland.go | rig/{landing,checks,specs,slot}.go (specs, related skip timing_tests), vault/batch.go, apartproc |
-| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter (RunGuardedRestarter), FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go, application/agentruns.go | {rig/{afterlanding,built,backend},userunits,vault/formulas}.go |
-| AgentRunMarks (the follower's model runs under way, which a landing's restart waits for), CutRunFiles | application/agentruns.go, application/eventspring.go | agentruns, vault/vault.go (PutRunFile) |
+| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | {rig/{afterlanding,built,backend},userunits,vault/formulas}.go |
 | EventLog (EventNewestLog), BeadFeed, {Follow,Nudge}Cursors, ShipStates, SubscribeFiles, EventSpringer, EventController, HarnessCount | application/event*.go, application/eventnewest.go, status.go | {eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | {postern,hands*,homemove} |
 | PosternInboxShow (kept messages, --show) | application/posternkeep.go | postern_inbox |
