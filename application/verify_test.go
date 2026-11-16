@@ -145,6 +145,9 @@ func TestVerifyEvidenceReadsAMessageAndItsPictureByTxid(t *testing.T) {
 
 const deployedCommit = "8fde6ab55a1d5ccbad7d1cfdc8190382679d4874"
 
+// servedBuild is a bundle that carries the build the landing of the fixture made.
+const servedBuild = `var v="0.1.20";var c="8fde6ab";`
+
 // voteString holds a $, which a shell would have expanded.
 const voteString = "Vote for tonight's best trunk and you could win a $150 Amazon gift card"
 
@@ -327,7 +330,7 @@ func TestVerifyDeployFailsOnAMarkerThatIsNotTheLandingCommit(t *testing.T) {
 }
 
 func TestVerifyDeployPassesWhenTheLandingIsContainedInALaterDeployedCommit(t *testing.T) {
-	server := boardServer(t, "ok", http.StatusOK, "")
+	server := boardServer(t, "ok", http.StatusOK, servedBuild)
 	f := newDeployFixture(server, true, "")
 	later := "e67ce02156e0534021d0e9ec601a4b9f666e8721"
 	f.marks["leaderboard.deployed"] = later
@@ -353,7 +356,7 @@ func TestVerifyDeploySaysItCouldNotTellForACommitTheCheckoutDoesNotKnow(t *testi
 }
 
 func TestVerifyDeploySaysTheDeployIsNotTrackedForARigThatKeepsNoDeployMark(t *testing.T) {
-	server := boardServer(t, "ok", http.StatusOK, "")
+	server := boardServer(t, "ok", http.StatusOK, servedBuild)
 	f := newDeployFixture(server, true, "")
 	delete(f.marks, "leaderboard.deployed")
 	delete(f.after, "leaderboard")
@@ -407,7 +410,7 @@ func TestVerifyDeployFailsWhenHealthzDoesNotAnswerWell(t *testing.T) {
 }
 
 func TestVerifyDeployWithNoStringsSaysSoAndStillRunsTheOtherChecks(t *testing.T) {
-	server := boardServer(t, "ok", http.StatusOK, "")
+	server := boardServer(t, "ok", http.StatusOK, servedBuild)
 	f := newDeployFixture(server, true, "Nothing to grep here.", "A comment.")
 
 	result, out := f.run(t)
@@ -439,7 +442,7 @@ func TestVerifyDeployWithNoHealthzKeySaysSoAndFailsOnlyOnTheOtherChecks(t *testi
 }
 
 func TestVerifyDeployNamesTheLandingCommitFromAnEachLandingToo(t *testing.T) {
-	server := boardServer(t, "ok", http.StatusOK, "")
+	server := boardServer(t, "ok", http.StatusOK, servedBuild)
 	f := newDeployFixture(server, true, "")
 	detail := f.beads.Details["lb-1"]
 	detail.CloseReason = "landed on main (fast-forward, 8fde6ab, version 0.1.4)"
@@ -495,5 +498,127 @@ func TestVerifyCandidatesTakeTheSectionNotALaterNoteThatMentionsTheWords(t *test
 	}
 	if !strings.Contains(got[0].Check, "Tap Save and see the green tick") {
 		t.Fatalf("expected the builder's section, got %q", got[0].Check)
+	}
+}
+
+// servedSite is a fake host that serves a rig's page and one bundle, and counts
+// the requests it was asked.
+type servedSite struct {
+	server *httptest.Server
+	asked  *int
+}
+
+func newServedSite(t *testing.T, bundleText string) servedSite {
+	t.Helper()
+	asked := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		asked++
+		if r.URL.Path == "/assets/index-Zz90.js" {
+			_, _ = io.WriteString(w, bundleText)
+			return
+		}
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `<html><head><script type="module" src="/assets/index-Zz90.js"></script></head></html>`)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return servedSite{server: server, asked: &asked}
+}
+
+// movedPage is a Pages-like host that serves only a page that has moved.
+func newMovedPage(t *testing.T) servedSite {
+	t.Helper()
+	asked := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked++
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, "<html><body>This page has moved.</body></html>")
+	}))
+	t.Cleanup(server.Close)
+	return servedSite{server: server, asked: &asked}
+}
+
+func TestVerifyReadsTheServedBuildOfTheSiteURL(t *testing.T) {
+	pages := newMovedPage(t)
+
+	// The landing is version 0.1.20 at batch commit 8fde6ab55a1d.
+	for _, c := range []struct {
+		name, bundle string
+		fails        bool
+		want         string
+	}{
+		{"another build", `var v="0.1.19";`, true, "deploy MISMATCH"},
+		{"the landing's version", `var v="0.1.20";`, false, "build OK"},
+		{"the landing's commit", `var c="8fde6ab";`, false, "build OK"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			site := newServedSite(t, c.bundle)
+			f := newDeployFixture(nil, false, "No strings named here.")
+			f.rules.Require("leaderboard", domain.EpicRequirements{SiteURL: site.server.URL + "/"})
+
+			result, out := f.run(t)
+
+			if result.Failed() != c.fails {
+				t.Fatalf("Failed() = %v, want %v\n%s", result.Failed(), c.fails, out)
+			}
+			if !strings.Contains(out, c.want) {
+				t.Errorf("output lacks %q:\n%s", c.want, out)
+			}
+			if *site.asked == 0 {
+				t.Errorf("the host named by site_url was not read:\n%s", out)
+			}
+			if *pages.asked != 0 {
+				t.Errorf("the Pages-like host was read %d time(s)", *pages.asked)
+			}
+		})
+	}
+}
+
+func TestVerifyDeployAPageThatCannotBeReadIsNoPassForTheBuild(t *testing.T) {
+	pages := newMovedPage(t)
+	f := newDeployFixture(nil, false, "No strings named here.")
+	f.rules.Require("leaderboard", domain.EpicRequirements{SiteURL: pages.server.URL + "/missing"})
+
+	result, out := f.run(t)
+
+	if !result.Failed() || !strings.Contains(out, "build FAIL") {
+		t.Fatalf("expected the unread page to fail the build, got %+v\n%s", result, out)
+	}
+}
+
+func TestVerifyOfARigWithNoSiteURLSaysTheLiveSiteWasNotRead(t *testing.T) {
+	f := newDeployFixture(nil, false, "No strings named here.")
+
+	result, out := f.run(t)
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "no site_url") || !strings.Contains(last, "the live site was not read") {
+		t.Fatalf("the last line must say the live site was not read, got %q\n%s", last, out)
+	}
+	if strings.HasSuffix(last, "strings 0/0 found") {
+		t.Fatalf("a bare pass: %q", last)
+	}
+	if result.Deploy != application.VerifyOK {
+		t.Fatalf("the deploy check is unchanged, got %+v", result)
+	}
+}
+
+func TestVerifyOfARigWithNoAfterLandingCommitAndNoSiteURLNeedsNoSuchWord(t *testing.T) {
+	f := newDeployFixture(nil, false, "No strings named here.")
+	f.after = deployAfter{}
+	f.marks = deployMarks{}
+
+	_, out := f.run(t)
+
+	if strings.Contains(out, "the live site was not read") {
+		t.Fatalf("a rig with no deploy and no site has no live site to read:\n%s", out)
 	}
 }

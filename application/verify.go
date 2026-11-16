@@ -467,6 +467,12 @@ type VerifyDeployResult struct {
 	Healthz VerifyCheckOutcome
 	// Named is how many strings the bead names, Found how many are in the bundle.
 	Named, Found int
+	// Build is the served build against the landing's, read from the rig's
+	// site_url page when the bead names no string; empty when it was not asked.
+	Build VerifyCheckOutcome
+	// SiteNotRead is a rig that deploys by an after-landing command and names no
+	// site_url: its live site was not read, and the summary line says so.
+	SiteNotRead bool
 }
 
 // VerifyCheckOutcome is one check's word in the summary line.
@@ -488,12 +494,19 @@ const (
 
 // Failed is whether any check failed; a check with nothing to run did not.
 func (r VerifyDeployResult) Failed() bool {
-	return (r.Deploy != VerifyOK && r.Deploy != VerifyUntracked) || r.Healthz == VerifyFail || r.Found < r.Named
+	return (r.Deploy != VerifyOK && r.Deploy != VerifyUntracked) || r.Healthz == VerifyFail || r.Found < r.Named || (r.Build != "" && r.Build != VerifyOK && r.Build != VerifyNone)
 }
 
 // Line is the one summary line.
 func (r VerifyDeployResult) Line(id string) string {
-	return fmt.Sprintf("verify %s: deploy %s, healthz %s, strings %d/%d found", id, r.Deploy, r.Healthz, r.Found, r.Named)
+	line := fmt.Sprintf("verify %s: deploy %s, healthz %s, strings %d/%d found", id, r.Deploy, r.Healthz, r.Found, r.Named)
+	if r.Build != "" {
+		line += fmt.Sprintf(", build %s", r.Build)
+	}
+	if r.SiteNotRead {
+		line += "; no site_url for the rig, so the live site was not read"
+	}
+	return line
 }
 
 // verifyBodyLimit bounds what is printed of a healthz body.
@@ -533,6 +546,13 @@ func (v VerifyDeploy) Run(ctx context.Context, id string) (VerifyDeployResult, e
 		texts = append(texts, c.Text)
 	}
 	result.Named, result.Found = v.checkStrings(ctx, rig, requirements.SiteURL, VerifyStrings(texts...))
+	site := strings.TrimSpace(requirements.SiteURL)
+	switch {
+	case site != "" && result.Named == 0:
+		result.Build = v.checkBuild(ctx, rig, site, bead.CloseReason)
+	case site == "" && v.After != nil && v.After.Command(rig) != "":
+		result.SiteNotRead = true
+	}
 	fmt.Fprintln(v.Out, result.Line(id))
 	return result, nil
 }
@@ -656,6 +676,54 @@ func (v VerifyDeploy) checkStrings(ctx context.Context, rig, site string, wanted
 		}
 	}
 	return named, found
+}
+
+// landedVersion is the version a landing's close reason names ("version 0.1.20"),
+// or "" when it names none.
+var landedVersion = regexp.MustCompile(`version ([0-9][0-9A-Za-z.+-]*[0-9A-Za-z])`)
+
+// checkBuild reads the rig's public page and says whether it serves the build the
+// bead landed: the landed version, or the landing's commit (its first seven
+// characters), on the page or in a bundle it names. It is asked when the bead
+// names no string, so that a deploy that ended well but serves another build is
+// a mismatch (mw-gq6.1306).
+func (v VerifyDeploy) checkBuild(ctx context.Context, rig, site, closeReason string) VerifyCheckOutcome {
+	commit := landingCommit(closeReason)
+	var version string
+	if m := landedVersion.FindStringSubmatch(closeReason); m != nil {
+		version = m[1]
+	}
+	if commit == "" && version == "" {
+		fmt.Fprintf(v.Out, "build not compared: the bead names neither a version nor a commit it landed at, so the page %s was not read for one\n", site)
+		return VerifyNone
+	}
+	read := readLivePage(ctx, v.Web, rig, site)
+	if !read.Read() {
+		fmt.Fprintf(v.Out, "build FAIL: %s\n", read.Why)
+		return VerifyFail
+	}
+	live := read.Page + "\n" + read.Bundle
+	switch {
+	case version != "" && versionOnPage(live, version):
+		fmt.Fprintf(v.Out, "build OK: %s serves version %s, the version the bead landed\n", site, version)
+		return VerifyOK
+	case len(commit) >= 7 && strings.Contains(live, commit[:7]):
+		fmt.Fprintf(v.Out, "build OK: %s serves commit %s, the commit the bead landed at\n", site, commit[:7])
+		return VerifyOK
+	}
+	var looked []string
+	if version != "" {
+		looked = append(looked, "version "+version)
+	}
+	if commit != "" {
+		looked = append(looked, "commit "+commit)
+	}
+	line := fmt.Sprintf("deploy MISMATCH: %s serves a build other than the landing's: no %s on the page or its %d bundle(s)", site, strings.Join(looked, " or "), read.Bundles)
+	if read.Why != "" {
+		line += " (" + read.Why + ")"
+	}
+	fmt.Fprintln(v.Out, line)
+	return VerifyMismatch
 }
 
 // liveBundle is the text of every bundle the rig's page names, or why there is
