@@ -12,6 +12,10 @@ import (
 // share of that number, and still read as level (PROVISIONAL).
 const ArrowBand = 0.05
 
+// RateFloor is how many percentage points a rate must move, as well as the
+// ArrowBand, to read as up or down (the same two points as ChangeRateFloor).
+const RateFloor = ChangeRateFloor
+
 // The arrows, and the words that say whether the way a number moved is good.
 const (
 	ArrowUp       = "↑"
@@ -49,6 +53,16 @@ func NewTrend(now, previous float64, lowerIsBetter bool) Trend {
 		t.Verdict = VerdictWorse
 	}
 	return t
+}
+
+// NewRateTrend is NewTrend for a rate, a share in percent: it reads level inside
+// RateFloor points as well as inside the ArrowBand, since on a rate near 10% one
+// point is already past the relative band, and is load, not a change.
+func NewRateTrend(now, previous float64, lowerIsBetter bool) Trend {
+	if math.Abs(now-previous) <= RateFloor+1e-9 {
+		return Trend{Previous: previous, Arrow: ArrowLevel}
+	}
+	return NewTrend(now, previous, lowerIsBetter)
 }
 
 // Text is the trend as it follows a number in a line: " ↔", " ↓ better", or
@@ -205,7 +219,9 @@ func qualityArrows(now, before Quality) map[string]Trend {
 	}
 	set("landed", NewTrend(float64(now.Landed), float64(before.Landed), false))
 	set("refused", NewTrend(float64(now.Refused), float64(before.Refused), true))
-	set("refusal_rate", trendIf(before.Landed+before.Refused > 0, now.RefusalRate, before.RefusalRate, true))
+	if before.Landed+before.Refused > 0 {
+		set("refusal_rate", NewRateTrend(now.RefusalRate, before.RefusalRate, true))
+	}
 	both := now.Landed > 0 && before.Landed > 0
 	set("attempts_per_landing", trendIf(both, now.AttemptsPerLanding, before.AttemptsPerLanding, true))
 	set("bugs_per_landing", trendIf(both, now.BugsPerLanding, before.BugsPerLanding, true))

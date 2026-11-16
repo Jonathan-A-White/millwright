@@ -128,3 +128,31 @@ func TestHeavyStoriesCountOnlyOwnAttempts(t *testing.T) {
 		}
 	}
 }
+
+func TestARefusalRateOnePointIsLevel(t *testing.T) {
+	arrows := qualityArrows(
+		Quality{Landed: 89, Refused: 11, RefusalRate: 11},
+		Quality{Landed: 90, Refused: 10, RefusalRate: 10},
+	)
+	if got := arrows["refusal_rate"]; got.Arrow != ArrowLevel || got.Verdict != "" {
+		t.Errorf("refusal_rate 10%% -> 11%% reads %+v, want level", got)
+	}
+	arrows = qualityArrows(
+		Quality{Landed: 87, Refused: 13, RefusalRate: 13},
+		Quality{Landed: 90, Refused: 10, RefusalRate: 10},
+	)
+	if got := arrows["refusal_rate"]; got.Arrow != ArrowUp || got.Verdict != VerdictWorse {
+		t.Errorf("refusal_rate 10%% -> 13%% reads %+v, want up worse", got)
+	}
+	// mw report --since reads the same rate the same way.
+	if got := landingChange(10, 11, true, true); got != ChangeLevel {
+		t.Errorf("--since refusal rate 10 -> 11 reads %q, want level", got)
+	}
+	if got := landingChange(10, 13, true, true); got != "+30% worse" {
+		t.Errorf("--since refusal rate 10 -> 13 reads %q, want +30%% worse", got)
+	}
+	// a count or an average keeps only the relative band.
+	if got := landingChange(10, 11, true, false); got != "+10% worse" {
+		t.Errorf("a count 10 -> 11 reads %q, want +10%% worse", got)
+	}
+}
