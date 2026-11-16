@@ -340,5 +340,5 @@ func (w *GristWatch) say(err error) {
 // to do. A host with no [grist] table has no such job. The pass is in flight at
 // most once: a grist that arrives while it runs is one more pass when it ends.
 func GristJob(watch *GristWatch, run func(context.Context) error) SpringJob {
-	return SpringJob{Name: GristJobName, Probe: watch.Waiting, ProbeFirst: true, Run: run}
+	return SpringJob{Name: GristJobName, Probe: watch.Waiting, ProbeFirst: true, RunsAgent: true, Run: run}
 }

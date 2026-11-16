@@ -129,6 +129,11 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 	// no vault configured there is no mailbox and no one is told.
 	if dir, err := config.Vault(); err == nil {
 		spring.Mailbox = mwGateway(dir, host)
+		// The follower's model runs are marked while they run, so that a landing's
+		// restart waits for them, and a run that is cut is written down in the
+		// vault's runs/cut (mw-gq6.1339).
+		spring.Runs = hostAgentRuns()
+		spring.Cuts = cutRunFiles(mwVault(dir, host))
 	}
 	return spring, nil
 }

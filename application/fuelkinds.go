@@ -87,10 +87,43 @@ func (f FuelByKind) Run(ctx context.Context) error {
 		sort.Strings(ran)
 		fmt.Fprintf(f.Out, "%-10s %d %s, %s tokens (%s)\n", kind, passes, noun, Thousands(tokens), strings.Join(ran, " · "))
 	}
-	if shown == 0 {
+	cuts, err := f.cutRuns(ctx, cutoff)
+	if err != nil {
+		return err
+	}
+	if shown == 0 && len(cuts) == 0 {
 		fmt.Fprintln(f.Out, "no pass in that time")
 	}
+	for _, cut := range cuts {
+		fmt.Fprintf(f.Out, "%-10s %s (its fuel is in no run log)\n", "cut run", cut.Line())
+	}
 	return nil
+}
+
+// cutRuns are the model runs written down as cut (runs/cut) since cutoff, a day
+// as 2006-01-02, oldest first: a run that was cut leaves no run log, so its fuel
+// is not counted above, and this line is where it is seen (mw-gq6.1339).
+func (f FuelByKind) cutRuns(ctx context.Context, cutoff string) ([]CutRun, error) {
+	names, err := f.Runs.RunFiles(ctx, CutRunDir)
+	if err != nil {
+		return nil, fmt.Errorf("listing the cut runs: %w", err)
+	}
+	sort.Strings(names)
+	var cuts []CutRun
+	for _, name := range names {
+		if len(name) < len(time.DateOnly) || name[:len(time.DateOnly)] < cutoff || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		body, err := f.Runs.ReadRunFile(ctx, CutRunDir, name)
+		if err != nil {
+			return nil, fmt.Errorf("reading the cut run %s: %w", name, err)
+		}
+		var cut CutRun
+		if json.Unmarshal([]byte(body), &cut) == nil && cut.Job != "" {
+			cuts = append(cuts, cut)
+		}
+	}
+	return cuts, nil
 }
 
 // now is the injected clock, or the host's when none is set.

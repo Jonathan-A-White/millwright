@@ -3951,7 +3951,19 @@ size of each part (the evidence and candidates among them, with the pictures bes
 no agent, writes no file, no comment and mails nothing. `--model` and `--effort` replace the
 day's. `mw fuel [--days n]` adds up the tokens of the model passes that keep a run log in `runs/<kind>/` (the
 sleep pass, kind `sleep`, and the To do ranking, kind `todo-rank`) and prints a line for each kind, with how many
-passes ran on which model and effort.
+passes ran on which model and effort. It also prints a line, `cut run`, for each model run that was cut and
+written down in `runs/cut/` (the job, when it began, how long it ran, and why), since a cut run keeps no run log.
+
+**A landing never cuts a model run of the follower** (mw-gq6.1339). The follower starts the sleep pass's agent, the
+To do ranking's and the mill's grist pass as its own children, so a restart of `mw-view-follow.service` on a new
+build (the restart a landing of the millwright rig makes, and the one a self-update build makes) would end them.
+While one of these runs the follower keeps a mark of it in `~/.local/state/mw/agent-runs/<job>.json` (the job, the
+host, the follower's process and when it began), and the restart waits until no mark is live, looking every 5
+seconds. The wait has one limit, `application.AgentRunWaitLimit`, 30 minutes (the longest Sunday pass seen took 12m30s):
+when it passes the restart goes ahead, its note in the landing's report says `a run was cut` and which job, and the
+follower writes the run down in `runs/cut/<began>-<job>.json` as it is stopped. A run cut by a crash or a host
+restart leaves its mark with no process behind it, and the follower that comes back writes it down the same way
+(it then says `ran at most` that long). With no model run under way the restart is as it was: one note, no wait.
 
 The pass's learning is kept in two places. `plans/improvements/ledger.jsonl` holds a line for each improvement the
 Mayor approved (`id`, `filed`, `predicted` {tokens, speed, quality}, `cost` {size, tokens}, `measure` {metric,

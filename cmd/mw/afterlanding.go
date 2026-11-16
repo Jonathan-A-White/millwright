@@ -6,7 +6,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
-	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -73,7 +72,7 @@ func newAfterLandingCmd() *cobra.Command {
 					rig.WithSlotSuffix(rig.AfterLandingSlotSuffix),
 					rig.WithSlotNotice(func(said string) { cmd.ErrOrStderr().Write([]byte(said)) }),
 				),
-				Units:    userunits.Systemctl{},
+				Units:    hostUnits(),
 				Built:    hostDeployedMarks(),
 				Checkout: rig.New(),
 				Rigs:     rigs,

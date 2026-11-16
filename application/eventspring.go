@@ -125,6 +125,11 @@ type SpringJob struct {
 	// About, when set, says in a few words when the job runs, for the
 	// listing of mw events jobs.
 	About string
+	// RunsAgent says the pass starts a model agent as a child of the follower,
+	// which a restart of the follower would cut: the follower marks the pass
+	// while it runs (EventSpring.Runs), and a landing's restart waits for it
+	// (RunGuardedRestarter; mw-gq6.1339).
+	RunsAgent bool
 	// Run does one pass and returns when it is over: a pass that returns an
 	// error is a failed job.
 	Run func(ctx context.Context) error
@@ -272,6 +277,10 @@ type EventSpring struct {
 	// Mailbox is where the Mayor is told of a failed pass of a job with
 	// TellFailure; nil tells no one.
 	Mailbox Mailbox
+	// Runs is where a pass of a job with RunsAgent is marked while it runs, and
+	// Cuts where a run that did not end is written down; nil keeps neither.
+	Runs AgentRunMarks
+	Cuts CutRunFiles
 
 	mu      sync.Mutex
 	started bool
@@ -306,6 +315,7 @@ func (s *EventSpring) Spring(ctx context.Context) error {
 		s.started = true
 		s.seen = head
 		s.jobs = map[string]*springState{}
+		s.writeDownGoneRuns(ctx, now)
 		newest, _ := NewestOf(ctx, s.Log)
 		interrupted := s.interruptedPasses(newest)
 		passes := s.lastPasses(newest)
@@ -404,6 +414,8 @@ func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, 
 		s.mu.Lock()
 		s.say(j, s.write(ctx, j, st, events.JobRunning, ""))
 		s.mu.Unlock()
+		run := AgentRun{Job: j.Name, Host: s.Host, Began: s.now()}
+		marked := s.markRun(ctx, j, run)
 		err := j.Run(ctx)
 		var skipped *SkippedPassError
 		isSkip := errors.As(err, &skipped)
@@ -421,6 +433,9 @@ func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, 
 			tell = s.dueToTell(j, st)
 		} else {
 			s.say(j, s.write(ctx, j, st, events.JobDone, ""))
+		}
+		if marked {
+			s.endRun(ctx, j, run, cutShort && !errors.Is(err, ErrLeftRunning))
 		}
 		st.inFlight = false
 		if again := st.again; again != "" && ctx.Err() == nil {
@@ -544,4 +559,73 @@ func (s *EventSpring) now() time.Time {
 		return time.Now()
 	}
 	return s.Now()
+}
+
+// markRun marks j's pass as a model run under way, when j runs an agent and
+// there is somewhere to mark it, and says whether it did. A mark that cannot be
+// written is said on Err and the pass goes on unmarked.
+func (s *EventSpring) markRun(ctx context.Context, j SpringJob, run AgentRun) bool {
+	if !j.RunsAgent || s.Runs == nil {
+		return false
+	}
+	if err := s.Runs.Begin(ctx, run); err != nil {
+		s.sayRun(j, "marking the run", err)
+		return false
+	}
+	return true
+}
+
+// endRun takes j's mark away once its pass has ended and its end is written; a
+// pass that the follower's stopping cut short is written down as a cut run
+// first. s.mu is held.
+func (s *EventSpring) endRun(ctx context.Context, j SpringJob, run AgentRun, cut bool) {
+	ctx = context.WithoutCancel(ctx)
+	if cut {
+		s.recordCut(ctx, j.Name, CutRun{
+			Job: run.Job, Host: run.Host, Began: run.Began, Ran: s.now().Sub(run.Began),
+			Why: "the follower was stopped under it (a restart on a new build, or a stop)",
+		})
+	}
+	if err := s.Runs.End(ctx, run); err != nil {
+		s.sayRun(j, "taking the mark of the run away", err)
+	}
+}
+
+// writeDownGoneRuns writes down each run whose mark a process that is not there
+// left: the follower crashed or the host restarted under it. It runs once, as
+// the follower's first Spring begins, before any pass of its own is marked.
+func (s *EventSpring) writeDownGoneRuns(ctx context.Context, now time.Time) {
+	if s.Runs == nil {
+		return
+	}
+	_, gone, err := s.Runs.Open(ctx)
+	if err != nil {
+		s.sayRun(SpringJob{Name: "model runs"}, "reading the marks of runs under way", err)
+		return
+	}
+	for _, run := range gone {
+		s.recordCut(ctx, run.Job, CutRun{
+			Job: run.Job, Host: run.Host, Began: run.Began, Ran: now.Sub(run.Began),
+			Why: "its process was gone when the follower came back (a crash or a host restart); it ran at most this long",
+		})
+		if err := s.Runs.Forget(ctx, run); err != nil {
+			s.sayRun(SpringJob{Name: run.Job}, "taking the mark of the cut run away", err)
+		}
+	}
+}
+
+// recordCut writes a cut run down, in the vault's runs/cut, and says it on Err.
+func (s *EventSpring) recordCut(ctx context.Context, name string, cut CutRun) {
+	if s.Err != nil {
+		fmt.Fprintf(s.Err, "mw events follow: a model run was cut: %s\n", cut.Line())
+	}
+	if err := WriteCutRun(ctx, s.Cuts, cut); err != nil {
+		s.sayRun(SpringJob{Name: name}, "writing down the cut run", err)
+	}
+}
+
+func (s *EventSpring) sayRun(j SpringJob, what string, err error) {
+	if s.Err != nil {
+		fmt.Fprintf(s.Err, "mw events follow: %s of %s: %v\n", what, j.Name, err)
+	}
 }

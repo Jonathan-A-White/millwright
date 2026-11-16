@@ -53,7 +53,7 @@ const UnitRestartFailedLine = "a user unit could not be restarted on the new bui
 // which a build of the factory rig leaves on the old binary until they are
 // restarted. mw-postern-mirror.service is a oneshot a timer starts, so it picks
 // up the new binary by itself.
-var FactoryUnits = []string{"mw-view-follow.service"}
+var FactoryUnits = []string{FollowerUnit}
 
 // UnitRestarter is the port a host's user manager is asked to restart a running
 // unit through.
@@ -121,6 +121,11 @@ func RestartFactoryUnits(ctx context.Context, units UnitRestarter, rig string) (
 			notes, failed = append(notes, note), append(failed, note)
 		case restarted:
 			notes = append(notes, "restarted "+unit+" on the new build")
+		}
+		// A restart that waited for a model run of the follower, or went ahead
+		// of one at the limit and cut it, says so (mw-gq6.1339).
+		if said, ok := units.(interface{ RestartNotes(unit string) []string }); ok {
+			notes = append(notes, said.RestartNotes(unit)...)
 		}
 	}
 	return notes, failed
