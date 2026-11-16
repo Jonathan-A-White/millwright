@@ -16,7 +16,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
-	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -329,7 +328,7 @@ func newNextCmd() *cobra.Command {
 				PushScope:    doctor.GhScopes{},
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
 				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, nil, ""),
-				Units:        userunits.Systemctl{},
+				Units:        hostUnits(),
 				Stamps:       stamps,
 				CloseOuts:    hostCloseOuts(),
 				Tester:       tester,

@@ -63,6 +63,10 @@ func newSleepPassCmd() *cobra.Command {
 			"The model and effort are [sleep] nightly_model and nightly_effort (opus and medium), and on\n" +
 			"Sundays, UTC, sunday_model and sunday_effort (fable and xhigh); --model and --effort replace\n" +
 			"the day's. The follower makes the pass once a day from [events] sleep_hour (07:30 UTC).\n\n" +
+			"A landing's restart of the follower on a new build waits for the pass's agent to end (the follower\n" +
+			"marks it while it runs) for at most 30 minutes, application.AgentRunWaitLimit; after that the restart\n" +
+			"goes on, its note says a run was cut and which job, and the follower writes the run down in\n" +
+			"runs/cut/, which mw fuel says.\n\n" +
 			"--dry-run gathers the bundle and prints the model, the system prompt, the prompt and the\n" +
 			"bundle's sizes; it starts no agent, writes no file and mails nothing.",
 		Args: cobra.NoArgs,
@@ -337,7 +341,9 @@ func newFuelCmd() *cobra.Command {
 		Long: "fuel adds up the tokens of the passes that keep a run log in the vault's runs/<kind>/<date>.json\n" +
 			"(the sleep pass and the To do ranking), each kind on its own line with how many passes ran and\n" +
 			"on which model and effort, over the last --days days (default 7). A story's session keeps its\n" +
-			"fuel in its seat's ledger, which mw status and mw report count.",
+			"fuel in its seat's ledger, which mw status and mw report count. A model run that was cut (a restart\n" +
+			"of the follower after the wait's limit, a crash, a host restart) keeps no run log, so mw fuel says it\n" +
+			"on a line of its own from runs/cut/: the job, when it began, how long it ran, and why.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if days < 1 {

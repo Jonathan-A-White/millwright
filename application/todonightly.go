@@ -104,6 +104,7 @@ func (n *TodoNightly) Job() SpringJob {
 		Name: TodoRankJobName,
 		// A failed night's rank is told to the Mayor (mw-gq6.531).
 		TellFailure: true,
+		RunsAgent:   true,
 		Probe: func(ctx context.Context) (string, bool) {
 			if n.due(ctx) {
 				return ClockReason, true

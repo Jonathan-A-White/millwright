@@ -17,7 +17,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
-	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 	"github.com/Jonathan-A-White/millwright/infrastructure/watch"
 
@@ -47,7 +46,7 @@ func hostSelfUpdate(gateway *beads.Gateway, rigs, afterLanding map[string]string
 		Checkout: rig.New(),
 		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs)),
 		Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
-		Units:    userunits.Systemctl{},
+		Units:    hostUnits(),
 		Slot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 		Landed:   rig.New(),
 		Live:     hostDeployCheck(gateway, files, host),

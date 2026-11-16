@@ -997,6 +997,7 @@ func (n *SleepNightly) Job() SpringJob {
 		Name: SleepJobName,
 		// A failed night's pass is told to the Mayor (mw-gq6.531).
 		TellFailure: true,
+		RunsAgent:   true,
 		About:       about,
 		Probe: func(ctx context.Context) (string, bool) {
 			if n.due(ctx) {

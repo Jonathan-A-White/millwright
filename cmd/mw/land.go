@@ -11,7 +11,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
-	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -175,7 +174,7 @@ func newLandCmd() *cobra.Command {
 				LiveSite:     verifyWeb{},
 				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, cmd.OutOrStdout(), application.BatchLogPrefix+"grist smoke: "),
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()), // staged as after a single landing (mw-gq6.963)
-				Units:        userunits.Systemctl{},
+				Units:        hostUnits(),
 				Stamps:       stamps,
 			}
 			_, err = batchLandFor(next, files, dryRun, one, cmd.ErrOrStderr()).Run(cmd.Context(), args[0])
