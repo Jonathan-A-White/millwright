@@ -151,8 +151,9 @@ type SleepBundle []SleepPart
 // and, for a part mw cut, how. The last line is the total against its budget.
 func (b SleepBundle) Sizes() string {
 	var sizes strings.Builder
-	total := 0
+	total, budgets := 0, 0
 	for _, part := range b {
+		budgets += part.Budget
 		fmt.Fprintf(&sizes, "  %-14s %-20s %s bytes of %s", part.Name, part.File, Thousands(len(part.Text)), Thousands(part.Budget))
 		if n := len(part.Attach); n > 0 {
 			size := 0
@@ -167,7 +168,7 @@ func (b SleepBundle) Sizes() string {
 		sizes.WriteString("\n")
 		total += len(part.Text)
 	}
-	fmt.Fprintf(&sizes, "  %-14s %-20s %s bytes of %s\n", "total", "", Thousands(total), Thousands(SleepTotalBudget))
+	fmt.Fprintf(&sizes, "  %-14s %-20s %s bytes of %s\n", "total", "", Thousands(total), Thousands(budgets))
 	return sizes.String()
 }
 
@@ -403,7 +404,7 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 	if opts.DryRun {
 		p.say("mw sleep pass (a dry run: nothing started, nothing written)\n")
 		p.say("agent: %s/%s, %s pass, plans/%s%s\n\n", model, effort, passWord(deep), SleepPlansPrefix, window.Date)
-		p.say("--- system prompt ---\n%s\n--- prompt ---\n%s\n--- bundle ---\n%s", system, prompt, bundle.Sizes())
+		p.say("--- system prompt ---\n%s\n--- prompt ---\n%s\n--- bundle ---\n%s%s", system, prompt, bundle.Sizes(), bundle.Turns(deep))
 		return result, nil
 	}
 
@@ -428,7 +429,7 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 	}
 	grind, err := p.Grinder.Grind(ctx, GrindCall{
 		Dir: dir, Model: model, Effort: effort, System: system, Schema: SleepSchema,
-		Prompt: prompt, Timeout: sleepTimeout, MaxTurns: SleepMaxTurns,
+		Prompt: prompt, Timeout: sleepTimeout, MaxTurns: SleepTurnsFor(deep),
 	})
 	if err != nil {
 		return result, fmt.Errorf("mw sleep pass: the agent could not run, nothing was written: %w", err)
@@ -939,7 +940,7 @@ func sleepPrompt(window SleepWindow, now time.Time, bundle SleepBundle) string {
 	var prompt strings.Builder
 	fmt.Fprintf(&prompt, "Tonight is %s (%s, UTC). This is the %s pass", window.Date, now.Weekday(), passWord(window.Deep))
 	if window.Deep {
-		prompt.WriteString(": read everything, not only what moved.\n")
+		prompt.WriteString(": read everything, not only what moved. The files are larger tonight than on other nights: a file the Read tool gives only part of, read on with its offset and limit, and read each picture.\n")
 	} else {
 		prompt.WriteString(": weigh what moved in the night's diff and the day's runs.\n")
 	}

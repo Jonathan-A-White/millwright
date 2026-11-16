@@ -81,7 +81,10 @@ func isWork(b TriageBead) bool {
 // TriageLine is one live work bead as a dump line says it, and the unit a diff
 // compares.
 type TriageLine struct {
-	ID              string   `json:"id"`
+	ID string `json:"id"`
+	// Title is the bead's title, which the Sunday sleep pass reads for every bead
+	// (mw-gq6.1344).
+	Title           string   `json:"title,omitempty"`
 	Type            string   `json:"type"`
 	Status          string   `json:"status"`
 	Priority        int      `json:"priority"`
@@ -150,7 +153,7 @@ func triageLines(beads []TriageBead, now time.Time) []TriageLine {
 			continue
 		}
 		line := TriageLine{
-			ID: b.ID, Type: b.Type, Status: b.Status, Priority: b.Priority,
+			ID: b.ID, Title: oneLine(b.Title), Type: b.Type, Status: b.Status, Priority: b.Priority,
 			Labels: sortedCopy(b.Labels), Rig: b.Rig, Size: b.Size, Parent: b.Parent,
 			Created: formatTriageTime(b.Created), Updated: formatTriageTime(b.Updated),
 			Description: clipRunes(b.Description, TriageDescriptionRunes),
