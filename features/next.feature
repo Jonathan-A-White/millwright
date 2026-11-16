@@ -1291,7 +1291,7 @@ Feature: Closing out a finished story and carrying on
     And that mail's subject is "Landed: The story mw-gq6.1"
     And that mail's body holds:
       | For the rig memory (millwright):                                                                           |
-      | mw memory add millwright --kind gotcha --subject 'bd' --source mw-gq6.1 'Point every bd call at the vault with -C.' |
+      | mw memory add millwright --kind gotcha --subject 'bd' --source mw-gq6.1 -- 'Point every bd call at the vault with -C.' |
       | mw memory retire millwright old-note --reason 'The script it described is gone.'                           |
 
   Scenario: A Landed mail for a flat-file rig says to place the proposals by hand, not as mw memory lines

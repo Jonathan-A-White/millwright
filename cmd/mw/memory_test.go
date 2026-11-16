@@ -166,3 +166,23 @@ func TestDemoteHasAnAutoQuestionAndAddABootAndAQuestion(t *testing.T) {
 		}
 	}
 }
+
+// The line a Landed mail prints for an add puts -- before the sentence, so a
+// sentence that begins with -- is pasted as a sentence, not a flag (mw-gq6.1370).
+func TestMemoryAddTakesASentenceStartingWithDashDashAfterAnEndOfFlags(t *testing.T) {
+	vaultDir := aTightRig(t)
+	t.Setenv("MW_RIG_MEMORY_BYTES", "100000")
+	// The words of the printed line, as mw MemoryCommand prints them.
+	p := application.FactProposal{Verb: application.ProposeGotcha, Subject: "flags", NewSlug: "dash-dash", Sentence: "--flag is a word of the sentence."}
+	if printed := p.MemoryCommand("tight", "mw-1"); !strings.HasSuffix(printed, "--source mw-1 -- '--flag is a word of the sentence.'") {
+		t.Fatalf("the printed line is not the one under test: %s", printed)
+	}
+	stdout, _ := runMW(t, "memory", "add", "tight", "--kind", "gotcha", "--subject", "flags", "--slug", "dash-dash", "--source", "mw-1", "--", "--flag is a word of the sentence.")
+	if !strings.Contains(stdout, "added dash-dash") {
+		t.Fatalf("not added:\n%s", stdout)
+	}
+	fact, err := os.ReadFile(filepath.Join(vaultDir, "seats/builder/rigs/tight/facts/dash-dash.md"))
+	if err != nil || !strings.Contains(string(fact), "--flag is a word of the sentence.") {
+		t.Errorf("the fact is missing or wrong: %v\n%s", err, fact)
+	}
+}

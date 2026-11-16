@@ -169,7 +169,7 @@ var memoryCommandShape = map[string]struct {
 // as the proposal it carries out. The rig and the --source are not kept: the
 // landing names its own rig and the story is the source. A command with a word
 // or a flag it does not know, a missing required part or an unclosed quote is
-// not a proposal.
+// not a proposal. A bare -- ends the flags.
 func parseMemoryCommand(text string) (FactProposal, bool) {
 	words, ok := shellWords(strings.TrimPrefix(text, memoryCommandPrefix))
 	if !ok || len(words) == 0 {
@@ -182,6 +182,12 @@ func parseMemoryCommand(text string) (FactProposal, bool) {
 	flags, positionals := map[string]string{}, []string{}
 	for rest := words[1:]; len(rest) > 0; rest = rest[1:] {
 		word := rest[0]
+		if word == "--" {
+			// A bare -- ends the flags, as in a shell: every word after it is
+			// positional, so a sentence that starts with - or -- is read (mw-gq6.1370).
+			positionals = append(positionals, rest[1:]...)
+			break
+		}
 		if !strings.HasPrefix(word, "--") {
 			positionals = append(positionals, word)
 			continue
@@ -288,13 +294,15 @@ func shellWords(line string) ([]string, bool) {
 
 // MemoryCommand is the mw memory line that carries the proposal out for the
 // rig, ready to paste. The source of a new fact is the story that proposed it.
+// An add or a supersede puts -- before the sentence, so that a sentence that
+// begins with - is not taken for a flag when it is pasted (mw-gq6.1370).
 func (p FactProposal) MemoryCommand(rig, story string) string {
 	switch p.Verb {
 	case ProposeGotcha, ProposeDecision:
-		return fmt.Sprintf("mw memory add %s --kind %s --subject %s%s --source %s %s",
+		return fmt.Sprintf("mw memory add %s --kind %s --subject %s%s --source %s -- %s",
 			rig, p.Verb, shellQuoted(p.Subject), p.slugFlag(), story, shellQuoted(p.Sentence))
 	case ProposeSupersede:
-		return fmt.Sprintf("mw memory supersede %s %s%s --source %s %s", rig, p.Slug, p.slugFlag(), story, shellQuoted(p.Sentence))
+		return fmt.Sprintf("mw memory supersede %s %s%s --source %s -- %s", rig, p.Slug, p.slugFlag(), story, shellQuoted(p.Sentence))
 	case ProposeRetire:
 		return fmt.Sprintf("mw memory retire %s %s --reason %s", rig, p.Slug, shellQuoted(p.Sentence))
 	case ProposeRecheck:

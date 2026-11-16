@@ -95,9 +95,9 @@ func aRigMemorySection() application.FactProposals {
 
 func TestRigMemoryBlockOfAFactsRigKeepsTheMwMemoryLines(t *testing.T) {
 	want := "For the rig memory (lampas):\n" +
-		"mw memory add lampas --kind gotcha --subject 'bd' --source mw-9 'Point every bd call at the vault with -C.'\n" +
-		"mw memory add lampas --kind decision --subject 'tmux' --source mw-9 'Tests use a private socket.'\n" +
-		"mw memory supersede lampas bd-dash-c --source mw-9 'Use -C, as its own call.'\n" +
+		"mw memory add lampas --kind gotcha --subject 'bd' --source mw-9 -- 'Point every bd call at the vault with -C.'\n" +
+		"mw memory add lampas --kind decision --subject 'tmux' --source mw-9 -- 'Tests use a private socket.'\n" +
+		"mw memory supersede lampas bd-dash-c --source mw-9 -- 'Use -C, as its own call.'\n" +
 		"mw memory retire lampas old-note --reason 'The script it described is gone.'\n" +
 		"mw memory recheck lampas some-fact --why 'bd 1.4 may have changed it.'\n" +
 		"nothing"
@@ -197,8 +197,8 @@ func TestAReadyMemoryCommandIsParsedToTheSameProposalAsTheTypedForm(t *testing.T
 	// and a slug the Builder chose kept.
 	block := got.RigMemoryBlock("millwright", "mw-gq6.771", "")
 	for _, wantLine := range []string{
-		"mw memory add millwright --kind gotcha --subject 'bd' --source mw-gq6.771 'Point every bd call at the vault with -C.'",
-		"mw memory add millwright --kind decision --subject 'tmux' --slug private-socket --source mw-gq6.771 'Tests use a builder'\\''s private socket.'",
+		"mw memory add millwright --kind gotcha --subject 'bd' --source mw-gq6.771 -- 'Point every bd call at the vault with -C.'",
+		"mw memory add millwright --kind decision --subject 'tmux' --slug private-socket --source mw-gq6.771 -- 'Tests use a builder'\\''s private socket.'",
 	} {
 		if !strings.Contains(block, wantLine) {
 			t.Errorf("the block lacks %q:\n%s", wantLine, block)
@@ -426,6 +426,55 @@ func TestABacktickInsideTheQuotedSentenceIsKept(t *testing.T) {
 		}
 		if s := got.Lines[0].Proposal.Sentence; s != "Call `Foo` first, then `Bar`." {
 			t.Errorf("%s: sentence %q", name, s)
+		}
+	}
+}
+
+// The closing comment of mw-gq6.1369 wrapped its whole mw memory command in
+// backticks; a sentence that begins with -- could not be read or pasted
+// (mw-gq6.1370).
+const gq61369Line = "`mw memory add millwright --kind gotcha --subject giveway-windows-home --source mw-gq6.1369 \"The desktop runs Windows 11 Home, which has no quser.exe: contrib/windows/giveway.ps1 Screen-Occupied falls back to the console session and logs screen=quser, screen=console or screen=error(...); a PowerShell exe call there needs a branch for its absence.\"`"
+
+func TestProposalLinesInBackticksAndWithAnEndOfFlagsAreRead(t *testing.T) {
+	gq61369Sentence := "The desktop runs Windows 11 Home, which has no quser.exe: contrib/windows/giveway.ps1 Screen-Occupied falls back to the console session and logs screen=quser, screen=console or screen=error(...); a PowerShell exe call there needs a branch for its absence."
+	for name, tc := range map[string]struct {
+		line string
+		want application.FactProposal
+	}{
+		"the gq6.1369 backticked command": {gq61369Line, application.FactProposal{Verb: application.ProposeGotcha, Subject: "giveway-windows-home", Sentence: gq61369Sentence}},
+		"a backticked subject form":       {"`gotcha [bd]: Point every bd call at the vault with -C.`", application.FactProposal{Verb: application.ProposeGotcha, Subject: "bd", Sentence: "Point every bd call at the vault with -C."}},
+		"a sentence starting with --": {"mw memory add millwright --kind gotcha --subject flags --source mw-1 -- '--flag is read as a flag.'",
+			application.FactProposal{Verb: application.ProposeGotcha, Subject: "flags", Sentence: "--flag is read as a flag."}},
+		"a sentence starting with a dash, backticked": {"`mw memory supersede millwright old-fact --source mw-1 -- '- a bullet in the sentence.'`",
+			application.FactProposal{Verb: application.ProposeSupersede, Slug: "old-fact", Sentence: "- a bullet in the sentence."}},
+		"flags after the end of flags are positional": {"mw memory add millwright --kind decision --subject s --source mw-1 -- --kind",
+			application.FactProposal{Verb: application.ProposeDecision, Subject: "s", Sentence: "--kind"}},
+	} {
+		got := application.ParseFactProposals("For the rig memory:\n" + tc.line + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed != "" {
+			t.Errorf("%s: want one proposal, got %+v", name, got.Lines)
+			continue
+		}
+		if !reflect.DeepEqual(got.Lines[0].Proposal, tc.want) {
+			t.Errorf("%s: got %+v, want %+v", name, got.Lines[0].Proposal, tc.want)
+		}
+	}
+}
+
+func TestThePrintedMemoryCommandHasAnEndOfFlagsAndRoundTrips(t *testing.T) {
+	for _, p := range []application.FactProposal{
+		{Verb: application.ProposeGotcha, Subject: "bd", Sentence: "--flag-like start."},
+		{Verb: application.ProposeDecision, Subject: "tmux", NewSlug: "private-socket", Sentence: "- dash start."},
+		{Verb: application.ProposeSupersede, Slug: "old-fact", Sentence: "--new sentence."},
+		{Verb: application.ProposeSupersede, Slug: "old-fact", NewSlug: "newer", Sentence: "A plain sentence."},
+	} {
+		cmd := p.MemoryCommand("millwright", "mw-1")
+		if !strings.Contains(cmd, " -- '") {
+			t.Errorf("the printed command has no -- before the sentence: %s", cmd)
+		}
+		got := application.ParseFactProposals("For the rig memory:\n" + cmd + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed != "" || !reflect.DeepEqual(got.Lines[0].Proposal, p) {
+			t.Errorf("%s: round trip gave %+v, want %+v", cmd, got.Lines, p)
 		}
 	}
 }

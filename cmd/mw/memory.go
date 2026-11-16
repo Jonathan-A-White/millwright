@@ -108,7 +108,8 @@ func newMemoryAddCmd() *cobra.Command {
 			"--boot no writes the fact demoted (boot: no), for a line the rig's own test enforces: it needs --question,\n" +
 			"which is appended to eval.md with the fact as its expect after it is checked to put the fact in the top 3\n" +
 			"(one term per word of the question; else nothing is written), and the fact and eval.md are committed together.\n" +
-			"--question goes only with --boot no.",
+			"--question goes only with --boot no.\n" +
+			"A sentence that begins with - is passed after a bare --: add <rig> --kind ... --source <src> -- \"<sentence>\".",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if boot != "yes" && boot != "no" {
@@ -155,7 +156,7 @@ func newMemorySupersedeCmd() *cobra.Command {
 			"With --by <existing-slug> and no sentence, supersede adds no fact: it retires <slug> with the\n" +
 			"reason 'superseded by <existing-slug>' (as retire does, carrying eval.md questions to it) and\n" +
 			"refuses a --by slug that is unknown, not current or the same fact. --by cannot be combined\n" +
-			"with a sentence, --slug or --source.",
+			"with a sentence, --slug or --source. A sentence that begins with - follows a bare --.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if by != "" {
 				return cobra.ExactArgs(2)(cmd, args)
