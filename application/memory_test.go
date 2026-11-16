@@ -1815,3 +1815,100 @@ func TestMakeRoomTakesAnOlderGotchaBeforeALandedStorysDecision(t *testing.T) {
 		t.Errorf("want the older gotcha taken before the landed story's decision:\n%s", out)
 	}
 }
+
+// aTodaysFilesRig is a rig at its budget whose boot facts were all placed today
+// (the clock says 2026-10-18 12:00): four of files of the rig, oldest placed
+// first (zulu, yank, xray, wolf, the last the fact just added), one of file
+// application/gov.go that names the Governor and one of subject 'general', both
+// placed before them all. Nothing is old enough for the older tiers.
+func aTodaysFilesRig() (*editableFiles, application.Memory, *bytes.Buffer) {
+	placed := func(subject, at, sentence string) string {
+		return "---\nsubject: " + subject + "\nkind: gotcha\nstatus: current\nsource: mw-1\nsince: 2026-10-18\nplaced: 2026-10-18T" + at + "Z\n---\n\n" + sentence + "\n"
+	}
+	files := &editableFiles{files: map[string]string{
+		"gov.md":   placed("application/gov.go", "06:00:00", "Decided by the Governor: the gov file keeps its lock for the whole run."),
+		"plain.md": placed("general", "06:30:00", "The plain probe answers only on its own port."),
+		"zulu.md":  placed("application/zulu.go", "09:00:00", "The zulu probe answers only on its own port."),
+		"yank.md":  placed("application/yank.go", "09:01:00", "The yank probe answers only on its own port."),
+		"xray.md":  placed("application/xray.go", "09:02:00", "The xray probe answers only on its own port."),
+		"wolf.md":  placed("application/wolf.go", "09:03:00", "The wolf probe answers only on its own port."),
+	}}
+	var out bytes.Buffer
+	m := anEditableMemory(files, &recordingVault{}, &out)
+	m.Budget = renderSize(files)
+	return files, m, &out
+}
+
+func TestMakeRoomOnARigOfFactsPlacedTodayTakesTheFilesFactsPlacedLongestAgo(t *testing.T) {
+	files, m, out := aTodaysFilesRig()
+	want := roomLine("application/zulu.go", "The zulu probe answers only on its own port.") +
+		roomLine("application/yank.go", "The yank probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "zulu") || !demoted(files, "yank") {
+		t.Errorf("want zulu and yank, the files' facts placed longest ago, demoted:\n%s", out)
+	}
+	for _, kept := range []string{"xray", "wolf", "gov", "plain"} {
+		if demoted(files, kept) {
+			t.Errorf("%s was demoted: the fact just added, the Governor's and a fact of no file must stay\n%s", kept, out)
+		}
+	}
+	for _, slug := range []string{"zulu", "yank"} {
+		if !strings.Contains(out.String(), slug+" (tier: file fact)") {
+			t.Errorf("want %s said with its tier's name:\n%s", slug, out)
+		}
+	}
+}
+
+func TestAddWithMakeRoomOnARigOfFactsPlacedTodayEndsUnderBudgetWithTheNewFact(t *testing.T) {
+	files, m, out := aTodaysFilesRig()
+	delete(files.files, "wolf.md")
+	m.Budget = renderSize(files)
+	err := m.Add(context.Background(), application.MemoryAdd{
+		Rig: "kiln", Slug: "wolf", Subject: "application/wolf.go", Source: "mw-1", Kind: application.FactGotcha, MakeRoom: true,
+		Sentence: "The wolf probe answers only on its own port.",
+	})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if files.files["wolf.md"] == "" || demoted(files, "wolf") {
+		t.Errorf("the fact just added is missing or demoted:\n%s", out)
+	}
+	if !demoted(files, "zulu") || demoted(files, "gov") || demoted(files, "plain") {
+		t.Errorf("want zulu, the first placed of a file's facts, demoted, the Governor's and a fact of no file kept:\n%s", out)
+	}
+	if size := renderSize(files); size > m.Budget {
+		t.Errorf("the render is %d/%d after the add", size, m.Budget)
+	}
+	if !strings.Contains(out.String(), "zulu (tier: file fact)") {
+		t.Errorf("want the demoted fact said with its tier's name:\n%s", out)
+	}
+}
+
+func TestMakeRoomDryRunNamesTheFileFactTierAndChangesNothing(t *testing.T) {
+	files, m, out := aTodaysFilesRig()
+	want := roomLine("application/zulu.go", "The zulu probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want, DryRun: true}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out.String(), "would demote zulu") || !strings.Contains(out.String(), "(tier: file fact)") {
+		t.Errorf("want the plan to name zulu and the tier:\n%s", out)
+	}
+	if len(files.wrote) != 0 || demoted(files, "zulu") {
+		t.Errorf("a dry run wrote %v\n%s", files.wrote, out)
+	}
+}
+
+func TestMakeRoomTakesAGotchaOverTheKeepWindowBeforeTheFilesFactsOfToday(t *testing.T) {
+	files, m, out := aTodaysFilesRig()
+	files.files["alfa.md"] = roomFact("alfa", "gotcha", "2026-10-10", "The alfa probe answers only on its own port.")
+	m.Budget = renderSize(files)
+	want := roomLine("alfa", "The alfa probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "alfa") || demoted(files, "zulu") {
+		t.Errorf("want the old gotcha taken and today's file facts left:\n%s", out)
+	}
+}
