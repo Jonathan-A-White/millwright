@@ -358,3 +358,36 @@ func TestParseFactProposalsStopsAtABlankLineAfterNothing(t *testing.T) {
 		t.Errorf("nothing on its own line: got %+v", got.Lines)
 	}
 }
+
+func TestABacktickedMemoryCommandIsAProposal(t *testing.T) {
+	bare := "mw memory add millwright --kind gotcha --subject x --source mw-1 \"A fact.\""
+	want := application.ParseFactProposals("For the rig memory:\n" + bare + "\n")
+	if len(want.Lines) != 1 || want.Lines[0].Malformed != "" {
+		t.Fatalf("the bare line should be a proposal, got %+v", want.Lines)
+	}
+	wantCommand := want.Lines[0].Proposal.MemoryCommand("millwright", "mw-1")
+	for name, line := range map[string]string{
+		"single backticks":       "`" + bare + "`",
+		"a list marker and them": "- `" + bare + "`",
+		"triple backticks":       "```" + bare + "```",
+		"spaces inside them":     "` " + bare + " `",
+	} {
+		got := application.ParseFactProposals("For the rig memory:\n" + line + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed != "" {
+			t.Errorf("%s: want one proposal, got %+v", name, got.Lines)
+			continue
+		}
+		if cmd := got.Lines[0].Proposal.MemoryCommand("millwright", "mw-1"); cmd != wantCommand {
+			t.Errorf("%s: got %q, want %q", name, cmd, wantCommand)
+		}
+	}
+	for name, line := range map[string]string{
+		"an opening backtick only": "`" + bare,
+		"unequal fences":           "```" + bare + "`",
+	} {
+		got := application.ParseFactProposals("For the rig memory:\n" + line + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed != line {
+			t.Errorf("%s: want one malformed line %q, got %+v", name, line, got.Lines)
+		}
+	}
+}

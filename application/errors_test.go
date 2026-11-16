@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io/fs"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -533,5 +534,26 @@ func TestQuestionLineListsTheThreeVerdictsAsSeparateCommands(t *testing.T) {
 		if !strings.Contains(said, want) {
 			t.Errorf("the question line should list %q as its own command, got %q", want, said)
 		}
+	}
+}
+
+func TestABacktickedCommonErrorsLineIsReadLikeTheBareLine(t *testing.T) {
+	bare := application.ParseCommonErrors("For common errors:\nsome-class: a line about it\n")
+	if len(bare.Lines) != 1 || bare.Lines[0].Malformed != "" {
+		t.Fatalf("the bare line should be read, got %+v", bare.Lines)
+	}
+	for name, text := range map[string]string{
+		"single backticks": "`some-class: a line about it`",
+		"a list marker":    "- `some-class: a line about it`",
+		"triple backticks": "```some-class: a line about it```",
+	} {
+		got := application.ParseCommonErrors("For common errors:\n" + text + "\n")
+		if len(got.Lines) != 1 || !reflect.DeepEqual(got.Lines[0], bare.Lines[0]) {
+			t.Errorf("%s: got %+v, want %+v", name, got.Lines, bare.Lines)
+		}
+	}
+	got := application.ParseCommonErrors("For common errors:\n`some-class: a line about it\n")
+	if len(got.Lines) != 1 || got.Lines[0].Malformed != "`some-class: a line about it" {
+		t.Errorf("an unmatched backtick stays malformed, got %+v", got.Lines)
 	}
 }
