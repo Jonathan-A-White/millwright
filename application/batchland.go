@@ -333,6 +333,7 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 	}
 	b.slot = &batchSlot{holding: holding}
 	b.Next.SlotYield = b.slot.yield
+	b.Next.SlotShared = b.slot.shared
 	release := func() {
 		report.Notes = append(report.Notes, b.slot.notes...)
 		if err := holding.Release(ctx); err != nil {

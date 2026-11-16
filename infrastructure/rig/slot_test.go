@@ -1138,3 +1138,35 @@ func TestACheckWaitingForTheSlotKeepsItsPlaceWhenItsDeadlinePassesAndTakesItUpAg
 		t.Error("expected the landing to take the slot once the check was done")
 	}
 }
+
+// mw-gq6.1351: a yielded holding says whether a check shares the slot beside it,
+// which the gate lock's own queue does not say until the check has queued.
+func TestAYieldedLandingSaysWhetherACheckSharesTheSlot(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+	landing := yielding(t, dir)
+	defer landing.Release(ctx)
+	sharers, ok := landing.(application.SlotSharers)
+	if !ok {
+		t.Fatal("expected a yieldable holding to say whether the slot is shared")
+	}
+	if sharers.SharedByOthers() {
+		t.Error("expected a landing holding the slot alone to have no sharer")
+	}
+	if err := landing.Yield(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if sharers.SharedByOthers() {
+		t.Error("expected a yielded landing with no check beside it to have no sharer")
+	}
+	check, err := impatient().TakeShared(ctx, dir, "builder@laptop checking mw-a.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sharers.SharedByOthers() {
+		t.Error("expected a check sharing the slot to be said")
+	}
+	check.Release(ctx)
+	if sharers.SharedByOthers() {
+		t.Error("expected no sharer once the check ended")
+	}
+}

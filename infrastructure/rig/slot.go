@@ -437,6 +437,15 @@ func (h *holding) Resume(ctx context.Context) error {
 	return write(h.file, h.says)
 }
 
+// SharedByOthers implements application.SlotSharers: whether another live holder
+// shares the slot beside this yielded holding.
+func (h *holding) SharedByOthers() bool {
+	if h.gone || !h.yielded {
+		return false
+	}
+	return otherShared(h.path, h.record)
+}
+
 // rewrite replaces what the holding's shared record says.
 func (h *holding) rewrite(says string) error {
 	record, err := writeShared(h.path, says)

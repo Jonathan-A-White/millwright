@@ -17,7 +17,8 @@ import (
 // lock the landing holds. Neither moves until the check's wait runs out
 // (mw-gq6.1316). So a landing holding the gate lock gives it back before it takes
 // the slot alone again, and asks for it again once it has the slot, but only when
-// somebody is queued for the lock (LockWaiters): with nobody queued the lock keeps
+// somebody is queued for the lock (LockWaiters) or another holder shares the slot,
+// a check not yet queued for the lock (mw-gq6.1351): with neither the lock keeps
 // its place and no gate queued meanwhile is let in ahead of it (mw-gq6.1319).
 
 // slotAndLockTries is how many times a close-out that gives its merge slot up for
@@ -58,7 +59,7 @@ func (n Next) takeGateLockUnderTheSlot(ctx context.Context, c *closeOut, report 
 		if resume == nil {
 			break
 		}
-		if err == nil && turn.Holding != nil && othersWaitFor(turn.Holding) {
+		if err == nil && turn.Holding != nil && n.othersNeedTheLockBack(turn.Holding) {
 			n.giveBackBeforeTheSlot(report, turn.Holding)
 			resume()
 			continue
@@ -75,6 +76,14 @@ func (n Next) takeGateLockUnderTheSlot(ctx context.Context, c *closeOut, report 
 func othersWaitFor(lock Holding) bool {
 	waiters, ok := lock.(LockWaiters)
 	return !ok || waiters.Waiting() > 0
+}
+
+// othersNeedTheLockBack says whether the gate lock is to be given back before the
+// slot is taken alone again: somebody is queued for it, or another holder shares
+// the slot (Next.SlotShared), a check that took the slot and has not yet queued
+// for the lock, which Waiting does not count (mw-gq6.1351).
+func (n Next) othersNeedTheLockBack(lock Holding) bool {
+	return othersWaitFor(lock) || (n.SlotShared != nil && n.SlotShared())
 }
 
 // giveBackBeforeTheSlot gives the gate lock back when the merge slot is about to
@@ -139,9 +148,10 @@ func (n Next) resumeSlot(ctx context.Context, c *closeOut, report *NextReport, r
 		resume()
 		return
 	}
-	if !othersWaitFor(held.inner) {
-		// Nobody is queued for the lock, so no check can wait for it beside the
-		// slot: the lock is kept and keeps its place (mw-gq6.1319).
+	if !n.othersNeedTheLockBack(held.inner) {
+		// Nobody is queued for the lock and nobody shares the slot, so no check can
+		// wait for the lock beside the slot: the lock is kept and keeps its place
+		// (mw-gq6.1319).
 		resume()
 		return
 	}

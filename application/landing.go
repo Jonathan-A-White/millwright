@@ -530,6 +530,14 @@ type YieldingHolding interface {
 	Resume(ctx context.Context) error
 }
 
+// SlotSharers is what a YieldingHolding may also say: whether another holder
+// shares the slot beside it while it is yielded. A check that took the slot
+// shared but is not yet queued for the gate lock is such a holder, and is no
+// waiter a gate lock's Waiting counts (mw-gq6.1351).
+type SlotSharers interface {
+	SharedByOthers() bool
+}
+
 // takeForCheck takes the rig's slot for a worktree check: shared when the slot
 // can be, exclusive when it cannot.
 func takeForCheck(ctx context.Context, slot MergeSlot, rigDir, holder string) (Holding, error) {
