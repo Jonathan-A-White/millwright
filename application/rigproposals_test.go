@@ -391,3 +391,41 @@ func TestABacktickedMemoryCommandIsAProposal(t *testing.T) {
 		}
 	}
 }
+
+// The closing comment of mw-gq6.1330 wrapped its whole mw memory command in
+// one inline-code span; the landing mail printed it as MALFORMED (mw-gq6.1365).
+const gq61330Line = "`mw memory add millwright --kind decision --subject doctor-step-budget --source mw-gq6.1330 \"Doctor.StepBudget (cmd/mw doctorStepBudget 30 s) extends RunBudget to the run's end for cures, note writes/clears and the verdict (Doctor.step): cut and said as cure-failed or note-failed; RunBudget + StepBudget + 30 s is held under the unit's TimeoutStartSec by contrib/unittimeout_test.go.\"`"
+
+func TestTheGq61330BacktickedLineIsAProposalAlsoAfterAListMarker(t *testing.T) {
+	for name, line := range map[string]string{
+		"bare span":   gq61330Line,
+		"list marker": "- " + gq61330Line,
+		"numbered":    "1. " + gq61330Line,
+	} {
+		got := application.ParseFactProposals("For the rig memory:\n" + line + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed != "" {
+			t.Fatalf("%s: want one proposal, got %+v", name, got.Lines)
+		}
+		p := got.Lines[0].Proposal
+		if p.Verb != application.ProposalVerb("decision") || p.Subject != "doctor-step-budget" || !strings.HasPrefix(p.Sentence, "Doctor.StepBudget (cmd/mw") {
+			t.Errorf("%s: got %+v", name, p)
+		}
+	}
+}
+
+func TestABacktickInsideTheQuotedSentenceIsKept(t *testing.T) {
+	inner := "mw memory add millwright --kind gotcha --subject x --source mw-1 \"Call `Foo` first, then `Bar`.\""
+	for name, line := range map[string]string{
+		"bare":      inner,
+		"in a span": "`" + inner + "`",
+		"list":      "- `" + inner + "`",
+	} {
+		got := application.ParseFactProposals("For the rig memory:\n" + line + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed != "" {
+			t.Fatalf("%s: want one proposal, got %+v", name, got.Lines)
+		}
+		if s := got.Lines[0].Proposal.Sentence; s != "Call `Foo` first, then `Bar`." {
+			t.Errorf("%s: sentence %q", name, s)
+		}
+	}
+}
