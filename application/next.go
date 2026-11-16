@@ -249,6 +249,10 @@ type Next struct {
 	// landing sets it, so that a Builder's check of the rig runs beside the
 	// wait (mw-4hqh0en); mw next leaves it nil and holds the slot throughout.
 	SlotYield func(ctx context.Context) (resume func())
+	// SlotShared, when set, says whether another holder shares the slot the
+	// close-out yielded (SlotSharers): it keeps the gate lock only if nobody is
+	// queued for the lock and nobody shares the slot (mw-gq6.1351).
+	SlotShared func() bool
 
 	// SpecChecks runs a rig's changed-specs command after the rig's gate, on the
 	// specs the story added or changed (mw-gq6.366). Nil runs none.

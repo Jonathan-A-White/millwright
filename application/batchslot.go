@@ -63,3 +63,11 @@ func (b BatchLand) slotLost() string {
 	}
 	return fmt.Sprintf("the merge slot could not be taken alone again after a wait: %v", b.slot.lost)
 }
+
+// shared says whether another holder shares the slot the batch yielded, which a
+// check that took it and has not yet queued for the gate lock is (mw-gq6.1351).
+// A holding that cannot say is taken to have none.
+func (s *batchSlot) shared() bool {
+	sharers, ok := s.holding.(SlotSharers)
+	return ok && s.yielded && sharers.SharedByOthers()
+}

@@ -85,3 +85,105 @@ func TestAYieldedWaitWithNoCheckKeepsTheGateLock(t *testing.T) {
 		}
 	})
 }
+
+// mw-gq6.1351: a check that took the merge slot shared but has not yet queued for
+// the gate lock is no waiter Waiting() counts, so a landing whose yielded wait
+// ended in that moment kept the lock, and its taking the slot alone again waited
+// for the check, which then waited for the lock (mw-gq6.1316). The lock is given
+// back when somebody is queued for it or another holder shares the slot.
+
+// sharerBox is the shared holding a test's check takes, set from another goroutine.
+type sharerBox struct {
+	mu sync.Mutex
+	h  application.Holding
+}
+
+func (b *sharerBox) set(h application.Holding) { b.mu.Lock(); b.h = h; b.mu.Unlock() }
+func (b *sharerBox) get() application.Holding  { b.mu.Lock(); defer b.mu.Unlock(); return b.h }
+
+// sharedByOthers says whether another holder shares the slot l's landing yielded,
+// as batchSlot does for Next.SlotShared.
+func (l *aLandingAndACheckOfOneRig) sharedByOthers() bool {
+	s, ok := l.holding.(application.SlotSharers)
+	return ok && s.SharedByOthers()
+}
+
+// givesTheLockBackFor runs the landing's gate with a check that shares the slot and
+// has queued no ticket for the gate lock, which is let go only once the lock is
+// seen free: the lock must be given back for the landing to go on.
+func (l *aLandingAndACheckOfOneRig) givesTheLockBackFor(t *testing.T, land application.BatchLand, sharer *sharerBox) (freed bool, gate application.Checked) {
+	t.Helper()
+	land.Next.SlotShared = l.sharedByOthers
+	gated := make(chan application.Checked, 1)
+	go func() { gated <- land.GateTheBatch(context.Background(), l.rigDir, l.report()) }()
+	// Once the check shares the slot and the wait has ended, the landing waits for
+	// the check to end before it takes the slot alone: the lock it holds then is the
+	// one that stalls the check (mw-gq6.1316), and it must be free.
+	for deadline := time.Now().Add(2 * time.Second); sharer.get() == nil && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+	}
+	time.Sleep(300 * time.Millisecond)
+	freed = sharer.get() != nil && l.gate.Holder() == ""
+	if err := sharer.get().Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case gate = <-gated:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("expected the landing's gate to end\n%s", l.said.String())
+	}
+	return freed, gate
+}
+
+func TestAYieldedWaitWithACheckSharingTheSlotGivesTheLockBack(t *testing.T) {
+	t.Run("a wait for a calm host", func(t *testing.T) {
+		l := newALandingAndACheckOfOneRig(t)
+		defer l.holding.Release(context.Background())
+		var sharer sharerBox
+		land := l.land()
+		land.Next.Load = &apptest.FakeHostLoad{Readings: []application.LoadReading{busy(), calm()}}
+		land.Next.LoadWait = func(ctx context.Context, _ time.Duration) error {
+			// A check takes the slot the landing gave up, and has queued no ticket for
+			// the gate lock yet.
+			h, err := l.slots.TakeShared(ctx, l.rigDir, "mw check mw-x.1")
+			sharer.set(h)
+			return err
+		}
+		freed, gate := l.givesTheLockBackFor(t, land, &sharer)
+		if !freed {
+			t.Errorf("expected the gate lock to be given back while a check shared the slot, it was kept\n%s", l.said.String())
+		}
+		if !gate.Passed {
+			t.Errorf("expected the landing's gate to pass, got %+v\n%s", gate, l.said.String())
+		}
+	})
+
+	t.Run("a wait for the gate lock", func(t *testing.T) {
+		l := newALandingAndACheckOfOneRig(t)
+		defer l.holding.Release(context.Background())
+		other, err := l.gate.Take(context.Background(), "mw-gq6.894", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sharer sharerBox
+		land := l.land()
+		go func() {
+			l.waitQueued(1)
+			// The landing waits for the lock with its slot shared; a check takes the
+			// slot and queues for nothing, and then the lock is freed.
+			s, err := l.slots.TakeShared(context.Background(), l.rigDir, "mw check mw-x.1")
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			sharer.set(s)
+			other.Holding.Release(context.Background())
+		}()
+		freed, gate := l.givesTheLockBackFor(t, land, &sharer)
+		if !freed {
+			t.Errorf("expected the gate lock to be given back while a check shared the slot, it was kept\n%s", l.said.String())
+		}
+		if !gate.Passed {
+			t.Errorf("expected the landing's gate to pass, got %+v\n%s", gate, l.said.String())
+		}
+	})
+}
