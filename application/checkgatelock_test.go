@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -103,7 +105,7 @@ func TestTheCallClockIsMovedOnlyOnceATicketIsQueued(t *testing.T) {
 	select {
 	case <-moved:
 		t.Fatal("expected the clock to stand still while nothing was queued")
-	case <-time.After(50 * time.Millisecond):
+	case <-quietFor(50 * time.Millisecond):
 	}
 	if got := clock.Now(); !got.Equal(newCallClock().at) {
 		t.Fatalf("expected the clock not to have moved, it reads %s", got)
@@ -111,7 +113,7 @@ func TestTheCallClockIsMovedOnlyOnceATicketIsQueued(t *testing.T) {
 	tickets.Store(1)
 	select {
 	case <-moved:
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("expected the clock to be moved once a ticket was queued")
 	}
 	if got := clock.Now(); got.Sub(newCallClock().at) != time.Hour {
@@ -220,7 +222,7 @@ func TestACloseOutsGateHoldingTheHostsGateLockMakesAWholeCheckWaitAndEndInOneLin
 // lock is then given back so that the check ends, and the test fails on the notice.
 func (w *aWholeCheckBesideTheHostsGateLock) releaseOnceTold(holding application.Holding, want string) {
 	go func() {
-		for deadline := time.Now().Add(30 * time.Second); !strings.Contains(w.told.String(), want) && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		for deadline := time.Now().Add(hangGuard); !strings.Contains(w.told.String(), want) && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		}
 		holding.Release(context.Background())
 	}()
@@ -259,7 +261,7 @@ func TestAWholeCheckHoldingTheHostsGateLockMakesACloseOutsGateWait(t *testing.T)
 	}()
 	select {
 	case <-checks.started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatal("expected the check to start the rig's tests")
 	}
 
@@ -671,7 +673,7 @@ func TestACheckRunAgainWithinItsKeepTimeHasItsPlaceAheadOfATicketTakenInBetween(
 			turn.Holding.Release(context.Background())
 		}
 	}()
-	for deadline := time.Now().Add(5 * time.Second); w.queuedGate() < 2 && time.Now().Before(deadline); {
+	for deadline := time.Now().Add(hangGuard); w.queuedGate() < 2 && time.Now().Before(deadline); {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if got := w.queuedGate(); got != 2 {
@@ -683,7 +685,7 @@ func TestACheckRunAgainWithinItsKeepTimeHasItsPlaceAheadOfATicketTakenInBetween(
 	select {
 	case <-gotAt:
 		t.Fatal("expected the ticket taken in between to wait behind the kept place")
-	case <-time.After(300 * time.Millisecond):
+	case <-quietFor(300 * time.Millisecond):
 	}
 
 	report, err := w.check(10 * time.Second)
@@ -696,7 +698,7 @@ func TestACheckRunAgainWithinItsKeepTimeHasItsPlaceAheadOfATicketTakenInBetween(
 		if got.Before(ran) {
 			t.Errorf("expected the check to run before the ticket taken in between had the lock")
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Error("expected the ticket taken in between to have the lock once the check was done")
 	}
 	if got := w.queuedGate(); got != 0 {
@@ -908,7 +910,7 @@ func TestAForegroundWholeCheckThatGetsTheLockTooLateForTheGateKeepsItsPlaceAndSa
 			turn.Holding.Release(context.Background())
 		}
 	}()
-	for deadline := time.Now().Add(5 * time.Second); w.queuedGate() < 2 && time.Now().Before(deadline); {
+	for deadline := time.Now().Add(hangGuard); w.queuedGate() < 2 && time.Now().Before(deadline); {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if got := w.queuedGate(); got != 2 {
@@ -917,7 +919,7 @@ func TestAForegroundWholeCheckThatGetsTheLockTooLateForTheGateKeepsItsPlaceAndSa
 	select {
 	case <-gotAt:
 		t.Fatal("expected the close-out to wait behind the kept place")
-	case <-time.After(200 * time.Millisecond):
+	case <-quietFor(200 * time.Millisecond):
 	}
 
 	report, err = w.checkInACall(time.Minute, 10*time.Second, 9*time.Second)
@@ -933,7 +935,7 @@ func TestAForegroundWholeCheckThatGetsTheLockTooLateForTheGateKeepsItsPlaceAndSa
 		if got.Before(ran) {
 			t.Errorf("expected the check to run before the close-out had the lock")
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Error("expected the close-out to have the lock once the check was done")
 	}
 }
@@ -1016,13 +1018,13 @@ func TestAForegroundWholeCheckWhoseCalmWaitEatsTheFitKeepsItsPlaceAndSaysToRunIt
 			turn.Holding.Release(context.Background())
 		}
 	}()
-	for deadline := time.Now().Add(5 * time.Second); w.queuedGate() < 2 && time.Now().Before(deadline); {
+	for deadline := time.Now().Add(hangGuard); w.queuedGate() < 2 && time.Now().Before(deadline); {
 		time.Sleep(5 * time.Millisecond)
 	}
 	select {
 	case <-gotAt:
 		t.Fatal("expected the close-out to wait behind the kept place")
-	case <-time.After(200 * time.Millisecond):
+	case <-quietFor(200 * time.Millisecond):
 	}
 	report, err = w.checkInACall(time.Minute, 10*time.Second, 9*time.Second)
 	if err != nil || report.Waiting != "" {
@@ -1034,7 +1036,7 @@ func TestAForegroundWholeCheckWhoseCalmWaitEatsTheFitKeepsItsPlaceAndSaysToRunIt
 		if got.Before(ran) {
 			t.Errorf("expected the check to run before the close-out had the lock")
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(hangGuard):
 		t.Error("expected the close-out to have the lock once the check was done")
 	}
 }
@@ -1388,7 +1390,7 @@ func TestAWholeChecksWaitForTheGateLockEndsWhenTheChecksClockPassesItsBound(t *t
 	}
 	defer holder.Holding.Release(context.Background())
 	go func() {
-		for deadline := time.Now().Add(10 * time.Second); w.queuedGate() < 1 && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		for deadline := time.Now().Add(hangGuard); w.queuedGate() < 1 && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		}
 		w.clock.Pass(2 * time.Hour)
 	}()
@@ -1428,7 +1430,7 @@ func TestAWholeChecksWaitForTheMergeSlotEndsWhenTheChecksClockPassesItsBound(t *
 	}
 	defer landing.Release(context.Background())
 	go func() {
-		for deadline := time.Now().Add(10 * time.Second); told.String() == "" && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		for deadline := time.Now().Add(hangGuard); told.String() == "" && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		}
 		w.clock.Pass(2 * time.Hour)
 	}()
@@ -1514,7 +1516,7 @@ func TestAForegroundCheckEndsItsWaitInsideTheCallsBudgetOnASlowStart(t *testing.
 		// given back only so that such a check ends and the test can say so.
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
+		case <-time.After(hangGuard):
 		}
 		closeOut.Holding.Release(context.Background())
 	}()
@@ -1574,7 +1576,7 @@ func TestAForegroundCheckWritesItsLogWhileItWaitsAndNotOnlyWhenItEnds(t *testing
 	logs := loggedRecords{&mapRecords{}}
 	var midWait string
 	go func() {
-		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		for deadline := time.Now().Add(hangGuard); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
 			if text, err := logs.ReadRunFile(context.Background(), "mw-x.1", application.CheckLogFileName(1)); err == nil && strings.Contains(text, "still waiting for laptop's gate lock") {
 				midWait = text
 				break
@@ -2214,5 +2216,50 @@ func TestACloseOutGateOfARigWithPartsTakesTheGateLockByTurns(t *testing.T) {
 	}
 	if holder := w.gate.Holder(); holder != "" {
 		t.Errorf("expected the gate lock to be free after both, %q holds it", holder)
+	}
+}
+
+// A bound a test reads off the host's clock is a bound a loaded host can make a
+// test fail on: the wait for the thing the test waits on is eaten by the host's
+// slowness, and the test fails though nothing is wrong (mw-gq6.1302, mw-gq6.1335).
+// What a test waits for in this file is waited for with a hang guard of a minute
+// or more, which only a test that never returns meets, and the passing of a wait
+// the check is bounded by is the injected callClock moved by hand.
+const realClockBoundFloor = 60 * time.Second
+
+// hangGuard is the real-time bound of a wait for what the test is waiting on (a
+// ticket in the queue, a line said, a channel closed): twice the floor, met only
+// by a test that never returns, and not by a loaded host being slow.
+const hangGuard = 2 * realClockBoundFloor
+
+// quietFor is a channel that fires after d of real time, for a test that says
+// something did not happen in that time. A loaded host only makes the stretch
+// shorter in what it lets happen, so it cannot fail a test that is right, and
+// no clock moved by hand can stand for it: nothing moves it while it is waited
+// for. It is not a bound on a wait for something to come.
+func quietFor(d time.Duration) <-chan time.Time {
+	return time.NewTimer(d).C
+}
+
+// TestNoTestOfTheGateLockReadsARealClockBoundUnderAMinute reads this file for the
+// bounds it sets with time.Now().Add or time.After on a number of seconds or
+// milliseconds written out, and names each under realClockBoundFloor.
+func TestNoTestOfTheGateLockReadsARealClockBoundUnderAMinute(t *testing.T) {
+	source, err := os.ReadFile("checkgatelock_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound := regexp.MustCompile(`time\.(?:Now\(\)\.Add|After)\(\s*(\d+)\s*\*\s*time\.(Second|Millisecond|Minute)\s*\)`)
+	unit := map[string]time.Duration{"Millisecond": time.Millisecond, "Second": time.Second, "Minute": time.Minute}
+	for number, line := range strings.Split(string(source), "\n") {
+		for _, found := range bound.FindAllStringSubmatch(line, -1) {
+			count, err := strconv.Atoi(found[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d := time.Duration(count) * unit[found[2]]; d < realClockBoundFloor {
+				t.Errorf("checkgatelock_test.go:%d reads a real-clock bound of %s, under the %s of a hang guard: %s", number+1, d, realClockBoundFloor, strings.TrimSpace(line))
+			}
+		}
 	}
 }
