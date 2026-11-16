@@ -1540,7 +1540,7 @@ func (m Memory) makeRoom(ctx context.Context, rig string, bytes int, extra *RigF
 	fmt.Fprintf(m.Out, "render before: %d/%d bytes\n", size, m.Budget)
 	for _, move := range moves {
 		if dryRun {
-			fmt.Fprintf(m.Out, "would demote %s  (Q: %s)  (tier: %s)\n", move.slug, move.question, roomTierNames[move.tier])
+			fmt.Fprintf(m.Out, "would demote %s  (Q: %s)\n  %s (tier: %s)\n", move.slug, move.question, move.slug, roomTierNames[move.tier])
 			continue
 		}
 		if err := m.Demote(ctx, rig, move.slug, move.question); err != nil {
