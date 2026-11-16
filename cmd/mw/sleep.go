@@ -179,9 +179,10 @@ func newSleepPass(dir, host string, out io.Writer) (application.SleepPass, error
 			Beads:    gateway, InboxDir: inbox,
 		},
 		Vault: files, Ledger: files, Grinder: claudeGrinder(), Mailbox: gateway,
-		Beads:  gateway,
-		Holds:  gateway,
-		Verify: application.VerifySettings{Model: verify.Model, Effort: verify.Effort, Confidence: verify.Confidence},
+		Beads:    gateway,
+		Holds:    gateway,
+		InboxDir: inbox,
+		Verify:   application.VerifySettings{Model: verify.Model, Effort: verify.Effort, Confidence: verify.Confidence},
 		Settings: application.SleepSettings{
 			NightlyModel: settings.NightlyModel, NightlyEffort: settings.NightlyEffort,
 			SundayModel: settings.SundayModel, SundayEffort: settings.SundayEffort,

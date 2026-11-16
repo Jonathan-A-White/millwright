@@ -349,6 +349,10 @@ type SleepPass struct {
 	// Holds is where the held beads are read from, to name the old ones in
 	// stale.md; without it none is named (mw-gq6.978).
 	Holds SleepHolds
+	// InboxDir is where his messages are kept whole, to check the agent's claim
+	// that a message of his came wordless against (mw-gq6.1345); without it the
+	// dirs of the evidence's own files are read.
+	InboxDir string
 	// Instructions is grinds/sleep.md, the rule the agent is given.
 	Instructions string
 	// Host signs the summary: sleep@<host>.
@@ -461,6 +465,13 @@ func (p SleepPass) Run(ctx context.Context, opts SleepOptions) (SleepResult, err
 		runPath, logErr := p.keepLog(ctx, window.Date, log)
 		commitErr := p.commit(ctx, window.Date, runPath)
 		return result, errors.Join(fmt.Errorf("mw sleep pass: the agent's answer is refused, no plan was written (%s): %s", grind.Subtype, refused), logErr, commitErr)
+	}
+
+	// His words the agent called missing are checked against the inbox store.
+	var corrected []string
+	answer.Questions, corrected = checkWordlessClaims(answer.Questions, p.sleepInboxDirs(bundle))
+	for _, line := range corrected {
+		p.say("%s\n", line)
 	}
 
 	foldsText, folds := sleepFolds(answer.Folds)

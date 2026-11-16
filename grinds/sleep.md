@@ -95,7 +95,11 @@ full dump only to place what moved.
      each of the four axes: `{"quality", "his_time", "fuel", "speed"}`.
 2. **questions**: markdown, at most five numbered questions for the Governor, each a
    one-line choice with your recommendation and the evidence. Only what you cannot
-   decide under the principles.
+   decide under the principles. A picture of his with words is a message with
+   words: they are the line "the words he sent with the picture" of
+   `evidence.txt`. Never call a message wordless, or say he sent no reply, unless
+   its block of `evidence.txt` has none; mw checks each such claim against the
+   inbox and replaces it with his words.
 3. **maps**: markdown. For each foggy effort in the dump: what the fog is, what
    lifted since the last pass, the slices you would carve with a size each, and the
    one question that would lift the rest. Nothing for an effort that is clear.

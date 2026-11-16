@@ -343,6 +343,24 @@ func txidOfStem(stem string) string {
 	return stem
 }
 
+// messageStemTxid is the txid of the message a saved file belongs to. A message
+// with several files saves them as <txid>-1, <txid>-2 (attachmentOutcome), and
+// the words are kept once, under <txid>: a stem that ends in -N and has a kept
+// message of the stem without it stands for that message, so its pictures are
+// his words' pictures and are not each a message with none (mw-gq6.1345).
+func messageStemTxid(dir, stem string) string {
+	txid := txidOfStem(stem)
+	cut := strings.LastIndex(stem, "-")
+	if cut <= 0 || cut == len(stem)-1 || strings.Trim(stem[cut+1:], "0123456789") != "" {
+		return txid
+	}
+	base := txidOfStem(stem[:cut])
+	if _, err := os.Stat(PosternKeptFile(dir, base)); err != nil {
+		return txid
+	}
+	return base
+}
+
 // ReadVerifyEvidence reads the saved messages and pictures of the inbox dir:
 // those written at since or later, or, when txids are given, those and no
 // others. Newest last. A txid that names no file is an error.
@@ -365,9 +383,15 @@ func ReadVerifyEvidence(dir string, since time.Time, txids []string) ([]VerifyEv
 		if e.IsDir() || !verifyEvidenceExts[ext] {
 			continue
 		}
-		txid := txidOfStem(strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())))
+		stem := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
+		txid := messageStemTxid(dir, stem)
 		if len(wanted) > 0 && !wanted[txid] {
-			continue
+			if !wanted[txidOfStem(stem)] {
+				continue
+			}
+			// a part asked for by its own name is the message it belongs to
+			wanted[txid] = true
+			delete(wanted, txidOfStem(stem))
 		}
 		info, err := e.Info()
 		if err != nil {
