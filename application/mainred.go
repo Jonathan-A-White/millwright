@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -284,6 +285,43 @@ func (m MainRed) tests() string { return strings.Join(m.Tests, ", ") }
 // a close-out that waits as long has told the Mayor nothing sooner.
 const DefaultMainAloneBound = 10 * time.Minute
 
+// DefaultMainAloneSlotWait is how long the run of the failing tests on main may
+// wait for one of the host's test-runner slots before it is given up on
+// (mw-gq6.1421). The wait is no part of DefaultMainAloneBound: a host whose
+// slots are all taken for a quarter of an hour had the run cut at 10 minutes
+// without it ever starting, and the story was refused as its own fault.
+const DefaultMainAloneSlotWait = 30 * time.Minute
+
+type runBoundKey struct{}
+
+// WithRunBound is ctx with how long the run it is given to may take once it has
+// started: a NamedChecks adapter that waits for a test-runner slot before it runs
+// begins this clock after the wait, as the gate's and the after-landing command's
+// limits do (mw-gq6.1421). An adapter that reads none keeps the context's own
+// deadline, the old whole-run bound.
+func WithRunBound(ctx context.Context, bound time.Duration) context.Context {
+	return context.WithValue(ctx, runBoundKey{}, bound)
+}
+
+// RunBoundOf is the bound WithRunBound gave ctx, 0 when it has none.
+func RunBoundOf(ctx context.Context) time.Duration {
+	bound, _ := ctx.Value(runBoundKey{}).(time.Duration)
+	return bound
+}
+
+// RunCutError is what a run says when it began and was stopped at its bound
+// (WithRunBound): the run was asked, and has no answer.
+type RunCutError struct{ Bound time.Duration }
+
+func (e *RunCutError) Error() string {
+	return fmt.Sprintf("the run did not end in %s", e.Bound)
+}
+
+// MainNotCheckedWords start the first line of a refusal whose failing tests were
+// not run alone on main (mw-gq6.1421): the Mayor reads the stop as main's
+// unchecked word, not as the story's fault.
+const MainNotCheckedWords = "main not checked"
+
 // The labels a failing test is given in the note of a check of main alone
 // (mw-gq6.929), one per test: it fails on main too, it fails only on the
 // branch, or main was not asked, and why.
@@ -339,6 +377,14 @@ func labelMain(report *NextReport, note string) {
 // would have, since main was not asked.
 func mainNotRunNote(tests []string, why string) string {
 	return labelNote(tests, "main", func(string) string { return NotRunPrefix + why })
+}
+
+// labelNotRun is labelMain for tests main was not asked: every one is labelled
+// "not run: <why>", and the report says main was not checked, so that the refusal
+// opens with it (mw-gq6.1421).
+func labelNotRun(report *NextReport, tests []string, why string) {
+	report.MainNotChecked = why
+	labelMain(report, mainNotRunNote(tests, why))
 }
 
 // mainAloneRun names the run of the failing tests on main alone in the waits for a
@@ -398,7 +444,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	// again, and taken again after it (holdingWhole, mw-gq6.1085).
 	defer n.holdingWhole(c, report, n.waitForTheGateLock(ctx, c, report, "the failing tests on main alone"))()
 	if why := n.waitForRoom(ctx, c, report); why != "" {
-		labelMain(report, mainNotRunNote(tests, n.Host+" has no room: "+why))
+		labelNotRun(report, tests, n.Host+" has no room: "+why)
 		return nil
 	}
 	at := base
@@ -410,7 +456,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: a landing of %s at %s could not be opened: %v", strings.Join(tests, ", "), c.path.Rig, base, err))
-		labelMain(report, mainNotRunNote(tests, fmt.Sprintf("a worktree of %s could not be opened: %s", base, firstLine(err.Error()))))
+		labelNotRun(report, tests, fmt.Sprintf("a worktree of %s could not be opened: %s", base, firstLine(err.Error())))
 		return nil
 	}
 	defer func() {
@@ -443,22 +489,36 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	if bound <= 0 {
 		bound = DefaultMainAloneBound
 	}
-	// The run is cut at its bound, and what it printed so far is not an answer.
-	runOnMain := func() (run NamedRun, err error, cut bool) {
-		bounded, cancel := context.WithTimeout(ctx, bound)
+	slotWait := n.MainAloneSlotWait
+	if slotWait <= 0 {
+		slotWait = DefaultMainAloneSlotWait
+	}
+	// The run is cut at its bound, which an adapter that waits for a test-runner
+	// slot starts counting after the wait (WithRunBound); the wait and the run
+	// together are cut at the bound and the most the wait may take. What the run
+	// printed so far is not an answer (mw-gq6.1421).
+	runOnMain := func() (run NamedRun, err error, cut string) {
+		bounded, cancel := context.WithTimeout(ctx, slotWait+bound)
 		defer cancel()
-		run, err = n.NamedChecks.RunNamed(bounded, c.path.Rig, dir, asked)
-		return run, err, ctx.Err() == nil && bounded.Err() != nil
+		run, err = n.NamedChecks.RunNamed(WithRunBound(bounded, bound), c.path.Rig, dir, asked)
+		var ended *RunCutError
+		switch {
+		case errors.As(err, &ended):
+			return run, err, fmt.Sprintf("the run did not end in %s", ended.Bound)
+		case ctx.Err() == nil && bounded.Err() != nil:
+			return run, err, fmt.Sprintf("the run did not end in %s, a wait of up to %s for a test-runner slot not counted", bound, slotWait)
+		}
+		return run, err, ""
 	}
 	notRun := func(why string) *MainRed {
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: %s", strings.Join(tests, ", "), why))
-		labelMain(report, mainNotRunNote(tests, why))
+		labelNotRun(report, tests, why)
 		return nil
 	}
 	before, _ := n.readLoad(ctx)
 	run, err, cut := runOnMain()
-	if cut {
-		return notRun(fmt.Sprintf("the run did not end in %s", bound))
+	if cut != "" {
+		return notRun(cut)
 	}
 	if err == nil && run.Ran && !run.NotRun && !run.Passed {
 		// A failure read with the host far over its cores is the host's more than
@@ -471,8 +531,8 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		if again {
 			first := run.Checked
 			run, err, cut = runOnMain()
-			if cut {
-				return notRun(fmt.Sprintf("the run did not end in %s", bound))
+			if cut != "" {
+				return notRun(cut)
 			}
 			report.Notes = append(report.Notes, ranTwice(mainAloneRun, n.Host, busy, first, run.Checked, err))
 		}
@@ -481,13 +541,13 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	switch {
 	case err != nil:
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone was not checked for %s: %v", strings.Join(tests, ", "), err))
-		labelMain(report, mainNotRunNote(tests, firstLine(err.Error())))
+		labelNotRun(report, tests, firstLine(err.Error()))
 		return nil
 	case !run.Ran:
-		labelMain(report, mainNotRunNote(tests, "the rig names no command to run tests by name"))
+		labelNotRun(report, tests, "the rig names no command to run tests by name")
 		return nil
 	case run.NotRun:
-		labelMain(report, mainNotRunNote(tests, n.namedWhy(ctx, "the command to run them by name did not start", c, report, run.Output)))
+		labelNotRun(report, tests, n.namedWhy(ctx, "the command to run them by name did not start", c, report, run.Output))
 		return nil
 	case run.Passed:
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone passes %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
@@ -507,7 +567,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	if len(onMain) == 0 {
 		// Failed, and named no test: a build that broke, say. Nothing is said of
 		// any one test.
-		labelMain(report, mainNotRunNote(tests, n.namedWhy(ctx, "the run on main failed without naming a test", c, report, run.Output)))
+		labelNotRun(report, tests, n.namedWhy(ctx, "the run on main failed without naming a test", c, report, run.Output))
 		return nil
 	}
 	allOnMain := true

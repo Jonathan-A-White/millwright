@@ -65,7 +65,7 @@ func passedOnMain() application.NamedRun {
 
 func aStopWithMainRunOn(t *testing.T, h *aHostBusyDuringTheRunOnMain) closeOutOnMain {
 	t.Helper()
-	return aTestsFailStopWaiting(t, h, h, 0, nil, h.wait)
+	return aTestsFailStopWaiting(t, h, h, 0, nil, h.wait, 0)
 }
 
 const bothFailOnMain = "--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.01s)\nFAIL\n"

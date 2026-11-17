@@ -220,8 +220,20 @@ func (c *Checks) runLineWith(ctx context.Context, rig, dir, command string, extr
 	if err != nil {
 		return application.Checked{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
-	output, err := runLine(ctx, c.shell, command, dir, c.nice, env)
+	// A bound the caller gave the run itself (application.WithRunBound) starts here,
+	// after the wait for the slot, so a host whose slots were taken does not have
+	// the run cut before it began (mw-gq6.1421).
+	runCtx := ctx
+	if bound := application.RunBoundOf(ctx); bound > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, bound)
+		defer cancel()
+	}
+	output, err := runLine(runCtx, c.shell, command, dir, c.nice, env)
 	release()
+	if err != nil && ctx.Err() == nil && runCtx.Err() != nil {
+		return application.Checked{}, &application.RunCutError{Bound: application.RunBoundOf(ctx)}
+	}
 	checked := application.Checked{Command: command, Output: output, Passed: err == nil}
 	if err == nil {
 		return checked, nil

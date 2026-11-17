@@ -76,12 +76,19 @@ type closeOutOnMain struct {
 	vault   *fakeVault
 }
 
-func aTestsFailStop(t *testing.T, named application.NamedChecks, load application.HostLoad, bound time.Duration, afterwards func()) closeOutOnMain {
+// aTestsFailStopWithBounds is aTestsFailStop with the run's bound and the longest
+// wait for a test-runner slot given (zero is the default of each).
+func aTestsFailStopWithBounds(t *testing.T, named application.NamedChecks, bound, slotWait time.Duration) closeOutOnMain {
 	t.Helper()
-	return aTestsFailStopWaiting(t, named, load, bound, afterwards, func(context.Context, time.Duration) error { return nil })
+	return aTestsFailStopWaiting(t, named, nil, bound, nil, func(context.Context, time.Duration) error { return nil }, slotWait)
 }
 
-func aTestsFailStopWaiting(t *testing.T, named application.NamedChecks, load application.HostLoad, bound time.Duration, afterwards func(), loadWait func(context.Context, time.Duration) error) closeOutOnMain {
+func aTestsFailStop(t *testing.T, named application.NamedChecks, load application.HostLoad, bound time.Duration, afterwards func()) closeOutOnMain {
+	t.Helper()
+	return aTestsFailStopWaiting(t, named, load, bound, afterwards, func(context.Context, time.Duration) error { return nil }, bound)
+}
+
+func aTestsFailStopWaiting(t *testing.T, named application.NamedChecks, load application.HostLoad, bound time.Duration, afterwards func(), loadWait func(context.Context, time.Duration) error, slotWait time.Duration) closeOutOnMain {
 	t.Helper()
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
@@ -94,7 +101,7 @@ func aTestsFailStopWaiting(t *testing.T, named application.NamedChecks, load app
 	got.report, got.err = application.Next{
 		Tracker: tracker, Vault: vault, Worktrees: landing, Landing: landing,
 		Checks: twoFailingTests{afterwards: afterwards}, Slot: aSlot{}, Mailbox: mailbox,
-		NamedChecks: named, Load: load, MainAloneBound: bound,
+		NamedChecks: named, Load: load, MainAloneBound: bound, MainAloneSlotWait: slotWait,
 		LoadWait: loadWait,
 		Seat:     "builder", Host: "laptop",
 		Rigs: map[string]string{"millwright": "/rigs/millwright"},
@@ -204,7 +211,7 @@ func (h *aHostThatCalmsAfter) wait(context.Context, time.Duration) error {
 func TestAStopOnAHostThatCalmsWithinTheBoundIsHeldOnMainsRed(t *testing.T) {
 	named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.01s)\nFAIL\n")}
 	host := &aHostThatCalmsAfter{calmsAfter: 3}
-	got := aTestsFailStopWaiting(t, named, host, 0, host.busyNow, host.wait)
+	got := aTestsFailStopWaiting(t, named, host, 0, host.busyNow, host.wait, 0)
 	if got.report.Reason != application.ReasonMainRed {
 		t.Fatalf("expected the story held on main's red once the host calmed, got %q (%v)", got.report.Reason, got.err)
 	}
@@ -222,7 +229,7 @@ func TestAStopOnAHostThatCalmsWithinTheBoundIsHeldOnMainsRed(t *testing.T) {
 func TestAStopOnAHostThatNeverCalmsLabelsTestsAsNotRunAfterABoundedWait(t *testing.T) {
 	named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA\n")}
 	host := &aHostThatCalmsAfter{calmsAfter: 1 << 30}
-	got := aTestsFailStopWaiting(t, named, host, 0, host.busyNow, host.wait)
+	got := aTestsFailStopWaiting(t, named, host, 0, host.busyNow, host.wait, 0)
 	if got.report.Reason != application.ReasonTestsFail {
 		t.Fatalf("expected tests-fail as before, got %q (%v)", got.report.Reason, got.err)
 	}
