@@ -437,9 +437,21 @@ var _ application.Rebases = (*Worktrees)(nil)
 // Rebase implements application.Rebases: `git rebase onto` in dir. A rebase
 // that stops on a conflict is aborted, leaving dir on the commit it was on, and
 // reported as false, with a MergeConflict naming the files when git said them; one that cannot even be undone is an error.
+//
+// A plain rebase drops every merge commit of the branch, and with it the
+// conflict resolution the merge held (mw-gq6.1404). A branch holding a merge
+// not yet in onto is therefore not rebased: the error names the merges, and dir
+// is left as it was.
 func (w *Worktrees) Rebase(ctx context.Context, dir, onto string) (bool, error) {
 	if onto == "" {
 		return false, fmt.Errorf("rebasing %s: onto what?", dir)
+	}
+	merges, err := w.git(ctx, dir, "log", "--merges", "--format=%h %s", onto+"..HEAD")
+	if err != nil {
+		return false, err
+	}
+	if merges = strings.TrimSpace(merges); merges != "" {
+		return false, fmt.Errorf("the branch holds a merge commit a rebase onto %s would drop with its conflict resolution: %s", onto, strings.Join(strings.Split(merges, "\n"), "; "))
 	}
 	driver, err := gitcmd.WriteMergeDriver(w.mergeScript)
 	if err != nil {
