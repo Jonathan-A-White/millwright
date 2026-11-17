@@ -96,6 +96,10 @@ func (d Disk) Trees(ctx context.Context) ([]application.HostSweepTree, error) {
 				continue
 			}
 			dir := filepath.Join(parent, entry.Name())
+			// The rig's merge-slot directories live here too: not a worktree, not the sweep's.
+			if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
+				continue
+			}
 			owner := d.rigOf(ctx, dir, rigDir)
 			add(d.look(ctx, application.HostSweepTree{
 				Story: entry.Name(), Rig: d.nameOf(owner), RigDir: owner, Dir: dir,

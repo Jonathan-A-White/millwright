@@ -65,6 +65,8 @@ func rigOnDisk(t *testing.T) (Disk, string) {
 		git(t, filepath.Join(trees, story), "commit", "-m", "work")
 	}
 	git(t, filepath.Join(trees, "s-pushed"), "push", "origin", "mw/s-pushed")
+	// A directory beside them that is no worktree: a merge slot's.
+	write(t, filepath.Join(trees, "rig.merge-slot.queue", "ticket"), "1")
 	// A branch whose worktree is long gone.
 	git(t, rigDir, "branch", "mw/s-branch-only", "main")
 	return Disk{Rigs: map[string]string{"rig": rigDir}, Home: filepath.Join(root, "work"), Vault: filepath.Join(root, "vault")}, trees
