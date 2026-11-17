@@ -310,6 +310,14 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 			sync.Stamps = queue
 		}
 	}
+	if sync.CloudBook == nil {
+		// The box's own notes of its last backup and collection are told from
+		// an older box's of the name by the book (mw-gq6.1434); a vault that
+		// cannot be placed leaves them as they are.
+		if dir, err := config.Vault(); err == nil {
+			sync.CloudBook, sync.CloudPlan = cloudStatus(dir, sync.Host)
+		}
+	}
 	switch {
 	case said:
 		sync.BackupInterval = time.Duration(minutes) * time.Minute

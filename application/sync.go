@@ -1023,6 +1023,14 @@ type Sync struct {
 	// nil SyncHalts writes and clears nothing.
 	SyncHalts SyncHaltMarker
 
+	// CloudBook and CloudPlan are the cloud's book, where a box made under a
+	// name an older box had is told from it: the notes of when this host last
+	// backed up and collected are read as none when they are dated before the
+	// box's Up, as the old box's (mw-gq6.1434). A nil CloudBook, or one that
+	// cannot be read, reads them as they are.
+	CloudBook CloudBook
+	CloudPlan CloudPlan
+
 	// Now is the clock, so that a test can pin the time a sync was level at.
 	// The zero value reads the real one.
 	Now func() time.Time
@@ -1461,7 +1469,7 @@ func (s Sync) backupIfDue(ctx context.Context, report *SyncReport) {
 // note that cannot be read as a time, both read as due, the same as
 // dueForGC.
 func (s Sync) dueForBackup(ctx context.Context) bool {
-	last, err := s.Tracker.Note(ctx, LastBackupKey(s.Host))
+	last, err := s.ownTimedNote(ctx, LastBackupKey(s.Host))
 	if err != nil || last == "" {
 		return true
 	}
@@ -1470,6 +1478,27 @@ func (s Sync) dueForBackup(ctx context.Context) bool {
 		return true
 	}
 	return s.now().Sub(at) >= s.backupInterval()
+}
+
+// ownTimedNote reads a note this host left of a time it did something (the last
+// backup, the last collection), as empty, never done, when the time is before
+// the box's Up: the note is the old box's, left under a name this box now holds,
+// and its interval is not this box's to wait out (mw-gq6.1434). The note is
+// dated by itself, the one test being CloudState.NoteOfAnOlderBox, through
+// boxBook. A note that is not a time is returned as it is.
+func (s Sync) ownTimedNote(ctx context.Context, key string) (string, error) {
+	said, err := s.Tracker.Note(ctx, key)
+	if err != nil || said == "" {
+		return said, err
+	}
+	at, perr := time.Parse(LastSyncFormat, strings.TrimSpace(said))
+	if perr != nil {
+		return said, nil
+	}
+	if readBoxBook(ctx, s.CloudBook, s.CloudPlan).older(s.Host, at) {
+		return "", nil
+	}
+	return said, nil
 }
 
 // backupInterval is how long the host that holds the one database waits
@@ -1632,7 +1661,7 @@ func (s Sync) squashAt() int {
 // note that cannot be read as a time, both read as due: better one collection
 // too many than a cadence that silently never runs.
 func (s Sync) dueForGC(ctx context.Context) bool {
-	last, err := s.Tracker.Note(ctx, LastGCKey(s.Host))
+	last, err := s.ownTimedNote(ctx, LastGCKey(s.Host))
 	if err != nil || last == "" {
 		return true
 	}
