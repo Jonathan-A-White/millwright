@@ -72,7 +72,11 @@ func GristLevelJob(heartbeat time.Duration, run func(context.Context) error) Spr
 		Name:   GristLevelJobName,
 		Every:  heartbeat,
 		Reason: HeartbeatReason,
-		Run:    run,
+		// The grist smoke of a pass waits for the mill's answer inside the
+		// follower, so the pass is a model run: marked while it waits, and a
+		// landing's restart of the follower waits for it (mw-gq6.1387).
+		RunsAgent: true,
+		Run:       run,
 		Wants: func(e events.Event) (string, bool) {
 			if e.Kind == events.KindBeadChanged && e.To == events.BeadLanded && e.From != e.To && !strings.Contains(e.Bead, "-mol-") {
 				return "bead " + e.Bead + " landed", true
