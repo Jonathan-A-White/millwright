@@ -479,13 +479,13 @@ type Next struct {
 	// the gate fits it (mw-gq6.945).
 	AfterCalm func(held Holding) error
 
-	// GateLock keeps this host to one rig gate at a time, whatever rig: a
-	// close-out takes it before the rig's tests, in the worktree and again on the
-	// merged result, and waits for the load to calm only once it has it
-	// (mw-gq6.388). On the merged result it is kept until the landing ends, and
-	// never waited for under the rig's merge slot across hosts (mw-gq6.422). A
-	// nil GateLock takes none.
-	GateLock GateLock
+	// GateLock keeps this host to one rig gate at a time, whatever rig: a close-out
+	// takes it before the rig's tests, in the worktree and on the merged result, and
+	// gives it back for a wait for a calm host (gatecalm.go, mw-gq6.1420). It is
+	// never waited for under the rig's merge slot across hosts (mw-gq6.422); nil
+	// takes none. GateTurnsLimit bounds a gate's turns (0 is DefaultGateTurnsLimit).
+	GateLock       GateLock
+	GateTurnsLimit time.Duration
 
 	// Rechecks re-runs a bug's spec on the rig's main when its Builder ended with
 	// no commits saying the bug is fixed on main already: a spec that passes
@@ -2348,9 +2348,7 @@ func (n Next) batchRunOnTheMerge(ctx context.Context, c *closeOut, report *NextR
 	if handBack != nil {
 		return gated{Err: handBack}, "", true
 	}
-	if lock != nil {
-		defer n.giveTheGateLockBack(report, lock)
-	}
+	defer n.holdingWhole(c, report, lock)() // given back for a wait for a calm host (mw-gq6.1420)
 	target := n.freshTarget(ctx, c, report)
 	behind := n.commitsBehind(ctx, c, base)
 	dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)

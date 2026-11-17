@@ -28,6 +28,10 @@ import (
 type gateTurns struct {
 	lock   Holding
 	waited time.Duration
+	// whole says the gate runs the rig's tests whole, and holds the lock this way
+	// only to give it back for a wait for a calm host (holdingWhole); kept says the
+	// turns waited past the limit, and the lock is kept for the remaining parts.
+	whole, kept bool
 }
 
 // takingTurns gives c the gate lock lock to take turns with until the returned
@@ -51,7 +55,7 @@ func (n Next) takingTurns(c *closeOut, report *NextReport, lock Holding) func() 
 // unless the close-out holds the lock by turns (a batch's gate or a story's) and the rig's gate
 // is named as more than one part on the host.
 func (n Next) turnParts(c *closeOut) []GatePart {
-	if c.turns == nil || n.GateParts == nil {
+	if c.turns == nil || c.turns.whole || n.GateParts == nil {
 		return nil
 	}
 	if parts := n.GateParts.Parts(c.path.Rig); len(parts) > 1 {
@@ -63,15 +67,18 @@ func (n Next) turnParts(c *closeOut) []GatePart {
 // partsTakingTurns runs the parts of the rig's gate in dir one after another, as
 // the rig's one line runs its steps: the first that fails, or does not start, ends
 // the run. Between two parts the gate lock is given back and taken again
-// (takeTurn), and a host that gives way starts no more of them. The Checked is the
+// (takeTurn) until the turns have waited past the limit (keepsTheLock), and a host
+// that gives way starts no more of them. The Checked is the
 // run as a whole: its command the parts that ran, joined as one line joins its
 // steps, and its output theirs in turn.
 func (n Next) partsTakingTurns(ctx context.Context, c *closeOut, report *NextReport, dir string, parts []GatePart) (Checked, error) {
 	var commands []string
 	var output strings.Builder
 	for i, part := range parts {
-		if i > 0 {
+		if i > 0 && !n.keepsTheLock(c, i, parts) {
 			n.takeTurn(ctx, c, report, i, parts)
+		}
+		if i > 0 {
 			if err := n.gateGivesWay(ctx, c); err != nil {
 				return Checked{}, err
 			}
@@ -125,4 +132,38 @@ func batchRigOf(holder string) (rig string, ok bool) {
 	}
 	_, rig, ok = strings.Cut(holder, " of ")
 	return rig, ok && rig != ""
+}
+
+// DefaultGateTurnsLimit is how long the turns of one gate may wait for other
+// gates in all before it keeps the lock for its remaining parts (mw-gq6.1420):
+// lampas's batch 551 waited 14m22s, 36m42s, 26m49s and 15m2s before four of its
+// 11 parts, and would have waited so before each. It is provisional: the config
+// file's gate_turns_limit_minutes changes it.
+const DefaultGateTurnsLimit = 30 * time.Minute
+
+func (n Next) gateTurnsLimit() time.Duration {
+	if n.GateTurnsLimit <= 0 {
+		return DefaultGateTurnsLimit
+	}
+	return n.GateTurnsLimit
+}
+
+// keepsTheLock says whether c's gate keeps the lock after part done of parts in
+// place of taking a turn: once its turns have waited for other gates longer in
+// all than the limit, it keeps it for every part left, and says so on one line
+// (mw-gq6.1420). A gate's turns are then bounded by the limit and one round of
+// the gates queued behind it.
+func (n Next) keepsTheLock(c *closeOut, done int, parts []GatePart) bool {
+	turns := c.turns
+	if turns.kept {
+		return true
+	}
+	limit := n.gateTurnsLimit()
+	if turns.waited <= limit {
+		return false
+	}
+	turns.kept = true
+	n.print(fmt.Sprintf("  turn    %s's turns have waited %s for other gates, over the limit of %s: it keeps %s's gate lock for its remaining %d of %d parts\n",
+		c.id, gateWaited(turns.waited), gateWaited(limit), n.Host, len(parts)-done, len(parts)))
+	return true
 }

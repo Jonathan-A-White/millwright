@@ -27,6 +27,9 @@ type gateRecord struct {
 	// its core count, and at is the reading that said it was.
 	timeout bool
 	at      LoadReading
+	// lockWaited and calmWaited are how long the close-out's gates waited for the
+	// host's gate lock and for the host to calm, in all (mw-gq6.1420).
+	lockWaited, calmWaited time.Duration
 }
 
 // beginGate takes the host's reading and the count of stories running at the

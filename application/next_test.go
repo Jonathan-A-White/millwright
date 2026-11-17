@@ -442,8 +442,10 @@ func TestACloseOutThatGivesTheSlotAcrossHostsBackToWaitStillLandsWithNoTryLost(t
 	if err != nil || !report.Landed {
 		t.Fatalf("expected the story landed in its one try, got %v and %+v", err, report)
 	}
-	if remote.pushes != 1 || report.Pushes != 1 || remote.remote != 3 {
-		t.Fatalf("expected one push, after the other host's 2 landings, got %d pushes and %d landings in all", remote.pushes, remote.remote)
+	// The other host lands while this one waits for its gate lock, for the host to
+	// calm, and for the lock again, given back for that wait (mw-gq6.1420).
+	if remote.pushes != 1 || report.Pushes != 1 || remote.remote != 4 {
+		t.Fatalf("expected one push, after the other host's 3 landings, got %d pushes and %d landings in all", remote.pushes, remote.remote)
 	}
 	gaveBack := 0
 	for _, said := range report.CrossSlot {
