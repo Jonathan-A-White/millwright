@@ -72,3 +72,30 @@ func QueuePlaceOf(ctx context.Context) *QueuePlace {
 // said the waiter would not use it: the lock was given back and the waiter's
 // place kept (mw-gq6.940).
 var ErrPlaceKeptLate = errors.New("the place was won too late to be used in this call, and is kept")
+
+// A batch landing takes precedence over single stories' checks and close-outs in
+// every queue it waits in on the host (mw-gq6.1450): lampas's batch 555 of 12
+// stories, one of them a story the Governor waited on, gave the gate lock back
+// after each of its 11 parts and queued behind single stories' close-outs, and
+// waited for test-runner slots that went from one Builder's run to the next. So a
+// batch asks, through the context of its waits, to be put ahead of every waiter
+// that did not ask the same, and behind those that did and asked first: the gate
+// lock (infrastructure/hostlock), a test-runner slot and the rig's merge slot
+// (infrastructure/rig), each through a first ticket of its queue
+// (infrastructure/ticketq). A batch's gate also keeps the gate lock across its
+// parts (gateturns.go), as nobody it would give the lock to may go ahead of it.
+
+type queuePrecedenceKey struct{}
+
+// WithQueuePrecedence asks every queue waited on under ctx to put the waiter ahead
+// of every waiter that did not ask it.
+func WithQueuePrecedence(ctx context.Context) context.Context {
+	return context.WithValue(ctx, queuePrecedenceKey{}, true)
+}
+
+// HasQueuePrecedence says whether the waits under ctx go ahead of others'
+// (WithQueuePrecedence).
+func HasQueuePrecedence(ctx context.Context) bool {
+	ahead, _ := ctx.Value(queuePrecedenceKey{}).(bool)
+	return ahead
+}

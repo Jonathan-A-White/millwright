@@ -36,7 +36,9 @@ const GatePoll = 2 * time.Second
 // has no turn-taking of its own, so waiters queue by ticket (mw-gq6.585): each
 // keeps a ticket file, named by when its wait began, in GateQueueDir, locked
 // for as long as its owner lives, and only the oldest live ticket may take the
-// flock. It is the adapter behind application.GateLock.
+// flock; a Take asked under application.WithQueuePrecedence, a batch's, keeps a
+// ticket ahead of every other kind (mw-gq6.1450). It is the adapter behind
+// application.GateLock.
 type Gate struct {
 	Dir string
 
@@ -90,9 +92,13 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 	// earlier call is its own again, and one left at the end of this wait is kept.
 	asked := application.QueuePlaceOf(ctx)
 	var ticket *ticketq.Ticket
-	if asked != nil && asked.Key != "" {
+	switch {
+	case asked != nil && asked.Key != "":
 		ticket, err = tickets.JoinAs(asked.Key, holder, started)
-	} else {
+	case application.HasQueuePrecedence(ctx):
+		// A batch goes ahead of every single story's check and close-out (mw-gq6.1450).
+		ticket, err = tickets.JoinFirst(holder, started)
+	default:
 		ticket, err = tickets.Join(holder, started)
 	}
 	if err != nil {

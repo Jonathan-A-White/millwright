@@ -356,16 +356,22 @@ nightly Lampas suite was among the load sources of the Laptop at 40 to 80 of 20 
 (handoff 726). The numbers above are its reason: a gate with another run beside it takes
 three to four times as long.
 
-A batch's gate takes the lock by turns in the same way when its rig's gate is named as
+A single story's close-out gate takes the lock by turns when its rig's gate is named as
 parts on the host (`[test_parts.<rig>]`): it runs the parts one after another, as the
 rig's one line runs its steps, gives the lock back after each and takes it again behind
-whoever queued for it meanwhile (`application/gateturns.go`, mw-gq6.1275). Lampas batch
-gates held the Laptop's lock 39 to 46 minutes for their vitest, and other rigs' checks
-waited behind them 40 minutes to 1h27m; behind a batch taking turns a check waits one
-part, a vitest shard. The parts are the whole gate, so such a batch runs them in place of
-its related-tests line. A check that finds the lock held says so in one line: who holds
-it (a batch named with its rig, and that it gives the lock back between its parts),
-since when, and that the check waits for its turn up to what its deadline has left.
+whoever queued for it meanwhile (`application/gateturns.go`, mw-gq6.1275, mw-gq6.1301).
+A batch's gate runs the parts in place of its related-tests line too, but keeps the lock
+across them (mw-gq6.1450): a batch takes precedence over single stories' checks and
+close-outs in every queue it waits in on the host, the gate lock, the test-runner slots
+(`builder_test_runs`) and its rig's merge slot, through a ticket that stands ahead of
+every ordinary one (`application.WithQueuePrecedence`, `ticketq.Queue.JoinFirst`). Lampas
+batch 555, of 12 stories, gave the lock back after each of its 11 parts and queued behind
+single stories' close-outs, and its parts waited for test-runner slots that went from one
+Builder's run to the next: it took hours. A batch still gives the lock back for a wait for
+a calm host (mw-gq6.1420) and asks for it again at the head of the queue. A check that
+finds the lock held says so in one line: who holds it (a batch named with its rig, that it
+goes ahead of single stories, and that it keeps the lock across its parts), since when,
+and that the check waits for its turn up to what its deadline has left.
 
 The numbers behind the order and the rule, from the vault's `runs/suite/lampas` of the 21
 nights 2026-10-13 to 2026-11-02: the whole suite ran 16 to 131 minutes (median 36), from

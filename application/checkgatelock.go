@@ -133,15 +133,19 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 
 // heldLine is the one line a check says when it finds the host's gate lock held
 // (mw-gq6.1275): whose gate holds it, a batch named with its rig, since when and
-// for how long so far, that a batch of a rig whose gate is named as parts gives
-// the lock back between them (gateturns.go), and what the check does next.
+// for how long so far, that a batch goes ahead of single stories and keeps the
+// lock across the parts of a rig whose gate is named as parts (gateturns.go,
+// mw-gq6.1450), and what the check does next.
 func (k Check) heldLine(try slotTry, by string, waitFor time.Duration) string {
 	holder, since := k.gateHolderNow(by, k.callNow())
 	line := fmt.Sprintf("%s's gate lock is held by %s, since %s (%s ago)",
 		k.Host, holder, since.UTC().Format("15:04:05Z"), gateWaited(k.callNow().Sub(since)))
-	if rig, ok := batchRigOf(holder); ok && k.Parts != nil {
-		if parts := len(k.Parts.Parts(rig)); parts > 1 {
-			line += fmt.Sprintf("; the batch's gate gives the lock back between its %d parts", parts)
+	if rig, ok := batchRigOf(holder); ok {
+		line += "; a batch goes ahead of single stories' checks and close-outs"
+		if k.Parts != nil {
+			if parts := len(k.Parts.Parts(rig)); parts > 1 {
+				line += fmt.Sprintf(" and keeps the lock across its %d parts", parts)
+			}
 		}
 	}
 	return line + fmt.Sprintf(": this check waits for its turn for up to %s and then runs %s, or ends in one line saying who still holds the lock, having run nothing",

@@ -175,6 +175,32 @@ func TestADryRunTakesOnlyTheRigsQueuedStoriesOldestFirstAndChangesNothing(t *tes
 	}
 }
 
+// aSlotThatSaysNo is a merge slot that notes whether it was asked for ahead of
+// single stories, and refuses.
+type aSlotThatSaysNo struct{ ahead *bool }
+
+func (s aSlotThatSaysNo) Take(ctx context.Context, _, _ string) (application.Holding, error) {
+	*s.ahead = application.HasQueuePrecedence(ctx)
+	return nil, errors.New("held for the test")
+}
+
+// A batch landing asks for its rig's merge slot ahead of the rig's single stories'
+// checks and close-outs, as it asks for the gate lock and test-runner slots
+// (mw-gq6.1450).
+func TestABatchLandingAsksForTheMergeSlotAheadOfSingleStories(t *testing.T) {
+	land, _, _ := aBatchRig(t)
+	land.DryRun = false
+	var ahead bool
+	land.Next.Slot = aSlotThatSaysNo{ahead: &ahead}
+
+	if _, err := land.Run(context.Background(), "millwright"); err == nil || !strings.Contains(err.Error(), "merge slot could not be taken") {
+		t.Fatalf("expected the landing to stop at the refused merge slot, got %v", err)
+	}
+	if !ahead {
+		t.Error("expected the batch to ask for the merge slot ahead of single stories (WithQueuePrecedence)")
+	}
+}
+
 func TestANothingQueuedRigLandsNothing(t *testing.T) {
 	land, _, out := aBatchRig(t)
 	land.DryRun = false

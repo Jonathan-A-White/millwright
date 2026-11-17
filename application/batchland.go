@@ -267,6 +267,9 @@ const gateOnTheBatch = "the rig's tests on the batch"
 // error is what stopped it, or the batch held; a batch of which some stories
 // landed and some were set aside is no error.
 func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
+	// A batch goes ahead of single stories' checks and close-outs in every queue it
+	// waits in: the merge slot, the gate lock and the test-runner slots (mw-gq6.1450).
+	ctx = WithQueuePrecedence(ctx)
 	n := b.Next
 	// A batch is not a story: no close-out mark is written for it.
 	n.CloseOuts = nil
@@ -705,6 +708,8 @@ func (r BatchReport) allOnTarget() bool {
 // changed specs, under the gate lock and the calm rule, counted with the others
 // the batch made.
 func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *BatchReport, nr *NextReport) gated {
+	// As Run asks it: the gate is a batch's, ahead of single stories' (mw-gq6.1450).
+	ctx = WithQueuePrecedence(ctx)
 	n := b.Next
 	began := n.now()
 	// Each run of the gate is taken with a close-out of its own; what it

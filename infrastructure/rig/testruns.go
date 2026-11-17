@@ -95,7 +95,9 @@ func (t *TestRuns) path(n int) string {
 //
 // A slot flock has no turn-taking of its own, so starts that wait queue by
 // ticket, as the gate lock's waiters do (infrastructure/ticketq): only the
-// oldest live ticket looks at the slots, so a start is not passed by later ones.
+// oldest live ticket looks at the slots, so a start is not passed by later ones,
+// but for a start asked under application.WithQueuePrecedence, a batch's gate part,
+// which goes ahead of every other (mw-gq6.1450).
 //
 // The wait is not counted against any time of the run's own: a caller takes the
 // slot before it starts its limit.
@@ -108,7 +110,13 @@ func (t *TestRuns) Take(ctx context.Context, holder string) (func(), error) {
 	}
 	var began, lastSaid time.Time
 	tickets := &ticketq.Queue{Dir: filepath.Join(t.dir, TestRunsQueueDir), Cap: TestRunsCap, Now: t.now}
-	ticket, err := tickets.Join(holder, t.now())
+	join := tickets.Join
+	if application.HasQueuePrecedence(ctx) {
+		// A batch's part takes the next free slot ahead of Builders' own runs
+		// (mw-gq6.1450).
+		join = tickets.JoinFirst
+	}
+	ticket, err := join(holder, t.now())
 	if err != nil {
 		return nil, err
 	}

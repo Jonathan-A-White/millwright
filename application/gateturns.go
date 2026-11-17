@@ -21,6 +21,14 @@ import (
 // close-out's gate of a single story takes turns the same way (Next.gate,
 // mw-gq6.1301); the gate on a merged result keeps the lock it holds across the
 // merge (mergedResultGate) and runs the rig's gate whole.
+//
+// A batch no longer takes turns (mw-gq6.1450): it takes precedence over single
+// stories' checks and close-outs in every queue it waits in on the host
+// (WithQueuePrecedence), so nobody it would give the lock to between its parts may
+// go ahead of it, and lampas's batch 555, which gave it back after each part and
+// queued behind single stories' close-outs, took hours. A gate whose waits take
+// precedence keeps the lock across its parts, and still gives it back for a wait
+// for a calm host (gatecalm.go), asking for it again at the head of the queue.
 
 // gateTurns is the host's gate lock as a gate that takes turns holds it: what it
 // holds now, nil once the lock could not be taken again, and how long the turns
@@ -74,8 +82,9 @@ func (n Next) turnParts(c *closeOut) []GatePart {
 func (n Next) partsTakingTurns(ctx context.Context, c *closeOut, report *NextReport, dir string, parts []GatePart) (Checked, error) {
 	var commands []string
 	var output strings.Builder
+	ahead := n.keepsTheLockAhead(ctx, c, parts)
 	for i, part := range parts {
-		if i > 0 && !n.keepsTheLock(c, i, parts) {
+		if i > 0 && !ahead && !n.keepsTheLock(c, i, parts) {
 			n.takeTurn(ctx, c, report, i, parts)
 		}
 		if i > 0 {
@@ -97,6 +106,18 @@ func (n Next) partsTakingTurns(ctx context.Context, c *closeOut, report *NextRep
 		}
 	}
 	return Checked{Command: strings.Join(commands, " && "), Passed: true, Output: output.String()}, nil
+}
+
+// keepsTheLockAhead says whether c's gate keeps the lock across all its parts
+// because its waits take precedence over everyone else's (a batch's, mw-gq6.1450),
+// and says so once when it does.
+func (n Next) keepsTheLockAhead(ctx context.Context, c *closeOut, parts []GatePart) bool {
+	if !HasQueuePrecedence(ctx) {
+		return false
+	}
+	n.print(fmt.Sprintf("  turn    %s keeps %s's gate lock across its %d parts: a batch goes ahead of single stories' checks and close-outs\n",
+		c.id, n.Host, len(parts)))
+	return true
 }
 
 // takeTurn gives the host's gate lock back after part done of parts (counted from

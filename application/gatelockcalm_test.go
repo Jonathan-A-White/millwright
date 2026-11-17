@@ -37,9 +37,11 @@ type aWatchedGateLock struct {
 	// round of the other gates queued for the lock.
 	clock *time.Time
 	wait  time.Duration
+	// ahead counts the takes asked ahead of single stories (WithQueuePrecedence).
+	ahead int
 }
 
-func (g *aWatchedGateLock) Take(_ context.Context, holder string, held func(string)) (application.GateTurn, error) {
+func (g *aWatchedGateLock) Take(ctx context.Context, holder string, held func(string)) (application.GateTurn, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.held {
@@ -47,6 +49,9 @@ func (g *aWatchedGateLock) Take(_ context.Context, holder string, held func(stri
 	}
 	g.held, g.holder = true, holder
 	g.taken++
+	if application.HasQueuePrecedence(ctx) {
+		g.ahead++
+	}
 	if g.clock != nil && g.taken > 1 && g.wait > 0 {
 		if held != nil {
 			held("four other gates")
@@ -172,6 +177,14 @@ func TestABatchsGateHoldsNoGateLockWhileItWaitsForTheHostToCalm(t *testing.T) {
 	}
 	watch.sawTheLockFree(t, "a batch's gate")
 	checks.ranUnderTheLock(t)
+	// The batch asks for the lock again after the wait ahead of single stories'
+	// checks and close-outs, as it asked for it first (mw-gq6.1450).
+	if lock.taken < 2 || lock.ahead != lock.taken {
+		t.Errorf("expected every take of the batch's gate lock, the one after the wait for a calm host too, asked ahead of single stories: %d of %d were", lock.ahead, lock.taken)
+	}
+	if line := lineWith(out.String(), "while it waits for the host to calm"); !strings.Contains(line, "takes it again ahead of single stories' checks and close-outs") {
+		t.Errorf("expected the batch to say it takes the lock again ahead of single stories, got %q\n%s", line, out.String())
+	}
 }
 
 // aCloseOutWatched is mw next's close-out of one story under the watched lock, on
@@ -435,19 +448,18 @@ func anElevenPartBatch(t *testing.T, round time.Duration, load application.HostL
 	return gate, err, out.String(), parts, lock
 }
 
-func TestAnElevenPartBatchBehindGatesThatQueueForEverEndsItsGateWithinTheTurnsLimitAndOneRound(t *testing.T) {
+// A batch takes precedence over single stories' gates and keeps the lock across
+// its parts (mw-gq6.1450): behind gates that queue for ever it takes the lock once,
+// waits for none of them between its parts, and says so once.
+func TestAnElevenPartBatchBehindGatesThatQueueForEverKeepsTheGateLockAcrossItsParts(t *testing.T) {
 	const round = 20 * time.Minute
-	gate, err, log, parts, _ := anElevenPartBatch(t, round, nil, nil)
+	gate, err, log, parts, lock := anElevenPartBatch(t, round, nil, nil)
 
 	if err != nil || !gate.Passed || len(parts.ran) != 11 {
 		t.Fatalf("expected the batch's gate to pass by its 11 parts, got %d parts, %+v and %v\n%s", len(parts.ran), gate, err, log)
 	}
-	// Each take again waited a round; the turns stop once they waited over the limit.
-	var waited time.Duration
-	taken := strings.Count(log, "takes it again behind whoever waits for it")
-	waited = time.Duration(taken) * round
-	if limit := 30*time.Minute + round; waited >= limit {
-		t.Errorf("expected the batch's waits for other gates to stay under the limit and one round, %s, it waited %s over %d turns\n%s", limit, waited, taken, log)
+	if lock.taken != 1 || strings.Contains(log, "takes it again behind whoever waits for it") {
+		t.Errorf("expected the batch to take the gate lock once and keep it across its parts, it took it %d times\n%s", lock.taken, log)
 	}
 	var kept []string
 	for _, line := range strings.Split(log, "\n") {
@@ -456,7 +468,58 @@ func TestAnElevenPartBatchBehindGatesThatQueueForEverEndsItsGateWithinTheTurnsLi
 		}
 	}
 	if len(kept) != 1 {
-		t.Fatalf("expected one 'turn' line saying the batch keeps the lock for its remaining parts, got %q\n%s", kept, log)
+		t.Fatalf("expected one 'turn' line saying the batch keeps the lock across its parts, got %q\n%s", kept, log)
+	}
+	for _, want := range []string{"batch 552 of lampas", "across its 11 parts", "ahead of single stories"} {
+		if !strings.Contains(kept[0], want) {
+			t.Errorf("expected the turn line to say %q, got %q", want, kept[0])
+		}
+	}
+}
+
+// A single story's close-out gate still takes turns between its parts (mw-gq6.1301),
+// and its turns are bounded (mw-gq6.1420): behind gates that queue for ever it
+// keeps the lock for its remaining parts once its turns have waited past the limit.
+func TestAnElevenPartStoryGateBehindGatesThatQueueForEverEndsItsTurnsWithinTheLimitAndOneRound(t *testing.T) {
+	const round = 20 * time.Minute
+	clock := time.Date(2026, 11, 17, 7, 59, 0, 0, time.UTC)
+	lock := &aWatchedGateLock{clock: &clock, wait: round}
+	parts := &elevenParts{clock: &clock, part: 4 * time.Minute, lock: lock}
+	var out lockedBuffer
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("lp-1", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("lp-1", domain.Story{ID: "lp-1.1", Title: "A story"})
+	vault := newFakeVault()
+	vault.written["lp-1.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
+	_, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: parts, GateParts: parts, Slot: aSlot{}, Mailbox: apptest.NewFakeMailbox(), GateLock: lock,
+		GateTurnsLimit: 30 * time.Minute, Now: func() time.Time { return clock },
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"lampas": t.TempDir()},
+		Out:  writerOf(&out), Err: writerOf(&out),
+	}.Run(context.Background(), "lp-1.1")
+	log := out.String()
+	if err != nil || len(parts.ran) < 11 {
+		t.Fatalf("expected the story's gate to pass by its 11 parts, got %d parts and %v\n%s", len(parts.ran), err, log)
+	}
+	// Each take again waited a round; the turns stop once they waited over the limit.
+	taken := strings.Count(log, "takes it again behind whoever waits for it")
+	if taken == 0 {
+		t.Fatalf("expected the story's gate to take turns between its parts\n%s", log)
+	}
+	if waited, limit := time.Duration(taken)*round, 30*time.Minute+round; waited >= limit {
+		t.Errorf("expected the story's waits for other gates to stay under the limit and one round, %s, it waited %s over %d turns\n%s", limit, waited, taken, log)
+	}
+	var kept []string
+	for _, line := range strings.Split(log, "\n") {
+		if strings.HasPrefix(line, "  turn    ") && strings.Contains(line, "keeps laptop's gate lock") {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) != 1 {
+		t.Fatalf("expected one 'turn' line saying the story's gate keeps the lock for its remaining parts, got %q\n%s", kept, log)
 	}
 	for _, want := range []string{"30m", "remaining"} {
 		if !strings.Contains(kept[0], want) {

@@ -231,9 +231,13 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 	asked := application.QueuePlaceOf(ctx)
 	var ticket *ticketq.Ticket
 	var err error
-	if asked != nil && asked.Key != "" {
+	switch {
+	case asked != nil && asked.Key != "":
 		ticket, err = tickets.JoinAs(asked.Key, holder, started)
-	} else {
+	case application.HasQueuePrecedence(ctx):
+		// A batch goes ahead of the rig's close-outs and checks (mw-gq6.1450).
+		ticket, err = tickets.JoinFirst(holder, started)
+	default:
 		ticket, err = tickets.Join(holder, started)
 	}
 	if err != nil {
@@ -405,7 +409,11 @@ func (h *holding) Resume(ctx context.Context) error {
 	}
 	started := s.now()
 	tickets := &ticketq.Queue{Dir: h.path + SlotQueueSuffix, Cap: s.cap, Now: s.now}
-	ticket, err := tickets.Join(h.holder, started)
+	join := tickets.Join
+	if application.HasQueuePrecedence(ctx) {
+		join = tickets.JoinFirst // a batch's, ahead of the rig's checks (mw-gq6.1450)
+	}
+	ticket, err := join(h.holder, started)
 	if err != nil {
 		return fmt.Errorf("queueing to take the merge slot of %s back: %w", h.rigDir, err)
 	}

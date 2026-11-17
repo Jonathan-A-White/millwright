@@ -441,3 +441,64 @@ func TestAGateLockHoldingSaysHowManyAreQueuedBehindIt(t *testing.T) {
 	cancel()
 	<-ended
 }
+
+// takeInTheBackgroundUnder is takeInTheBackground for a Take asked under ctx.
+func takeInTheBackgroundUnder(t *testing.T, ctx context.Context, dir, holder string, order *[]string, mu *sync.Mutex, done chan<- error) {
+	t.Helper()
+	waiting := make(chan struct{})
+	var once sync.Once
+	go func() {
+		turn, err := hostlock.NewGate(dir, hostlock.WithGatePoll(2*time.Millisecond)).
+			Take(ctx, holder, func(string) { once.Do(func() { close(waiting) }) })
+		if err == nil {
+			mu.Lock()
+			*order = append(*order, holder)
+			mu.Unlock()
+			err = turn.Holding.Release(context.Background())
+		}
+		done <- err
+	}()
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s never found the gate lock held", holder)
+	}
+}
+
+// A batch takes precedence over single stories' checks and close-outs for the gate
+// lock (mw-gq6.1450): asked under application.WithQueuePrecedence, its wait goes to
+// the head of gate.queue, ahead of a story that began waiting before it, and behind
+// another batch that did.
+func TestABatchsWaitForTheGateLockGoesAheadOfStoriesThatQueuedBeforeIt(t *testing.T) {
+	for round := 0; round < 3; round++ {
+		dir := t.TempDir()
+		first, err := hostlock.NewGate(dir).Take(context.Background(), "mw-0", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var order []string
+		var mu sync.Mutex
+		done := make(chan error, 4)
+		batch := application.WithQueuePrecedence(context.Background())
+		takeInTheBackground(t, dir, "mw-a", &order, &mu, done)
+		takeInTheBackgroundUnder(t, batch, dir, "batch 555 of lampas", &order, &mu, done)
+		takeInTheBackground(t, dir, "mw-b", &order, &mu, done)
+		takeInTheBackgroundUnder(t, batch, dir, "batch 31 of millwright", &order, &mu, done)
+		if err := first.Holding.Release(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 4; i++ {
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("a waiter never took the gate lock")
+			}
+		}
+		if got, want := strings.Join(order, ","), "batch 555 of lampas,batch 31 of millwright,mw-a,mw-b"; got != want {
+			t.Fatalf("round %d: expected the lock taken in the order %s, got %s", round, want, got)
+		}
+	}
+}
