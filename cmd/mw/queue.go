@@ -1,6 +1,8 @@
 package main
 
 import (
+	"slices"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -35,7 +37,7 @@ func newQueueCmd() *cobra.Command {
 			// several new connections and seconds of the server's time: 195.87 s
 			// at load 25 (mw-gq6.1341). A host with no server reads by bd.
 			defer keepBeadsConnection(vault, cmd.ErrOrStderr())()
-			gateway, err := beads.FromConfig(followerGatewayOptions...)
+			gateway, err := beads.FromConfig(append(slices.Clone(followerGatewayOptions), beads.WithRunCache(), beads.WithoutStoryTexts())...)
 			if err != nil {
 				return err
 			}

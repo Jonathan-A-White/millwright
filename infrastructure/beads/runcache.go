@@ -36,6 +36,10 @@ type runCache struct {
 	beads memo[[]bead]
 	// index is beads indexed for ShowBeads.
 	index memo[*snapshot]
+	// live is the live beads as the kept connection read them (keptwork.go): ready,
+	// blocked and running stories are each read from it, and each read it whole,
+	// 2.9 MB and more than a second at load 11 (mw-gq6.1340).
+	live  memo[*liveListing]
 	notes memo[map[string]any]
 	// closed is the closed stories read of a rig, or of every rig, each kept
 	// under the kind of read it was (see closedMemo).
@@ -46,6 +50,7 @@ type runCache struct {
 func (c *runCache) reset() {
 	c.beads.reset()
 	c.index.reset()
+	c.live.reset()
 	c.notes.reset()
 	c.closed.reset()
 }

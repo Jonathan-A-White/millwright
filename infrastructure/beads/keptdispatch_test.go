@@ -40,6 +40,21 @@ type factoryServer struct {
 
 	mu      sync.Mutex
 	unknown []string
+	seen    []string // every query the server was sent, in order
+}
+
+// listingReads is how many times the live beads were read whole: the queries of
+// a listing of beads with their leases.
+func (s *factoryServer) listingReads() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, q := range s.seen {
+		if l := strings.ToLower(q); strings.Contains(l, "from issues i left join leases") {
+			n++
+		}
+	}
+	return n
 }
 
 type factoryConn struct{ s *factoryServer }
@@ -68,6 +83,9 @@ var keyAsked = regexp.MustCompile("where `key` = '([^']*)'")
 
 func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	s, q := c.s, strings.ToLower(query)
+	s.mu.Lock()
+	s.seen = append(s.seen, query)
+	s.mu.Unlock()
 	switch {
 	case strings.Contains(q, "from issues i left join leases"):
 		rows := [][]driver.Value{}
@@ -178,6 +196,9 @@ func (s *factoryServer) listed(q, id string) bool {
 			}
 		}
 		return false
+	}
+	if strings.Contains(q, "d.issue_id in (") {
+		return strings.Contains(q, "'"+strings.ToLower(id)+"'")
 	}
 	if !strings.Contains(q, "i.status <> 'closed'") {
 		return true
@@ -699,5 +720,114 @@ func TestTheBlockedStoriesAreReadOverTheKeptConnection(t *testing.T) {
 	}
 	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
 		t.Errorf("expected no bd started, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
+	}
+}
+
+// mw queue reads what is ready, blocked and running, and each of those read the
+// live beads whole: 2.9 MB over four reads of more than a second each at load
+// 11 (mw-gq6.1340). Under a run cache they are one read.
+func TestUnderARunCacheTheLiveBeadsAreReadOnceForEveryListingOfWork(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard), beads.WithRunCache())
+
+	ready, err := g.ReadyForHost(ctx, "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.BlockedForHost(ctx, "desktop"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.RunningStories(ctx, "desktop"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.RunningElsewhere(ctx, "desktop"); err != nil {
+		t.Fatal(err)
+	}
+	if len(ready) == 0 {
+		t.Errorf("expected a story ready on the desktop, got none")
+	}
+	if got := server.listingReads(); got != 1 {
+		t.Errorf("expected the live beads read once for four listings of the work, got %d reads", got)
+	}
+	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
+		t.Errorf("expected no bd started, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
+	}
+}
+
+// Without a run cache every listing reads the live beads afresh, as a follower
+// that lives on must, and a write under a run cache ends what it kept.
+func TestTheLiveBeadsAreReadAfreshWithoutARunCacheAndAfterAWriteWithOne(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard))
+	for i := 0; i < 2; i++ {
+		if _, err := g.ReadyForHost(ctx, "desktop"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := server.listingReads(); got != 2 {
+		t.Errorf("expected two reads of the live beads without a run cache, got %d", got)
+	}
+
+	server = aQuietFactory(asked)
+	g = beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard), beads.WithRunCache())
+	if _, err := g.ReadyForHost(ctx, "desktop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.HoldStory(ctx, "mw-e.2"); err != nil {
+		t.Logf("the hold: %v", err)
+	}
+	if _, err := g.ReadyForHost(ctx, "desktop"); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.listingReads(); got != 2 {
+		t.Errorf("expected the live beads read again after a write, got %d reads", got)
+	}
+}
+
+// A command that prints no story text (mw queue) reads the live beads without
+// their descriptions, acceptance criteria and comment counts, and their edges by
+// the ids of the beads found: three statements, none of them the join of every
+// dependency (mw-gq6.1340).
+func TestTheLiveBeadsOfAQueueAreReadWithoutTheirTextsAndTheirEdgesByTheirIds(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard),
+		beads.WithRunCache(), beads.WithoutStoryTexts())
+
+	ready, err := g.ReadyForHost(ctx, "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ready) == 0 {
+		t.Fatalf("expected a story ready on the desktop")
+	}
+	server.mu.Lock()
+	seen := append([]string(nil), server.seen...)
+	server.mu.Unlock()
+	if len(seen) != 3 {
+		t.Errorf("expected three statements (beads, labels, edges), got %d:\n%s", len(seen), strings.Join(seen, "\n"))
+	}
+	for _, q := range seen {
+		l := strings.ToLower(q)
+		switch {
+		case strings.Contains(l, "leases"):
+			if strings.Contains(l, "i.description") || strings.Contains(l, "i.acceptance_criteria") || strings.Contains(l, "from comments") {
+				t.Errorf("expected the beads read without their description, acceptance or comments, got %s", q)
+			}
+		case strings.Contains(l, "from dependencies"):
+			if !strings.Contains(l, "d.issue_id in ('") || strings.Contains(l, "join issues i on") {
+				t.Errorf("expected the edges read by the ids of the beads found, got %s", q)
+			}
+		}
+	}
+	for _, id := range detailIDs(ready) {
+		if id == "" {
+			t.Errorf("expected every ready story to carry its id")
+		}
 	}
 }
