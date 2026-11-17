@@ -881,7 +881,6 @@ func oldHoldsText(holds []OldHold) string {
 	return out.String()
 }
 
-
 // cutQueue is the queue.json part: mw queue --json, which prints a story over
 // nine lines, compacted to a line to a story when it is over its budget, so a
 // cut by lines no longer drops the ready stories past it unsaid (mw-gq6.1384).
