@@ -399,6 +399,15 @@ type Next struct {
 	// refusal then lets the story through. Empty is no such word.
 	RescopedByMayor string
 
+	// MetByMayor is the run of mw next --met-by-mayor (mw-gq6.1378): the Mayor
+	// ran the criterion a Builder's closing comment calls unmet himself, and it
+	// passed. The close-out records it on the bead as a MET-BY-MAYOR: comment,
+	// which answers that closing comment; the acceptance is not touched.
+	// MetByMayorGiven says the flag was given, so that a blank run is refused
+	// rather than read as no flag.
+	MetByMayor      string
+	MetByMayorGiven bool
+
 	// HasGristTestKey says whether this host holds the factory's grist test key,
 	// and so can reach the live mill a grind example is proved on. A host that
 	// holds none and stops a branch grist-example-unproved pushes the branch to
@@ -951,6 +960,11 @@ func (c *closeOut) attempt() int {
 // reason the story did not land; the report says what was recorded anyway,
 // because a close-out that lands nothing still writes down what happened.
 func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
+	// A word of the Mayor's with no run in it answers nothing: refused before
+	// anything is read or written (mw-gq6.1378).
+	if n.MetByMayorGiven && strings.TrimSpace(n.MetByMayor) == "" {
+		return NextReport{StoryID: storyID, Host: n.Host}, fmt.Errorf("closing out %s: %s", storyID, MetByMayorBlank)
+	}
 	// A story whose session is still at work is not closed out by hand: nothing
 	// is written, so that the session's own close-out finds the story as it left
 	// it (mw-gq6.394).
@@ -1303,6 +1317,9 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 		}
 	}
 	if err := n.recordRescope(ctx, c, &report); err != nil {
+		return report, err
+	}
+	if err := n.recordMetByMayor(ctx, c, &report); err != nil {
 		return report, err
 	}
 	return n.land(ctx, c, &report)
@@ -2494,15 +2511,18 @@ func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, report *Ne
 	if c.detail.Molecule.RootID == "" {
 		return Refusal{}, false
 	}
-	text, written, readErr := n.closingCommentTextOnStory(ctx, c, report, base)
+	text, at, comments, written, readErr := n.closingCommentOnStory(ctx, c, report, base)
 	if readErr != nil {
 		return readRefusal(readErr)
 	}
-	if unmet := UnmetCriteria(text); written && len(unmet) > 0 {
+	// The Mayor ran what the closing comment calls unmet and said so on the bead
+	// after it (--met-by-mayor, mw-gq6.1378): that comment is answered.
+	if unmet := UnmetCriteria(text); written && len(unmet) > 0 && !metByMayorAfter(comments, at) {
 		return Refusal{ReasonUnmetCriterion, fmt.Sprintf("the closing comment of %s says an acceptance criterion is not met: %s", c.id, unmet[0]),
 			"The closing comment says, of acceptance criteria:\n" + bulletList(unmet) + "\n" +
 				"A story is landed when every acceptance criterion holds when run. One that holds only in part, is not met or was not run is not a landing: " +
-				"the story is handed back, and the Mayor re-scopes it or closes what is done."}, true
+				"the story is handed back, and the Mayor re-scopes it or closes what is done.\n" +
+				"If the Mayor ran the criterion himself and it passed, " + MetRecipe(c.id) + " answers the comment without changing the acceptance."}, true
 	}
 	if written {
 		return n.gristExampleRefusal(ctx, c, report, text)
@@ -2640,18 +2660,25 @@ func (n Next) newestCommitAndComments(ctx context.Context, c *closeOut, report *
 // newest commit of the story's branch, and whether there is one. A read that
 // failed is the error, not a no.
 func (n Next) closingCommentTextOnStory(ctx context.Context, c *closeOut, report *NextReport, base string) (string, bool, error) {
+	text, _, _, written, err := n.closingCommentOnStory(ctx, c, report, base)
+	return text, written, err
+}
+
+// closingCommentOnStory is closingCommentTextOnStory with where the comment
+// stands among the story's comments, in the order the tracker gave them, and all
+// of them: the position of the closing comment, or -1 when there is none.
+func (n Next) closingCommentOnStory(ctx context.Context, c *closeOut, report *NextReport, base string) (text string, at int, comments []Comment, written bool, err error) {
 	newest, comments, err := n.newestCommitAndComments(ctx, c, report, base)
 	if err != nil {
-		return "", false, err
+		return "", -1, nil, false, err
 	}
-	var text string
-	written := false
-	for _, comment := range comments {
+	at = -1
+	for i, comment := range comments {
 		if comment.Created.After(newest) && isClosingComment(comment.Text) {
-			newest, text, written = comment.Created, comment.Text, true
+			newest, text, written, at = comment.Created, comment.Text, true, i
 		}
 	}
-	return text, written, nil
+	return text, at, comments, written, nil
 }
 
 // isClosingComment is a comment with the two sections of a Builder's closing

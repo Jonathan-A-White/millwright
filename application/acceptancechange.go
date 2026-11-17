@@ -246,3 +246,85 @@ func (n Next) recordRescope(ctx context.Context, c *closeOut, report *NextReport
 	report.Notes = append(report.Notes, "recorded the Mayor's re-scope of "+c.id+" on the bead: "+oneLine(n.RescopedByMayor))
 	return nil
 }
+
+// MetByMayorMark opens the comment that records the Mayor's own run of an
+// acceptance criterion a Builder's closing comment calls unmet, and that passed
+// (mw-gq6.1378). It answers that closing comment and changes no acceptance; who
+// wrote it and when are the comment's own.
+const MetByMayorMark = "MET-BY-MAYOR:"
+
+// MetByMayorBlank is what a --met-by-mayor with no run in it is told.
+const MetByMayorBlank = "--met-by-mayor needs what the Mayor ran and what it printed: pass it as a sentence, e.g. --met-by-mayor \"ran AC 1 on the laptop at load 23: 1.68 s\""
+
+// MetRecipe is the one line that lands a handed-back story whose unmet criterion
+// the Mayor ran himself and found met.
+func MetRecipe(id string) string {
+	return "mw next " + id + ` --no-dispatch --met-by-mayor "<what he ran and what it printed>"`
+}
+
+// closingCommentAt is where the newest comment with a 'For the rig memory:'
+// section stands among the comments, -1 when none does: the closing comment
+// the landing's verdict reads.
+func closingCommentAt(comments []Comment) int {
+	for i := len(comments) - 1; i >= 0; i-- {
+		if ParseFactProposals(comments[i].Text).Found {
+			return i
+		}
+	}
+	return -1
+}
+
+// metByMayorAnswer is the text of the newest MET-BY-MAYOR: comment that is not a
+// Builder's and stands after comment at, "" when there is none or at is -1. A
+// closing comment a Builder wrote after the Mayor's word is not answered by it.
+func metByMayorAnswer(comments []Comment, at int) string {
+	if at < 0 {
+		return ""
+	}
+	answer := ""
+	for _, comment := range comments[at+1:] {
+		if !builderAuthor(comment.Author) && strings.HasPrefix(strings.TrimSpace(comment.Text), MetByMayorMark) {
+			answer = strings.TrimSpace(comment.Text)
+		}
+	}
+	return answer
+}
+
+// metByMayorAfter says the comment at position at has been answered by the
+// Mayor's own run (metByMayorAnswer).
+func metByMayorAfter(comments []Comment, at int) bool {
+	return metByMayorAnswer(comments, at) != ""
+}
+
+// recordMetByMayor writes the MET-BY-MAYOR: comment a --met-by-mayor flag asks
+// for, when the story's closing comment says a criterion is not met and no word
+// of the Mayor's stands after it. Nothing of the acceptance is touched.
+func (n Next) recordMetByMayor(ctx context.Context, c *closeOut, report *NextReport) error {
+	run := strings.TrimSpace(n.MetByMayor)
+	if !n.MetByMayorGiven || run == "" {
+		return nil
+	}
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return fmt.Errorf("recording the Mayor's run on %s: the comments could not be read: %w", c.id, err)
+	}
+	at := closingCommentAt(comments)
+	if at < 0 || len(UnmetCriteria(comments[at].Text)) == 0 {
+		report.Notes = append(report.Notes, "--met-by-mayor: the closing comment of "+c.id+" does not say a criterion is not met, so nothing was recorded")
+		return nil
+	}
+	if metByMayorAfter(comments, at) {
+		return nil
+	}
+	which := "the criteria its closing comment calls unmet"
+	if found := ReadACNotMet(comments[at].Text); found.Found() {
+		which = "AC " + found.Words()
+	}
+	text := MetByMayorMark + " " + which + ": " + oneLine(run) + "\nat " + n.now().UTC().Format(time.RFC3339) +
+		"\n(mw next wrote this on the Mayor's word: he ran it himself and it passed. The acceptance did not change.)"
+	if err := n.Tracker.CommentOnStory(ctx, c.id, text); err != nil {
+		return fmt.Errorf("recording the Mayor's run on %s: %w", c.id, err)
+	}
+	report.Notes = append(report.Notes, "recorded the Mayor's run of "+which+" on "+c.id+": "+oneLine(run))
+	return nil
+}

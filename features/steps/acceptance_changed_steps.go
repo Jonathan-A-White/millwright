@@ -2,6 +2,9 @@ package steps
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -19,6 +22,9 @@ func registerAcceptanceChangedSteps(ctx *godog.ScenarioContext, c *nextContext) 
 	ctx.Given(`^the acceptance of "([^"]*)" now reads:$`, c.theAcceptanceNowReads)
 	ctx.Given(`^the Mayor wrote a closing comment on "([^"]*)" after its newest commit$`, c.theMayorWroteAClosingComment)
 	ctx.Given(`^mw next is run with --rescoped-by-mayor "([^"]*)"$`, c.mwNextIsRunRescoped)
+	ctx.Given(`^mw next is run with --met-by-mayor "([^"]*)"$`, c.mwNextIsRunMetByMayor)
+	ctx.Then(`^the story "([^"]*)" carries exactly (\d+) comments? quoting: (.+)$`, c.theStoryCarriesExactlyCommentsQuoting)
+	ctx.Then(`^the close-out failed saying: (.+)$`, c.theCloseOutFailedSaying)
 }
 
 // theStoryWasClaimedWithTheAcceptance gives the story the acceptance and records
@@ -47,5 +53,44 @@ func (c *nextContext) theMayorWroteAClosingComment(id string) error {
 // mwNextIsRunRescoped is the flag the Mayor adds to mw next.
 func (c *nextContext) mwNextIsRunRescoped(why string) error {
 	c.rescopedBy = why
+	return nil
+}
+
+// mwNextIsRunMetByMayor is the flag the Mayor adds to mw next once he has run a
+// criterion the Builder called unmet himself (mw-gq6.1378); a blank run is still
+// the flag given.
+func (c *nextContext) mwNextIsRunMetByMayor(run string) error {
+	c.metBy, c.metByGiven = run, true
+	return nil
+}
+
+// theStoryCarriesExactlyCommentsQuoting counts the comments of the story that
+// hold the words.
+func (c *nextContext) theStoryCarriesExactlyCommentsQuoting(id, count, words string) error {
+	want, err := strconv.Atoi(count)
+	if err != nil {
+		return err
+	}
+	words = strings.TrimSpace(words)
+	got := 0
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, words) {
+			got++
+		}
+	}
+	if got != want {
+		return fmt.Errorf("expected %d comment(s) on %s quoting %q, got %d: %q", want, id, words, got, c.tracker.Comments(id))
+	}
+	return nil
+}
+
+// theCloseOutFailedSaying reads the error the close-out returned.
+func (c *nextContext) theCloseOutFailedSaying(want string) error {
+	if c.err == nil {
+		return fmt.Errorf("expected the close-out to fail saying %q, it reported no failure", want)
+	}
+	if !strings.Contains(c.err.Error(), strings.TrimSpace(want)) {
+		return fmt.Errorf("expected the failure to hold %q, got %v", want, c.err)
+	}
 	return nil
 }

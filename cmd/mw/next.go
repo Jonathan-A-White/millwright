@@ -30,6 +30,7 @@ func newNextCmd() *cobra.Command {
 	var capOverride int
 	var heartbeat bool
 	var rescoped string
+	var metBy string
 
 	cmd := &cobra.Command{
 		Use:   "next <story-id>",
@@ -75,7 +76,12 @@ func newNextCmd() *cobra.Command {
 			"Mayor re-scoped it on purpose after the work was done, reworded the criteria and wrote a closing comment of\n" +
 			"his own, run `mw next <story> --no-dispatch --rescoped-by-mayor \"<why>\"`: the why is written on the bead\n" +
 			"(RESCOPED-BY-MAYOR:, with the acceptance it answers; who and when are the comment's own) and the story\n" +
-			"lands. A change no closing comment of the Mayor's answers, or one made after the re-scope, is still refused.",
+			"lands. A change no closing comment of the Mayor's answers, or one made after the re-scope, is still refused.\n\n" +
+			"A story whose Builder's closing comment says an acceptance criterion is not met, and which the Mayor (or the\n" +
+			"Tester) ran himself and found met, lands without the acceptance changing: `mw next <story> --no-dispatch\n" +
+			"--met-by-mayor \"<what he ran and what it printed>\"` writes a MET-BY-MAYOR: comment on the bead naming the\n" +
+			"criteria, the run and the time, and that comment answers the closing comment it follows. A closing comment a\n" +
+			"Builder writes after it is not answered by it; a blank run is refused.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("rescoped-by-mayor") && strings.TrimSpace(rescoped) == "" {
@@ -339,6 +345,8 @@ func newNextCmd() *cobra.Command {
 				RetryFromBranch: fromBranch,
 				HasGristTestKey: hostHasGristTestKey,
 				RescopedByMayor: rescoped,
+				MetByMayor:      metBy,
+				MetByMayorGiven: cmd.Flags().Changed("met-by-mayor"),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
@@ -350,6 +358,8 @@ func newNextCmd() *cobra.Command {
 		"how many sessions may run at once when dispatching, instead of what the config file says")
 	cmd.Flags().StringVar(&rescoped, "rescoped-by-mayor", "",
 		"the Mayor re-scoped this story after its claim and wrote a closing comment since: record this why on the bead and let the changed acceptance through")
+	cmd.Flags().StringVar(&metBy, "met-by-mayor", "",
+		"the Mayor ran an acceptance criterion the Builder's closing comment calls not met and it passed: record what he ran and what it printed on the bead, which answers that comment")
 	cmd.Flags().BoolVar(&heartbeat, "heartbeat", false,
 		"renew the story's claim's lease while its session runs, until the session ends; run beside a dispatched session's harness, not by hand")
 	return cmd
