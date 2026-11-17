@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
 // Proc reads the load average of the machine it runs on.
@@ -30,6 +31,11 @@ type Proc struct {
 	SwapSample time.Duration
 	// Sleep is how the swap sample waits out SwapSample; nil is time.Sleep.
 	Sleep func(time.Duration)
+	// DriveFile is the report the Windows task writes into a WSL host of the
+	// free space on its drive; empty is doctor.WSLDriveFreeFile under the home
+	// directory. Now is the clock that report's age is read on; nil is time.Now.
+	DriveFile string
+	Now       func() time.Time
 }
 
 var _ application.HostLoad = Proc{}
@@ -58,6 +64,7 @@ func (p Proc) Load(_ context.Context) (application.LoadReading, error) {
 	}
 	reading := application.LoadReading{Load: load, Cores: cores}
 	reading.MemAvailableMB, reading.MemKnown = p.memAvailableMB()
+	reading.DriveName, reading.DriveFreeBytes, reading.DriveKnown = p.driveFree()
 	reading.SwapInKBPerS, reading.SwapOutKBPerS, reading.SwapKnown = p.swapRate()
 	return reading, nil
 }
@@ -144,4 +151,24 @@ func (p Proc) memAvailableMB() (int64, bool) {
 		return kb / 1024, true
 	}
 	return 0, false
+}
+
+// driveFree is the Windows drive's free space from the task's report, and
+// whether there was a current one: no report (the host is not WSL), one that
+// cannot be read, or one older than doctor.WSLDriveFreeMaxAge (the task has
+// stopped) leaves it unknown rather than failing the whole reading
+// (mw-gq6.1381).
+func (p Proc) driveFree() (name string, free int64, known bool) {
+	drive, free, at, ok := doctor.ReadWSLDriveFree(p.DriveFile)
+	if !ok {
+		return "", 0, false
+	}
+	now := time.Now
+	if p.Now != nil {
+		now = p.Now
+	}
+	if now().Sub(at) > doctor.WSLDriveFreeMaxAge {
+		return "", 0, false
+	}
+	return drive, free, true
 }

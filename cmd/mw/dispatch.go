@@ -301,7 +301,9 @@ func newDispatchCmd() *cobra.Command {
 			"after the network is unmetered takes it. Any change of the network's state is one event.\n\n" +
 			"A host starts a story only while it has room (mw-t0z3fu.1), whatever host the story names: its\n" +
 			"1-minute load under room_load_per_core of a core each (default 1.0) and at least room_min_free_mb\n" +
-			"of memory available (default 2048), both under the config file's [dispatch] table. The cap is still\n" +
+			"of memory available (default 2048), both under the config file's [dispatch] table. On a WSL host\n" +
+			"it also needs min_drive_free_gb (default 10, 0 is off) free on the Windows drive holding the\n" +
+			"vhdx, read from the report the Windows task writes (mw host wsl-flag --install-line). The cap is still\n" +
 			"the ceiling. A story held back stays ready and claimed by nobody; a host that loses its room, and one\n" +
 			"that has it back, are each one event, and mw status says why. A load or memory that cannot be read\n" +
 			"holds nothing back.\n\n" +
@@ -459,7 +461,7 @@ func newDispatchCmd() *cobra.Command {
 				PushWait:      closePushWait(),
 				VaultDir:      dir,
 				Load:          hostload.Proc{},
-				Room:          application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
+				Room:          roomLimits(room),
 				Grist:         hostGristRoom(room),
 				Rigs:          rigs,
 				Changes:       worktrees,
@@ -546,4 +548,13 @@ func newDispatchCmd() *cobra.Command {
 	cmd.Flags().IntVar(&capOverride, "cap", 0,
 		"how many sessions may run at once, instead of what the config file says")
 	return cmd
+}
+
+// roomLimits is the config file's room as dispatch and status judge a host by:
+// min_drive_free_gb = 0 turns the Windows drive's guard off (mw-gq6.1381).
+func roomLimits(room config.RoomSettings) application.RoomLimits {
+	return application.RoomLimits{
+		LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB,
+		MinDriveFreeGB: room.MinDriveFreeGB, NoDriveGuard: room.MinDriveFreeGB == 0,
+	}
 }

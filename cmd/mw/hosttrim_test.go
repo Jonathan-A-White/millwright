@@ -133,3 +133,80 @@ func TestHostTrimSetupCheckPassesWhenEveryWSLHostHasTheDropIn(t *testing.T) {
 		t.Fatalf("expected a pass with nothing pending, got %v %q", err, out)
 	}
 }
+
+// pasteBlocks are the fenced blocks of what a command printed, each as the
+// lines between its fences.
+func pasteBlocks(out string) [][]string {
+	var blocks [][]string
+	var current []string
+	in := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "```") {
+			if in {
+				blocks = append(blocks, current)
+				current = nil
+			}
+			in = !in
+			continue
+		}
+		if in {
+			current = append(current, line)
+		}
+	}
+	return blocks
+}
+
+// mw-gq6.1381: the Governor copies the whole block, so the drop-in is ONE line
+// alone in a fenced block, with no prompt and no line break inside it.
+func TestHostTrimSetupPrintsTheDropInAsOneLineAloneInAFencedBlock(t *testing.T) {
+	hostTrimStates(t, "laptop", map[string]string{"laptop": doctor.WSLTrimHasDropIn})
+	out, err := runMw(t, "host", "trim-setup")
+	if err != nil {
+		t.Fatalf("mw host trim-setup failed: %v\n%s", err, out)
+	}
+	blocks := pasteBlocks(out)
+	if len(blocks) != 1 {
+		t.Fatalf("want one fenced block to copy, got %d in:\n%s", len(blocks), out)
+	}
+	if len(blocks[0]) != 1 || blocks[0][0] != doctor.WSLTrimPowerShellLine() {
+		t.Errorf("the block should hold the PowerShell line alone, got %q", blocks[0])
+	}
+	if strings.Contains(doctor.WSLTrimPowerShellLine(), "\n") || strings.HasPrefix(blocks[0][0], "PS ") || strings.HasPrefix(blocks[0][0], ">") {
+		t.Errorf("the line holds a line break or a prompt: %q", blocks[0][0])
+	}
+}
+
+// The sweep of the other `mw host` subcommands that print a Windows paste:
+// wsl-flag --install-line prints each paste as one line alone in a fenced block;
+// giveway's pastes are a script of several lines by design (each begins with a
+// comment saying what it does), so they are held to no prompt on any line.
+func TestTheOtherHostPastesCarryNoPromptAndWslFlagsIsOneLine(t *testing.T) {
+	out, err := runMw(t, "host", "wsl-flag", "--install-line", "--inline")
+	if err != nil {
+		t.Fatalf("mw host wsl-flag --install-line --inline failed: %v\n%s", err, out)
+	}
+	blocks := pasteBlocks(out)
+	if len(blocks) != 2 {
+		t.Fatalf("want the install and the way back as two fenced blocks, got %d:\n%.300s", len(blocks), out)
+	}
+	for _, block := range blocks {
+		if len(block) != 1 || strings.HasPrefix(block[0], "PS ") || strings.HasPrefix(block[0], ">") {
+			t.Errorf("a wsl-flag paste must be one line with no prompt, got %d lines starting %.40q", len(block), block)
+		}
+	}
+	for _, args := range [][]string{
+		{"host", "giveway", "--install-line", "--inline"},
+		{"host", "giveway", "--uninstall-line"},
+		{"host", "giveway", "--mode-line", "freeze"},
+	} {
+		out, err := runMw(t, args...)
+		if err != nil {
+			t.Fatalf("mw %s failed: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, "PS ") || strings.HasPrefix(line, "> ") || strings.Contains(line, "```") {
+				t.Errorf("mw %s: a line reads as a prompt or a fence: %.60q", strings.Join(args, " "), line)
+			}
+		}
+	}
+}

@@ -366,6 +366,25 @@ func (w *WSLDriveFree) path() (string, error) {
 	return filepath.Join(home, WSLDriveFreeDir, WSLDriveFreeFile), nil
 }
 
+// ReadWSLDriveFree reads the Windows task's report at path, or under the home
+// directory when path is empty: the drive, its free bytes and when the task
+// wrote it. ok is false when there is no report, which is what a host that is
+// not WSL has, or one that is not '<drive> <free bytes> <unix seconds>'.
+func ReadWSLDriveFree(path string) (drive string, free int64, at time.Time, ok bool) {
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", 0, time.Time{}, false
+		}
+		path = filepath.Join(home, WSLDriveFreeDir, WSLDriveFreeFile)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, time.Time{}, false
+	}
+	return parseDriveFree(string(raw))
+}
+
 // parseDriveFree reads "<drive> <free bytes> <unix seconds>".
 func parseDriveFree(text string) (drive string, free int64, at time.Time, ok bool) {
 	fields := strings.Fields(text)

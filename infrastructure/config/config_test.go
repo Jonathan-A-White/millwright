@@ -2314,6 +2314,27 @@ func TestRoomIsReadFromTheTable(t *testing.T) {
 	}
 }
 
+// mw-gq6.1381: the Windows drive's floor is 10 GB until the table says another,
+// and 0 turns the guard off.
+func TestMinDriveFreeGBIsReadFromTheTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	if got, err := config.Room(); err != nil || got.MinDriveFreeGB != 10 {
+		t.Fatalf("expected 10 GB by default, got %+v, %v", got, err)
+	}
+	for said, want := range map[string]int64{"15": 15, "0": 0} {
+		writeConfig(t, "[dispatch]\nmin_drive_free_gb = "+said+"\n")
+		if got, err := config.Room(); err != nil || got.MinDriveFreeGB != want {
+			t.Errorf("min_drive_free_gb = %s: got %+v, %v, want %d", said, got, err, want)
+		}
+	}
+	for _, bad := range []string{"min_drive_free_gb = -1\n", "min_drive_free_gb = lots\n", "min_drive_free_gb = 1.5\n"} {
+		writeConfig(t, "[dispatch]\n"+bad)
+		if _, err := config.Room(); err == nil || !strings.Contains(err.Error(), "min_drive_free_gb") {
+			t.Errorf("expected %q to be refused naming the key, got %v", bad, err)
+		}
+	}
+}
+
 func TestGristRoomIsReadFromTheDispatchTable(t *testing.T) {
 	writeConfig(t, "host = \"laptop\"\n")
 	got, err := config.Room()
