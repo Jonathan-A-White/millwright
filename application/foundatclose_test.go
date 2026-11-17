@@ -692,3 +692,57 @@ func TestFoundAtCloseFindingNamingOnlyTheReportingRigsFilesKeepsItsRig(t *testin
 		t.Errorf("expected rig=lampas files=package.json branch=main, got %s", got.Summary())
 	}
 }
+
+// A bare file name that a path with a folder in the same finding ends with is
+// that path's own second mention, so the files key keeps the path alone; a bare
+// name named alone stays (mw-gq6.1415, seen on mw-indx1x6.92).
+func TestFoundAtCloseFilesDropsABareNameItsFullPathNames(t *testing.T) {
+	cases := []struct {
+		name, finding, want string
+	}{
+		{
+			"the path then its bare name",
+			"The step reads the wrong table (features/steps/sermons.steps.tsx:87) and again in sermons.steps.tsx:246. AC: go test ./application passes. By design? no",
+			"features/steps/sermons.steps.tsx",
+		},
+		{
+			"the bare name first",
+			"The step in sermons.steps.tsx:246 matches twice, as in features/steps/sermons.steps.tsx:87. AC: go test ./application passes. By design? no",
+			"features/steps/sermons.steps.tsx",
+		},
+		{
+			"a bare name alone",
+			"The reader drops a row (Reader.tsx:12). AC: go test ./application passes. By design? no",
+			"Reader.tsx",
+		},
+		{
+			"a bare name of another file stays",
+			"The step reads the wrong table (features/steps/sermons.steps.tsx:87) and Reader.tsx:12 too. AC: go test ./application passes. By design? no",
+			"features/steps/sermons.steps.tsx,Reader.tsx",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			filed := aFindingOfAnotherRigRun(t, c.finding)
+			if len(filed) != 1 {
+				t.Fatalf("expected 1 bug filed, got %d", len(filed))
+			}
+			if got := filed[0].Files; got != c.want {
+				t.Errorf("expected the files key %q, got %q", c.want, got)
+			}
+		})
+	}
+}
+
+// The rig a finding is about is read from the same list of files, so a bare name
+// beside the full path of another rig's file does not make the finding's files
+// mixed (mw-gq6.1415).
+func TestFoundAtCloseRigReadingDropsABareNameItsFullPathNames(t *testing.T) {
+	filed := aFindingOfAnotherRigRun(t, "Cairn drops a row (Cairn/src/sermons.steps.tsx:87) and again in sermons.steps.tsx:246. AC: go test ./application passes. By design? no")
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d", len(filed))
+	}
+	if got := filed[0]; got.Rig != "cairn" || got.Files != "src/sermons.steps.tsx" {
+		t.Errorf("expected rig=cairn files=src/sermons.steps.tsx, got rig=%q files=%q", got.Rig, got.Files)
+	}
+}

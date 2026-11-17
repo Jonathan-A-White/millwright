@@ -309,12 +309,35 @@ func foundPaths(text string) []string {
 		seen[path] = true
 		paths = append(paths, path)
 	}
-	return paths
+	return foundDropBare(paths)
 }
 
-// foundFiles is the files key of a bug filed for lines: the files they name,
-// else finder, the files key of the story that found it.
-func foundFiles(lines []string, finder string) string {
+// foundDropBare takes out of paths each bare name (no folder) that another path
+// of the list, one with a folder, ends with: the second mention of a file
+// (features/steps/a.tsx, then a.tsx:246) is that path, not a file at the root. A
+// bare name no path ends with stays.
+func foundDropBare(paths []string) []string {
+	kept := make([]string, 0, len(paths))
+	for _, path := range paths {
+		bare := false
+		if !strings.Contains(path, "/") {
+			for _, other := range paths {
+				if strings.HasSuffix(other, "/"+path) {
+					bare = true
+					break
+				}
+			}
+		}
+		if !bare {
+			kept = append(kept, path)
+		}
+	}
+	return kept
+}
+
+// foundLinesPaths are the files the lines name, each once, in order, with a bare
+// name dropped when a path of the lines ends with it.
+func foundLinesPaths(lines []string) []string {
 	var paths []string
 	seen := map[string]bool{}
 	for _, line := range lines {
@@ -325,6 +348,13 @@ func foundFiles(lines []string, finder string) string {
 			}
 		}
 	}
+	return foundDropBare(paths)
+}
+
+// foundFiles is the files key of a bug filed for lines: the files they name,
+// else finder, the files key of the story that found it.
+func foundFiles(lines []string, finder string) string {
+	paths := foundLinesPaths(lines)
 	if len(paths) == 0 {
 		return finder
 	}
@@ -380,16 +410,7 @@ func (n Next) foundPlace(lines []string, finder domain.Path, beads []StoryDetail
 		add(merged.Rig)
 	}
 
-	var paths []string
-	seen := map[string]bool{}
-	for _, line := range lines {
-		for _, path := range foundPaths(line) {
-			if !seen[path] {
-				seen[path] = true
-				paths = append(paths, path)
-			}
-		}
-	}
+	paths := foundLinesPaths(lines)
 	rigs := map[string]bool{}
 	own := 0
 	stripped := make([]string, len(paths))
