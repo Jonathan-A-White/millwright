@@ -97,6 +97,14 @@ func RestartFactoryUnits(ctx context.Context, units UnitRestarter, rig string) (
 	if units == nil || rig != FactoryRig {
 		return nil, nil
 	}
+	return restartFactoryUnits(ctx, units, "", units.TryRestart)
+}
+
+// restartFactoryUnits is RestartFactoryUnits for a units that is not nil and a
+// rig that is the factory rig: it leaves the unit named skip alone (the self-update
+// leaves the follower to a later tick while a model run is under way,
+// mw-gq6.1388) and restarts each other through try.
+func restartFactoryUnits(ctx context.Context, units UnitRestarter, skip string, try func(ctx context.Context, unit string) (bool, error)) (notes, failed []string) {
 	stale, err := units.ReloadStale(ctx)
 	switch {
 	case err != nil:
@@ -114,7 +122,10 @@ func RestartFactoryUnits(ctx context.Context, units UnitRestarter, rig string) (
 		notes = append(notes, fmt.Sprintf("ran systemctl daemon-reload: %s had changed on disk and are loaded now", strings.Join(sysStale, ", ")))
 	}
 	for _, unit := range FactoryUnits {
-		restarted, err := units.TryRestart(ctx, unit)
+		if unit == skip {
+			continue
+		}
+		restarted, err := try(ctx, unit)
 		switch {
 		case err != nil:
 			note := fmt.Sprintf("%s could not be restarted on the new build and still runs the old mw: %s", unit, firstLine(err.Error()))
