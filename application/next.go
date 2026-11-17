@@ -284,11 +284,8 @@ type Next struct {
 	// MainAloneBound is how long that run on the target branch may take before
 	// it is cut and its tests are labelled "not run" (mw-gq6.929). Zero is
 	// DefaultMainAloneBound.
-	MainAloneBound time.Duration
-	// MainAloneSlotWait is how long that run may wait for one of the host's
-	// test-runner slots, a wait the bound does not count (mw-gq6.1421). Zero is
-	// DefaultMainAloneSlotWait.
-	MainAloneSlotWait time.Duration
+	MainAloneBound    time.Duration
+	MainAloneSlotWait time.Duration // the most that run waits for a test-runner slot, not in the bound; 0 is DefaultMainAloneSlotWait (mw-gq6.1421)
 
 	// CrossSlot is the rig's merge slot across hosts, on the beads server both
 	// hosts share, taken inside Slot so that the other host's close-outs wait
@@ -646,11 +643,8 @@ type NextReport struct {
 	MainRed *MainRed
 	// MainLabels is the note that says of each failing test whether it fails on
 	// main too (mw-gq6.929); empty when no check of main alone was made.
-	MainLabels string
-	// MainNotChecked is why the failing tests were not run alone on main, when
-	// they were not (mw-gq6.1421); a refusal for failing tests then opens with
-	// "main not checked", so that it is not read as the story's own fault.
-	MainNotChecked string
+	MainLabels     string
+	MainNotChecked string // why the failing tests were not run alone on main, if so (mw-gq6.1421)
 	// HandedBack says the merge slot was still held at the overall most a
 	// close-out waits, and the story was handed back for its close-out alone
 	// (RunCloseOutAgain), its claim, worktree and branch kept (mw-gq6.467).
@@ -3422,9 +3416,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	if (reason == ReasonTestsFail || reason == ReasonMergedTestsFail) && c.gate.timeout {
 		why += " (" + TimeoutUnderLoadNote(n.Host, c.gate.at) + ")"
 	}
-	if (reason == ReasonTestsFail || reason == ReasonMergedTestsFail) && report.MainNotChecked != "" {
-		why = fmt.Sprintf("%s (%s): %s", MainNotCheckedWords, report.MainNotChecked, why)
-	}
+	why = report.mainNotCheckedWhy(reason, why)
 	report.Why, report.Reason = why, reason
 	n.recordBenchmark(ctx, c, report, false)
 	giveBack := false

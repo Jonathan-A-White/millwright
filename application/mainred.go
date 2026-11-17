@@ -387,6 +387,16 @@ func labelNotRun(report *NextReport, tests []string, why string) {
 	labelMain(report, mainNotRunNote(tests, why))
 }
 
+// mainNotCheckedWhy is why with "main not checked (<reason>)" before it when
+// the stop is for failing tests and the check of main alone was not made, so
+// that the refusal's first words say the story's fault is not told (mw-gq6.1421).
+func (r *NextReport) mainNotCheckedWhy(reason Reason, why string) string {
+	if (reason == ReasonTestsFail || reason == ReasonMergedTestsFail) && r.MainNotChecked != "" {
+		return fmt.Sprintf("%s (%s): %s", MainNotCheckedWords, r.MainNotChecked, why)
+	}
+	return why
+}
+
 // mainAloneRun names the run of the failing tests on main alone in the waits for a
 // calm host and the notes that come of them.
 const mainAloneRun = "the run of the failing tests on main alone"
