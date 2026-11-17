@@ -11,7 +11,7 @@ Its ages are PROVISIONAL, for the Governor to confirm (mw-gq6.1427).
 | --- | --- | --- | --- |
 | 1 | A story's worktree under `.mw-worktrees/<story>` beside a rig, and its branch `mw/<story>` (a branch whose worktree is already gone too) | The story is **closed** (landed, superseded or abandoned) for over an hour, the worktree has no uncommitted change and no process in it, and every commit of the branch is on main or pushed to the branch's own remote ref | `git worktree remove` (never `--force`), then delete the branch |
 | 2 | A `.mw-landing-*` directory in the home directory or beside a rig | Over a day old, and the doctor's rule for a spare landing holds: clean, HEAD on main, no process in it | Delete the directory (the doctor's `stale-landings` check does the same for these; the sweep is the rolling one) |
-| 3 | A directory of the vault's `runs/` | Its newest file is 14 days old or more (`host_sweep_runs_days`, `MW_HOST_SWEEP_RUNS_DAYS`), and its name is not a story that is still open on this host | Delete the directory, whole |
+| 3 | A directory of the vault's `runs/` | Its newest file is 14 days old or more (`host_sweep_runs_days`, `MW_HOST_SWEEP_RUNS_DAYS`), and its name is not a story with a worktree here that is not closed | Delete the directory, whole |
 | 4 | `node_modules` and `ms-playwright` (the Playwright browsers) inside a worktree | The story is closed, and the worktree has no uncommitted change and no process in it. Row 1 takes them with the worktree; this row is for a worktree row 1 kept because of a commit not on main | Delete those directories only |
 | 5 | A `beads-*-aside-*` directory in the home directory (what `mw home move` sets aside) | Its newest file is 7 days old or more (`host_sweep_aside_days`, `MW_HOST_SWEEP_ASIDE_DAYS`) | Delete the directory, whole |
 
@@ -51,5 +51,5 @@ to have the timer list once more.
 `runs/` is tracked in the vault's git, and a directory's age is read from its
 files' times on this host, so a freshly cloned vault has none old. A removed run
 shows as a deletion in the vault's git; the vault's sync keeps or commits it as
-it does any change. A run's story is not asked of the tracker: one with no file
-written for 14 days is over.
+it does any change. A run is kept only when its name is a story with a worktree here
+that is not closed; no other story is asked of the tracker for a run.
