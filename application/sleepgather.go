@@ -151,12 +151,15 @@ func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundl
 	reportBudget := SleepBudgetFor(deep, SleepReportFile)
 	reportText, reportCut := cutReport(report, reportBudget)
 	bundle = append(bundle, SleepPart{Name: "report", File: SleepReportFile, Text: reportText, Budget: reportBudget, Cut: reportCut})
-	bundle = append(bundle, cutPart(deep, "folds", SleepFoldsFile, g.folds(ctx, dump.String())))
+	bundle = append(bundle, cutBlocks(deep, "folds", SleepFoldsFile, "list", g.folds(ctx, dump.String())))
 	// The held roots that live beads wait behind (mw stuck): the pass names
 	// them in its summary (mw-gq6.621).
 	// With them, the beads below the priority of what waits on them
 	// (mw-gq6.623), read from the same dump.
-	bundle = append(bundle, cutPart(deep, "stuck", SleepStuckFile, withNewline(g.said(g.Mw(ctx, "stuck")))+inversionsOfDump(dump.String())))
+	bundle = append(bundle, cutBlocks(deep, "stuck", SleepStuckFile, "list", []sleepBlock{
+		{name: "the held roots", body: withNewline(g.said(g.Mw(ctx, "stuck")))},
+		{name: "the priority inversions", body: inversionsOfDump(dump.String())},
+	}))
 	bundle = append(bundle, g.needsYou(ctx, deep))
 	evidence, candidates := g.verifyParts(ctx, window, now)
 	bundle = append(bundle, evidence, candidates)
@@ -392,10 +395,10 @@ func inversionsOfDump(dump string) string {
 // rigs' name order: the groups of bugs the Mayor folds in the morning
 // (mw-gq6.607). A rig with no such bug adds nothing; a list that cannot be read
 // is said so under the rig's name.
-func (g SleepGather) folds(ctx context.Context, dump string) string {
+func (g SleepGather) folds(ctx context.Context, dump string) []sleepBlock {
 	lines, err := ReadTriageLines(strings.NewReader(dump))
 	if err != nil {
-		return fmt.Sprintf("(the dump could not be read for the bugs: %v)\n", err)
+		return []sleepBlock{{body: fmt.Sprintf("(the dump could not be read for the bugs: %v)\n", err)}}
 	}
 	withBugs := map[string]bool{}
 	for _, l := range lines {
@@ -406,18 +409,65 @@ func (g SleepGather) folds(ctx context.Context, dump string) string {
 		}
 	}
 	if len(withBugs) == 0 {
-		return "(no rig has an open or held bug)\n"
+		return []sleepBlock{{body: "(no rig has an open or held bug)\n"}}
 	}
 	rigs := make([]string, 0, len(withBugs))
 	for rig := range withBugs {
 		rigs = append(rigs, rig)
 	}
 	sort.Strings(rigs)
-	var out strings.Builder
+	blocks := make([]sleepBlock, 0, len(rigs))
 	for _, rig := range rigs {
-		out.WriteString("## " + rig + "\n" + withNewline(g.said(g.Mw(ctx, "fold", rig))) + "\n")
+		blocks = append(blocks, sleepBlock{name: rig, head: "## " + rig + "\n", body: withNewline(g.said(g.Mw(ctx, "fold", rig))) + "\n"})
 	}
-	return out.String()
+	return blocks
+}
+
+// sleepBlock is one item of a part made of several: head is the line that names
+// it, which a cut never takes, and body what follows it, which a cut may. name
+// is how the cut note calls it, "" for a block that is the part's only one.
+type sleepBlock struct {
+	name, head, body string
+}
+
+// cutBlocks is the part held in file, made of blocks and cut to its budget with
+// a share of the room to each block's body (waterFill), so the last of them is
+// cut as much as the first and none is lost whole; a block that is cut says so
+// in its own line, and the part's note names it. what is the word the line uses
+// for a block ("list"). A part that fits is its blocks as they are.
+func cutBlocks(deep bool, name, file, what string, blocks []sleepBlock) SleepPart {
+	budget := SleepBudgetFor(deep, file)
+	var whole strings.Builder
+	heads := 0
+	wants := make([]int, len(blocks))
+	for n, b := range blocks {
+		whole.WriteString(b.head + b.body)
+		heads += len(b.head)
+		wants[n] = len(b.body)
+	}
+	if whole.Len() <= budget {
+		return SleepPart{Name: name, File: file, Text: whole.String(), Budget: budget}
+	}
+	shares := waterFill(budget-heads, wants)
+	var out strings.Builder
+	var notes []string
+	for n, b := range blocks {
+		cut, note := cutLinesOf(b.body, shares[n], what)
+		out.WriteString(b.head + cut)
+		if note != "" {
+			label := b.name
+			if label == "" {
+				label = "the part"
+			}
+			notes = append(notes, label+" "+note)
+		}
+	}
+	if out.Len() > budget {
+		// too many blocks for a note each: the part is cut as any text is.
+		cut, note := cutLines(whole.String(), budget)
+		return SleepPart{Name: name, File: file, Text: cut, Budget: budget, Cut: note}
+	}
+	return SleepPart{Name: name, File: file, Text: out.String(), Budget: budget, Cut: strings.Join(notes, "; ")}
 }
 
 // cutPart is the part held in file, cut to its budget by lines.
@@ -431,6 +481,11 @@ func cutPart(deep bool, name, file, text string) SleepPart {
 // ending in a line that says what was cut; note says it too, and is "" when
 // nothing was cut.
 func cutLines(text string, budget int) (cut, note string) {
+	return cutLinesOf(text, budget, "part")
+}
+
+// cutLinesOf is cutLines for text that is a what ("part", "list") of its own.
+func cutLinesOf(text string, budget int, what string) (cut, note string) {
 	if len(text) <= budget {
 		return text, ""
 	}
@@ -450,7 +505,7 @@ func cutLines(text string, budget int) (cut, note string) {
 	}
 	note = fmt.Sprintf("was %s bytes, cut to its first %s bytes (%d of %d lines)",
 		Thousands(len(text)), Thousands(len(head)), strings.Count(head, "\n"), strings.Count(text, "\n"))
-	return head + "(mw cut this part: it " + note + ")\n", note
+	return head + "(mw cut this " + what + ": it " + note + ")\n", note
 }
 
 // sleepLine is one bead of the dump as the agent reads it: the fields the rule

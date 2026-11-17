@@ -152,6 +152,76 @@ func TestAFoldListThatCannotBeReadIsSaidSoAndThePassGoesOn(t *testing.T) {
 	}
 }
 
+func TestAFoldListOverItsBudgetKeepsALinePerRig(t *testing.T) {
+	g := gatherFixture()
+	var dump []string
+	for n := 0; n < 30; n++ {
+		dump = append(dump, fmt.Sprintf(`{"id":"r%02d-1","type":"bug","status":"open","rig":"rig%02d"}`, n, n))
+	}
+	g.Dump = func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w, strings.Join(dump, "\n")+"\n")
+		return err
+	}
+	g.Mw = func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "fold" {
+			var b strings.Builder
+			b.WriteString(args[1] + ": 40 groups of 3 or more\n")
+			for i := 0; i < 40; i++ {
+				fmt.Fprintf(&b, "screen:%s group %02d of its bugs (3)\n", args[1], i)
+			}
+			return b.String(), nil
+		}
+		return "mw " + strings.Join(args, " ") + "\n", nil
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)[application.SleepFoldsFile]
+	if len(part.Text) > part.Budget {
+		t.Errorf("the folds are %d bytes, over their budget of %d", len(part.Text), part.Budget)
+	}
+	for n := 0; n < 30; n++ {
+		rig := fmt.Sprintf("rig%02d", n)
+		if !strings.Contains(part.Text, "## "+rig+"\n") {
+			t.Errorf("folds do not name %s: the last rigs were cut from the head", rig)
+		}
+		if !strings.Contains(part.Cut, rig+" was ") {
+			t.Errorf("the cut %q does not say it cut %s's list", part.Cut, rig)
+		}
+	}
+	if strings.Count(part.Text, "(mw cut ") < 30 {
+		t.Errorf("folds say %d cuts, want one for each of 30 rigs", strings.Count(part.Text, "(mw cut "))
+	}
+}
+
+func TestAStuckPartOverItsBudgetKeepsTheInversionsBesideTheRoots(t *testing.T) {
+	g := gatherFixture()
+	g.Dump = func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w,
+			`{"id":"mw-a.1","type":"task","status":"open","priority":1,"deps":["mw-a.2"]}`+"\n"+
+				`{"id":"mw-a.2","type":"task","status":"open","priority":2}`+"\n")
+		return err
+	}
+	g.Mw = func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "stuck" {
+			return strings.Repeat("mw-a.9 (iced): 3 behind: mw-a.1 mw-a.2 mw-a.3\n", 400), nil
+		}
+		return "", nil
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)[application.SleepStuckFile]
+	if len(part.Text) > part.Budget || part.Cut == "" {
+		t.Fatalf("stuck is %d bytes of %d, cut %q: want it cut to fit", len(part.Text), part.Budget, part.Cut)
+	}
+	if !strings.Contains(part.Text, "mw-a.2 P2→P1") {
+		t.Errorf("stuck = %q, want the inversions kept when the roots are over the budget", part.Text)
+	}
+}
+
 func TestSundaysBundleReadsThirtyDaysOfReportAndAWeekOfRuns(t *testing.T) {
 	bundle, err := gatherFixture().Gather(context.Background(), application.SleepWindow{Date: "2026-10-18", Deep: true})
 	if err != nil {
