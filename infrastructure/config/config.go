@@ -24,6 +24,7 @@
 //	grist_test_key_file = "/home/jwhite/.config/mw/grist-test.key"   # what mw grist smoke sends as
 //	google_client_file = "/home/jwhite/.config/mw/google-client.json" # the Desktop OAuth client mw google link signs in with
 //	ghost_url = "https://allmymind.org"  # the blog mw ghost draft pushes drafts to
+//	blog_script_hosts = ["allmymind.org", "cdn.jsdelivr.net/ghost/"]  # the hosts a page of the blog may load a script or iframe from
 //	gemini_model = "gemini-3.1-flash-lite-image"  # the Nano Banana model mw image makes pictures with
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
@@ -914,6 +915,33 @@ func GhostURL() (string, error) {
 		return "", fmt.Errorf("ghost_url is %q: it must be an https address", said)
 	}
 	return said, nil
+}
+
+// DefaultBlogScriptHosts is the list of hosts a page of the blog may load a script
+// or iframe from when nothing says another: the blog's own domain and its
+// subdomains, and jsDelivr for Ghost's own /ghost/ paths only.
+var DefaultBlogScriptHosts = []string{"allmymind.org", "cdn.jsdelivr.net/ghost/"}
+
+// BlogScriptHosts reports the hosts the script-watch job allows a page of the
+// blog to load a script or iframe from, read from the root-table
+// `blog_script_hosts` key of ~/.config/mw/config.toml, as
+// `blog_script_hosts = ["allmymind.org", "cdn.jsdelivr.net/ghost/"]`, and
+// DefaultBlogScriptHosts when the file says nothing. An entry is a host, which
+// allows it and its subdomains, or a host and a path, which allows that host
+// alone and that path and what is under it.
+func BlogScriptHosts() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	said, err := valueIn(filepath.Join(home, File), "blog_script_hosts")
+	if err != nil {
+		return nil, err
+	}
+	if hosts := list(said); len(hosts) > 0 {
+		return hosts, nil
+	}
+	return append([]string(nil), DefaultBlogScriptHosts...), nil
 }
 
 // DefaultGoogleTokenFile is where mw google link keeps the refresh token, mode

@@ -88,6 +88,11 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 	} else {
 		jobs = append(jobs, job)
 	}
+	if job, err := scriptWatchSpringJob(host, out); err != nil {
+		fmt.Fprintf(out, "mw events follow: no script watch job: %v\n", err)
+	} else {
+		jobs = append(jobs, job)
+	}
 	if job, err := todoRankSpringJob(host, out); err != nil {
 		fmt.Fprintf(out, "mw events follow: no To do rank job: %v\n", err)
 	} else {
