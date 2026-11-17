@@ -132,12 +132,35 @@ func (l GoogleLink) Run(ctx context.Context) error {
 // show prints the sign-in address, then tries the browser.
 func (l GoogleLink) show(authURL string) {
 	fmt.Fprintf(l.Out, "Sign in to Google in a browser on this machine (mw asks to see your contacts, nothing else):\n\n  %s\n\n", authURL)
+	fmt.Fprintf(l.Out, "%s\n\n", GoogleFinishHint)
 	if l.Open == nil {
 		return
 	}
 	if err := l.Open(authURL); err != nil {
 		fmt.Fprintf(l.Out, "(the browser did not open: %v; open the address above by hand)\n", err)
 	}
+}
+
+// GoogleFinishHint is what mw google link says while it waits, for a browser
+// that cannot reach the loopback redirect (signed in on his phone, a tab closed).
+const GoogleFinishHint = "If the browser shows a page that cannot load, copy its whole address and run: mw google finish '<address>'"
+
+// GoogleFinish is mw google finish: it hands the address the browser ended on
+// to the mw google link still waiting on this machine, which checks the state
+// and completes the link. Deliver is the hand-over, an error when the address
+// is not the waiting sign-in's; Out is told the outcome, never the address.
+type GoogleFinish struct {
+	Deliver func(ctx context.Context, address string) error
+	Out     io.Writer
+}
+
+// Run delivers address.
+func (f GoogleFinish) Run(ctx context.Context, address string) error {
+	if err := f.Deliver(ctx, address); err != nil {
+		return fmt.Errorf("the Google sign-in was not finished: %w", err)
+	}
+	fmt.Fprintln(f.Out, "handed to the waiting mw google link, which is finishing the link now (see its output for the outcome)")
+	return nil
 }
 
 // refuse revokes a grant whose scopes are not contacts.readonly alone and

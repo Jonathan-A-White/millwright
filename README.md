@@ -2487,8 +2487,16 @@ else), so a name-only `Text:` line can find its number. It runs on the home,
 never the VPS or the phone.
 
     mw google link     # sign in through a browser on the home; keeps the token (home only)
+    mw google finish '<address>'  # finish a waiting link with the address the browser ended on
     mw google status   # 'linked (contacts.readonly)' or 'not linked', never the token
     mw google unlink   # Google revokes the token, then the token file is deleted
+
+While `mw google link` waits it says: if the browser shows a page that cannot
+load (signed in on his phone, or the tab closed), copy its whole address
+(`http://127.0.0.1:<port>/?state=...&code=...`) and run `mw google finish
+'<address>'` on the home. The waiting link checks the state and finishes; an
+address with another state is refused. `mw gdrive auth` has no listener: it
+already reads the pasted address on stdin.
 
 The sign-in uses a Desktop app OAuth client he makes in the Google Cloud
 console (People API on, consent screen published In production for personal

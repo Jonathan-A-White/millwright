@@ -252,3 +252,28 @@ func TestAGoogleGrantNeverPrintsItsToken(t *testing.T) {
 	grant := application.GoogleGrant{Refresh: fakeRefresh, Scope: application.GoogleContactsScope}
 	mustNotCarry(t, fmt.Sprint(grant), fmt.Sprintf("%v %+v %#v %s", grant, grant, grant, grant))
 }
+
+func TestGoogleFinishSaysItHandedTheAddressOnAndRefusesWhatIsNotTheSignIn(t *testing.T) {
+	var out bytes.Buffer
+	var given string
+	finish := application.GoogleFinish{Out: &out, Deliver: func(_ context.Context, address string) error {
+		given = address
+		return nil
+	}}
+	if err := finish.Run(context.Background(), "http://127.0.0.1:41813/?state=s&code=c"); err != nil {
+		t.Fatal(err)
+	}
+	if given != "http://127.0.0.1:41813/?state=s&code=c" || !strings.Contains(out.String(), "finishing the link") {
+		t.Fatalf("expected the address handed on and said so, got %q %q", given, out.String())
+	}
+	if strings.Contains(out.String(), "code=c") {
+		t.Fatalf("expected the address not repeated, got %q", out.String())
+	}
+
+	out.Reset()
+	refused := application.GoogleFinish{Out: &out, Deliver: func(context.Context, string) error { return errors.New("state does not match") }}
+	err := refused.Run(context.Background(), "http://127.0.0.1:41813/?state=x&code=c")
+	if err == nil || !strings.Contains(err.Error(), "state does not match") || out.Len() != 0 {
+		t.Fatalf("expected the refusal returned and nothing claimed, got %v %q", err, out.String())
+	}
+}
