@@ -330,6 +330,11 @@ func OpenRefusedStories(work WorkInHand, now time.Time) []OpenRefused {
 			if inProgress && run != RunBlocked {
 				run = ""
 			}
+			// A harness stop mw dispatch is to give back, its time not yet come, is
+			// waiting as it was told to, not refused (mw-gq6.1382).
+			if harnessStopPending(d.Labels, now) {
+				continue
+			}
 			touched := firstKnown(d.Updated, d.Created)
 			if run == "" || touched.IsZero() || now.Sub(touched) <= OpenRefusedAge {
 				continue
