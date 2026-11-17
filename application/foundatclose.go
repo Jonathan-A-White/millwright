@@ -43,9 +43,12 @@ var foundSectionEnders = []string{RigMemoryMarker, CommonErrorsMarker, "What's n
 // after any bullet, number or emphasis marks; ok is false when the line does
 // not start with it. Only a line that starts with the heading is a heading: a
 // mention inside a sentence, between quote marks or behind a '>' is not
-// (mw-gq6.726).
+// (mw-gq6.726). One pair of backticks wrapping the whole line is stripped
+// first, as unfenced does for the other sections, so a line written as code is
+// read as the line inside it (mw-gq6.1400); a backtick pair around the heading
+// alone, with text after it, is still a mention.
 func headingRest(line, heading string) (rest string, ok bool) {
-	text := strings.TrimLeft(domain.TrimListMarker(strings.TrimSpace(line)), "*_# \t")
+	text := strings.TrimLeft(unfenced(domain.TrimListMarker(strings.TrimSpace(line))), "*_# \t")
 	if len(text) < len(heading) || !strings.EqualFold(text[:len(heading)], heading) {
 		return "", false
 	}
