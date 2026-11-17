@@ -1773,11 +1773,8 @@ func (f *FakeTracker) note(call string) {
 	f.asked = append(f.asked, call)
 }
 
-// ReadyStories lists the stories of an epic that can be started on a host
-// right now: open, unclaimed, unblocked, and whose Path names that host. It is
-// not on application.WorkTracker (the gateway's `bd ready --parent` timed out
-// on a big parent and nothing in production called it, mw-gq6.1343); a test
-// asks it of the fake alone.
+// ReadyStories lists an epic's stories that are ready on a host. It is the fake's
+// alone: the gateway's bd ready --parent timed out and had no caller (mw-gq6.1343).
 func (f *FakeTracker) ReadyStories(_ context.Context, epicID, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
