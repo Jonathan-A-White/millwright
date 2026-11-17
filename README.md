@@ -5912,6 +5912,18 @@ state directory. With no `[watch]` table the line is `nothing to watch`. A table
 that does not say `ssh`, `host` and `outside` is refused. The memory (the time of
 the first failed check) is `memory` beside the log. See `features/watch.feature`.
 
+## mw host sweep
+
+`mw host sweep` frees a host's disk of what no live story can need: the worktree
+and branch of a closed story, caches of a closed story's kept worktree, landing
+directories a close-out could not take away, runs of the vault over 14 days old
+and `beads-*-aside-*` directories over 7. It never touches a worktree with an
+uncommitted change, a branch with a commit that is neither on main nor pushed, a
+story that is not closed, or a directory a process is running in. `--dry-run`
+lists each path with its size and the reason and changes nothing. The timer
+(`sh scripts/install-units.sh --enable mw-host-sweep`) runs it weekly and at
+boot; its first run on a host only lists. `docs/host-sweep.md` is the table.
+
 ## mw doctor
 
 ```sh

@@ -1,0 +1,37 @@
+# One `mw host sweep` run, as the user, then it exits: no daemon. For
+# `systemctl --user`; see docs/host-sweep.md.
+#
+# Started by mw-host-sweep.timer, weekly and at boot, on every host. It frees
+# what no live story can need (worktrees and branches of closed stories, old
+# landing directories, old runs, dead worktrees' node_modules and Playwright
+# caches, old beads-*-aside-* directories) so a host's disk does not fill again.
+# Its first run on a host only lists what it would remove and changes nothing;
+# every later run removes it, one line a path in the Millhand's tick log. It
+# reads the tracker for each worktree's story, so its bd needs beads.env too.
+[Unit]
+Description=Free the disk of what no live story can need (mw host sweep)
+OnFailure=mw-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+
+# Like mw-doctor.service, it runs the binary at its one fixed, known place.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+# bd reaches a served beads database through BEADS_DOLT_* in beads.env; without
+# them it makes .beads/embeddeddolt and finds nothing (mw-gq6.446). Optional, as
+# a host whose beads are embedded has none.
+EnvironmentFile=-%h/.config/mw/beads.env
+ExecStart=/usr/bin/env %h/.local/bin/mw host sweep --timer
+
+# Deleting is disk work, never a session's: stay out of its way.
+Nice=19
+IOSchedulingClass=idle
+
+# Type=oneshot has no start timeout by default, and a hung read would then
+# block every later run. The timer fires weekly, so a long run is allowed:
+# a worktree's node_modules is tens of thousands of files.
+TimeoutStartSec=30min
+
+# A squeeze on memory may kill it first, before the seat it shares the host with.
+OOMScoreAdjust=500
+MemoryMax=384M
