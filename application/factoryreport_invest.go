@@ -102,7 +102,10 @@ func readInvestShare(whole *ReportBlock, rigs []ReportBlock, starvedP1 string, t
 		Target: math.Round(target*1000) / 10, Min: math.Round(min*1000) / 10, Max: math.Round(max*1000) / 10,
 	}
 	s.Bound, s.Reason = investBound(now, before, rigs, starvedP1)
-	s.Arrow = trendIf(now.Landed > 0 && before.Landed > 0, s.Share, s.PreviousShare, false)
+	if now.Landed > 0 && before.Landed > 0 {
+		// A share is a rate in percent, so it holds level inside RateFloor points too.
+		s.Arrow = NewRateTrend(s.Share, s.PreviousShare, false)
+	}
 	s.Arrow.Verdict = ""
 	share := fraction(float64(now.Invested), float64(now.Landed))
 	switch {
