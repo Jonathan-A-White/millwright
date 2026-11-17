@@ -169,12 +169,12 @@ type heldRef struct {
 var governorsWord = regexp.MustCompile(`(?i)\b(governor|his word)\b`)
 
 // holdsOnHisWord reports whether a comment is a hold on the Governor's word: one
-// that opens with HeldCommentPrefix, the way the factory writes a real hold, and
+// that IsHoldComment accepts, the way the factory writes a real hold, and
 // names the Governor or his word. The words held and Governor elsewhere in its
 // prose are not one: a filing note that says "the Governor to confirm" or quotes
 // him is no hold on his word (mw-gq6.720).
 func holdsOnHisWord(text string) bool {
-	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(text)), HeldCommentPrefix) &&
+	return IsHoldComment(text) &&
 		governorsWord.MatchString(text)
 }
 

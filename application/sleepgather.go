@@ -796,7 +796,7 @@ const SleepHoldDays = 7
 // sleepHoldReasonRunes is the most of a hold's reason the line of stale.md holds.
 const sleepHoldReasonRunes = 200
 
-// sleepNoHoldReason is the reason of a hold that no comment opening
+// IsHoldComment accepts.
 // HeldCommentPrefix gives.
 const sleepNoHoldReason = "no reason on the bead"
 
@@ -812,14 +812,14 @@ type OldHold struct {
 	ID, Title string
 	// Days is how long it has been held, in whole days.
 	Days int
-	// Reason is the first line of the last comment opening HeldCommentPrefix, or
+	// Reason is the first line of the last comment that IsHoldComment accepts, or
 	// sleepNoHoldReason.
 	Reason string
 }
 
 // OldHolds are the held work beads that have been held for SleepHoldDays or
-// more as of now, oldest first. A bead is held since its last comment opening
-// HeldCommentPrefix, else since it was last updated: a later remark on it does
+// more as of now, oldest first. A bead is held since its last comment that
+// IsHoldComment accepts, else since it was last updated: a later remark on it does
 // not make the hold young. It reads and changes nothing.
 func OldHolds(ctx context.Context, source SleepHolds, now time.Time) ([]OldHold, error) {
 	beads, err := source.TriageBeads(ctx)
@@ -849,7 +849,7 @@ func OldHolds(ctx context.Context, source SleepHolds, now time.Time) ([]OldHold,
 		}
 		for _, c := range said[b.ID] { // oldest first: the last hold comment wins
 			text := strings.TrimSpace(c.Text)
-			if !strings.HasPrefix(strings.ToUpper(text), HeldCommentPrefix) {
+			if !IsHoldComment(text) {
 				continue
 			}
 			if !c.Created.IsZero() {

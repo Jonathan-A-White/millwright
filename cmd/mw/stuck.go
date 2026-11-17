@@ -24,7 +24,7 @@ func newStuckCmd() *cobra.Command {
 			"  - an iced bead (label icebox); mw ice moves a bead behind its dependents when it ices it\n" +
 			"  - a held (deferred) bead whose blockers are all closed and which has no reason to be held: none of\n" +
 			"    the labels grilling, hitl (or hitl:<kind>), demo or icebox, and no comment opening '" + application.HeldCommentPrefix + "'\n" +
-			"    (write 'HELD: <why>' on a bead held on purpose and it is left alone)\n" +
+			"    (write 'HELD: <why>', or 'HELD by <who>: <why>', on a bead held on purpose and it is left alone)\n" +
 			"  - a claimed bead whose lease ran out over " + strconv.Itoa(int(application.StuckClaimAge/time.Hour)) + " hours ago with no heartbeat since: a claim with no\n" +
 			"    session (a claim bd shows no lease for is not seen)\n\n" +
 			"Each root is printed with the count and the ids of the live beads behind it; a root with nothing live\n" +

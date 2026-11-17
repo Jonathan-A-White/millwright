@@ -17,6 +17,24 @@ import (
 // it alone.
 const HeldCommentPrefix = "HELD:"
 
+// IsHoldComment is whether a comment is the written reason a bead is held: its
+// first word is HELD, in any case, followed by a colon or a space, so that both
+// 'HELD: waits' and the hand-written 'HELD by the Mayor 921: waits' count, and
+// 'HELDOVER' or a comment with HELD elsewhere in it does not (mw-gq6.1379). It
+// is the one reader of a hold's reason: nothing else matches the opening by a
+// prefix of its own.
+func IsHoldComment(text string) bool {
+	rest := strings.TrimSpace(text)
+	if len(rest) <= len("HELD") || !strings.EqualFold(rest[:len("HELD")], "HELD") {
+		return false
+	}
+	switch rest[len("HELD")] {
+	case ':', ' ', '\t', '\n', '\r':
+		return true
+	}
+	return false
+}
+
 // StuckClaimAge is how long a claim may have had no session behind it (its
 // lease run out with no heartbeat since) before mw stuck counts it a root.
 const StuckClaimAge = 6 * time.Hour
@@ -98,7 +116,7 @@ type StuckFinder interface {
 //   - An iced bead (label icebox).
 //   - A held (deferred) bead every blocker of which is closed and which has no
 //     reason to be held: none of the labels in HoldReasonLabels, and no comment
-//     opening HeldCommentPrefix.
+//     that IsHoldComment accepts.
 //   - A claimed bead whose lease ran out more than StuckClaimAge ago, with no
 //     heartbeat since: a claim with no session. A claim bd shows no lease for is
 //     not listed, as StaleClaims does not list it.
@@ -209,7 +227,7 @@ func waitsOnUnfinished(byID map[string]domain.GraphBead, b domain.GraphBead) boo
 
 func holdsAReason(comments []Comment) bool {
 	return slices.ContainsFunc(comments, func(c Comment) bool {
-		return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(c.Text)), HeldCommentPrefix)
+		return IsHoldComment(c.Text)
 	})
 }
 

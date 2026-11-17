@@ -157,6 +157,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeFileCallersScenario(ctx)
 	steps.InitializeFilePlanScenario(ctx)
 	steps.InitializeFilesExpectedScenario(ctx)
+	steps.InitializeStuckHoldScenario(ctx)
 	steps.InitializeGiveWayScenario(ctx)
 	steps.InitializeGiveWayHomeScenario(ctx)
 	steps.InitializeGristEvalScenario(ctx)

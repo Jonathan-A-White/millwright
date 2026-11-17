@@ -16,7 +16,7 @@ import (
 
 func opensWithHeld(comments []string) bool {
 	return slices.ContainsFunc(comments, func(c string) bool {
-		return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(c)), application.HeldCommentPrefix)
+		return application.IsHoldComment(c)
 	})
 }
 
@@ -28,7 +28,7 @@ func TestIceWritesAHeldCommentWithTheReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := tracker.Comments("mw-i.1")
-	if len(got) != 1 || !strings.HasPrefix(got[0], application.HeldCommentPrefix) || !strings.Contains(got[0], "waiting on the new rig") {
+	if len(got) != 1 || !application.IsHoldComment(got[0]) || !strings.Contains(got[0], "waiting on the new rig") {
 		t.Fatalf("comments = %q, want one opening %q with the reason", got, application.HeldCommentPrefix)
 	}
 }

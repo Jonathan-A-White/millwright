@@ -309,7 +309,7 @@ func TestAFindingWithAnACAndASweepIsFiledWithThemInItsAcceptanceAndItsSizeInItsP
 	comments, err := tracker.StoryComments(ctx, d.Story.ID)
 	mustDo(t, err)
 	for _, c := range comments {
-		if strings.HasPrefix(c.Text, application.HeldCommentPrefix) {
+		if application.IsHoldComment(c.Text) {
 			t.Errorf("expected no hold reason on a bug with an AC, got %q", c.Text)
 		}
 	}

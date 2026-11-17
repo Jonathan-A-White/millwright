@@ -318,7 +318,7 @@ func (f NeedsYouFacts) parkedCard(byID map[string]domain.GraphBead, bead string)
 		}
 	}
 	for _, c := range f.Comments[bead] {
-		if strings.HasPrefix(strings.TrimSpace(c.Text), HeldCommentPrefix) {
+		if IsHoldComment(c.Text) {
 			evidence = append(evidence, "the Mayor wrote HELD on it: "+clipRunes(oneLine(c.Text), 120))
 			break
 		}
