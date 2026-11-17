@@ -566,3 +566,79 @@ func TestACutWorktreeLeavesADirtyCheckoutsMainAndItsFilesAlone(t *testing.T) {
 		t.Fatalf("README.md = %q, %v; want the edit kept", b, err)
 	}
 }
+
+// TestRebaseRefusesABranchHoldingAMergeCommitAndNamesIt drives real git: an
+// earlier attempt merged main into its branch and resolved a conflict there.
+// A plain rebase would drop that merge and its resolution without a word, so
+// the rebase is not begun, the branch is left as it was, and the error names
+// the merge.
+func TestRebaseRefusesABranchHoldingAMergeCommitAndNamesIt(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	run(t, here, "git", "checkout", "-q", "-b", "mw/one", "main")
+	write(t, here, "notes.md", "one's notes\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Notes one")
+	run(t, here, "git", "checkout", "-q", "main")
+	write(t, here, "notes.md", "main's notes\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Notes main")
+	run(t, here, "git", "checkout", "-q", "mw/one")
+	cmd := gittest.Command("git", "merge", "main", "-m", "Merge main into the attempt")
+	cmd.Dir = here
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected the merge to conflict, got: %s", out)
+	}
+	write(t, here, "notes.md", "the resolution\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Merge main into the attempt")
+	merge := run(t, here, "git", "rev-parse", "--short", "HEAD")
+	head := run(t, here, "git", "rev-parse", "HEAD")
+	run(t, here, "git", "checkout", "-q", "main")
+	write(t, here, "other.md", "main moves on\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Main moves on")
+	run(t, here, "git", "checkout", "-q", "mw/one")
+
+	rebased, err := rig.New().Rebase(ctx, here, "main")
+	if rebased || err == nil {
+		t.Fatalf("expected the rebase refused, got %v, %v", rebased, err)
+	}
+	if application.Conflicted(err) {
+		t.Errorf("expected the merge named, not a conflict, got %v", err)
+	}
+	for _, want := range []string{merge, "Merge main into the attempt"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to name %q, got %v", want, err)
+		}
+	}
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got != head {
+		t.Errorf("expected the branch left on %s, it is on %s", head, got)
+	}
+	if got := run(t, here, "git", "show", "HEAD:notes.md"); got != "the resolution" {
+		t.Errorf("expected the resolution kept, got %q", got)
+	}
+}
+
+// TestRebaseStillRebasesABranchOfPlainCommits keeps the refusal to merges: a
+// branch of plain commits goes onto a moved target as before.
+func TestRebaseStillRebasesABranchOfPlainCommits(t *testing.T) {
+	here, _ := aRig(t)
+	run(t, here, "git", "checkout", "-q", "-b", "mw/one", "main")
+	write(t, here, "one.md", "one\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "One")
+	run(t, here, "git", "checkout", "-q", "main")
+	write(t, here, "two.md", "two\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Two")
+	run(t, here, "git", "checkout", "-q", "mw/one")
+
+	rebased, err := rig.New().Rebase(context.Background(), here, "main")
+	if err != nil || !rebased {
+		t.Fatalf("expected a clean rebase, got %v, %v", rebased, err)
+	}
+	if got := run(t, here, "git", "show", "HEAD:two.md"); got != "two" {
+		t.Errorf("expected main's file under the rebased branch, got %q", got)
+	}
+}
