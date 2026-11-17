@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -1291,6 +1292,78 @@ func TestCarryPicksAFixersMergeCommitByItsFirstParent(t *testing.T) {
 	}
 	if got := run(t, here, "git", "show", tip+":story.md"); got != "the story's work, as the fixer mended it" {
 		t.Errorf("expected the fixer's resolution on the branch, got %q", got)
+	}
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got != merge {
+		t.Errorf("expected the worktree put back at %s, got %s", merge, got)
+	}
+}
+
+// A merge the fixer made on the story's own line, taking the batch's line in,
+// has the story's branch for its first parent: the pick is against the other
+// parent, so the batch's own commits (picked by their own hashes) are not
+// brought in twice, and the merge's own change lands (mw-gq6.1371).
+func TestCarryPicksAMergeAgainstTheParentTheBranchDoesNotHold(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	_, batchTip := aStoryAndItsFixer(t, here)
+	run(t, here, "git", "checkout", "-q", "--detach", "mw/story")
+	run(t, here, "git", "merge", "-q", "--no-ff", "--no-commit", batchTip)
+	write(t, here, "resolved.md", "the fixer's own resolution\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Merge the batch's line, resolved")
+	merge := run(t, here, "git", "rev-parse", "HEAD")
+	run(t, here, "git", "checkout", "-q", "--detach", batchTip)
+	run(t, here, "git", "fetch", "-q", "origin")
+
+	tip, err := worktrees.Carry(ctx, here, "origin", []string{merge}, "origin/mw/story", "mw/story")
+	if err != nil {
+		t.Fatalf("expected the merge to be carried, got %v", err)
+	}
+	run(t, here, "git", "fetch", "-q", "origin")
+	if at := run(t, here, "git", "rev-parse", "origin/mw/story"); at != tip {
+		t.Errorf("expected the branch moved to %s, got %s", tip, at)
+	}
+	if got := run(t, here, "git", "show", tip+":resolved.md"); got != "the fixer's own resolution" {
+		t.Errorf("expected the merge's own change on the branch, got %q", got)
+	}
+	if _, err := exec.Command("git", "-C", here, "cat-file", "-e", tip+":fix.md").CombinedOutput(); err == nil {
+		t.Errorf("expected the merged-in commit's change not to be picked with the merge")
+	}
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got != batchTip {
+		t.Errorf("expected the worktree put back at %s, got %s", batchTip, got)
+	}
+}
+
+// A merge of two lines the branch holds neither of cannot be picked against
+// either: it is refused by name, and the worktree goes back (mw-gq6.1371).
+func TestCarryRefusesAMergeWhoseParentsAreBothNew(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	_, _ = aStoryAndItsFixer(t, here)
+	run(t, here, "git", "checkout", "-q", "--detach", "main")
+	write(t, here, "left.md", "one line\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "One line")
+	left := run(t, here, "git", "rev-parse", "HEAD")
+	run(t, here, "git", "checkout", "-q", "--detach", "main")
+	write(t, here, "right.md", "the other line\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The other line")
+	run(t, here, "git", "merge", "-q", "--no-ff", "-m", "Merge the two", left)
+	merge := run(t, here, "git", "rev-parse", "HEAD")
+	run(t, here, "git", "fetch", "-q", "origin")
+	before := run(t, here, "git", "rev-parse", "origin/mw/story")
+
+	_, err := worktrees.Carry(ctx, here, "origin", []string{merge}, "origin/mw/story", "mw/story")
+	want := "carrying " + merge + " onto mw/story: a merge whose parents are both new"
+	if err == nil || err.Error() != want {
+		t.Fatalf("expected %q, got %v", want, err)
+	}
+	run(t, here, "git", "fetch", "-q", "origin")
+	if at := run(t, here, "git", "rev-parse", "origin/mw/story"); at != before {
+		t.Errorf("expected the branch left at %s, got %s", before, at)
 	}
 	if got := run(t, here, "git", "rev-parse", "HEAD"); got != merge {
 		t.Errorf("expected the worktree put back at %s, got %s", merge, got)

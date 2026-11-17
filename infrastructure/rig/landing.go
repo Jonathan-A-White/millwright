@@ -550,7 +550,8 @@ func (w *Worktrees) OnBranch(ctx context.Context, dir, commit, ref string) (bool
 // Carry implements application.Landing: the worktree is detached onto onto,
 // each commit is cherry-picked, the head is pushed as branch by Push (no
 // force), and the worktree is detached back onto where it stood. A merge
-// commit is picked against its first parent (-m 1). A pick that
+// commit is picked against the parent the line does not hold (-m), and one
+// whose parents the line holds none of is refused by name. A pick that
 // conflicts is aborted before the error comes back; a commit onto holds
 // already, or whose pick comes out empty, is skipped (mw-gq6.1055).
 func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []string, onto, branch string) (string, error) {
@@ -581,12 +582,22 @@ func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []str
 			continue
 		}
 		pick := []string{"cherry-pick"}
-		if merge, err := w.isMerge(ctx, dir, commit); err != nil {
+		parents, err := w.parents(ctx, dir, commit)
+		if err != nil {
 			return "", err
-		} else if merge {
-			// a fixer's merge of the story's branch: what it brought in over
-			// the batch is the change to pick (mw-gq6.1367).
-			pick = append(pick, "-m", "1")
+		}
+		if len(parents) > 1 {
+			// a fixer's merge of the story's branch: the parent the line holds
+			// is where the pick lands, so the other parent is the mainline
+			// and the merge's own changes are the diff to pick (mw-gq6.1371).
+			mainline, err := w.mergeMainline(ctx, dir, parents)
+			if err != nil {
+				return "", err
+			}
+			if mainline == 0 {
+				return "", fmt.Errorf("carrying %s onto %s: a merge whose parents are both new", commit, branch)
+			}
+			pick = append(pick, "-m", strconv.Itoa(mainline))
 		}
 		if _, err := w.git(ctx, dir, append(pick, commit)...); err != nil {
 			if !w.pickIsEmpty(ctx, dir) {
@@ -607,13 +618,42 @@ func (w *Worktrees) Carry(ctx context.Context, dir, remote string, commits []str
 	return strings.TrimSpace(tip), nil
 }
 
-// isMerge says commit has more than one parent.
-func (w *Worktrees) isMerge(ctx context.Context, dir, commit string) (bool, error) {
+// parents lists the parents of commit.
+func (w *Worktrees) parents(ctx context.Context, dir, commit string) ([]string, error) {
 	out, err := w.git(ctx, dir, "rev-list", "--parents", "-n", "1", commit)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return len(strings.Fields(out)) > 2, nil
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return nil, nil
+	}
+	return fields[1:], nil
+}
+
+// mergeMainline numbers the parent a merge is picked against: the first
+// parent HEAD does not hold. It is 1 when HEAD holds them all, and 0 when it
+// holds none, which no pick can make sense of.
+func (w *Worktrees) mergeMainline(ctx context.Context, dir string, parents []string) (int, error) {
+	first, heldAny := 0, false
+	for i, parent := range parents {
+		held, err := w.OnBranch(ctx, dir, parent, "HEAD")
+		if err != nil {
+			return 0, err
+		}
+		if held {
+			heldAny = true
+		} else if first == 0 {
+			first = i + 1
+		}
+	}
+	switch {
+	case !heldAny:
+		return 0, nil
+	case first == 0:
+		return 1, nil
+	}
+	return first, nil
 }
 
 // pickIsEmpty says a cherry-pick that stopped has nothing left to apply: no
