@@ -97,3 +97,60 @@ Feature: A story whose acceptance changed after its claim is handed back
     When mw closes out "mw-gq6.1"
     Then nothing was landed on "main"
     And the report says it stopped for "acceptance-changed"
+
+  # mw-gq6.1378: a Builder's closing comment says an AC is not met, the Mayor
+  # ran it himself and it passed. The acceptance did not change, so nothing is
+  # re-scoped: --met-by-mayor answers the comment on the bead.
+  Scenario: A story whose Builder said an AC was not met lands on the Mayor's word that he ran it and it passed
+    Given the story "mw-gq6.1" was claimed with the acceptance:
+      """
+      1. The first thing works at load 20.
+      2. go test ./... passes.
+      """
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "AC 1 NOT met: the desktop could not reach load 20. Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    And mw next is run with --met-by-mayor "ran AC 1 on the laptop at load 23: 1.68 s"
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" carries exactly 1 comment quoting: MET-BY-MAYOR:
+    And the story "mw-gq6.1" carries a comment quoting: ran AC 1 on the laptop at load 23: 1.68 s
+    And the story "mw-gq6.1" carries a comment quoting: AC 1
+    And the story "mw-gq6.1" carries a comment quoting: 2026-09-18T12:00:00Z
+
+  Scenario: A story whose Builder said an AC was not met is still refused without the Mayor's word
+    Given the story "mw-gq6.1" was claimed with the acceptance:
+      """
+      1. The first thing works at load 20.
+      """
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "AC 1 NOT met: the desktop could not reach load 20. Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the report says it stopped for "unmet-criterion"
+
+  Scenario: A blank --met-by-mayor is refused and asks for the run
+    Given the story "mw-gq6.1" was claimed with the acceptance:
+      """
+      1. The first thing works at load 20.
+      """
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "AC 1 NOT met: the desktop could not reach load 20. Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    And mw next is run with --met-by-mayor ""
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the close-out failed saying: --met-by-mayor needs what the Mayor ran and what it printed
+    And the story "mw-gq6.1" carries no comment quoting: MET-BY-MAYOR:
+
+  Scenario: A Builder's new closing comment after the Mayor's word is not answered by it
+    Given the story "mw-gq6.1" was claimed with the acceptance:
+      """
+      1. The first thing works at load 20.
+      """
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "AC 1 NOT met: the desktop could not reach load 20. Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    And the comment "MET-BY-MAYOR: AC 1: ran it, 1.68 s" was written on "mw-gq6.1" after its newest commit
+    And the comment "AC 1 NOT met again. Internal: nothing for the Governor to look at. For the rig memory: nothing" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the report says it stopped for "unmet-criterion"

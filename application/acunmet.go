@@ -168,6 +168,11 @@ func (n Next) landedWithoutACs(ctx context.Context, c *closeOut, report *NextRep
 	if !found.Found() {
 		return MailLanded, ""
 	}
+	// The Mayor ran it and said so on the bead after the closing comment
+	// (--met-by-mayor, mw-gq6.1378): the criterion is met, so no bug and no verdict.
+	if answer := metByMayorAnswer(comments, closingCommentAt(comments)); answer != "" {
+		return MailLanded, "AC " + found.Words() + " met by the Mayor's own run, said in the closing comment as not met:\n" + answer
+	}
 	verdict = found.Subject()
 	title := acNotMetTitle(c.id, found, c.detail.Acceptance)
 	block = fmt.Sprintf("AC %s NOT met, said in the closing comment:\n%s", found.Words(), strings.Join(found.Lines, "\n"))

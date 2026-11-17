@@ -35,6 +35,10 @@ type nextContext struct {
 	// rescopedBy is the why of mw next --rescoped-by-mayor, empty without the
 	// flag (features/acceptance_changed.feature).
 	rescopedBy string
+	// metBy and metByGiven are the run of mw next --met-by-mayor and whether the
+	// flag was given at all, which a blank value still is (mw-gq6.1378).
+	metBy      string
+	metByGiven bool
 	root       string // holds the origin, both clones and the vault
 	vault      string
 	rig        string
@@ -1167,6 +1171,8 @@ func (c *nextContext) nextUseCase() application.Next {
 		RetryFromBranch: !c.fromMain,
 		HasGristTestKey: c.hostGristKey(),
 		RescopedByMayor: c.rescopedBy,
+		MetByMayor:      c.metBy,
+		MetByMayorGiven: c.metByGiven,
 		Now:             func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
 		Out:             &c.printed,
 		Err:             &c.stderr,
