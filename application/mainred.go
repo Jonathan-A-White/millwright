@@ -406,13 +406,14 @@ const mainAloneRun = "the run of the failing tests on main alone"
 // a calm host (Next.calmed, up to Next.loadBound), because main's red holds a
 // story and a host that is busy by day would otherwise charge the story an
 // attempt for it (mw-gq6.930); the wait says so in the output and the notes. A
-// host whose load or memory cannot be read has room.
+// host whose load or memory cannot be read has room. The factory's own running
+// part workers are not counted against it (NoRoomBesidesPartWorkers, mw-gq6.1438).
 func (n Next) waitForRoom(ctx context.Context, c *closeOut, report *NextReport) string {
 	reading, ok := n.readLoad(ctx)
 	if !ok {
 		return ""
 	}
-	if reading.NoRoom(RoomLimits{}) == "" {
+	if reading.NoRoomBesidesPartWorkers(RoomLimits{}) == "" {
 		return ""
 	}
 	const what = mainAloneRun
@@ -424,7 +425,7 @@ func (n Next) waitForRoom(ctx context.Context, c *closeOut, report *NextReport) 
 			report.Notes = append(report.Notes, err.Error())
 		}
 	}
-	return reading.NoRoom(RoomLimits{})
+	return reading.NoRoomBesidesPartWorkers(RoomLimits{})
 }
 
 // mainAlone runs the tests failed (a failed run of the rig's tests) names, by
