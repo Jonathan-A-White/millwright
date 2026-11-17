@@ -1199,3 +1199,64 @@ func TestStarvedMailsOncePerEpisodeWhenTheHoldFlips(t *testing.T) {
 		t.Errorf("expected the alarm to show the newest hold and reason, got %+v", alarms)
 	}
 }
+
+// mw-gq6.1399: a host=auto story whose rig is checked out on the laptop alone is
+// passed over by every host that tries it, the laptop for no room and cloud1 for
+// the rig it does not have. The alarm named only the older host's hold, cloud1's,
+// and hid the laptop's, which is the real block.
+func twoHostsHoldingARig(t *testing.T) *apptest.FakeTracker {
+	t.Helper()
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.1", "One", "auto")
+	storyOn(t, tracker, "mw-gq6.2", "Two", "auto")
+	notes := map[string]application.StarvedRig{
+		"cloud1": {Rig: "millwright", Since: statusNow.Add(-4 * time.Hour), Hold: application.StarvedHolds["rig-not-checked-out"], Reason: "the rig millwright is not checked out on cloud1: add it under [rigs] in the config file"},
+		"laptop": {Rig: "millwright", Since: statusNow.Add(-3 * time.Hour), Hold: application.StarvedHolds["no-room"], Reason: "laptop has no room: load 27 of 20 cores"},
+	}
+	for host, note := range notes {
+		if err := tracker.SetNote(context.Background(), application.StarvedKey(host), application.FormatStarved([]application.StarvedRig{note})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tracker
+}
+
+func TestAStarvedAlarmNamesEveryHostsHoldOfARigNotOnlyTheOldest(t *testing.T) {
+	alarms := starvedAlarms(t, twoHostsHoldingARig(t))
+	if len(alarms) != 1 {
+		t.Fatalf("expected one alarm for the rig, got %+v", alarms)
+	}
+	line := alarms[0].Line()
+	for _, want := range []string{"millwright", "2 ready", "none running for 4h00m",
+		"laptop: no room", "load 27 of 20 cores", "cloud1: rig not checked out", "not checked out on cloud1"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("expected %q in the line, got %q", want, line)
+		}
+	}
+	if strings.Contains(line, "\n") {
+		t.Errorf("expected one line, got %q", line)
+	}
+	if again := starvedAlarms(t, twoHostsHoldingARig(t)); again[0].Identity != alarms[0].Identity {
+		t.Errorf("expected the same identity whatever the holds, got %q and %q", again[0].Identity, alarms[0].Identity)
+	}
+}
+
+func TestAStarvedAlarmOfOneHostsHoldIsWordedAsBefore(t *testing.T) {
+	alarms := starvedAlarms(t, starvedFixture(t, 4*time.Hour))
+	want := "millwright: 2 ready, none running for 4h00m, held by smoke hold — the grist smoke of cairn failed (cairn/sweep/one)"
+	if len(alarms) != 1 || alarms[0].Text != want {
+		t.Errorf("expected %q, got %+v", want, alarms)
+	}
+}
+
+func TestAStaleHostsHoldIsNotNamedBesideAnotherHostsFreshOne(t *testing.T) {
+	tracker := twoHostsHoldingARig(t)
+	held := application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: statusNow.Add(-5 * time.Hour)}}
+	if err := tracker.SetNote(context.Background(), application.TicksKey("cloud1"), held.Note()); err != nil {
+		t.Fatal(err)
+	}
+	alarms := starvedAlarms(t, tracker)
+	if len(alarms) != 1 || strings.Contains(alarms[0].Text, "cloud1") || !strings.Contains(alarms[0].Text, "no room") {
+		t.Errorf("expected only the laptop's hold, got %+v", alarms)
+	}
+}

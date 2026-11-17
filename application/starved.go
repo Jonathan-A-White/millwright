@@ -290,6 +290,7 @@ func (d Dispatch) keepStarved(ctx context.Context, ready []StoryDetail, running 
 // long none ran, and the hold with its reason.
 func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAlarm {
 	oldest := map[string]StarvedRig{}
+	holding := map[string][]StarvedRig{}
 	for _, r := range rigs {
 		// A host that gives way holds nothing back: it takes nothing new while the
 		// person is at the screen, and what it noted before the freeze is not a
@@ -297,6 +298,7 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		if r.GivesWay || !r.current(now) {
 			continue
 		}
+		holding[r.Rig] = append(holding[r.Rig], r)
 		if held, ok := oldest[r.Rig]; !ok || r.Since.Before(held.Since) {
 			oldest[r.Rig] = r
 		}
@@ -322,10 +324,7 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		if running || len(ready) == 0 {
 			continue
 		}
-		text := fmt.Sprintf("%s: %d ready, none running for %s, held by %s", rig, len(ready), elapsed(now.Sub(r.Since)), r.Hold)
-		if r.Reason != "" {
-			text += " — " + r.Reason
-		}
+		text := fmt.Sprintf("%s: %d ready, none running for %s, held by %s", rig, len(ready), elapsed(now.Sub(r.Since)), holdsWords(holding[rig]))
 		if way := harnessWayOut(r, work); way != "" {
 			text += ". " + way
 		}
@@ -339,6 +338,37 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity, Wait: wait})
 	}
 	return alarms
+}
+
+// holdsWords is what holds a rig, in the alarm's words. One host's note is its
+// hold and the reason dispatch gave. Several hosts' notes are each named with the
+// host, the oldest first: a story that could run on several hosts is passed over
+// by each, and the hold of the host that is the real block (the laptop's no room)
+// is not hidden behind another's (cloud1 has no checkout) (mw-gq6.1399).
+func holdsWords(held []StarvedRig) string {
+	if len(held) == 1 {
+		return holdWords(held[0])
+	}
+	sorted := slices.Clone(held)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if !sorted[i].Since.Equal(sorted[j].Since) {
+			return sorted[i].Since.Before(sorted[j].Since)
+		}
+		return sorted[i].Host < sorted[j].Host
+	})
+	words := make([]string, len(sorted))
+	for i, r := range sorted {
+		words[i] = r.Host + ": " + holdWords(r)
+	}
+	return strings.Join(words, "; ")
+}
+
+// holdWords is one note's hold with the reason dispatch gave it.
+func holdWords(r StarvedRig) string {
+	if r.Reason == "" {
+		return r.Hold
+	}
+	return r.Hold + " — " + r.Reason
 }
 
 // GristFirstWords end the reason dispatch gives for the cap while a tutor is in
