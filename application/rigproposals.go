@@ -99,7 +99,7 @@ func ParseFactProposals(comment string) FactProposals {
 			}
 			continue
 		}
-		if proposal, ok := parseFactProposal(text); ok {
+		if proposal, ok := parseFactProposal(text); ok && !strayClosingBacktick(text) {
 			saidNothing = saidNothing || proposal.Verb == ProposeNothing
 			found.Lines = append(found.Lines, ProposalLine{Proposal: proposal})
 		} else {
@@ -120,6 +120,15 @@ func unfenced(text string) string {
 		}
 	}
 	return text
+}
+
+// strayClosingBacktick is true for a section line, already unfenced, that ends
+// in a backtick with no opening one before it: its backticks do not pair, so
+// the last is a closing fence whose opening was lost and would be kept in the
+// line's sentence (mw-gq6.1373). A sentence that ends in a code word of its own
+// has its backticks paired and is not stray.
+func strayClosingBacktick(text string) bool {
+	return strings.HasSuffix(text, "`") && strings.Count(text, "`")%2 == 1
 }
 
 func parseFactProposal(text string) (FactProposal, bool) {

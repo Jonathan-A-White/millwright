@@ -1026,7 +1026,7 @@ func ParseCommonErrors(comment string) CommonErrorProposals {
 		case strings.EqualFold(strings.Trim(text, " .*_`"), "nothing"):
 			saidNothing = true
 			found.Lines = append(found.Lines, CommonErrorLine{Nothing: true})
-		case m != nil:
+		case m != nil && !strayClosingBacktick(text):
 			found.Lines = append(found.Lines, CommonErrorLine{Slug: m[1], Line: strings.Join(strings.Fields(m[2]), " ")})
 		default:
 			found.Lines = append(found.Lines, CommonErrorLine{Malformed: strings.TrimSpace(raw)})
