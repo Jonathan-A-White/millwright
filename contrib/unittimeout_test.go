@@ -61,6 +61,8 @@ var longestWait = map[string]time.Duration{
 	"mw-report.service":          2 * time.Minute,
 	"mw-parent-note.service":     2 * time.Minute,
 	"mw-millhand-review.service": 2 * time.Minute,
+	// mw host sweep: one bd read of the stories of the worktrees, then the disk (mw-gq6.1427).
+	"mw-host-sweep.service": 5 * time.Minute,
 }
 
 func TestEveryUnitThatCanWaitOutlastsItsLongestWait(t *testing.T) {
