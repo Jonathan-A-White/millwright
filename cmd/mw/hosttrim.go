@@ -172,7 +172,12 @@ func fileHostTrimStep(cmd *cobra.Command, bead, host string) error {
 	add := newHandsAddCmd()
 	add.SetOut(cmd.OutOrStdout())
 	add.SetErr(cmd.ErrOrStderr())
+	// The script carries the drop-in as base64, which the paste rules refuse
+	// (no-base64). Until mw-gq6.1431 writes it as plain text, say so on the
+	// bead rather than leave the step unfiled; that story drops these flags.
 	add.SetArgs([]string{bead, "--id", hostTrimStepPrefix + host, "--host", host, "--as", "root",
-		"--way-back", doctor.WSLTrimWayBack(), "--", doctor.WSLTrimRootScript()})
+		"--way-back", doctor.WSLTrimWayBack(),
+		"--allow", "no-base64", "--allow-why", "the root script carries the drop-in as base64 until mw-gq6.1431 writes it as plain text",
+		"--", doctor.WSLTrimRootScript()})
 	return add.ExecuteContext(cmd.Context())
 }

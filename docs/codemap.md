@@ -30,6 +30,7 @@
 | EventLog (EventNewestLog), BeadFeed, {Follow,Nudge}Cursors, ShipStates, SubscribeFiles, EventSpringer, EventController, HarnessCount | application/event*.go, application/eventnewest.go, status.go | {eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | {postern,hands*,homemove} |
 | PosternInboxShow (kept messages, --show) | application/posternkeep.go | postern_inbox |
+| PasteRules (the table; mw postern send, talk say, hands add run it) | application/pasterules.go | postern_send |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | {bsv,stampqueue,chainlookup}, rig/worktree.go |
 | Grinder, WarmGrinder, GristPoolBoard, GristTalkStore, GrindSource, Grist*, VisionSource | grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/personcap.go, griststatus.go, gristsmoke.go | {claude/grind,rig/{grinds,landingof},hostlock/try}.go, grist |
 | GristCredits, GristCredit{Key,State}, GristCreditsAdmin | application/gristcredits.go | {grist/credits,claude/grind}.go, cmd/mw/grist_credits.go |
