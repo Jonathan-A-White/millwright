@@ -36,7 +36,7 @@ func (g *countedGate) asked() int {
 }
 
 func TestAYieldedWaitWithNoCheckKeepsTheGateLock(t *testing.T) {
-	t.Run("a wait for a calm host", func(t *testing.T) {
+	t.Run("a wait for a calm host gives it back all the same", func(t *testing.T) {
 		l := newALandingAndACheckOfOneRig(t)
 		defer l.holding.Release(context.Background())
 		gate := &countedGate{inner: l.gate}
@@ -50,8 +50,10 @@ func TestAYieldedWaitWithNoCheckKeepsTheGateLock(t *testing.T) {
 		if !got.Passed {
 			t.Fatalf("expected the landing's gate to pass, got %+v\n%s", got, l.said.String())
 		}
-		if asked := gate.asked(); asked != 1 {
-			t.Errorf("expected the gate lock to be asked for once and kept through the wait for a calm host, it was asked for %d times\n%s", asked, l.said.String())
+		// No holder keeps the lock while it only waits for the host to calm, queued
+		// for or not (mw-gq6.1420): it is given back for the wait and asked for again.
+		if asked := gate.asked(); asked != 2 {
+			t.Errorf("expected the gate lock to be given back for the wait for a calm host and asked for again after it, it was asked for %d times\n%s", asked, l.said.String())
 		}
 	})
 

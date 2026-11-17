@@ -532,8 +532,8 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		load, handBack = nil, nil
 		keptNote = fmt.Sprintf("the rig's tests passed at %s in an earlier call of this check, which the changed specs' slot or gate lock handed back, and were not run again", shortCommit(tip))
 	case !split && k.Slot != nil && k.GateLock != nil:
-		// Slot, then gate lock, taken before the wait for a calm host so that the
-		// load waited on is not another gate's: a close-out does the same.
+		// Slot, then gate lock; the lock is given back for a wait for a calm host
+		// and taken again after it, as a close-out's is (gatecalm.go, mw-gq6.1420).
 		held := checkGateLock{k: k, c: c, attempt: report.Attempt, left: left, fit: fit}
 		gateLock, afterCalm = held, held.afterCalm
 	case !split && k.Slot != nil:

@@ -393,10 +393,10 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	}
 	began := n.now()
 	// The gate lock is waited for first, and the landing opened after: a host's
-	// gate can queue for an hour, and the target moves meanwhile (mw-gq6.872).
-	if lock := n.waitForTheGateLock(ctx, c, report, "the failing tests on main alone"); lock != nil {
-		defer n.giveTheGateLockBack(report, lock)
-	}
+	// gate can queue for an hour, and the target moves meanwhile (mw-gq6.872). It is
+	// given back for each wait for a calm host, the wait for room and the wait to run
+	// again, and taken again after it (holdingWhole, mw-gq6.1085).
+	defer n.holdingWhole(c, report, n.waitForTheGateLock(ctx, c, report, "the failing tests on main alone"))()
 	if why := n.waitForRoom(ctx, c, report); why != "" {
 		labelMain(report, mainNotRunNote(tests, n.Host+" has no room: "+why))
 		return nil

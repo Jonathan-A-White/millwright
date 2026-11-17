@@ -170,18 +170,29 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 // when the host is busy but not far over: then says what became of the run, "ran
 // anyway" for a run that is made, so that a run that is not made can say so
 // (mw-gq6.930).
+//
+// A gate that holds the host's gate lock gives it back for the wait and takes it
+// again after it (gatecalm.go, mw-gq6.1420).
 func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, what, then string, handBack, again bool) (reading LoadReading, gaveUp bool, err error) {
 	reading, ok := n.readLoad(ctx)
 	if !ok || !reading.Busy() {
 		return reading, false, nil
 	}
+	return n.calmedWithoutTheLock(ctx, report, c, what, then, handBack, again, reading)
+}
+
+// calmWait is the wait of calmedThen, begun at reading with the host busy, of
+// which spent was waited already (by an earlier round of the same wait, before
+// the lock was taken again behind another gate). It returns the wait so far.
+func (n Next) calmWait(ctx context.Context, report *NextReport, c *closeOut, what, then string, handBack, again bool, reading LoadReading, spent time.Duration) (LoadReading, bool, time.Duration, error) {
 	handBack = handBack && n.CalmHandBack != nil
 	bound := n.loadBound()
 	if handBack && n.LoadBoundLeft != nil {
-		bound = max(n.LoadBoundLeft(), 0)
+		// What is left of the call's one deadline already counts what was spent.
+		bound, spent = max(n.LoadBoundLeft(), 0), 0
 	}
 	n.print(fmt.Sprintf("  wait    %s is at load %.1f of %d cores: waiting up to %s for it to calm before %s\n",
-		n.Host, reading.Load, reading.Cores, bound, what))
+		n.Host, reading.Load, reading.Cores, max(bound-spent, 0), what))
 	// The close-out says it is waiting, and says it is running again once it stops.
 	n.markCloseOut(ctx, c.id, c.began, true)
 	defer n.markCloseOut(ctx, c.id, c.began, false)
@@ -191,7 +202,8 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 		defer n.resumeSlot(ctx, c, report, n.SlotYield(ctx))
 	}
 	since := n.now()
-	var waited, said time.Duration
+	waited, said := spent, spent
+	defer func() { c.gate.calmWaited += waited - spent }()
 	for reading.Busy() {
 		// The steps waited are a count, not the clock: the reads of a host at load 43
 		// and the sleeps that overshoot are not in it. A call's deadline that has
@@ -201,37 +213,37 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 		}
 		if waited >= bound {
 			if handBack {
-				return reading, true, n.CalmHandBack(ctx, reading, since, waited, again)
+				return reading, true, waited, n.CalmHandBack(ctx, reading, since, waited, again)
 			}
 			if reading.FarOver() {
 				// Far over the cores a run only fails for the host, and
 				// takes the host's other work down with it.
 				busy := HostBusyError{Host: n.Host, Reading: reading, Waited: waited, What: what}
 				n.print("  wait    " + busy.Error() + "\n")
-				return reading, true, busy
+				return reading, true, waited, busy
 			}
 			if c.waitsWhenBusy {
 				still := HostStillBusyError{Reading: reading}
 				n.print("  wait    " + still.Error() + "\n")
-				return reading, true, still
+				return reading, true, waited, still
 			}
 			note := fmt.Sprintf("%s was still at load %.1f of %d cores after waiting %s, so %s %s",
 				n.Host, reading.Load, reading.Cores, waited, what, then)
 			n.print("  wait    " + note + "\n")
 			report.Notes = append(report.Notes, note)
-			return reading, true, nil
+			return reading, true, waited, nil
 		}
 		step := n.loadPoll()
 		if handBack {
 			step = min(step, bound-waited)
 		}
 		if err := n.loadWait(ctx, step); err != nil {
-			return reading, false, nil
+			return reading, false, waited, nil
 		}
 		waited += step
 		next, ok := n.readLoad(ctx)
 		if !ok {
-			return reading, false, nil
+			return reading, false, waited, nil
 		}
 		reading = next
 		if handBack && reading.Busy() && waited-said >= calmedMinute {
@@ -241,7 +253,7 @@ func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, w
 		}
 	}
 	report.Notes = append(report.Notes, fmt.Sprintf("%s was busy: waited %s for it to calm before %s", n.Host, waited, what))
-	return reading, false, nil
+	return reading, false, waited, nil
 }
 
 // gated is one run of the rig's tests as the close-out treats it. Said, when it
@@ -256,8 +268,9 @@ type gated struct {
 // gate runs the rig's tests in dir the way a close-out must on a host that may
 // be busy, one gate at a time on the host: it takes the host's gate lock first,
 // waiting for another close-out's gate to end, and keeps it until its own ends,
-// the retry included, however it ends (mw-gq6.388). A lock that cannot be taken
-// is said, and the tests run without it.
+// the retry included, however it ends (mw-gq6.388), but for its waits for a calm
+// host, for which it is given back (gatecalm.go, mw-gq6.1420). A lock that cannot
+// be taken is said, and the tests run without it.
 func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, what string, span RelatedSpan) gated {
 	lock, err := n.takeTheGateLock(ctx, c, report, what)
 	if err != nil {
@@ -289,8 +302,17 @@ func (n Next) gateWithSpecs(ctx context.Context, c *closeOut, report *NextReport
 	if err := n.gateGivesWay(ctx, c); err != nil {
 		return gated{Err: err}, log
 	}
+	before, _ := n.readLoad(ctx)
 	run, err := n.SpecChecks.RunSpecs(ctx, c.path.Rig, dir, span.Base)
+	if err == nil && len(run.Specs) > 0 && !run.NotRun && !run.Passed {
+		// A failure read far over the cores is run once more when the host calms,
+		// as specsRefusal does, with the lock given back for the wait (mw-gq6.1079).
+		run, err = n.specsAgain(ctx, c, report, dir, span, before, run)
+	}
 	if err != nil {
+		if isHostBusy(err) || isHostStillBusy(err) || isGivesWay(err) {
+			return gated{Err: err}, log
+		}
 		return gated{Err: fmt.Errorf("the rig's changed specs could not be run in %s: %w", dir, err)}, log
 	}
 	n.sayGateRead(run.Checked)
@@ -374,24 +396,33 @@ func (n Next) waitForTheGateLock(ctx context.Context, c *closeOut, report *NextR
 // the lock when the lock says to hand it back (GateLockHandBack): then the lock
 // is nil and the error is the hand-back, which ends the gate.
 func (n Next) takeTheGateLock(ctx context.Context, c *closeOut, report *NextReport, what string) (Holding, error) {
+	lock, _, err := n.takeTheGateLockTurn(ctx, c, report, what)
+	return lock, err
+}
+
+// takeTheGateLockTurn is takeTheGateLock, saying too what the take waited for;
+// the wait is counted on the close-out's gate record (gateRecord.lockWaited).
+func (n Next) takeTheGateLockTurn(ctx context.Context, c *closeOut, report *NextReport, what string) (Holding, GateTurn, error) {
 	if n.GateLock == nil {
-		return nil, nil
+		return nil, GateTurn{}, nil
 	}
+	began := n.now()
 	turn, err := n.takeGateLockUnderTheSlot(ctx, c, report, what)
+	c.gate.lockWaited += n.now().Sub(began)
 	if err != nil {
 		n.markCloseOut(ctx, c.id, c.began, false)
 		var handBack GateLockHandBack
 		if errors.As(err, &handBack) {
-			return nil, handBack
+			return nil, GateTurn{}, handBack
 		}
 		n.noteLocklessGate(report, err, what)
-		return nil, nil
+		return nil, GateTurn{}, nil
 	}
 	if turn.For != "" {
 		n.markCloseOut(ctx, c.id, c.began, false)
 		report.Notes = append(report.Notes, fmt.Sprintf("gate waited %s for %s before %s", gateWaited(turn.Waited), turn.For, what))
 	}
-	return n.keepTheLockForTheSlot(c, what, turn.Holding), nil
+	return n.keepTheLockForTheSlot(c, what, turn.Holding), turn, nil
 }
 
 // noteLocklessGate says the gate lock could not be taken, and that the tests
@@ -546,16 +577,22 @@ func (n Next) mergedGateWaits(ctx context.Context, c *closeOut, report *NextRepo
 }
 
 // waitForTheMergedGate waits for what the next run on a merged result waits
-// for: this host's gate lock, which it keeps, and then the host, to calm. A
-// close-out holding its rig's merge slot across hosts gives it back first.
+// for: the host, to calm, with no gate lock held, and then this host's gate lock,
+// which it keeps (mw-gq6.1420). A lock taken by an earlier try that found the host
+// busy is given back for the wait. A close-out holding its rig's merge slot
+// across hosts gives it back first.
 func (n Next) waitForTheMergedGate(ctx context.Context, c *closeOut, report *NextReport) {
 	m := &c.merged
-	if n.GateLock != nil && !m.asked {
-		m.asked, m.lock = true, n.waitForTheGateLock(ctx, c, report, m.what())
-	}
 	if !m.calmed {
+		if m.lock != nil {
+			n.giveTheGateLockBack(report, m.lock)
+			m.asked, m.lock = false, nil
+		}
 		m.before, m.gaveUp, m.hostBusy = n.calmed(ctx, report, c, m.what(), false, false)
 		m.calmed = true
+	}
+	if n.GateLock != nil && !m.asked {
+		m.asked, m.lock = true, n.waitForTheGateLock(ctx, c, report, m.what())
 	}
 }
 
@@ -611,7 +648,7 @@ func (n Next) gateOnACalmHostHolding(ctx context.Context, c *closeOut, report *N
 	if handedBack != nil {
 		return gated{Err: handedBack}
 	}
-	if lock != nil && n.AfterCalm != nil {
+	if lock = c.heldNow(lock); lock != nil && n.AfterCalm != nil {
 		if err := n.AfterCalm(lock); err != nil {
 			return gated{Err: err}
 		}

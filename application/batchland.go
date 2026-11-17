@@ -715,6 +715,7 @@ func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *Batc
 	bc.readsGiveWay = true
 	bc.gate = report.gate
 	gate, log := n.gateWithSpecs(ctx, bc, nr, dir, gateOnTheBatch, RelatedSpan{Base: report.Base, Skip: report.versionCommit})
+	b.say("%s", gateTook(report.Label(), n.Host, gateEnded(gate), n.now().Sub(began), bc.gate.lockWaited-report.gate.lockWaited, bc.gate.calmWaited-report.gate.calmWaited))
 	report.gate = bc.gate
 	if lost := b.slotLost(); lost != "" {
 		gate = gated{Err: fmt.Errorf("%s", lost)}

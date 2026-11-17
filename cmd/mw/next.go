@@ -175,6 +175,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			gateTurnsLimit, err := config.GateTurnsLimit()
+			if err != nil {
+				return err
+			}
 			// A [tester] table that cannot be read springs no Tester story, and
 			// never stops a close-out: it is said, and the landing goes on.
 			tester := testerTrialSaid("mw next", cmd.ErrOrStderr())
@@ -297,7 +301,9 @@ func newNextCmd() *cobra.Command {
 				Slot:      rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
 				CrossSlot: application.CrossSlot{Notes: gateway, Host: host},
 				GateLock:  hostGateLock(),
-				Rechecks:  recheckSuite,
+				// A gate's turns end once they waited this long for other gates (mw-gq6.1420).
+				GateTurnsLimit: gateTurnsLimit,
+				Rechecks:       recheckSuite,
 				// A finding main already fixes is not filed as a bug (mw-gq6.1245).
 				FindingChecks: recheckSuite,
 				Vault:         files,

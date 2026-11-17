@@ -660,9 +660,20 @@ func (n *NightlyTiming) runRig(ctx context.Context, due TimingDue) (skipped stri
 		return skipped, nil
 	}
 
-	if n.GateLock != nil {
+	// held is the gate lock the run holds, given back for the wait to run its tests
+	// again and taken again after it (mw-gq6.1420).
+	var held Holding
+	defer func() {
+		if held != nil {
+			held.Release(context.WithoutCancel(ctx))
+		}
+	}()
+	take := func(before string) {
+		if n.GateLock == nil {
+			return
+		}
 		turn, err := n.GateLock.Take(ctx, "timing "+rig, func(by string) {
-			n.say("  wait    %s's gate lock is held by %s: waiting for it before the timing run\n", n.Host, by)
+			n.say("  wait    %s's gate lock is held by %s: waiting for it before %s\n", n.Host, by, before)
 		})
 		if err != nil {
 			// Left as it is (mw-gq6.917): the run is 81 to 388 s against the suite's 16 to
@@ -670,11 +681,12 @@ func (n *NightlyTiming) runRig(ctx context.Context, due TimingDue) (skipped stri
 			// suite gives the lock back between its command lines, so the 3 hour cap
 			// is reached only by gates that queue for hours; a night skipped is not
 			// tried again that day.
-			n.say("  wait    %s's gate lock could not be taken (%v), so the timing run is made without it\n", n.Host, err)
-		} else if turn.Holding != nil {
-			defer turn.Holding.Release(context.WithoutCancel(ctx))
+			n.say("  wait    %s's gate lock could not be taken (%v), so %s is made without it\n", n.Host, err, before)
+			return
 		}
+		held = turn.Holding
 	}
+	take("the timing run")
 
 	dir, head, release, err := suite.cutTree(ctx, rig, due.RigDir, TimingTreePrefix)
 	if err != nil {
@@ -701,7 +713,14 @@ func (n *NightlyTiming) runRig(ctx context.Context, due TimingDue) (skipped stri
 	// (mw-gq6.1063).
 	var ranTwice string
 	if !checked.Passed {
+		if held != nil {
+			held.Release(context.WithoutCancel(ctx))
+			held = nil
+		}
 		busy, again, err := n.timingWait().waitToRunAgain(ctx, &closeOut{id: "timing " + rig}, &NextReport{}, "the timing tests", "them", reading, false)
+		if err == nil && again {
+			take("the timing tests again")
+		}
 		var stillBusy HostBusyError
 		switch {
 		case errors.As(err, &stillBusy):
