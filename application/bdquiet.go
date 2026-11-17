@@ -184,6 +184,12 @@ func (r BdRetry) take(ctx context.Context) (func(), error) {
 	}
 }
 
+// WaitQuiet is take for a caller that runs no bd through BdRetry but writes the
+// beads in the same way (a collection): it waits for this host's turn and for
+// quiet, saying so on Err when it waited, and returns what lets the turn go. The
+// failure after the limit is a *BdBusyError naming what it waited for.
+func (r BdRetry) WaitQuiet(ctx context.Context) (func(), error) { return r.take(ctx) }
+
 // tryTurn takes the turn and looks at the host once: the turn, with no blocker,
 // when both are free, and otherwise no turn and what is in the way. The turn is
 // taken first so that two commands looking together are not both told the host

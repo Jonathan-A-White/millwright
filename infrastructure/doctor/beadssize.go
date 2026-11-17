@@ -21,10 +21,10 @@ const BeadsSizeName = "beads-size"
 // same one application/status.go's beadsLine warns against.
 const beadsSizeDir = ".beads"
 
-// The beads-size check's damper: there is no cure to retry, so one failed
-// cure attempt is all an episode ever spends — the second probe of the same
-// episode finds it already capped, and mw doctor never runs Cure again until
-// the probe next says ok.
+// The beads-size check's damper: the one cure is the daily collection, run once;
+// if .beads is still over after it, or it failed, that attempt is all an episode
+// ever spends — the second probe of the same episode finds it already capped,
+// and mw doctor never runs Cure again until the probe next says ok.
 const (
 	BeadsSizeDamperWait = 0 * time.Second
 	BeadsSizeDamperCap  = 1
@@ -95,10 +95,12 @@ func (b *BeadsSize) cachesFound() string {
 
 // BeadsSize is the check that watches this host's own .beads against the
 // same budget mw status warns against: past it, an unattended sync or
-// dispatch could run the disk full and stop working silently. It never
-// cures — there is nothing safe to automate here — so a faulty probe is
-// tried once, fails once, and the episode sits damped until the probe next
-// says ok; the note that damping writes is what wakes the Millhand to look.
+// dispatch could run the disk full and stop working silently. Its one cure is
+// the collection the daily job runs, when the last is older than CollectEvery
+// (never the squash, which is the Governor's word); a probe still faulty after
+// it, or with no cure to run, is tried once, fails once, and the episode sits
+// damped until the probe next says ok; the note that damping writes is what
+// wakes the Millhand to look.
 type BeadsSize struct {
 	// Dir is the vault's directory.
 	Dir string
@@ -113,7 +115,33 @@ type BeadsSize struct {
 	// Squash is sync.beads_squash: whether that squash may run at all, which
 	// is the Governor's word (mw-gq6.504).
 	Squash bool
+
+	// Collect runs the collection the daily job runs (the tracker's GC, never
+	// the squash), through the quiet wait every bd writer uses, and records when
+	// it ran, so that the next LastCollected reads it. With it nil the check has
+	// no cure to run and says so, as it always did.
+	Collect func(context.Context) error
+	// LastCollected is when this host's last collection ran (the daily job's
+	// own note); the zero time says never, or not readable, and reads as stale.
+	LastCollected func(context.Context) (time.Time, error)
+	// CollectEvery is how old the last collection must be before the cure runs
+	// another; zero reads DefaultBeadsCollectEvery.
+	CollectEvery time.Duration
+	// Now is the clock; nil reads the real one.
+	Now func() time.Time
+	// Sizer reads the size of .beads; nil walks it, as Probe always did.
+	Sizer func(context.Context) (int64, error)
+
+	// outcome is what the last cure that ran the collection found, for WayBack.
+	outcome string
 }
+
+// DefaultBeadsCollectEvery is how old the last collection must be before the
+// cure runs one: far enough from the daily cadence that the cure is not the
+// daily job twice, near enough that a store which crossed its budget between
+// two collections is not left alarmed for most of a day (mw-gq6.1403).
+// PROVISIONAL: the Governor is to confirm six hours.
+const DefaultBeadsCollectEvery = 6 * time.Hour
 
 // NewBeadsSize is the check over the vault at dir, against the standard
 // budget.
@@ -128,9 +156,9 @@ func (b *BeadsSize) Name() string { return BeadsSizeName }
 // when the vault or .beads itself is not there to size at all — never faulty
 // on a fresh or misconfigured vault, only on one this check can actually
 // measure.
-func (b *BeadsSize) Probe(context.Context) (application.Verdict, string) {
+func (b *BeadsSize) Probe(ctx context.Context) (application.Verdict, string) {
 	path := filepath.Join(b.Dir, beadsSizeDir)
-	size, err := beadsSizeOf(path)
+	size, err := b.size(ctx)
 	if err != nil {
 		return application.DoctorCannotTell, err.Error()
 	}
@@ -141,9 +169,62 @@ func (b *BeadsSize) Probe(context.Context) (application.Verdict, string) {
 	return application.DoctorOK, ""
 }
 
-// Cure implements application.DoctorCheck: there is none; the error says what
-// was found.
-func (b *BeadsSize) Cure(context.Context) error { return b.beadsSizeNoCure() }
+// size reads .beads: through Sizer when one is given, else by walking it.
+func (b *BeadsSize) size(ctx context.Context) (int64, error) {
+	if b.Sizer != nil {
+		return b.Sizer(ctx)
+	}
+	return beadsSizeOf(filepath.Join(b.Dir, beadsSizeDir))
+}
+
+func (b *BeadsSize) now() time.Time {
+	if b.Now != nil {
+		return b.Now()
+	}
+	return time.Now()
+}
+
+func (b *BeadsSize) collectEvery() time.Duration {
+	if b.CollectEvery > 0 {
+		return b.CollectEvery
+	}
+	return DefaultBeadsCollectEvery
+}
+
+// Cure implements application.DoctorCheck. Past budget with the last
+// collection older than the interval, it runs the collection the daily job
+// runs, once, and reads .beads again: it is cured when that is under budget,
+// and says both sizes and when the collection ran when it is not. Inside the
+// interval it runs nothing, and the error says what was found. With no
+// collector (a check built without one) there is no cure to run.
+func (b *BeadsSize) Cure(ctx context.Context) error {
+	if b.Collect == nil || b.LastCollected == nil {
+		return b.beadsSizeNoCure()
+	}
+	now := b.now().UTC()
+	last, _ := b.LastCollected(ctx)
+	if !last.IsZero() && now.Sub(last) < b.collectEvery() {
+		return fmt.Errorf("no cure: the last collection ran at %s, %s ago, inside the %s before another; %w",
+			last.UTC().Format(time.RFC3339), now.Sub(last).Round(time.Minute), b.collectEvery(), b.beadsSizeNoCure())
+	}
+	before, err := b.size(ctx)
+	if err != nil {
+		return err
+	}
+	at := now.Format(time.RFC3339)
+	if err := b.Collect(ctx); err != nil {
+		return fmt.Errorf("the collection at %s failed with .beads at %d bytes: %w", at, before, err)
+	}
+	after, err := b.size(ctx)
+	if err != nil {
+		return fmt.Errorf("the collection ran at %s with .beads at %d bytes; reading it again failed: %w", at, before, err)
+	}
+	b.outcome = fmt.Sprintf("the collection ran at %s: .beads %d bytes before, %d after", at, before, after)
+	if after > b.budget() {
+		return fmt.Errorf("%s, still past the %d byte budget; %w", b.outcome, b.budget(), b.beadsSizeNoCure())
+	}
+	return nil
+}
 
 // Damper implements application.DoctorCheck.
 func (b *BeadsSize) Damper() (time.Duration, int) { return BeadsSizeDamperWait, BeadsSizeDamperCap }
@@ -152,6 +233,9 @@ func (b *BeadsSize) Damper() (time.Duration, int) { return BeadsSizeDamperWait, 
 // anything, so there is nothing to undo; on the home it names the cure that
 // does run, elsewhere a person clears space by hand.
 func (b *BeadsSize) WayBack() string {
+	if b.outcome != "" {
+		return "none: the collection only reclaims space and deletes no work; " + b.outcome
+	}
 	if b.Home {
 		return "none: this check changes nothing; " + b.squashCure()
 	}
