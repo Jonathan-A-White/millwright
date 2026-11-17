@@ -292,6 +292,28 @@ func TestADocsLineIsReadWhereverItSitsAndInEachVerdict(t *testing.T) {
 	}
 }
 
+func TestParseDocsReadingOfABacktickedLine(t *testing.T) {
+	bare := "Docs: read a.md, b.md; helped because it said so."
+	want := application.ParseDocsReading(bare)
+	if !want.Found || want.Unread != "" {
+		t.Fatalf("the bare line is not read: %+v", want)
+	}
+	for name, line := range map[string]string{
+		"one pair":        "`" + bare + "`",
+		"triple":          "```" + bare + "```",
+		"bulleted":        "- `" + bare + "`",
+		"after a comment": "Done.\n`" + bare + "`\n",
+	} {
+		if got := application.ParseDocsReading(line); got != want {
+			t.Errorf("%s: got %+v, want %+v", name, got, want)
+		}
+	}
+	// A backticked mention of the heading is still not a Docs line.
+	if got := application.ParseDocsReading("`Docs:` is the heading I used."); got.Found {
+		t.Errorf("a mention was read as a Docs line: %+v", got)
+	}
+}
+
 func TestADocsLineNotOfTheShapeIsKeptUnread(t *testing.T) {
 	got := application.ParseDocsReading("Done.\nDocs: I read the codemap and it was fine.\n")
 	if !got.Found || got.Unread != "I read the codemap and it was fine." || got.Files != "" || got.Verdict != "" {
