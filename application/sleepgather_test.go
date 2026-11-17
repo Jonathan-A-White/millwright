@@ -581,3 +581,28 @@ func TestTheBundleGivesAPictureTheWordsHeSentWithIt(t *testing.T) {
 		t.Errorf("evidence.txt does not give the picture its words:\n%s", text)
 	}
 }
+
+func TestTriageDiffCutDumpIsReadWithoutItsCutLine(t *testing.T) {
+	cutLine := "(mw cut this part: it was 90,000 bytes, cut to its first 70,000 bytes (300 of 400 lines))\n"
+	g := gatherFixture()
+	g.Earlier = earlierDump{
+		name: "plans/sleep-2026-10-15/triage.jsonl",
+		text: `{"id":"mw-a.1","type":"task","status":"open","priority":3}` + "\n" + cutLine,
+		ok:   true,
+	}
+	g.Dump = func(_ context.Context, w io.Writer) error {
+		_, err := io.WriteString(w, `{"id":"mw-a.1","type":"task","status":"open","priority":1}`+"\n"+cutLine)
+		return err
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := partsByFile(bundle)[application.SleepDiffFile].Text
+	if strings.Contains(diff, "could not be read") || strings.Contains(diff, "invalid character") {
+		t.Errorf("the diff of a dump mw cut was not produced:\n%s", diff)
+	}
+	if !strings.Contains(diff, "mw-a.1") {
+		t.Errorf("the diff does not say what moved:\n%s", diff)
+	}
+}

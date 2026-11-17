@@ -256,8 +256,36 @@ func HasHisPriorityLabel(labels []string) bool {
 	return false
 }
 
-// ReadTriageLines reads the lines of a dump back.
+// triageCutMark begins the line mw writes at the end of a part it cut
+// ("(mw cut this part: ..."); it is not a bead.
+const triageCutMark = "(mw cut this part"
+
+// withoutCutLines is r's text with each line that begins with triageCutMark
+// left out, so a dump mw cut reads like the beads it kept.
+func withoutCutLines(r io.Reader) (io.Reader, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.Contains(string(raw), triageCutMark) {
+		return strings.NewReader(string(raw)), nil
+	}
+	var kept strings.Builder
+	for _, line := range strings.SplitAfter(string(raw), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), triageCutMark) {
+			kept.WriteString(line)
+		}
+	}
+	return strings.NewReader(kept.String()), nil
+}
+
+// ReadTriageLines reads the lines of a dump back. A line mw wrote to say it cut
+// the dump ("(mw cut this part: ...") is skipped, for the kept dump may end in it.
 func ReadTriageLines(r io.Reader) ([]TriageLine, error) {
+	r, err := withoutCutLines(r)
+	if err != nil {
+		return nil, fmt.Errorf("reading a triage dump: %w", err)
+	}
 	var lines []TriageLine
 	dec := json.NewDecoder(r)
 	for dec.More() {
