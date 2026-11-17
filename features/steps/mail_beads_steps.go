@@ -201,9 +201,11 @@ func (c *mailBeadsContext) readyOnAre(host, title string) error {
 	if err := c.expectExactly("what "+host+" is offered", ready, title); err != nil {
 		return err
 	}
-	inEpic, err := c.laptop.ReadyStories(ctx, c.epic, host)
-	if err != nil {
-		return err
+	var inEpic []application.StoryDetail
+	for _, story := range ready {
+		if story.EpicID == c.epic {
+			inEpic = append(inEpic, story)
+		}
 	}
 	return c.expectExactly("what "+host+" is offered from the epic", inEpic, title)
 }

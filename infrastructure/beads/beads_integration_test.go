@@ -408,7 +408,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 
 	// It is ready on the host its Path names, which it inherits from the epic.
-	ready, err := gateway.ReadyStories(ctx, epicID, "vps")
+	ready, err := readyInEpic(ctx, gateway, epicID, "vps")
 	if err != nil {
 		t.Fatalf("listing the ready stories: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 
 	// And not on another host.
-	elsewhere, err := gateway.ReadyStories(ctx, epicID, "laptop")
+	elsewhere, err := readyInEpic(ctx, gateway, epicID, "laptop")
 	if err != nil {
 		t.Fatalf("listing the ready stories for laptop: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	if err := gateway.ClaimStory(ctx, storyID); err != nil {
 		t.Fatalf("claiming %s: %v", storyID, err)
 	}
-	ready, err = gateway.ReadyStories(ctx, epicID, "vps")
+	ready, err = readyInEpic(ctx, gateway, epicID, "vps")
 	if err != nil {
 		t.Fatalf("listing the ready stories after the claim: %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	}
 
 	// Held: beads offers a dispatcher neither of them, path or no path.
-	ready, err := gateway.ReadyStories(ctx, epicID, "vps")
+	ready, err := readyInEpic(ctx, gateway, epicID, "vps")
 	if err != nil {
 		t.Fatalf("listing the ready stories of a held plan: %v", err)
 	}
@@ -1102,7 +1102,7 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 			t.Fatalf("releasing %s: %v", id, err)
 		}
 	}
-	ready, err = gateway.ReadyStories(ctx, epicID, "vps")
+	ready, err = readyInEpic(ctx, gateway, epicID, "vps")
 	if err != nil {
 		t.Fatalf("listing the ready stories of a released plan: %v", err)
 	}
@@ -1130,7 +1130,7 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	if err := gateway.CloseStory(ctx, first, "worked"); err != nil {
 		t.Fatalf("closing %s: %v", first, err)
 	}
-	ready, err = gateway.ReadyStories(ctx, epicID, "vps")
+	ready, err = readyInEpic(ctx, gateway, epicID, "vps")
 	if err != nil {
 		t.Fatalf("listing the ready stories after the close: %v", err)
 	}
@@ -2111,4 +2111,20 @@ func TestGatewayListsTheCardsClosedSinceATimeAndReadsTheirRow(t *testing.T) {
 	if got := shown[0]; got.TodoRow != "now" || got.TodoRowWhy != "Due tomorrow" || got.TodoSlipped != "2026-10-15T17:00:00Z" {
 		t.Errorf("expected %s ranked now because Due tomorrow and slipped, got %q, %q, %q", open, got.TodoRow, got.TodoRowWhy, got.TodoSlipped)
 	}
+}
+
+// readyInEpic is what bd offers host from one epic: the ready set ReadyForHost
+// reads, narrowed to the stories filed under epicID.
+func readyInEpic(ctx context.Context, gateway *beads.Gateway, epicID, host string) ([]application.StoryDetail, error) {
+	offered, err := gateway.ReadyForHost(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var ready []application.StoryDetail
+	for _, story := range offered {
+		if story.EpicID == epicID {
+			ready = append(ready, story)
+		}
+	}
+	return ready, nil
 }
