@@ -30,6 +30,12 @@ type RigFiles interface {
 	// checkout at rigDir; the named files are paths in the rig (mw-gq6.661,
 	// mw-gq6.856).
 	TestCallers(rigDir string, files []string) (int, error)
+
+	// BranchOnOrigin says whether the branch is one of the rig's origin, as the
+	// checkout at rigDir knows it (its remote-tracking ref, or else what the
+	// origin itself lists), and names the branch origin's HEAD is, "" when that
+	// cannot be told. An error is a checkout that could not be read (mw-gq6.1416).
+	BranchOnOrigin(rigDir, branch string) (found bool, head string, err error)
 }
 
 // WrongRig is a story whose files key names paths that exist in none of its
