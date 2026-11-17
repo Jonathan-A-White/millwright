@@ -103,6 +103,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
   - [The routine timer's check: `mw millhand tick`](#the-routine-timers-check-mw-millhand-tick)
   - [Waking the Millhand by timer](#waking-the-millhand-by-timer)
 - [Watching a host from one that can lose its network](#watching-a-host-from-one-that-can-lose-its-network)
+- [mw host sweep](#mw-host-sweep)
 - [mw doctor](#mw-doctor)
 - [Heavy work on a small host](#heavy-work-on-a-small-host)
 - [The Path](#the-path)
