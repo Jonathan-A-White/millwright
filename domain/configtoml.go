@@ -218,7 +218,7 @@ func (c *ConfigTOML) valueText(st tomlStatement) string {
 // TOML text for a value (see TOMLLiteral). An existing key keeps its place and
 // whatever comment follows its value; a missing key goes after the last key of
 // its table; a missing table is appended after a blank line. Every other byte
-// is as it was. Neither table nor key may need quoting. The root table is "".
+// is as it was. A table or key part that is not bare is written quoted. The root table is "".
 func (c *ConfigTOML) Set(table, key, literal string) string {
 	crlf := len(c.lines) > 1 && strings.HasSuffix(c.lines[0], "\r")
 	eol := ""
@@ -237,7 +237,7 @@ func (c *ConfigTOML) Set(table, key, literal string) string {
 		return strings.Join(out, "\n")
 	}
 
-	added := key + " = " + literal + eol
+	added := tomlKeyText(key) + " = " + literal + eol
 	after := -1
 	for _, st := range c.stmts {
 		if st.table == table && !st.array && st.last > after {
@@ -263,7 +263,7 @@ func (c *ConfigTOML) Set(table, key, literal string) string {
 		return added + "\n" + text
 	}
 	if text == "" {
-		return "[" + table + "]" + eol + "\n" + added + "\n"
+		return "[" + tomlTableText(table) + "]" + eol + "\n" + added + "\n"
 	}
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
@@ -272,7 +272,7 @@ func (c *ConfigTOML) Set(table, key, literal string) string {
 	if strings.TrimSpace(body[strings.LastIndex(body, "\n")+1:]) != "" {
 		text += eol + "\n"
 	}
-	return text + "[" + table + "]" + eol + "\n" + added + "\n"
+	return text + "[" + tomlTableText(table) + "]" + eol + "\n" + added + "\n"
 }
 
 // KnownRootConfigKeys are the keys of the config file's root table that mw
@@ -290,7 +290,8 @@ var KnownRootConfigKeys = []string{
 }
 
 // SplitConfigKey splits "table.key" at its last dot. The table may itself be
-// dotted ("cloud.caps"); every part must be a bare TOML key. A key with no dot
+// dotted ("cloud.caps"); every part is a bare TOML key or a quoted one
+// (test_parts.lampas."vitest 1/6"), which comes back without its quotes. A key with no dot
 // is a key of the root table, and the table is "": it must be one of
 // KnownRootConfigKeys, or the error names them.
 func SplitConfigKey(dotted string) (table, key string, err error) {
@@ -304,13 +305,73 @@ func SplitConfigKey(dotted string) (table, key string, err error) {
 		return "", "", fmt.Errorf("%q is not a known top-level key (the known ones are %s); for a key of a table say <table>.<key>, as after_landing.millwright",
 			dotted, strings.Join(KnownRootConfigKeys, ", "))
 	}
-	table, key = dotted[:cut], dotted[cut+1:]
-	for _, part := range append(strings.Split(table, "."), key) {
-		if !tomlBareKey.MatchString(part) {
-			return "", "", fmt.Errorf("%q: %q is not a bare key (letters, digits, - and _ only)", dotted, part)
-		}
+	parts, err := splitDottedKey(dotted)
+	if err != nil {
+		return "", "", err
 	}
-	return table, key, nil
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("%q: a key of a table is said <table>.<key>", dotted)
+	}
+	return strings.Join(parts[:len(parts)-1], "."), parts[len(parts)-1], nil
+}
+
+// splitDottedKey reads a TOML dotted key into its parts: each is bare (letters,
+// digits, - and _) or quoted with " or ', the quotes taken off. A quoted part
+// may not hold a dot, a backslash or a control character, since a table is kept
+// as its parts joined by dots and the scanner reads no escapes.
+func splitDottedKey(dotted string) ([]string, error) {
+	var parts []string
+	rest := dotted
+	for {
+		rest = strings.TrimLeft(rest, " \t")
+		var part string
+		if rest != "" && (rest[0] == '"' || rest[0] == '\'') {
+			end := strings.IndexByte(rest[1:], rest[0])
+			if end < 0 {
+				return nil, fmt.Errorf("%q: a quoted key is not closed", dotted)
+			}
+			part, rest = rest[1:1+end], rest[end+2:]
+			if part == "" || strings.ContainsAny(part, ".\\") || strings.ContainsFunc(part, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+				return nil, fmt.Errorf("%q: %q is not a key mw can take (quoted, it may not be empty or hold a dot, a backslash or a control character)", dotted, part)
+			}
+		} else {
+			end := strings.IndexByte(rest, '.')
+			if end < 0 {
+				end = len(rest)
+			}
+			part, rest = strings.TrimRight(rest[:end], " \t"), rest[end:]
+			if !tomlBareKey.MatchString(part) {
+				return nil, fmt.Errorf("%q: %q is not a bare key (letters, digits, - and _ only; quote it, as \"vitest 1/6\", otherwise)", dotted, part)
+			}
+		}
+		parts = append(parts, part)
+		rest = strings.TrimLeft(rest, " \t")
+		if rest == "" {
+			return parts, nil
+		}
+		if rest[0] != '.' {
+			return nil, fmt.Errorf("%q: expected a dot after %q", dotted, part)
+		}
+		rest = rest[1:]
+	}
+}
+
+// tomlKeyText is one key part as a TOML file spells it: bare when it can be,
+// else in double quotes.
+func tomlKeyText(part string) string {
+	if tomlBareKey.MatchString(part) {
+		return part
+	}
+	return `"` + part + `"`
+}
+
+// tomlTableText is a dotted table name with each part that needs it quoted.
+func tomlTableText(table string) string {
+	parts := strings.Split(table, ".")
+	for i, part := range parts {
+		parts[i] = tomlKeyText(part)
+	}
+	return strings.Join(parts, ".")
 }
 
 // TOMLLiteral is the TOML text that stores value. A value that is already TOML
