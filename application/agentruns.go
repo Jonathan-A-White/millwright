@@ -172,6 +172,34 @@ func (g *RunGuardedRestarter) TryRestart(ctx context.Context, unit string) (bool
 	return g.Units.TryRestart(ctx, unit)
 }
 
+// WaitLimit is how long a restart of the follower waits for a model run, at most.
+func (g *RunGuardedRestarter) WaitLimit() time.Duration {
+	if g.Limit <= 0 {
+		return AgentRunWaitLimit
+	}
+	return g.Limit
+}
+
+// LiveRuns are the model runs under way now, read without waiting for them. A
+// restarter with no marks has none.
+func (g *RunGuardedRestarter) LiveRuns(ctx context.Context) ([]AgentRun, error) {
+	if g.Runs == nil {
+		return nil, nil
+	}
+	live, _, err := g.Runs.Open(ctx)
+	return live, err
+}
+
+// RestartCutting restarts unit at once, without waiting, because a restart asked
+// for at since has waited its limit for the runs in live to end: it says which
+// runs it cuts, as TryRestart does at the limit.
+func (g *RunGuardedRestarter) RestartCutting(ctx context.Context, unit string, live []AgentRun, since time.Time) (bool, error) {
+	if len(live) > 0 {
+		g.note(unit, "%s was restarted after %s: a run was cut: %s", unit, g.now().Sub(since).Round(time.Second), runsLine(live, g.now()))
+	}
+	return g.Units.TryRestart(ctx, unit)
+}
+
 // ReloadStale implements UnitRestarter.
 func (g *RunGuardedRestarter) ReloadStale(ctx context.Context) ([]string, error) {
 	return g.Units.ReloadStale(ctx)

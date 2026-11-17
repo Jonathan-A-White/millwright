@@ -160,8 +160,9 @@ type SelfUpdateFailure struct {
 // not be brought level or built. A checkout left alone, as it should be, is no
 // failure; nor is a failed deploy of another rig.
 func (s SelfUpdate) Update(ctx context.Context) ([]string, *SelfUpdateFailure) {
+	pending := s.finishPendingRestart(ctx)
 	notes, failure := s.runFactory(ctx)
-	return append(notes, s.deployOthers(ctx)...), failure
+	return append(append(pending, notes...), s.deployOthers(ctx)...), failure
 }
 
 func (s SelfUpdate) runFactory(ctx context.Context) ([]string, *SelfUpdateFailure) {
@@ -264,8 +265,7 @@ func (s SelfUpdate) levelFactory(ctx context.Context, dir string, failed func(st
 	if note := markDeployedAt(ctx, s.Built, FactoryRig, head); note != "" {
 		notes = append(notes, note)
 	}
-	said, _ := RestartFactoryUnits(ctx, s.Units, FactoryRig)
-	return with(append(notes, said...))
+	return with(append(notes, s.restartFactoryUnits(ctx)...))
 }
 
 // leftMark is the key, in Built, under which a rig's checkout that was left
