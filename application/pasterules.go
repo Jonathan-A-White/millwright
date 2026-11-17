@@ -388,3 +388,21 @@ func checkWords(in pasteInput) pasteFinding {
 	warn, refuse := lengthFindings(in.text, in.class)
 	return pasteFinding{warn: warn, refuse: refuse}
 }
+
+// lengthFindings is the words row of the paste table (see PasteRules): the
+// warning or the refusal, without the command's name, for the text and its
+// class.
+func lengthFindings(text, class string) (warning, refusal string) {
+	warn, refuse, what := PosternWarnWords, PosternRefuseWords, "message"
+	if class == "decision-needed" {
+		warn, refuse, what = PosternCardWarnWords, PosternCardRefuseWords, "card question"
+	}
+	n := wordsOutsideFences(text)
+	switch {
+	case n > refuse:
+		return "", fmt.Sprintf("%d words, over the %d a %s may run: trim it, put the detail on the bead, or send it as it is with `mw postern send --long <text>`", n, refuse, what)
+	case n > warn:
+		return fmt.Sprintf("%d words; a phone shows about %d: trim, or say it in the bead", n, warn), ""
+	}
+	return "", ""
+}
