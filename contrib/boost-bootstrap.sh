@@ -352,10 +352,47 @@ fetch_out() { # <url>
 }
 
 # --- 1. packages ------------------------------------------------------------------
+# rig_packages: the Debian package names the vault's rigs/*.toml list under
+# system_packages = ["ffmpeg", ...] (one line or several), one per line, as
+# written; nothing when the vault has no rigs/ folder or a file has no such key.
+# A comment and a quoted word of another key are not read (mw-gq6.1396).
+rig_packages() {
+	local f
+	for f in "$BOOST_VAULT"/rigs/*.toml; do
+		[ -f "$f" ] || continue
+		awk '
+			/^[ \t]*system_packages[ \t]*=/ { on = 1; sub(/^[^=]*=/, "") }
+			on {
+				q = 0; w = ""
+				for (i = 1; i <= length($0); i++) {
+					c = substr($0, i, 1)
+					if (q) { if (c == "\"") { print w; q = 0; w = "" } else w = w c }
+					else if (c == "\"") q = 1
+					else if (c == "#") break
+					else if (c == "]") { on = 0; break }
+				}
+			}
+		' "$f"
+	done
+}
+
+# all_packages: PKGS, then each name a rig lists that PKGS and the rigs before it
+# do not already hold, a name that is not a Debian package name left out.
+all_packages() {
+	local p all=" $PKGS "
+	for p in $(rig_packages); do
+		case $p in '' | [!a-z0-9]* | *[!a-z0-9+.-]*) continue ;; esac
+		case $all in *" $p "*) ;; *) all="$all$p " ;; esac
+	done
+	all=${all# }
+	echo "${all% }"
+}
+
 s_packages() {
-	local p miss=""
-	step packages "$PKGS"
-	for p in $PKGS; do have_pkg "$p" || miss="$miss $p"; done
+	local p miss="" all
+	all=$(all_packages)
+	step packages "$all"
+	for p in $all; do have_pkg "$p" || miss="$miss $p"; done
 	miss=${miss# }
 	if [ -z "$miss" ]; then
 		skip "all of them are installed"

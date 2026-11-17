@@ -118,3 +118,121 @@ func TestBootstrapInstallsFfmpegForTheRigsThatConvertAudio(t *testing.T) {
 		}
 	}
 }
+
+// bootstrapPackagesLine runs contrib/boost-bootstrap.sh --dry-run on a box where
+// no package is installed, with a vault that holds the given rigs/ files (none
+// when rigs is nil), and returns the apt-get install line of its packages step.
+func bootstrapPackagesLine(t *testing.T, rigs map[string]string) (line string, pkgs []string) {
+	t.Helper()
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("no bash to run the bootstrap with")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "contrib", "boost-bootstrap.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range strings.Split(string(text), "\n") {
+		if rest, ok := strings.CutPrefix(l, "PKGS="); ok {
+			pkgs = strings.Fields(strings.Trim(rest, `"`))
+		}
+	}
+	dir := t.TempDir()
+	vault := filepath.Join(dir, "vault")
+	if err := os.MkdirAll(vault, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if rigs != nil {
+		if err := os.MkdirAll(filepath.Join(vault, "rigs"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range rigs {
+			if err := os.WriteFile(filepath.Join(vault, "rigs", name), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	bin := filepath.Join(dir, "bin")
+	home := filepath.Join(dir, "home")
+	for _, d := range []string{bin, home} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// a box with nothing installed: dpkg-query finds no package
+	if err := os.WriteFile(filepath.Join(bin, "dpkg-query"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", script, "--dry-run")
+	cmd.Env = []string{
+		"PATH=" + bin + ":/usr/bin:/bin", "HOME=" + home, "BOOST_VAULT=" + vault,
+		"BOOST_HOST=cloud9", "BOOST_WG_ADDRESS=10.88.0.9", "BOOST_BEADS_HOST=10.88.0.1",
+		"BOOST_WG_HUB_PUBKEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+	}
+	// the run stops at the vault step (the temp vault is no checkout); the
+	// packages step is printed first.
+	out, _ := cmd.CombinedOutput()
+	for _, l := range strings.Split(string(out), "\n") {
+		if strings.Contains(l, "would: apt-get install") {
+			line = strings.TrimSpace(l)
+			break
+		}
+	}
+	if line == "" {
+		t.Fatalf("the dry run printed no apt-get install line:\n%s", out)
+	}
+	return line, pkgs
+}
+
+func countWord(line, word string) int {
+	n := 0
+	for _, f := range strings.Fields(line) {
+		if f == word {
+			n++
+		}
+	}
+	return n
+}
+
+// TestBootstrapInstallsTheSystemPackagesOfTheRigsInTheVault: a rig's file in the
+// vault may list system_packages, and the packages step installs the union of
+// those and mw's own, each once (mw-gq6.1396).
+func TestBootstrapInstallsTheSystemPackagesOfTheRigsInTheVault(t *testing.T) {
+	line, pkgs := bootstrapPackagesLine(t, map[string]string{
+		"lampas.toml":  "files_expected = true\nsystem_packages = [\"ffmpeg\", \"sox\"]\nsite_url = \"https://x/\"\n",
+		"cairn.toml":   "files_expected = true\n",
+		"voicey.toml":  "system_packages = [\n  \"espeak\", # speech\n  \"fontconfig\",\n]\n",
+		"strange.toml": "# system_packages = [\"nope\"]\nnote = \"system_packages = [\\\"nope2\\\"]\"\n",
+	})
+	if got := countWord(line, "ffmpeg"); got != 1 {
+		t.Errorf("ffmpeg appears %d times, want once: %s", got, line)
+	}
+	for _, want := range append(append([]string{}, pkgs...), "sox", "espeak", "fontconfig") {
+		if countWord(line, want) != 1 {
+			t.Errorf("%s is not named once: %s", want, line)
+		}
+	}
+	for _, not := range []string{"nope", "nope2"} {
+		if countWord(line, not) != 0 {
+			t.Errorf("%s is named though no rig lists it: %s", not, line)
+		}
+	}
+}
+
+// TestBootstrapPackagesAreMwsOwnWhenNoRigListsAny: a rig file with no
+// system_packages key, or a vault with no rigs/ folder, changes nothing.
+func TestBootstrapPackagesAreMwsOwnWhenNoRigListsAny(t *testing.T) {
+	for name, rigs := range map[string]map[string]string{
+		"a rig file without the key": {"cairn.toml": "files_expected = true\n"},
+		"no rigs folder":             nil,
+	} {
+		line, pkgs := bootstrapPackagesLine(t, rigs)
+		want := "would: apt-get install -y --no-install-recommends " + strings.Join(pkgs, " ")
+		if line != want {
+			t.Errorf("%s: line = %q, want %q", name, line, want)
+		}
+	}
+}

@@ -66,6 +66,7 @@ changes nothing. `--dry-run` prints `would:` where a run would act, and writes,
 installs and starts nothing.
 
 1. **packages**: `git tmux jq ripgrep python3 curl ca-certificates gh make xz-utils wireguard-tools ffmpeg` (apt, root).
+   A rig's file in the vault (`rigs/<rig>.toml`) may add its own with `system_packages = ["ffmpeg", ...]` (Debian package names): the step installs the union of the two, each once, and a re-run on an old box adds the missing ones (mw-gq6.1396).
 2. **node**: Node 22+ from nodejs.org at `BOOST_NODE_VERSION`, its tarball checked against the published `SHASUMS256.txt`, unpacked under `~/.local/lib` and linked into `~/.local/bin`.
 3. **git**: your identity; a `credential.https://github.com.helper` that reads `$GH_TOKEN` when git asks (so no token is in git's config); `~/.config/mw/github.env`.
 4. **wireguard**: `/etc/wireguard/wg0.conf` (mode 600) with this host's address and the hub as the one peer, `wg-quick@wg0` enabled and up. An existing key in `wg0.conf` is kept.
