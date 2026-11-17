@@ -478,3 +478,35 @@ func TestThePrintedMemoryCommandHasAnEndOfFlagsAndRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// A line with a closing backtick and no opening one is not a proposal: the
+// backtick would be kept in its sentence (mw-gq6.1373). The same holds for a
+// common errors line.
+func TestAStrayClosingBacktickMakesAMemoryLineMalformed(t *testing.T) {
+	bare := "mw memory add millwright --kind gotcha --subject x --source mw-1 \"A fact.\""
+	for name, line := range map[string]string{
+		"a memory command":      bare + "`",
+		"after a list marker":   "- " + bare + "`",
+		"a typed line":          "gotcha [bd]: Point every bd call at the vault with -C.`",
+		"a closing triple only": bare + "```",
+	} {
+		got := application.ParseFactProposals("For the rig memory:\n" + line + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed == "" {
+			t.Errorf("%s: want one malformed line, got %+v", name, got.Lines)
+		}
+	}
+	// A backtick pair inside the sentence, even at its end, is not stray.
+	for name, line := range map[string]string{
+		"a code word at the end": "gotcha [bd]: Point every call at the vault with `-C`",
+		"inside a span":          "`gotcha [bd]: Point every call at the vault with `-C``",
+	} {
+		got := application.ParseFactProposals("For the rig memory:\n" + line + "\n")
+		if len(got.Lines) != 1 || got.Lines[0].Malformed != "" {
+			t.Errorf("%s: want one proposal, got %+v", name, got.Lines)
+		}
+	}
+	errs := application.ParseCommonErrors("For common errors:\nsome-class: a fault in a thing`\n")
+	if len(errs.Lines) != 1 || errs.Lines[0].Malformed == "" {
+		t.Errorf("common errors: want one malformed line, got %+v", errs.Lines)
+	}
+}
