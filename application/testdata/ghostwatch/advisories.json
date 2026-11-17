@@ -1,0 +1,46 @@
+[
+  {
+    "ghsa_id": "GHSA-8jqq-qq46-c657",
+    "cve_id": null,
+    "summary": "Owner Role Assignment via Content Import",
+    "severity": "medium",
+    "state": "published",
+    "published_at": "2026-11-13T16:54:14Z",
+    "vulnerabilities": [
+      {"package": {"ecosystem": "npm", "name": "ghost"}, "vulnerable_version_range": ">= 1.0.0, < 6.76.0", "patched_versions": "6.76.0", "vulnerable_functions": []}
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-w52v-v783-gw97",
+    "cve_id": "CVE-2026-26980",
+    "summary": "SQL injection in Content API",
+    "severity": "critical",
+    "state": "published",
+    "published_at": "2026-02-16T18:04:35Z",
+    "vulnerabilities": [
+      {"package": {"ecosystem": "npm", "name": "ghost"}, "vulnerable_version_range": "<= 6.19.0", "patched_versions": "6.19.1", "vulnerable_functions": []}
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-aaaa-bbbb-cccc",
+    "cve_id": null,
+    "summary": "A fault in a theme package, not in Ghost",
+    "severity": "low",
+    "state": "published",
+    "published_at": "2026-01-02T00:00:00Z",
+    "vulnerabilities": [
+      {"package": {"ecosystem": "npm", "name": "some-theme"}, "vulnerable_version_range": "< 9.0.0", "patched_versions": "9.0.0", "vulnerable_functions": []}
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-dddd-eeee-ffff",
+    "cve_id": "CVE-2023-0001",
+    "summary": "An old fault in Ghost 4",
+    "severity": "high",
+    "state": "published",
+    "published_at": "2023-01-02T00:00:00Z",
+    "vulnerabilities": [
+      {"package": {"ecosystem": "npm", "name": "ghost"}, "vulnerable_version_range": ">= 4.0.0, < 4.48.8", "patched_versions": "4.48.8", "vulnerable_functions": []}
+    ]
+  }
+]
