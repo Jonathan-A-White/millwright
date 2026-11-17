@@ -31,6 +31,7 @@ Feature: A story the harness stopped is given back whole once its time has come
     And the story "mw-gq6.1" is held blocked
     When a dispatch tick runs at "2026-09-18T12:20:00Z" with room for 0 sessions
     Then the story "mw-gq6.1" is open with no claim and no run state label
+    And the story "mw-gq6.1" carries no harness stop label
     And the story "mw-gq6.1" records attempt 0
     And the story "mw-gq6.1", untouched since "2026-09-18T12:00:00Z", is named by no refused-open alarm at "2026-09-18T13:00:00Z"
     When a dispatch tick runs at "2026-09-18T12:21:00Z" with room for 1 session
@@ -65,3 +66,4 @@ Feature: A story the harness stopped is given back whole once its time has come
     And the story "mw-gq6.1", untouched since "2026-09-18T12:00:00Z", is named by no refused-open alarm at "2026-09-18T13:00:00Z"
     When a dispatch tick runs at "2026-09-19T09:05:00Z" with room for 0 sessions
     Then the story "mw-gq6.1" is open with no claim and no run state label
+    And the story "mw-gq6.1" carries no harness stop label

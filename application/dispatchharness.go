@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -37,6 +38,7 @@ func (d Dispatch) retryHarnessStop(ctx context.Context, detail StoryDetail, name
 			"%s: the harness stopped it (%s) and the time it named has come, but its run state could not be cleared, so it is held: %v", id, stop.Reason, err))
 		return false
 	}
+	d.clearHarnessStopLabels(ctx, detail, report)
 	if err := d.Tracker.ReleaseClaimHeldBy(ctx, id, detail.Assignee); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: the harness stopped it (%s) and the time it named has come, but its claim could not be given back, so it is held: %v", id, stop.Reason, err))
@@ -68,6 +70,24 @@ func (d Dispatch) retryHarnessStop(ctx context.Context, detail StoryDetail, name
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: the give-back after its harness stop could not be commented on: %v", id, err))
 	}
 	return true
+}
+
+// clearHarnessStopLabels takes the harness-stop:<unix> label mw next wrote
+// beside run:blocked (markHarnessStop) off the story: the time it names has
+// come, and the story is no longer a stopped one (mw-gq6.1410). A label that
+// cannot be taken off is a note, not a refusal: it is harmless once its time
+// has passed.
+func (d Dispatch) clearHarnessStopLabels(ctx context.Context, detail StoryDetail, report *DispatchReport) {
+	for _, label := range detail.Labels {
+		label = strings.TrimSpace(label)
+		if !strings.HasPrefix(label, HarnessStopState+":") {
+			continue
+		}
+		if err := d.Tracker.RemoveLabel(ctx, detail.Story.ID, label); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf(
+				"%s: the label %s could not be taken off after the give-back: %v", detail.Story.ID, label, err))
+		}
+	}
 }
 
 // holdForHarness holds this host's new claims until the stop's time, the

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -25,6 +26,7 @@ func registerHarnessOverloadSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.When(`^the pane of "([^"]*)" is dead$`, c.thePaneIsDead)
 	ctx.When(`^a dispatch tick runs at "([^"]*)" with room for (\d+) sessions?$`, c.aDispatchTickRunsAt)
 	ctx.Then(`^the story "([^"]*)" is open with no claim and no run state label$`, c.theStoryIsOpenWithNoRunState)
+	ctx.Then(`^the story "([^"]*)" carries no harness stop label$`, c.theStoryCarriesNoHarnessStopLabel)
 	ctx.Then(`^the story "([^"]*)", untouched since "([^"]*)", is named by no refused-open alarm at "([^"]*)"$`, c.theStoryIsNamedByNoRefusedAlarm)
 	ctx.Then(`^the dispatch started "([^"]*)" again as attempt (\d+)$`, c.theDispatchStartedAgainAs)
 }
@@ -81,6 +83,22 @@ func (c *nextContext) theStoryIsOpenWithNoRunState(id string) error {
 	for _, label := range detail.Labels {
 		if len(label) > len(application.RunState) && label[:len(application.RunState)+1] == application.RunState+":" {
 			return fmt.Errorf("expected %s to carry no run state, it carries %q", id, label)
+		}
+	}
+	return nil
+}
+
+// theStoryCarriesNoHarnessStopLabel says no label of the story starts with the
+// harness stop's dimension: the time a stop named is spent once the story is
+// given back (mw-gq6.1410).
+func (c *nextContext) theStoryCarriesNoHarnessStopLabel(id string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	for _, label := range detail.Labels {
+		if strings.HasPrefix(label, application.HarnessStopState+":") {
+			return fmt.Errorf("expected %s to carry no harness stop label, it carries %q", id, label)
 		}
 	}
 	return nil
