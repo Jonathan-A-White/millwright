@@ -111,3 +111,22 @@ func (n Next) closeAsFixedOnMain(ctx context.Context, c *closeOut, report *NextR
 	}
 	return *report, true, s.err
 }
+
+// giveBackOpen is the give-back of a stop whose story is worked again by the next
+// dispatch tick (open steps, turn cap, harness crash and the rest): it reports
+// whether the claim was given back, and whether the story is then left with no
+// run state (mw-gq6.1409). The run state is cleared first, as the harness-stop
+// give-back does (mw-gq6.1382), so that no open story is ever seen carrying
+// run:blocked for the refused-open alarm to name; a state that cannot be cleared
+// keeps the claim, and the stop records run:blocked on the claimed story as it
+// does for every other.
+func (n Next) giveBackOpen(ctx context.Context, c *closeOut, report *NextReport) (given, cleared bool, trouble []string) {
+	if err := writeRetrying(ctx, n, report, "the clearing of the run state", func() error { return n.Tracker.ClearRunState(ctx, c.id) }); err != nil {
+		return false, false, []string{fmt.Sprintf("the run state of %s could not be cleared, so its claim was kept: %v", c.id, err)}
+	}
+	if err := n.releaseOnStop(ctx, c.id, report); err != nil {
+		// Cleared, claim kept: the blocked state is written below all the same.
+		return false, false, []string{fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err)}
+	}
+	return true, true, nil
+}

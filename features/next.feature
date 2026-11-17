@@ -450,7 +450,7 @@ Feature: Closing out a finished story and carrying on
     When mw closes out "mw-gq6.1"
     Then nothing was landed on "main"
     And the story "mw-gq6.1" is not closed
-    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" is open, unclaimed and carries no run state label
     And the story "mw-gq6.1" carries a comment quoting: formula step
     And the report says it stopped for "open-steps"
     And the last ledger line holds:
@@ -570,7 +570,7 @@ Feature: Closing out a finished story and carrying on
     And a formula was poured for "mw-gq6.1" and one of its steps is still open
     When mw closes out "mw-gq6.1"
     Then the story "mw-gq6.1" is not closed
-    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" is open, unclaimed and carries no run state label
     And the report says it stopped for "open-steps"
     And the story "mw-gq6.1" carries a comment quoting: takes it as attempt 2
     And the worktree of "mw-gq6.1" is still there
@@ -601,6 +601,7 @@ Feature: Closing out a finished story and carrying on
     Then nothing was landed on "main"
     And the story "mw-gq6.1" is not closed
     And the report says it stopped for "turn-cap"
+    And the story "mw-gq6.1" is open, unclaimed and carries no run state label
     And the story "mw-gq6.1" carries a comment quoting: capped at 121 turns
     And the story "mw-gq6.1" carries a comment quoting: takes it as attempt 2
     And the last ledger line holds:

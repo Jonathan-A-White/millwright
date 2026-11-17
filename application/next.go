@@ -3447,7 +3447,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// story's that left no FINDINGS (mw-gq6.594): nothing is left to land, and the
 	// Mayor can bd close it. Every other stop keeps the claim, because the claim
 	// is the evidence.
-	given := false
+	given, cleared := false, false
 	if reason == ReasonStubClosingComment {
 		// Its work is done, so another attempt would redo it: the claim is
 		// given back and the story held for the Mayor (mw-gq6.1045).
@@ -3462,11 +3462,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 			}
 		}
 	} else if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || reason == ReasonHarnessCrash || reason == ReasonHarnessMissing || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
-		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
-			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
-		} else {
-			given = true
-		}
+		given, cleared, trouble = n.giveBackOpen(ctx, c, report)
 	}
 
 	claim := "the claim was not given back"
@@ -3513,7 +3509,9 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		trouble = append(trouble, fmt.Sprintf("the reason could not be written on the story: %v", err))
 		unwritten = append(unwritten, UnrecordedComment)
 	}
-	if err := writeRetrying(ctx, n, report, "the run state", func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunBlocked, stateDetail) }); err != nil {
+	if cleared {
+		// Given back open: no run state, so the story is not seen refused (mw-gq6.1409).
+	} else if err := writeRetrying(ctx, n, report, "the run state", func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunBlocked, stateDetail) }); err != nil {
 		trouble = append(trouble, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunBlocked, err))
 		unwritten = append(unwritten, UnrecordedRunState)
 	}
