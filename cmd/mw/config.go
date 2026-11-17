@@ -82,7 +82,8 @@ func newConfigSetCmd() *cobra.Command {
 			"A value that is already TOML (a quoted string, an array, an inline table, a number, true or\n" +
 			"false, a date) is written as typed; any other value is written as a quoted string. To store\n" +
 			"the string 5 and not the number, pass '\"5\"'. The table may be dotted (cloud.caps); the key\n" +
-			"after the last dot, and every part, must be a bare key. A key of the root table that mw reads\n" +
+			"after the last dot, and every part, is a bare key or a quoted one, as test_parts.lampas.\"vitest 1/6\"\n" +
+			"(quote it for the shell too: 'test_parts.lampas.\"vitest 1/6\"'). A key of the root table that mw reads\n" +
 			"(cap, builder_nice, builder_jobs, host and the rest) is named without a table; any other\n" +
 			"top-level key is refused, naming the known ones.\n\n" +
 			"It refuses, with a non-zero status, writing nothing and making no backup: a key with no\n" +

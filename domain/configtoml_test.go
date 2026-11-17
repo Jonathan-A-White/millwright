@@ -161,10 +161,41 @@ func TestSplitConfigKey(t *testing.T) {
 	if _, _, err := SplitConfigKey("nokey"); err == nil || !strings.Contains(err.Error(), "builder_jobs") {
 		t.Errorf("an unknown root key must be refused naming the known ones: %v", err)
 	}
-	for _, bad := range []string{".k", "t.", "a b.k", "a..k", `a."b"`} {
+	for _, bad := range []string{".k", "t.", "a b.k", "a..k", `a."b`, `a."b"c`, `a."b.c"`, `"a b".`} {
 		if _, _, err := SplitConfigKey(bad); err == nil {
 			t.Errorf("%q: %v", bad, err)
 		}
+	}
+}
+
+func TestSplitConfigKeyTakesAQuotedSegment(t *testing.T) {
+	for dotted, want := range map[string][3]string{
+		`test_parts.lampas."vitest build"`: {"test_parts.lampas", "vitest build", ""},
+		`test_parts.lampas."vitest 1/6"`:   {"test_parts.lampas", "vitest 1/6", ""},
+		`test_parts.lampas.'vitest build'`: {"test_parts.lampas", "vitest build", ""},
+		`test_parts."my rig".install`:      {"test_parts.my rig", "install", ""},
+		`test_parts . lampas . "a b"`:      {"test_parts.lampas", "a b", ""},
+	} {
+		table, key, err := SplitConfigKey(dotted)
+		if err != nil || table != want[0] || key != want[1] {
+			t.Errorf("%s: got %q %q %v, want %q %q", dotted, table, key, err, want[0], want[1])
+		}
+	}
+}
+
+func TestSetAQuotedKeyWritesItQuoted(t *testing.T) {
+	c, err := ParseConfigTOML("[test_parts.lampas]\ninstall = \"npm ci\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[test_parts.lampas]\ninstall = \"npm ci\"\n\"vitest build\" = \"x\"\n"
+	if got := c.Set("test_parts.lampas", "vitest build", `"x"`); got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+	empty, _ := ParseConfigTOML("")
+	want = "[test_parts.\"my rig\"]\n\"a b\" = 1\n"
+	if got := empty.Set("test_parts.my rig", "a b", "1"); got != want {
+		t.Errorf("got %q want %q", got, want)
 	}
 }
 

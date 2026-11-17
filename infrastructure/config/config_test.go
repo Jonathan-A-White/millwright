@@ -2792,6 +2792,47 @@ func TestConfigSetRefusesAnInvestShareOutsideTheBoundsNamingThem(t *testing.T) {
 	}
 }
 
+// A test part named with a space or a slash ("vitest 1/6") is a quoted key of
+// its table, and mw config set and mw config get take it quoted, as TOML does
+// (mw-gq6.1393); every other byte of the file stays as it was.
+func TestConfigSetAQuotedDottedKeySegmentKeepsEveryOtherByte(t *testing.T) {
+	const before = "# my config\nvault = \"/v\"\n\n[test_parts.lampas]\ninstall = \"npm ci\" # first\n\"vitest build\" = \"npm run build\"  # the gate\n\n[cap]\nx = 1\n"
+	writeConfig(t, before)
+	path, err := config.FilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	set := application.ConfigSet{File: configfile.New(path), Out: &out, Now: func() time.Time { return time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC) }}
+	if err := set.Run(context.Background(), `test_parts.lampas."vitest build"`, "npx vite build", false); err != nil {
+		t.Fatalf("mw config set on a quoted key: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(before, `"npm run build"`, `"npx vite build"`, 1)
+	if string(got) != want {
+		t.Fatalf("expected only the one value changed:\n%s\ngot:\n%s", want, got)
+	}
+
+	var read strings.Builder
+	get := application.ConfigGet{File: configfile.New(path), Out: &read}
+	if err := get.Run(context.Background(), `test_parts.lampas."vitest build"`); err != nil || read.String() != "npx vite build\n" {
+		t.Fatalf("mw config get on a quoted key: %q, %v", read.String(), err)
+	}
+
+	// A key the file lacks is added quoted, after the table's last key.
+	if err := set.Run(context.Background(), `test_parts.lampas."vitest 1/6"`, "npx vitest run --shard 1/6", false); err != nil {
+		t.Fatalf("mw config set of a new quoted key: %v", err)
+	}
+	got, _ = os.ReadFile(path)
+	want = strings.Replace(want, "# the gate\n", "# the gate\n\"vitest 1/6\" = \"npx vitest run --shard 1/6\"\n", 1)
+	if string(got) != want {
+		t.Fatalf("expected the new key quoted:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 func TestDampersAreReadFromTheTableAndLeaveTheRestZero(t *testing.T) {
 	writeConfig(t, "host = \"desktop\"\n")
 	if got, err := config.Dampers(); err != nil || got != (config.DampersSettings{}) {
