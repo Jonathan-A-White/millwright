@@ -197,6 +197,47 @@ func (o OAuth) SignIn(ctx context.Context, scope string, show func(authURL strin
 	return o.exchange(ctx, client, back.code, verifier, redirect)
 }
 
+// ErrNotThisSignIn is what Finish wraps when the waiting sign-in refused the
+// pasted address: its state is not the one it is waiting for.
+var ErrNotThisSignIn = errors.New("the pasted address is not from the sign-in mw google link is waiting for (its state does not match)")
+
+// ErrNobodyWaiting is what Finish wraps when nothing listens at the pasted
+// address: mw google link has finished, timed out or been stopped.
+var ErrNobodyWaiting = errors.New("no mw google link is waiting at that address")
+
+// Finish hands the address the browser ended on (its failed trip to the
+// loopback redirect, with the code and state in it) to the mw google link that
+// is waiting for it on this machine, as the browser would have. The waiting
+// sign-in checks the state and finishes the link; Finish only says whether it
+// took the address. Only an http://127.0.0.1:<port>/?state=... address is ever
+// fetched, and the code is never put in an error.
+func Finish(ctx context.Context, pasted string) error {
+	u, err := url.Parse(strings.TrimSpace(pasted))
+	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.Port() == "" || u.Port() == "0" ||
+		(u.Path != "/" && u.Path != "") || u.Query().Get("state") == "" {
+		return errors.New("that is not the address the browser ended on: copy the whole http://127.0.0.1:<port>/?state=...&code=... line from the address bar")
+	}
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return errors.New("that is not an address mw can hand to the waiting sign-in")
+	}
+	resp, err := (&http.Client{Timeout: callTimeout}).Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: it has finished, timed out or been stopped; run mw google link again", ErrNobodyWaiting)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusBadRequest:
+		return ErrNotThisSignIn
+	}
+	return fmt.Errorf("the waiting sign-in answered HTTP %d", resp.StatusCode)
+}
+
 // tokenAnswer is the token endpoint's answer, success or refusal.
 type tokenAnswer struct {
 	Refresh     string `json:"refresh_token"`

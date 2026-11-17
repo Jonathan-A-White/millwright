@@ -370,3 +370,118 @@ func TestATokenFileThatIsNotOursIsRefusedWithoutQuotingIt(t *testing.T) {
 		t.Fatalf("expected a refusal that does not quote the file, got %v", err)
 	}
 }
+
+// pastedBrowser is a browser that cannot reach the loopback (a phone, a closed
+// tab): it only keeps what Google would, and hands the address it would have
+// ended on to paste, once signIn is waiting.
+func (g *fakeGoogle) pastedBrowser(t *testing.T, ended chan<- url.Values) func(string) {
+	return func(authURL string) {
+		parsed, err := url.Parse(authURL)
+		if err != nil {
+			t.Errorf("auth URL %q: %v", authURL, err)
+			return
+		}
+		query := parsed.Query()
+		g.mu.Lock()
+		g.challenge = query.Get("code_challenge")
+		g.redirect = query.Get("redirect_uri")
+		g.mu.Unlock()
+		ended <- query
+	}
+}
+
+func TestAPastedAddressWithTheRightStateFinishesTheSignIn(t *testing.T) {
+	g := &fakeGoogle{}
+	ended := make(chan url.Values, 1)
+	oauth := google.OAuth{ClientFile: clientFile(t, "installed"), Endpoints: g.serve(t), Wait: 10 * time.Second}
+
+	type result struct {
+		grant application.GoogleGrant
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		grant, err := oauth.SignIn(context.Background(), application.GoogleContactsScope, g.pastedBrowser(t, ended))
+		done <- result{grant, err}
+	}()
+
+	query := <-ended
+	pasted := query.Get("redirect_uri") + "?state=" + url.QueryEscape(query.Get("state")) + "&code=" + url.QueryEscape(fakeCode) + "&scope=x"
+	if err := google.Finish(context.Background(), " "+pasted+"\n"); err != nil {
+		t.Fatalf("expected the pasted address delivered, got %v", err)
+	}
+	got := <-done
+	if got.err != nil || got.grant.Refresh != fakeRefresh {
+		t.Fatalf("expected the sign-in finished by the pasted address, got %+v %v", got.grant, got.err)
+	}
+}
+
+func TestAPastedAddressWithTheWrongStateIsRefusedAndTheSignInKeepsWaiting(t *testing.T) {
+	g := &fakeGoogle{}
+	ended := make(chan url.Values, 1)
+	oauth := google.OAuth{ClientFile: clientFile(t, "installed"), Endpoints: g.serve(t), Wait: 10 * time.Second}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := oauth.SignIn(context.Background(), application.GoogleContactsScope, g.pastedBrowser(t, ended))
+		done <- err
+	}()
+
+	query := <-ended
+	forged := query.Get("redirect_uri") + "?state=not-the-state&code=" + url.QueryEscape(fakeCode)
+	err := google.Finish(context.Background(), forged)
+	if !errors.Is(err, google.ErrNotThisSignIn) {
+		t.Fatalf("expected a refusal naming the state, got %v", err)
+	}
+	if strings.Contains(err.Error(), fakeCode) {
+		t.Fatalf("a refusal must not quote the code: %v", err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("expected the sign-in still waiting after a refused address, got %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if len(g.exchanged) != 0 {
+		t.Fatalf("expected no code exchanged for a wrong state, got %d", len(g.exchanged))
+	}
+	// the right address still finishes it
+	right := query.Get("redirect_uri") + "?state=" + url.QueryEscape(query.Get("state")) + "&code=" + url.QueryEscape(fakeCode)
+	if err := google.Finish(context.Background(), right); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAPastedAddressThatIsNotALoopbackIsNeverFetched(t *testing.T) {
+	asked := make(chan struct{}, 1)
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { asked <- struct{}{} }))
+	t.Cleanup(other.Close)
+	for _, pasted := range []string{
+		"",
+		"not an address",
+		"https://127.0.0.1:41813/?state=a&code=b",
+		"http://example.org/?state=a&code=b",
+		strings.Replace(other.URL, "127.0.0.1", "localhost", 1) + "/?state=a&code=b",
+		"http://127.0.0.1/?state=a&code=b",
+		"http://127.0.0.1:41813/?code=b",
+		"http://127.0.0.1:41813/other?state=a&code=b",
+	} {
+		if err := google.Finish(context.Background(), pasted); err == nil {
+			t.Fatalf("expected %q refused", pasted)
+		}
+	}
+	select {
+	case <-asked:
+		t.Fatal("expected nothing fetched")
+	default:
+	}
+}
+
+func TestAPastedAddressNobodyIsWaitingAtSaysSo(t *testing.T) {
+	err := google.Finish(context.Background(), "http://127.0.0.1:1/?state=a&code=b")
+	if !errors.Is(err, google.ErrNobodyWaiting) {
+		t.Fatalf("expected ErrNobodyWaiting, got %v", err)
+	}
+}

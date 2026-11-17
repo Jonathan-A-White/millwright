@@ -221,3 +221,68 @@ func TestGoogleLinkRefusesOffTheHome(t *testing.T) {
 		t.Fatal("expected no sign-in started off the home")
 	}
 }
+
+func TestGoogleFinishCompletesALinkTheBrowserCouldNotReach(t *testing.T) {
+	standInGoogle(t, "laptop")
+	token := filepath.Join(os.Getenv("HOME"), ".config", "mw", "google-token.json")
+
+	// The browser (a phone, a closed tab) never reaches the loopback: it only
+	// hands over the address mw opened.
+	opened := make(chan string, 1)
+	googleOpen = func(authURL string) error { opened <- authURL; return nil }
+
+	var said bytes.Buffer
+	var saidMu sync.Mutex
+	root := newRootCmd()
+	root.SetOut(lockedWriter{&saidMu, &said})
+	root.SetErr(lockedWriter{&saidMu, &said})
+	root.SetArgs([]string{"google", "link"})
+	done := make(chan error, 1)
+	go func() { done <- root.Execute() }()
+
+	parsed, err := url.Parse(<-opened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := parsed.Query()
+
+	forged := q.Get("redirect_uri") + "?state=not-the-state&code=4/forged"
+	said2, err := runGoogle(t, "google", "finish", forged)
+	if err == nil || !strings.Contains(said2, "state") {
+		t.Fatalf("expected a pasted address with the wrong state refused, got %q %v", said2, err)
+	}
+	if _, statErr := os.Stat(token); statErr == nil {
+		t.Fatal("expected nothing kept after a refused address")
+	}
+
+	right := q.Get("redirect_uri") + "?state=" + url.QueryEscape(q.Get("state")) + "&code=4/code"
+	said2, err = runGoogle(t, "google", "finish", right)
+	if err != nil {
+		t.Fatalf("mw google finish: %v: %s", err, said2)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("mw google link: %v", err)
+	}
+	saidMu.Lock()
+	linkSaid := said.String()
+	saidMu.Unlock()
+	mustNotShowTheToken(t, linkSaid)
+	if !strings.Contains(linkSaid, "mw google finish '<address>'") || !strings.Contains(linkSaid, "linked (contacts.readonly)") {
+		t.Fatalf("expected the finish hint while waiting and the link done, got %q", linkSaid)
+	}
+	body, _ := os.ReadFile(token)
+	if !strings.Contains(string(body), cmdFakeRefresh) {
+		t.Fatalf("expected the refresh token kept, got %s", body)
+	}
+}
+
+type lockedWriter struct {
+	mu *sync.Mutex
+	b  *bytes.Buffer
+}
+
+func (w lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.Write(p)
+}

@@ -31,7 +31,7 @@ func newGoogleCmd() *cobra.Command {
 			"~/.config/mw/google-client.json (google_client_file in the config file, or $" + config.GoogleClientFileEnv + ").\n" +
 			"The refresh token is kept in ~/.config/mw/google-token.json, mode 0600, and never shown.",
 	}
-	cmd.AddCommand(newGoogleLinkCmd(), newGoogleStatusCmd(), newGoogleUnlinkCmd())
+	cmd.AddCommand(newGoogleLinkCmd(), newGoogleFinishCmd(), newGoogleStatusCmd(), newGoogleUnlinkCmd())
 	return cmd
 }
 
@@ -43,7 +43,8 @@ func newGoogleLinkCmd() *cobra.Command {
 			"redirect on a free port), asking for contacts.readonly alone. The browser is opened\n" +
 			"when it can be, and the address is printed either way. The refresh token is kept in\n" +
 			"~/.config/mw/google-token.json, mode 0600, replacing any link before. It runs on the\n" +
-			"home only; a grant of anything but contacts.readonly is revoked and nothing is kept.",
+			"home only; a grant of anything but contacts.readonly is revoked and nothing is kept.\n" +
+			"While it waits it says how to finish by hand when the browser cannot reach it: mw google finish.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			account, tokens, err := googleAccount()
@@ -67,6 +68,22 @@ func newGoogleLinkCmd() *cobra.Command {
 				},
 				Open: googleOpen,
 			}.Run(cmd.Context())
+		},
+	}
+}
+
+func newGoogleFinishCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "finish <address>",
+		Short: "Finish a mw google link that is waiting, with the address the browser ended on",
+		Long: "finish is for a sign-in the browser could not bring back to mw google link (it was signed\n" +
+			"in on a phone, or the tab was closed): copy the whole address the browser shows, an\n" +
+			"http://127.0.0.1:<port>/?state=...&code=... line, and run it here, on the machine where\n" +
+			"mw google link is still waiting. The waiting link checks the state and finishes; an\n" +
+			"address from another sign-in is refused. Only a loopback address is ever fetched.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return application.GoogleFinish{Deliver: google.Finish, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0])
 		},
 	}
 }
