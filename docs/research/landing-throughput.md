@@ -13,6 +13,27 @@ Hours here are story-hours unless a line says otherwise: one story waiting one h
 A "pipeline hour" is an hour of a rig's one landing line (`mw land <rig>`), which every
 queued story of that rig waits behind.
 
+<!-- toc -->
+
+- [Short answers](#short-answers)
+- [1. What exists already](#1-what-exists-already)
+- [2. Does a story queued for batch landing count against its host's cap?](#2-does-a-story-queued-for-batch-landing-count-against-its-hosts-cap)
+- [3. Can a rig's landing gate run on a cloud host or the desktop when the home is over its load?](#3-can-a-rigs-landing-gate-run-on-a-cloud-host-or-the-desktop-when-the-home-is-over-its-load)
+- [4. The measurements](#4-the-measurements)
+  - [T1. Per rig: from the Builder finishing to the landing](#t1-per-rig-from-the-builder-finishing-to-the-landing)
+  - [T3 and T7. The batch landings](#t3-and-t7-the-batch-landings)
+  - [T8. The rigs that land each story: what a close-out waits for](#t8-the-rigs-that-land-each-story-what-a-close-out-waits-for)
+  - [The day he asked: lampas on 2026-11-17](#the-day-he-asked-lampas-on-2026-11-17)
+- [5. Every story in progress for over three hours](#5-every-story-in-progress-for-over-three-hours)
+- [6. Stories left working on a dead host, and Postern's Working filter](#6-stories-left-working-on-a-dead-host-and-posterns-working-filter)
+  - [A dead host](#a-dead-host)
+  - [Postern's Working filter](#posterns-working-filter)
+- [7. Limits of this study](#7-limits-of-this-study)
+- [8. Ranked fixes](#8-ranked-fixes)
+- [Appendix A. The script](#appendix-a-the-script)
+
+<!-- /toc -->
+
 ## Short answers
 
 1. **Most of what Postern called Working was finished and waiting to land.** At 14:32Z, 25
