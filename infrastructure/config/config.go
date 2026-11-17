@@ -2306,6 +2306,46 @@ func HostSilentHours() (int, error) {
 	return hours, nil
 }
 
+// HostSweepRunsEnv and HostSweepAsideEnv are the environment settings of the ages
+// mw host sweep keeps a run and a set-aside beads directory to.
+const (
+	HostSweepRunsEnv  = "MW_HOST_SWEEP_RUNS_DAYS"
+	HostSweepAsideEnv = "MW_HOST_SWEEP_ASIDE_DAYS"
+)
+
+// HostSweepRunsDays reports how many days a run's directory in the vault's
+// runs/ is kept by mw host sweep: $MW_HOST_SWEEP_RUNS_DAYS if it is set,
+// otherwise the root-table `host_sweep_runs_days` key of ~/.config/mw/config.toml,
+// and fallback when neither says.
+func HostSweepRunsDays(fallback int) (int, error) {
+	return sweepDays("host_sweep_runs_days", HostSweepRunsEnv, fallback)
+}
+
+// HostSweepAsideDays reports how many days a beads-*-aside-* directory is kept
+// by mw host sweep: $MW_HOST_SWEEP_ASIDE_DAYS if it is set, otherwise the
+// root-table `host_sweep_aside_days` key, and fallback when neither says.
+func HostSweepAsideDays(fallback int) (int, error) {
+	return sweepDays("host_sweep_aside_days", HostSweepAsideEnv, fallback)
+}
+
+func sweepDays(key, env string, fallback int) (int, error) {
+	said, err := optionalSetting(key, env, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return fallback, nil
+	}
+	days, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("%s is %q, which is not a whole number of days: set %s=<n>, or `%s = <n>` in %s", key, said, env, key, File)
+	}
+	if days < 1 {
+		return 0, fmt.Errorf("%s is %d days, so everything would be old at once: set it to 1 or more", key, days)
+	}
+	return days, nil
+}
+
 // NudgeAfterMinutes reports how long a story claimed on this host may run with
 // nothing mailed to the Mayor about it before the mail notifier's quiet alarm
 // names it: $MW_NUDGE_AFTER_MINUTES if it is set, otherwise the root-table

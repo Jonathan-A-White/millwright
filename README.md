@@ -103,6 +103,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
   - [The routine timer's check: `mw millhand tick`](#the-routine-timers-check-mw-millhand-tick)
   - [Waking the Millhand by timer](#waking-the-millhand-by-timer)
 - [Watching a host from one that can lose its network](#watching-a-host-from-one-that-can-lose-its-network)
+- [mw host sweep](#mw-host-sweep)
 - [mw doctor](#mw-doctor)
 - [Heavy work on a small host](#heavy-work-on-a-small-host)
 - [The Path](#the-path)
@@ -5911,6 +5912,18 @@ The rule has three cases:
 state directory. With no `[watch]` table the line is `nothing to watch`. A table
 that does not say `ssh`, `host` and `outside` is refused. The memory (the time of
 the first failed check) is `memory` beside the log. See `features/watch.feature`.
+
+## mw host sweep
+
+`mw host sweep` frees a host's disk of what no live story can need: the worktree
+and branch of a closed story, caches of a closed story's kept worktree, landing
+directories a close-out could not take away, runs of the vault over 14 days old
+and `beads-*-aside-*` directories over 7. It never touches a worktree with an
+uncommitted change, a branch with a commit that is neither on main nor pushed, a
+story that is not closed, or a directory a process is running in. `--dry-run`
+lists each path with its size and the reason and changes nothing. The timer
+(`sh scripts/install-units.sh --enable mw-host-sweep`) runs it weekly and at
+boot; its first run on a host only lists. `docs/host-sweep.md` is the table.
 
 ## mw doctor
 

@@ -119,3 +119,7 @@ func (l LandingTrees) runningIn(dir string) []string {
 func oneLineOf(text string) string {
 	return strings.Join(strings.Fields(text), " ")
 }
+
+// RunningIn lists the processes whose working directory is dir or under it, as
+// the pids /proc names them: the sweep of a host keeps a worktree one runs in.
+func (l LandingTrees) RunningIn(dir string) []string { return l.runningIn(dir) }
