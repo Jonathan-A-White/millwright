@@ -478,3 +478,15 @@ func TestALandedBugOutsideTheFrictionRegisterWithNoLabelIsNotCounted(t *testing.
 		t.Errorf("a parts line is printed with no friction-register landing:\n%s", printed)
 	}
 }
+
+// A share of landings invested is a rate in percent: one point near 10% is past
+// the relative band, and is load, not a change.
+func TestInvestShareOnePointIsLevel(t *testing.T) {
+	f := newShareFactory(t)
+	f.rows("2026-10-08", 18, 2, 0) // 11.1%
+	f.rows("2026-09-30", 10, 1, 0) // 10%
+	result, printed := f.run(0, false)
+	if got := result.InvestShare.Arrow; got.Arrow != application.ArrowLevel || got.Verdict != "" {
+		t.Errorf("a share from 10%% to 11.1%% reads %+v, want %q and no verdict:\n%s", got, application.ArrowLevel, printed)
+	}
+}
