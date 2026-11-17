@@ -250,7 +250,7 @@ func (s HostSweep) Run(ctx context.Context) (HostSweepReport, error) {
 			keep(kind, where, tree.Unsaved)
 			// What is left of the tree is its commits: what a build makes again goes.
 			for _, cache := range tree.Caches {
-				s.removeCache(cache, tree.Story, remove)
+				s.removeCache(ctx, cache, tree.Story, remove)
 			}
 			continue
 		}
@@ -314,9 +314,9 @@ func (s HostSweep) Run(ctx context.Context) (HostSweepReport, error) {
 }
 
 // removeCache removes one cache directory of a kept tree.
-func (s HostSweep) removeCache(cache HostSweepDir, story string, remove func(HostSweepAct, func() error)) {
+func (s HostSweep) removeCache(ctx context.Context, cache HostSweepDir, story string, remove func(HostSweepAct, func() error)) {
 	act := HostSweepAct{Kind: "cache", Path: cache.Path, Bytes: cache.Bytes, Why: "story " + story + " is closed and a build makes it again"}
-	remove(act, func() error { return s.Files.RemoveDir(context.Background(), cache.Path) })
+	remove(act, func() error { return s.Files.RemoveDir(ctx, cache.Path) })
 }
 
 // storyStates reads each worktree's story from the tracker, once, by id.
