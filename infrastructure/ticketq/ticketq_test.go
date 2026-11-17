@@ -322,3 +322,59 @@ func TestTicketsNamedInTheOldFormAreStillReadAgedAndCleared(t *testing.T) {
 		t.Errorf("expected my ticket %s to sort after %s", mine.Name(), recentName)
 	}
 }
+
+// A batch's waits go ahead of every waiter that is a single story's (mw-gq6.1450):
+// a ticket joined first stands before every ordinary ticket, however much older,
+// and behind a first ticket that joined before it.
+func TestAFirstTicketStandsAheadOfOrdinaryOnesAndBehindEarlierFirstOnes(t *testing.T) {
+	q := aQueue(t)
+	now := time.Now()
+	story, err := q.Join("mw-story", now.Add(-10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer story.Drop()
+	batch, err := q.JoinFirst("batch 555 of lampas", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, err := q.JoinFirst("batch 31 of millwright", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer later.Drop()
+	if head, _ := q.Head(batch.Name()); !head {
+		t.Error("expected the batch's first ticket to be the head ahead of the older story's")
+	}
+	if head, by := q.Head(story.Name()); head || by != "batch 555 of lampas" {
+		t.Errorf("expected the story to wait behind the batch, got %v and %q", head, by)
+	}
+	if head, by := q.Head(later.Name()); head || by != "batch 555 of lampas" {
+		t.Errorf("expected the later first ticket to wait behind the earlier one, got %v and %q", head, by)
+	}
+	if place, of := q.Place(story.Name()); place != 3 || of != 3 {
+		t.Errorf("expected the story third of 3, got %d of %d", place, of)
+	}
+	batch.Drop()
+	if head, _ := q.Head(later.Name()); !head {
+		t.Error("expected the later first ticket to be the head once the earlier one dropped")
+	}
+}
+
+// A first ticket is aged by when its wait began, as any ticket is.
+func TestAFirstTicketOlderThanTheCapIsSkippedWhileItsOwnerLives(t *testing.T) {
+	q := aQueue(t)
+	old, err := q.JoinFirst("batch 1 of lampas", time.Now().Add(-2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Drop()
+	mine, err := q.Join("mw-b", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mine.Drop()
+	if head, _ := q.Head(mine.Name()); !head {
+		t.Error("expected a first ticket past the cap to be skipped")
+	}
+}

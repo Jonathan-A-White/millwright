@@ -59,6 +59,21 @@ func (q *Queue) join(holder, key string, started time.Time) (*Ticket, error) {
 	return q.joinNamed(holder, key, fmt.Sprintf("%020d-%010d-%d", q.stamp(started), seq.Add(1), os.Getpid()))
 }
 
+// firstMark begins the name of a ticket joined first (JoinFirst). It sorts before
+// every digit, so such a ticket stands ahead of every ordinary one, and among the
+// tickets joined first the rest of the name orders them by join, as it does the
+// ordinary ones. It is no dot, which marks a ticket still being made.
+const firstMark = "+"
+
+// JoinFirst is Join for a waiter that goes ahead of every waiter that joined with
+// Join or JoinAs, however long they have waited, and behind every waiter that
+// joined first before it: a batch landing's, which takes precedence over single
+// stories' checks and close-outs (mw-gq6.1450). The ticket is aged, kept and
+// cleared as any other.
+func (q *Queue) JoinFirst(holder string, started time.Time) (*Ticket, error) {
+	return q.joinNamed(holder, "", fmt.Sprintf("%s%020d-%010d-%d", firstMark, q.stamp(started), seq.Add(1), os.Getpid()))
+}
+
 // stamp is the number a new ticket is named by: the time the wait began, in
 // nanoseconds, but never at or below the newest ticket already in the queue, so
 // that a waiter joining later is never ahead of one that joined earlier, whatever
@@ -393,7 +408,7 @@ func (q *Queue) clearUnfinished(path string) {
 // began is when the wait a ticket stands for began, read from its name.
 func began(name string) (time.Time, bool) {
 	var nanos int64
-	if _, err := fmt.Sscanf(name, "%d-", &nanos); err != nil {
+	if _, err := fmt.Sscanf(strings.TrimPrefix(name, firstMark), "%d-", &nanos); err != nil {
 		return time.Time{}, false
 	}
 	return time.Unix(0, nanos), true
