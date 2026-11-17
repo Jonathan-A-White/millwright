@@ -144,11 +144,12 @@ func newLandCmd() *cobra.Command {
 				// one, on the union of its stories' files (mw-gq6.601), and the
 				// rig's changed-specs command after it on the union of its specs
 				// (mw-gq6.627).
-				RelatedChecks: checks,
-				SpecChecks:    checks,
-				NamedChecks:   checks,
-				GateParts:     checks,
-				GateRecords:   files,
+				RelatedChecks:  checks,
+				SpecChecks:     checks,
+				NamedChecks:    checks,
+				NamedElsewhere: namedElsewhere(),
+				GateParts:      checks,
+				GateRecords:    files,
 
 				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
 				Bench:     benchmarkLimits(bench), // the par of a landed story, from the past benchmarks withVaultPorts reads (mw-gq6.966)

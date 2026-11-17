@@ -97,6 +97,7 @@ type nextContext struct {
 	related      map[string]string           // the [related_tests] table this scenario's host has
 	mainRedBug   string                      // the open bug that names main's failing test, when a scenario filed one
 	named        map[string]string           // the [named_tests] table this scenario's host has
+	elsewhere    *apptest.FakeNamedElsewhere // the other hosts' runs of the named tests (mw-gq6.1395)
 	gateParts    []application.GatePart      // the parts this scenario's host names the rig's gate as
 	partToCheck  int                         // the --part of the check being run, 0 for none
 	callEnv      string                      // BASH_MAX_TIMEOUT_MS in the environment of the check being run
@@ -1188,8 +1189,9 @@ func (c *nextContext) nextUseCase() application.Next {
 		Stamps:         c.stamps,
 		Tester:         c.testerTrial(),
 
-		RelatedChecks: related,
-		NamedChecks:   named,
+		RelatedChecks:  related,
+		NamedChecks:    named,
+		NamedElsewhere: c.namedElsewhere(),
 	}
 }
 

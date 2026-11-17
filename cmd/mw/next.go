@@ -281,7 +281,8 @@ func newNextCmd() *cobra.Command {
 
 				// The tests a merged result fails are run by name on the target
 				// branch alone, to tell main's red from the story's (mw-gq6.645).
-				NamedChecks: checks,
+				NamedChecks:    checks,
+				NamedElsewhere: namedElsewhere(),
 
 				// A story stopped with steps open is told which parts of a split
 				// gate it left unrun (mw-6zgnz5y).

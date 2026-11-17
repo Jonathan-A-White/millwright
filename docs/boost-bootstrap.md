@@ -65,7 +65,7 @@ Each is printed as `==> [n/13] name: what`, checks before it acts, and says
 changes nothing. `--dry-run` prints `would:` where a run would act, and writes,
 installs and starts nothing.
 
-1. **packages**: `git tmux jq ripgrep python3 curl ca-certificates gh make xz-utils wireguard-tools` (apt, root).
+1. **packages**: `git tmux jq ripgrep python3 curl ca-certificates gh make xz-utils wireguard-tools ffmpeg` (apt, root).
 2. **node**: Node 22+ from nodejs.org at `BOOST_NODE_VERSION`, its tarball checked against the published `SHASUMS256.txt`, unpacked under `~/.local/lib` and linked into `~/.local/bin`.
 3. **git**: your identity; a `credential.https://github.com.helper` that reads `$GH_TOKEN` when git asks (so no token is in git's config); `~/.config/mw/github.env`.
 4. **wireguard**: `/etc/wireguard/wg0.conf` (mode 600) with this host's address and the hub as the one peer, `wg-quick@wg0` enabled and up. An existing key in `wg0.conf` is kept.

@@ -12,7 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// Remote runs `mw peek --here` on the host a story is worked on, and
+// Remote runs `mw named-here` to run tests by name there, `mw peek --here` on the host a story is worked on, and
 // `mw retry --worktree-state` to ask what its worktree there holds, and
 // `mw retry` to have it bundle that work and give the claim back.
 type Remote struct {
@@ -28,6 +28,7 @@ type Remote struct {
 var (
 	_ application.PeekRemote     = Remote{}
 	_ application.WorktreeRemote = Remote{}
+	_ application.NamedElsewhere = Remote{}
 )
 
 // unattendedSSH keeps ssh from stopping to ask a question nobody is there to
@@ -59,6 +60,21 @@ func (r Remote) RetryThere(ctx context.Context, host, storyID string, flags []st
 		command += " " + quote(flag)
 	}
 	return r.run(ctx, host, command+" "+quote(storyID))
+}
+
+// RunNamedOn implements application.NamedElsewhere: it runs mw named-here on
+// host, which makes a landing of ref there and runs the tests by name, and reads
+// how they came out from what it printed.
+func (r Remote) RunNamedOn(ctx context.Context, host, rig, ref string, tests []string) (application.NamedRun, error) {
+	command := "mw named-here " + quote(rig) + " " + quote(ref)
+	for _, test := range tests {
+		command += " " + quote(test)
+	}
+	text, err := r.run(ctx, host, command)
+	if err != nil {
+		return application.NamedRun{}, err
+	}
+	return application.ParseNamedHere(text)
 }
 
 // run runs command on host over its ssh line and returns what it printed.

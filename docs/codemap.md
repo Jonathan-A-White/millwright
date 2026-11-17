@@ -14,7 +14,7 @@
 | Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | {tmux,bdprogram} |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go, application/seattake.go | {vault/{seat,reaplog},tmux/window,claude/claude}.go |
-| Transcript*, HostSigns, PeekRemote | application/seatcontext.go, application/peek.go, nudge.go | {claude,peekremote,vault/git.go} |
+| Transcript*, HostSigns, PeekRemote, NamedElsewhere (the home runs main's failing tests by name before a host's gap is called main's red; far end `mw named-here`) | application/seatcontext.go, application/peek.go, nudge.go, mainred.go, namedhere.go | {claude,peekremote,vault/git.go} |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | {tmux/reap,vault/reaplog,reaper/arm}.go |
 | WatchProbes | watch.go | watch |
 | Doctor*, VPSProbe, RecheckSkipCheck | doctor.go, application/vpsnginx.go, application/recheckskips.go | {doctor,vpsnginx} |

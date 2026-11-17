@@ -89,3 +89,32 @@ func TestBootstrapGivesABoostTheNamedTestsLines(t *testing.T) {
 		t.Errorf("a config with a [named_tests] table was edited:\n%s", got)
 	}
 }
+
+// TestBootstrapInstallsFfmpegForTheRigsThatConvertAudio: a fresh Boost's package
+// list holds ffmpeg, the tool a rig's run-book test needs before it reaches what
+// it checks. A cloud box without it failed the test on its own, and mw next took
+// that for main's red (mw-gq6.1395).
+func TestBootstrapInstallsFfmpegForTheRigsThatConvertAudio(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "contrib", "boost-bootstrap.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var packages []string
+	for _, line := range strings.Split(string(script), "\n") {
+		if rest, ok := strings.CutPrefix(line, "PKGS="); ok {
+			packages = strings.Fields(strings.Trim(rest, `"`))
+		}
+	}
+	if len(packages) == 0 {
+		t.Fatal("contrib/boost-bootstrap.sh has no PKGS line")
+	}
+	for _, want := range []string{"ffmpeg", "git", "tmux", "jq", "ripgrep", "wireguard-tools"} {
+		found := false
+		for _, p := range packages {
+			found = found || p == want
+		}
+		if !found {
+			t.Errorf("the packages a Boost installs lack %s: %v", want, packages)
+		}
+	}
+}

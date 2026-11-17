@@ -37,6 +37,16 @@ type NamedChecks interface {
 	RunNamed(ctx context.Context, rig, dir string, tests []string) (NamedRun, error)
 }
 
+// NamedElsewhere is the port the failing tests are asked of another host by
+// (mw-gq6.1395): the far end of an ssh, which opens a throwaway worktree of the
+// target there and runs them by name as NamedChecks does here.
+type NamedElsewhere interface {
+	// RunNamedOn runs just the tests named, by name, on host, in a worktree of ref
+	// (the target branch) made there. A host that could not be asked is an error;
+	// tests that fail are a NamedRun that did not pass.
+	RunNamedOn(ctx context.Context, host, rig, ref string, tests []string) (NamedRun, error)
+}
+
 const (
 	// MainRedState is the state dimension that says a story is held on main's
 	// own red: its value is the bead that carries the fix, and MainRedFixed
@@ -50,6 +60,12 @@ const (
 
 	// ReasonMainRed is the code a story held on main's red is filed under.
 	ReasonMainRed Reason = "main-red"
+
+	// MailHostGap and ReasonHostGap are MailMainRed and ReasonMainRed for a story
+	// whose failing tests fail on this host's run of main and pass on the home's:
+	// the host's gap, not main's red (mw-gq6.1395).
+	MailHostGap          = "Host gap"
+	ReasonHostGap Reason = "host-gap"
 )
 
 // playwrightFailure is a Playwright line that names a failed test: the list
@@ -216,7 +232,33 @@ type MainRed struct {
 	Took    time.Duration
 	Bug     string
 	NewBug  bool
+
+	// Gap is set when the home runs the same tests and passes them: the failure
+	// is this host's, and Bug is the bug filed against the host (mw-gq6.1395).
+	Gap *HostGap
 }
+
+// HostGap is a failure of one host's own: the tests main fails there pass on the
+// home.
+type HostGap struct {
+	// Host is the host that fails them, Home the host that passes them.
+	Host, Home string
+	// Line is the error line of the failing run, as the Builder of the bug is to
+	// find it.
+	Line string
+}
+
+// Reason is the code a story held on this finding is filed under.
+func (m MainRed) Reason() Reason {
+	if m.Gap != nil {
+		return ReasonHostGap
+	}
+	return ReasonMainRed
+}
+
+// isHeldOnMainsFailure says a refusal's reason is the one a hold on main's red
+// or on a host's gap answers.
+func isHeldOnMainsFailure(r Reason) bool { return r == ReasonMainRed || r == ReasonHostGap }
 
 func (m MainRed) tests() string { return strings.Join(m.Tests, ", ") }
 
@@ -235,6 +277,9 @@ const (
 	// hold: the branch added it (mw-gq6.967).
 	NotOnMain    = "not on main: the branch added it"
 	NotRunPrefix = "not run: "
+	// FailsOnTheHostOnly is the label of a test that fails on main on this host
+	// but passes on the home (%s is this host): the host's gap (mw-gq6.1395).
+	FailsOnTheHostOnly = "fails on %s only"
 )
 
 // maxLabelled is how many failing tests a note of labels lists one by one; the
@@ -448,17 +493,29 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		labelMain(report, mainNotRunNote(tests, n.namedWhy(ctx, "the run on main failed without naming a test", c, report, run.Output)))
 		return nil
 	}
+	allOnMain := true
+	for _, name := range tests {
+		allOnMain = allOnMain && onMain[name]
+	}
+	// Main fails them all on this host. When this host is not the home, the home is
+	// asked to run them too before main is called red from this host's run alone: a
+	// tool a cloud box lacks fails them there and nowhere else (mw-gq6.1395).
+	var gap *HostGap
+	if allOnMain {
+		gap = n.hostGap(ctx, report, c.path.Rig, base, asked, run, bound)
+	}
 	labelMain(report, labelNote(tests, at, func(test string) string {
 		if onMain[test] {
+			if gap != nil {
+				return fmt.Sprintf(FailsOnTheHostOnly, gap.Host)
+			}
 			return FailsOnMainToo
 		}
 		return label(test, BranchOnly)
 	}))
-	for _, name := range tests {
-		if !onMain[name] {
-			report.Notes = append(report.Notes, fmt.Sprintf("main alone fails other tests than %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
-			return nil
-		}
+	if !allOnMain {
+		report.Notes = append(report.Notes, fmt.Sprintf("main alone fails other tests than %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
+		return nil
 	}
 	// The bug that carries main's red names the tests by main's own lines, which
 	// a branch that moved a test does not change: a later story that fails the
@@ -467,9 +524,67 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	for i, test := range tests {
 		onMainNames[i] = onTarget[test]
 	}
-	red := &MainRed{Tests: onMainNames, Command: run.Command, Took: took}
+	red := &MainRed{Tests: onMainNames, Command: run.Command, Took: took, Gap: gap}
+	if gap != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("main alone fails %s on %s (checked in %s), and %s passes them by name: host gap, not main's red", red.tests(), gap.Host, took.Round(time.Second), gap.Home))
+		return red
+	}
 	report.Notes = append(report.Notes, fmt.Sprintf("main alone fails %s too (checked in %s): main is red", red.tests(), took.Round(time.Second)))
 	return red
+}
+
+// hostGap asks the home to run the tests main fails on this host by name, when
+// this host is not the home and the port is given, and returns the gap when the
+// home passes them: the failure is this host's. A home that fails them too, or
+// could not be asked, leaves main's red as this host's run found it; why is a
+// note either way (mw-gq6.1395).
+func (n Next) hostGap(ctx context.Context, report *NextReport, rigName, base string, tests []string, here NamedRun, bound time.Duration) *HostGap {
+	if n.NamedElsewhere == nil || n.Home == nil {
+		return nil
+	}
+	record, err := WhereIsHome(ctx, n.Home)
+	if err != nil || record.Host == "" || record.Host == n.Host {
+		return nil
+	}
+	home := record.Host
+	bounded, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	far, err := n.NamedElsewhere.RunNamedOn(bounded, home, rigName, base, tests)
+	why := ""
+	switch {
+	case err != nil:
+		why = firstLine(err.Error())
+	case !far.Ran:
+		why = "the rig names no command to run tests by name there"
+	case far.NotRun:
+		why = "the command to run them by name did not start: " + LastMeaningfulLines(far.Output, notRunLines, notRunLineLong)
+	case !far.Passed:
+		report.Notes = append(report.Notes, fmt.Sprintf("%s fails %s by name too: main is red, not the gap of %s", home, strings.Join(tests, ", "), n.Host))
+		return nil
+	}
+	if why != "" {
+		report.Notes = append(report.Notes, fmt.Sprintf("the failing tests were not run on %s, so main's failure on %s is not told from the host's own gap: %s", home, n.Host, why))
+		return nil
+	}
+	return &HostGap{Host: n.Host, Home: home, Line: ErrorLineOf(here.Output)}
+}
+
+// ErrorLineOf is the line of a failing run's output that says what went wrong:
+// the first meaningful line after go test's `--- FAIL:` header (the test's own
+// message), else the last meaningful line of the output.
+func ErrorLineOf(output string) string {
+	lines := strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), "--- FAIL: ") {
+			continue
+		}
+		for _, next := range lines[i+1:] {
+			if next = strings.TrimSpace(next); next != "" && next != "FAIL" && !strings.HasPrefix(next, "--- ") && !strings.HasPrefix(next, "=== ") {
+				return LastMeaningfulLines(next, 1, notRunLineLong)
+			}
+		}
+	}
+	return LastMeaningfulLines(output, 1, notRunLineLong)
 }
 
 // namesOnTarget says how each failing test is asked for on the target, in dir,
@@ -613,17 +728,22 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 					continue found
 				}
 			}
+			// A bug of one host's gap carries that host's story only, and a bug of
+			// main's red carries no host's.
+			if (red.Gap != nil) != strings.HasPrefix(d.Story.Title, "[bug] host gap: ") ||
+				(red.Gap != nil && !strings.HasPrefix(d.Story.Title, "[bug] host gap: "+red.Gap.Host+":")) {
+				continue
+			}
 			red.Bug = d.Story.ID
 			return
 		}
 	}
 	path := c.path.WithoutSourceKeys()
 	path.Files = ""
-	title := "[bug] main is red: " + red.tests()
 	story := NewStory{
 		EpicID:     c.detail.EpicID,
 		Standalone: c.detail.EpicID == "",
-		Title:      title,
+		Title:      "[bug] main is red: " + red.tests(),
 		Description: fmt.Sprintf("%s fails on %s by itself, with no story merged in: %s.\n\nFound by mw next on %s while closing out %s, whose merged result failed the same tests; "+
 			"`%s` fails them too in a clean worktree of %s. Until it is fixed every landing of %s that runs the rig's tests meets the same failure, and the story is held on this bug (mw-gq6.645).\n",
 			red.tests(), c.target, red.tests(), n.Host, c.id, red.Command, c.target, c.path.Rig),
@@ -631,6 +751,22 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 		Priority:   1,
 		Overrides:  path,
 		Labels:     []string{LabelBug},
+	}
+	if gap := red.Gap; gap != nil {
+		// The fix is on the host (a tool it lacks), so the bug is pathed to it.
+		path.Host = gap.Host
+		story = NewStory{
+			EpicID:     c.detail.EpicID,
+			Standalone: c.detail.EpicID == "",
+			Title:      fmt.Sprintf("[bug] host gap: %s: %s fails %s", gap.Host, gap.Line, red.tests()),
+			Description: fmt.Sprintf("%s fails on %s on %s, and passes on %s (the home): this is %s's gap, not main's red.\n\nThe error line: %s\n\nFound by mw next on %s while closing out %s, whose merged result failed the same tests; "+
+				"`%s` fails them in a clean worktree of %s on %s, and %s passes them by name. The story is held on this bug until it is fixed, and then its close-out runs again (mw-gq6.1395).\n",
+				red.tests(), c.target, gap.Host, gap.Home, gap.Host, gap.Line, n.Host, c.id, red.Command, c.target, gap.Host, gap.Home),
+			Acceptance: fmt.Sprintf("1. %s pass on %s, run by name on %s.\n2. The rig's gate passes on %s.\nSweep: other tools the rig's tests need that %s lacks; see the rig's README and contrib/boost-bootstrap.sh.", red.tests(), c.target, gap.Host, gap.Host, gap.Host),
+			Priority:   1,
+			Overrides:  path,
+			Labels:     []string{LabelBug},
+		}
 	}
 	var id string
 	err := writeRetrying(ctx, n, report, "the bug that carries main's red", func() error {
@@ -667,13 +803,27 @@ func (n Next) holdOnMainRed(ctx context.Context, c *closeOut, report *NextReport
 		return NextReport{}, false
 	}
 	report.MainRed = red
-	report.Reason = ReasonMainRed
+	report.Reason = red.Reason()
 	report.Why = fmt.Sprintf("main is red: %s, carried by %s", red.tests(), carrier)
+	if red.Gap != nil {
+		report.Why = fmt.Sprintf("host gap: %s: %s; %s passes %s by name; carried by %s", red.Gap.Host, red.Gap.Line, red.Gap.Home, red.tests(), carrier)
+	}
 
 	note := fmt.Sprintf("mw next on %s did not blame %s (%s): the rig's tests fail on the merged result in %s, and `%s` fails them on %s alone too (checked in %s). Main is red.\n\n"+
 		"%s carries the fix. The story is held waiting on it: its claim, worktree %s and branch %s are kept, it was not sent back, no attempt was counted, and "+
 		"the next dispatch tick after %s is closed runs its close-out alone again, not a new Builder session. Nothing was pushed.",
 		n.Host, c.id, ReasonMainRed, c.target, red.Command, c.target, red.Took.Round(time.Second), carrier, c.worktree, c.branch, carrier)
+	subject := MailMainRed
+	if gap := red.Gap; gap != nil {
+		// The same hold, said as the host's: main is not red, one host lacks something.
+		subject = MailHostGap
+		note = fmt.Sprintf("mw next on %s did not blame %s (%s): the rig's tests fail on the merged result in %s, and `%s` fails them on %s alone too (checked in %s), "+
+			"but %s runs %s by name and passes them. The failure is %s's own, not main's: %s\n\n"+
+			"%s carries the fix, pathed to %s. The story is held waiting on it: its claim, worktree %s and branch %s are kept, it was not sent back, no attempt was counted, and "+
+			"the next dispatch tick after %s is closed runs its close-out alone again, not a new Builder session. Nothing was pushed.",
+			n.Host, c.id, ReasonHostGap, c.target, red.Command, c.target, red.Took.Round(time.Second), gap.Home, red.tests(), gap.Host, gap.Line,
+			carrier, gap.Host, c.worktree, c.branch, carrier)
+	}
 	if red.NewBug {
 		note += fmt.Sprintf("\n\n%s was filed held by mw next, for the Mayor.", red.Bug)
 	}
@@ -687,15 +837,15 @@ func (n Next) holdOnMainRed(ctx context.Context, c *closeOut, report *NextReport
 		func() error { return n.Tracker.SetStoryState(ctx, c.id, MainRedState, red.Bug, report.Why) })
 	n.writeOrSay(ctx, c, report, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", c.id, RunState, RunCloseOutAgain),
 		func() error {
-			return n.Tracker.SetStoryState(ctx, c.id, RunState, RunCloseOutAgain, "("+string(ReasonMainRed)+") "+report.Why)
+			return n.Tracker.SetStoryState(ctx, c.id, RunState, RunCloseOutAgain, "("+string(red.Reason())+") "+report.Why)
 		})
 	n.writeOrSay(ctx, c, report, "the hold on the story", "the hold could not be written on the story",
 		func() error { return n.Tracker.CommentOnStory(ctx, c.id, note) })
-	if err := n.ledger(ctx, c, report, NotLanded(ReasonMainRed, report.Why+"; held, close-out again once it is fixed")); err != nil {
+	if err := n.ledger(ctx, c, report, NotLanded(red.Reason(), report.Why+"; held, close-out again once it is fixed")); err != nil {
 		report.Notes = append(report.Notes, err.Error())
 	}
 	n.commit(ctx, c, report)
-	n.mailTheMayor(ctx, c, report, MailMainRed, note)
+	n.mailTheMayor(ctx, c, report, subject, note)
 	return *report, true
 }
 
