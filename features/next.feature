@@ -964,6 +964,72 @@ Feature: Closing out a finished story and carrying on
     And 1 sessions were ever started for "mw-gq6.1"
     And the attempts counted on "mw-gq6.1" come to 1
 
+  # mw-gq6.1395: main's failure on a host that is not the home may be the host's (a
+  # tool a cloud box lacks), so the home is asked to run them by name too.
+  Scenario: A failure main has on a host that is not the home, and the home passes, is held as that host's gap
+    Given the vault names "laptop" as the home
+    And the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestRunBook (0.01s)", only once "main" is merged in
+    And the rig has a named-tests command that fails on main alone, saying "--- FAIL: TestRunBook\n    runbook_test.go:41: no ffmpeg"
+    And the home "laptop" passes the failing tests when they are run by name there
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And "laptop" was asked to run by name: TestRunBook
+    And the story "mw-gq6.1" is held as a host gap of "vps", waiting on a new held bug pathed to that host naming "TestRunBook"
+    And no bug for main's red was filed
+    And the report says "mw-gq6.1" was held as a host gap, not as main's red
+    And a mail with the subject "Host gap: The story mw-gq6.1" holds:
+      | host gap: vps: runbook_test.go:41: no ffmpeg |
+      | laptop passes TestRunBook by name |
+    And the last ledger line holds:
+      | not landed (host-gap): |
+      | TestRunBook: fails on vps only |
+    And the attempts counted on "mw-gq6.1" come to 1
+
+  Scenario: A failure main has on a host that is not the home, and the home fails it too, is main's red
+    Given the vault names "laptop" as the home
+    And the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)", only once "main" is merged in
+    And the rig has a named-tests command that fails on main alone, saying "--- FAIL: TestTogether"
+    And the home "laptop" fails the failing tests when they are run by name there, saying "--- FAIL: TestTogether"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then "laptop" was asked to run by name: TestTogether
+    And the story "mw-gq6.1" is held on main's red, waiting on a new held bug naming "TestTogether"
+    And the report says "mw-gq6.1" was held on main's red, not sent back
+
+  Scenario: A failure main has on a host that is not the home, when the home cannot be asked, is main's red as before
+    Given the vault names "laptop" as the home
+    And the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)", only once "main" is merged in
+    And the rig has a named-tests command that fails on main alone, saying "--- FAIL: TestTogether"
+    And the home "laptop" cannot be reached
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is held on main's red, waiting on a new held bug naming "TestTogether"
+    And the last ledger line holds:
+      | the failing tests were not run on laptop, so main's failure on vps is not told from the host's own gap |
+
+  Scenario: A failure main has on the home itself is main's red and no other host is asked
+    Given the vault names "vps" as the home
+    And the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail, saying "--- FAIL: TestTogether (0.01s)", only once "main" is merged in
+    And the rig has a named-tests command that fails on main alone, saying "--- FAIL: TestTogether"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is held on main's red, waiting on a new held bug naming "TestTogether"
+    And no other host was asked to run the failing tests
+
   Scenario: A merged result that fails a test an open bug names holds the story on that bug and files none
     Given the other host landed its own work on "main" while "mw-gq6.1" was worked
     And an open bug "Scorer fixtures raise wave.Error" names the failing test "TestTogether"

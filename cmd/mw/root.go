@@ -70,6 +70,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCauseCmd())
 	root.AddCommand(newTodoCmd())
 	root.AddCommand(newPathCmd())
+	root.AddCommand(newNamedHereCmd())
 	root.AddCommand(newPauseCmd())
 	root.AddCommand(newResumeCmd())
 	root.AddCommand(newRetryCmd())

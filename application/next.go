@@ -277,6 +277,11 @@ type Next struct {
 	// before.
 	NamedChecks NamedChecks
 
+	// NamedElsewhere asks the home to run them too when this host is not the
+	// home, before main is called red from this host's run alone (mw-gq6.1395).
+	// Nil asks no one: main's red is told from this host's run as it was.
+	NamedElsewhere NamedElsewhere
+
 	// MainAloneBound is how long that run on the target branch may take before
 	// it is cut and its tests are labelled "not run" (mw-gq6.929). Zero is
 	// DefaultMainAloneBound.
@@ -1439,7 +1444,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 			return n.stop(ctx, c, report, ReasonTurnCap, TurnCapWhy(result.Turns),
 				"It wrote its closing comment before the cap, but the close-out refused it as "+string(found[0].Reason)+": "+found[0].Why)
 		}
-		if found[0].Reason == ReasonMainRed && c.mainRed != nil {
+		if isHeldOnMainsFailure(found[0].Reason) && c.mainRed != nil {
 			if rep, held := n.holdOnMainRed(ctx, c, report, c.mainRed, ""); held {
 				return rep, nil
 			}
@@ -2242,13 +2247,13 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		// a close-out holds the story on main's fix instead of refusing it, and
 		// a check says so (mw-gq6.645).
 		if red := n.mainAlone(ctx, c, report, checked, base); red != nil {
-			why = fmt.Sprintf("main is red: %s fail on %s alone too (`%s`), so the failure is not this branch's", red.tests(), c.target, checked.Command)
+			why = red.RefusedWhy(c.target, checked.Command)
 			if all {
-				why += "; mw next holds the story on main's fix and runs its close-out again once that is closed"
+				why += "; mw next holds the story on " + red.HeldOn() + " and runs its close-out again once that is closed"
 			} else {
 				c.mainRed = red
 			}
-			reason = ReasonMainRed
+			reason = red.Reason()
 		}
 		refuse(reason, why, detail)
 	}

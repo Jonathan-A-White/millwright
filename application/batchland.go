@@ -621,6 +621,9 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		if red != nil {
 			if n.holdBatchOnMainRed(ctx, bc, nr, red) {
 				report.Held = fmt.Sprintf("main is red: %s, carried by %s; no fixer was started and the stories stay queued", red.tests(), red.Bug)
+				if red.Gap != nil {
+					report.Held = fmt.Sprintf("host gap: %s: %s; %s passes %s by name; carried by %s; no fixer was started and the stories stay queued", red.Gap.Host, red.Gap.Line, red.Gap.Home, red.tests(), red.Bug)
+				}
 				return
 			}
 		}

@@ -33,6 +33,7 @@ func registerNextMergeFixSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig has a named-tests command that passes on main alone$`, c.theNamedTestsPassOnMain)
 	ctx.Given(`^an open bug "([^"]*)" names the failing test "([^"]*)"$`, c.anOpenBugNamesTheTest)
 	ctx.Then(`^the named-tests command was run once, given: (.+)$`, c.theNamedTestsRanOnce)
+	registerNextHostGapSteps(ctx, c)
 	ctx.Then(`^the named-tests command was not run$`, c.theNamedTestsDidNotRun)
 	ctx.Then(`^the story "([^"]*)" is held on main's red, waiting on a new held bug naming "([^"]*)"$`, c.theStoryIsHeldOnAnewBug)
 	ctx.Then(`^the story "([^"]*)" is held on main's red, waiting on the open bug "([^"]*)"$`, c.theStoryIsHeldOnTheBug)
