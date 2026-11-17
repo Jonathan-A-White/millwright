@@ -290,6 +290,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the rig's tests were run (\d+) times$`, c.theRigsTestsWereRun)
 	ctx.Then(`^the story "([^"]*)" is closed$`, c.theStoryIsClosed)
 	ctx.Then(`^the story "([^"]*)" is not closed$`, c.theStoryIsNotClosed)
+	ctx.Then(`^the story "([^"]*)" is open, unclaimed and carries no run state label$`, c.theStoryIsOpenUnclaimedAndCarriesNoRunState)
 	ctx.Then(`^the story "([^"]*)" is held, not open$`, c.theStoryIsHeldNotOpen)
 	ctx.Then(`^the demo "([^"]*)" waits for the Governor, though it landed$`, c.theDemoWaitsForTheGovernor)
 	ctx.Then(`^the session of "([^"]*)" is closed$`, c.theSessionIsClosed)
@@ -1940,6 +1941,31 @@ func (c *nextContext) mwStatusCountsTodaysFuelAs(want string) error {
 	}
 	if got := fmt.Sprintf("%s tokens", application.Thousands(report.FuelToday)); got != want {
 		return fmt.Errorf("expected mw status to count today's fuel as %q, got %q", want, got)
+	}
+	return nil
+}
+
+// theStoryIsOpenUnclaimedAndCarriesNoRunState is a story a close-out gave back
+// whole: open, no claim on it, and no run:* label for the refused-open alarm to
+// name it by (mw-gq6.1409).
+func (c *nextContext) theStoryIsOpenUnclaimedAndCarriesNoRunState(id string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Status != apptest.StatusOpen {
+		return fmt.Errorf("expected %s to be open (%s), got %q (the close-out said: %v)", id, apptest.StatusOpen, detail.Status, c.err)
+	}
+	if detail.Assignee != "" {
+		return fmt.Errorf("expected the claim on %s to be given back, got %q", id, detail.Assignee)
+	}
+	for _, label := range detail.Labels {
+		if strings.HasPrefix(label, application.RunState+":") {
+			return fmt.Errorf("expected %s to carry no %s: label, got %v", id, application.RunState, detail.Labels)
+		}
+	}
+	if got := c.tracker.State(id, application.RunState); got != "" {
+		return fmt.Errorf("expected %s to have no run state, got %q", id, got)
 	}
 	return nil
 }
