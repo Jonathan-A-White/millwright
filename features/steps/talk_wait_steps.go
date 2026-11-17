@@ -182,7 +182,10 @@ type talkWaitRun struct {
 	// a bound on how soon it ended is judged on the wait's clock, not on when a
 	// starved scenario goroutine got round to looking.
 	endedAt time.Time
-	err     error
+	// report is what mw talk wait returned: its own index-to-print time is the
+	// wait's work, apart from how long the host took to hand it the event.
+	report application.TalkWaitReport
+	err    error
 }
 
 type talkWaitContext struct {
@@ -645,7 +648,7 @@ func (c *talkWaitContext) arm() error {
 	}
 	go func() {
 		defer close(run.done)
-		_, run.err = wait.Run(context.Background())
+		run.report, run.err = wait.Run(context.Background())
 		run.endedAt = time.Now()
 	}()
 	return c.waitFor("the wait to open the stream", func() bool {
@@ -664,6 +667,11 @@ func (c *talkWaitContext) arm() error {
 // a scenario that only needed more time.
 const talkWaitBudget = 30 * time.Second
 
+// talkWaitLoadSlack is what a bound counted on the wall clock from the event
+// is stretched by: a host under load starves the stream's goroutines for a
+// second or more between the event and the wait hearing it.
+const talkWaitLoadSlack = 5 * time.Second
+
 func (c *talkWaitContext) waitFor(what string, ok func() bool) error {
 	deadline := time.Now().Add(talkWaitBudget)
 	for time.Now().Before(deadline) {
@@ -676,7 +684,9 @@ func (c *talkWaitContext) waitFor(what string, ok func() bool) error {
 }
 
 // endsWithin holds the wait to a bound counted from the last event sent (or the
-// arming, when later), and judges it on when the wait itself returned. It waits
+// arming, when later), and judges it on when the wait itself returned; the wait's
+// own reported time is held to the bound, the wall clock to the bound and the
+// host's slack (talkWaitLoadSlack). It waits
 // talkWaitBudget for a wait that is still going, so a loaded host
 // that starves this goroutine, or the wait, fails nothing that ended in time.
 func (c *talkWaitContext) endsWithin(seconds int) error {
@@ -694,9 +704,16 @@ func (c *talkWaitContext) endsWithin(seconds int) error {
 	if c.run.err != nil {
 		return fmt.Errorf("mw talk wait failed: %w\n%s", c.run.err, c.run.errOut.String())
 	}
-	if took := c.run.endedAt.Sub(base); took > bound {
-		return fmt.Errorf("mw talk wait ended %s after the event, past the %d s it is held to; it printed:\n%s%s",
-			took.Round(time.Millisecond), seconds, c.run.out.String(), c.run.errOut.String())
+	// The wait's own work, where it reports it, is held to the bound itself.
+	if own := c.run.report.IndexToPrint; own > bound {
+		return fmt.Errorf("mw talk wait spent %s itself from the event to the print, past the %d s it is held to; it printed:\n%s%s",
+			own.Round(time.Millisecond), seconds, c.run.out.String(), c.run.errOut.String())
+	}
+	// The wall clock from the event also counts the host handing the event to
+	// the wait, which a loaded host stretches, so it gets the slack.
+	if took := c.run.endedAt.Sub(base); took > bound+talkWaitLoadSlack {
+		return fmt.Errorf("mw talk wait ended %s after the event, past the %d s it is held to (and %s of the host's slack); it printed:\n%s%s",
+			took.Round(time.Millisecond), seconds, talkWaitLoadSlack, c.run.out.String(), c.run.errOut.String())
 	}
 	return nil
 }

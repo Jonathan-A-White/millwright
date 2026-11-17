@@ -29,10 +29,36 @@ func TestEndsWithinJudgesWhenTheWaitEndedNotWhenTheScenarioLooked(t *testing.T) 
 
 func TestEndsWithinFailsAWaitThatEndedLate(t *testing.T) {
 	event := time.Now().Add(-time.Minute)
-	c := &talkWaitContext{lastEvent: event, run: endedRun(event, 0, 3*time.Second)}
+	c := &talkWaitContext{lastEvent: event, run: endedRun(event, 0, time.Second+talkWaitLoadSlack+time.Second)}
 	err := c.endsWithin(1)
 	if err == nil || !strings.Contains(err.Error(), "after the event") {
-		t.Fatalf("a wait that ended 3 s after the event passed a 1 s bound: %v", err)
+		t.Fatalf("a wait that ended past the bound and the host's slack passed a 1 s bound: %v", err)
+	}
+}
+
+// A host under load starves the stream's goroutines for a second or more
+// between the event and the wait hearing it, while the wait's own work, the
+// index-to-print time it reports, stays a millisecond (a gate run at load 10
+// of 16 ended a wait 1.362 s after the event with 1 ms of its own). The bound
+// is held to the wait's own time, and the wall clock gets the host's slack.
+func TestEndsWithinPassesAWaitWhoseOwnWorkWasQuickOnAStarvedHost(t *testing.T) {
+	event := time.Now().Add(-time.Minute)
+	run := endedRun(event, 0, 1362*time.Millisecond)
+	run.report.IndexToPrint = time.Millisecond
+	c := &talkWaitContext{lastEvent: event, run: run}
+	if err := c.endsWithin(1); err != nil {
+		t.Fatalf("a wait that took 1 ms itself failed because the host delayed the event 1.4 s: %v", err)
+	}
+}
+
+func TestEndsWithinFailsAWaitWhoseOwnWorkWasSlow(t *testing.T) {
+	event := time.Now().Add(-time.Minute)
+	run := endedRun(event, 0, 1500*time.Millisecond)
+	run.report.IndexToPrint = 1400 * time.Millisecond
+	c := &talkWaitContext{lastEvent: event, run: run}
+	err := c.endsWithin(1)
+	if err == nil || !strings.Contains(err.Error(), "itself") {
+		t.Fatalf("a wait that spent 1.4 s of its own passed a 1 s bound: %v", err)
 	}
 }
 
@@ -40,14 +66,14 @@ func TestEndsWithinFailsAWaitThatEndedLate(t *testing.T) {
 // against the wait ending on the event.
 func TestEndsWithinStartsAtTheEventNotAtTheArming(t *testing.T) {
 	event := time.Now().Add(-time.Minute)
-	c := &talkWaitContext{lastEvent: event, run: endedRun(event, 1500*time.Millisecond, 500*time.Millisecond)}
+	c := &talkWaitContext{lastEvent: event, run: endedRun(event, talkWaitLoadSlack+1500*time.Millisecond, 500*time.Millisecond)}
 	if err := c.endsWithin(1); err != nil {
-		t.Fatalf("1.5 s of keeping ideas before the event was counted against the wait: %v", err)
+		t.Fatalf("6.5 s of keeping ideas before the event was counted against the wait: %v", err)
 	}
-	// With the arming as its start the same run is 2 s long and fails.
+	// With the arming as its start the same run is 7 s long and fails.
 	c.lastEvent = c.run.armedAt
 	if err := c.endsWithin(1); err == nil {
-		t.Fatal("a wait that ended 2 s after the bound's start passed a 1 s bound")
+		t.Fatal("a wait that ended 7 s after the bound's start passed a 1 s bound")
 	}
 }
 
