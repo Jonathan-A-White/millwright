@@ -148,6 +148,53 @@ func (Files) TestCallers(rigDir string, named []string) (int, error) {
 	return countCallers(rigDir, tests, [][]string{named})[0], nil
 }
 
+// originBranchLimit is how long asking the origin itself may take.
+const originBranchLimit = 20 * time.Second
+
+// BranchOnOrigin implements application.RigFiles: whether the branch is one of
+// the origin of the checkout at rigDir, by its remote-tracking ref or, when the
+// checkout does not have that, by what the origin lists; and the branch the
+// origin's HEAD is (mw-gq6.1416). An error is a checkout git cannot read or an
+// origin that cannot be asked.
+func (Files) BranchOnOrigin(rigDir, branch string) (bool, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), originBranchLimit)
+	defer cancel()
+	git := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", rigDir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		out, err := cmd.Output()
+		return strings.TrimSpace(string(out)), err
+	}
+	if _, err := git("rev-parse", "--git-dir"); err != nil {
+		return false, "", fmt.Errorf("reading the checkout at %s: %w", rigDir, err)
+	}
+	head := ""
+	if out, err := git("symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		head = strings.TrimPrefix(out, "origin/")
+	}
+	if _, err := git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch); err == nil {
+		return true, head, nil
+	}
+	listed, err := git("ls-remote", "--heads", "origin", "refs/heads/"+branch)
+	if err != nil {
+		return false, head, fmt.Errorf("asking the origin of %s: %w", rigDir, err)
+	}
+	if listed != "" {
+		return true, head, nil
+	}
+	if head == "" {
+		if out, err := git("ls-remote", "--symref", "origin", "HEAD"); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				if ref, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+					head, _, _ = strings.Cut(ref, "\t")
+					break
+				}
+			}
+		}
+	}
+	return false, head, nil
+}
+
 // testFile is a tracked test file of a checkout and what it says.
 type testFile struct {
 	name string

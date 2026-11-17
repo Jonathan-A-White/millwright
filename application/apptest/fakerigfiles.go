@@ -1,6 +1,7 @@
 package apptest
 
 import (
+	"fmt"
 	"path"
 	"strings"
 	"sync"
@@ -18,6 +19,13 @@ type FakeRigFiles struct {
 	// stems asked for the last time.
 	callers map[string]int
 	asked   []string
+	// origins are the branches each checkout's origin has, and its HEAD branch.
+	origins map[string]fakeOrigin
+}
+
+type fakeOrigin struct {
+	head     string
+	branches map[string]bool
 }
 
 var _ application.RigFiles = (*FakeRigFiles)(nil)
@@ -108,4 +116,30 @@ func (f *FakeRigFiles) TestCallers(rigDir string, files []string) (int, error) {
 	defer f.mu.Unlock()
 	f.asked = append([]string(nil), files...)
 	return f.callers[rigDir], nil
+}
+
+// AddOrigin gives the checkout at rigDir an origin that has these branches, its
+// HEAD being head. A checkout with no origin added cannot be read.
+func (f *FakeRigFiles) AddOrigin(rigDir, head string, branches ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.origins == nil {
+		f.origins = map[string]fakeOrigin{}
+	}
+	origin := fakeOrigin{head: head, branches: map[string]bool{}}
+	for _, name := range branches {
+		origin.branches[name] = true
+	}
+	f.origins[rigDir] = origin
+}
+
+// BranchOnOrigin implements application.RigFiles.
+func (f *FakeRigFiles) BranchOnOrigin(rigDir, branch string) (bool, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	origin, ok := f.origins[rigDir]
+	if !ok {
+		return false, "", fmt.Errorf("%s has no origin that can be read", rigDir)
+	}
+	return origin.branches[branch], origin.head, nil
 }

@@ -192,6 +192,15 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 	}
 
+	// A branch the rig's origin does not have would fail every dispatch cutting
+	// its worktree, so it is refused here (mw-gq6.1416); one that cannot be
+	// judged is a warning, said for a branch the command names.
+	judged := story.Merged().Overlay(path)
+	refused, branchWarn := branchOnOrigin(s.Rigs, s.RigFiles, judged)
+	if refused != nil {
+		return domain.Path{}, fmt.Errorf("%w: nothing was written", refused)
+	}
+
 	// --after and --hold are judged, like the rest, before anything is written.
 	after, err := s.afterIDs(ctx, id)
 	if err != nil {
@@ -234,6 +243,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		if governorsDemo(story.Labels, story.Story.Overrides.Overlay(path).Files) && !hasHitlLabel(story.Labels) {
 			fmt.Fprintln(s.Out, demoNoHitlLine(id))
 		}
+	}
+	if branchWarn != "" && named.Branch != "" && s.Err != nil {
+		fmt.Fprintf(s.Err, "WARN: %s: %s\n", id, branchWarn)
 	}
 	// What dispatch would refuse the story for, said now and not by a Blocked
 	// mail after it is un-held (mw-oi2rkcb): the story as the write leaves it.
@@ -418,6 +430,34 @@ func crowdedGlob(glob domain.NamedGlob, what string) error {
 	return fmt.Errorf("the files key names %s, %s, and dispatch holds a story behind every running story "+
 		"that touches any file it matches: name the files instead, the ones the story will change, comma-separated, "+
 		"as files=src/Talk.tsx,src/chat/Chat.tsx, or a glob of at most %d files", glob.Written, what, MostFilesInADirectory)
+}
+
+// branchOnOrigin judges the branch key of a path against the origin of its rig's
+// checkout on this host: a refusal when the branch is not one of origin's, naming
+// the branch its HEAD is (mw-gq6.1416), and otherwise, when the checkout cannot be
+// read (the rig is not checked out here, or git cannot ask), the words of a
+// warning, "" for none. A path with no branch or no rig is not judged.
+func branchOnOrigin(rigs map[string]string, files RigFiles, path domain.Path) (error, string) {
+	branch, rig := strings.TrimSpace(path.Branch), strings.TrimSpace(path.Rig)
+	if branch == "" || rig == "" || files == nil {
+		return nil, ""
+	}
+	rigDir, here := rigs[rig]
+	if !here || rigDir == "" {
+		return nil, fmt.Sprintf("branch=%s was not checked against the origin of %s: %s is not checked out on this host", branch, rig, rig)
+	}
+	found, head, err := files.BranchOnOrigin(rigDir, branch)
+	if err != nil {
+		return nil, fmt.Sprintf("branch=%s was not checked against the origin of %s: %v", branch, rig, err)
+	}
+	if found {
+		return nil, ""
+	}
+	if head == "" {
+		return fmt.Errorf("branch=%s is not a branch of the origin of %s, and dispatch could not cut a worktree from it: name a branch origin has", branch, rig), ""
+	}
+	return fmt.Errorf("branch=%s is not a branch of the origin of %s, and dispatch could not cut a worktree from it: its HEAD branch is %s, so set branch=%s",
+		branch, rig, head, head), ""
 }
 
 // orRig is the rig as a refusal names it, "its rig" when the path has none.

@@ -503,6 +503,7 @@ func (f File) refusals(ctx context.Context, plan domain.Plan) ([]string, []guest
 	note(plan.Validate())
 	reasons = append(reasons, f.validateFormulasOf(ctx, plan, &readErr)...)
 	reasons = append(reasons, f.validateFiles(plan.Stories, plan.Epic.Defaults)...)
+	reasons = append(reasons, f.validateBranches(plan.Stories, plan.Epic.Defaults)...)
 	reasons = append(reasons, validateTesterStories(plan.Stories, plan.Epic.Defaults)...)
 	reasons = append(reasons, f.validateGristApps(plan.Stories)...)
 
@@ -764,6 +765,31 @@ func (f File) validateFiles(stories []domain.PlanStory, defaults domain.Path) []
 		}
 		if err := crowdedFiles(f.Rigs, f.RigFiles, path); err != nil {
 			reasons = append(reasons, fmt.Sprintf("filing story %s: %s", story.Key, err))
+		}
+	}
+	return reasons
+}
+
+// validateBranches says, naming the story key, each story whose branch is not one
+// of its rig's origin, as mw path set refuses it (mw-gq6.1416). A branch that
+// cannot be judged is a warning on Err, said once for a rig and branch.
+func (f File) validateBranches(stories []domain.PlanStory, defaults domain.Path) []string {
+	var reasons []string
+	warned := map[string]bool{}
+	for _, story := range stories {
+		path, err := story.PathFrom(defaults)
+		if err != nil {
+			continue
+		}
+		refused, warn := branchOnOrigin(f.Rigs, f.RigFiles, path)
+		if refused != nil {
+			reasons = append(reasons, fmt.Sprintf("filing story %s: %s", story.Key, refused))
+		}
+		// A rig not checked out here is no news on every filing: only a checkout
+		// that is here and cannot be read is warned of.
+		if _, here := f.Rigs[strings.TrimSpace(path.Rig)]; here && warn != "" && f.Err != nil && !warned[warn] {
+			warned[warn] = true
+			fmt.Fprintf(f.Err, "WARN: %s\n", warn)
 		}
 	}
 	return reasons

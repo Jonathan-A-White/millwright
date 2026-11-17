@@ -602,3 +602,119 @@ func TestPathSetSaysNothingOfACriterionAnyBuilderCanRun(t *testing.T) {
 		}
 	}
 }
+
+// aMediaRig is nac-service-media's story (mw-pniowru) on a host whose checkout
+// of the rig has an origin with only master.
+func aMediaRig(t *testing.T, readable bool) (*apptest.FakeTracker, map[string]string, *apptest.FakeRigFiles) {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	tracker.AddEpic("mw-e", domain.Path{Rig: "nac-service-media", Harness: domain.HarnessClaude,
+		Model: domain.ModelOpus, Effort: domain.EffortHigh, Host: "laptop"})
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.1", Title: "sibling", Overrides: domain.Path{Rig: "nac-service-media", Branch: "main"}})
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.2", Title: "target"})
+	files := apptest.NewFakeRigFiles()
+	if readable {
+		files.AddOrigin("/rigs/nac-service-media", "master", "master")
+	}
+	return tracker, map[string]string{"nac-service-media": "/rigs/nac-service-media"}, files
+}
+
+func TestPathSetRefusesABranchTheRigsOriginDoesNotHave(t *testing.T) {
+	tracker, rigs, files := aMediaRig(t, true)
+	writes := tracker.Writes()
+
+	_, err := application.PathSet{Tracker: tracker, Rigs: rigs, RigFiles: files}.
+		Run(context.Background(), "mw-e.2", "", []string{"rig=nac-service-media", "branch=main"})
+	if err == nil {
+		t.Fatal("expected branch=main to be refused on a rig whose origin has only master")
+	}
+	for _, said := range []string{"branch=main", "branch=master", "nothing was written"} {
+		if !strings.Contains(err.Error(), said) {
+			t.Errorf("expected the refusal to say %q, got %q", said, err)
+		}
+	}
+	if tracker.Writes() != writes {
+		t.Errorf("expected nothing written, the tracker took %d writes", tracker.Writes()-writes)
+	}
+	if detail, _ := tracker.ShowStory(context.Background(), "mw-e.2"); detail.Story.Overrides.Branch != "" {
+		t.Errorf("expected no branch written, got %q", detail.Story.Overrides.Branch)
+	}
+}
+
+func TestPathSetWritesABranchTheRigsOriginHas(t *testing.T) {
+	tracker, rigs, files := aMediaRig(t, true)
+
+	if _, err := (application.PathSet{Tracker: tracker, Rigs: rigs, RigFiles: files}).
+		Run(context.Background(), "mw-e.2", "", []string{"rig=nac-service-media", "branch=master"}); err != nil {
+		t.Fatalf("setting branch=master: %v", err)
+	}
+	if detail, _ := tracker.ShowStory(context.Background(), "mw-e.2"); detail.Story.Overrides.Branch != "master" {
+		t.Errorf("expected branch master written, got %q", detail.Story.Overrides.Branch)
+	}
+}
+
+func TestPathSetRefusesABranchCopiedFromASiblingThatTheOriginDoesNotHave(t *testing.T) {
+	tracker, rigs, files := aMediaRig(t, true)
+
+	_, err := application.PathSet{Tracker: tracker, Rigs: rigs, RigFiles: files}.
+		Run(context.Background(), "mw-e.2", "mw-e.1", nil)
+	if err == nil || !strings.Contains(err.Error(), "branch=master") {
+		t.Fatalf("expected the copied branch=main to be refused naming branch=master, got %v", err)
+	}
+	if detail, _ := tracker.ShowStory(context.Background(), "mw-e.2"); detail.Story.Overrides.Branch != "" {
+		t.Errorf("expected no branch written, got %q", detail.Story.Overrides.Branch)
+	}
+}
+
+func TestPathSetWarnsAndWritesABranchWhenTheRigCheckoutCannotBeRead(t *testing.T) {
+	tracker, rigs, files := aMediaRig(t, false)
+	var errs strings.Builder
+
+	if _, err := (application.PathSet{Tracker: tracker, Rigs: rigs, RigFiles: files, Err: &errs}).
+		Run(context.Background(), "mw-e.2", "", []string{"rig=nac-service-media", "branch=main"}); err != nil {
+		t.Fatalf("an unreadable checkout must not refuse: %v", err)
+	}
+	if !strings.Contains(errs.String(), "WARN:") || !strings.Contains(errs.String(), "branch=main") {
+		t.Errorf("expected a WARN line naming branch=main, got %q", errs.String())
+	}
+	if detail, _ := tracker.ShowStory(context.Background(), "mw-e.2"); detail.Story.Overrides.Branch != "main" {
+		t.Errorf("expected branch main written, got %q", detail.Story.Overrides.Branch)
+	}
+}
+
+func TestPathSetWarnsWhenTheRigIsNotCheckedOutHereAndAnExplicitBranchIsWritten(t *testing.T) {
+	tracker, _, files := aMediaRig(t, true)
+	var errs strings.Builder
+
+	if _, err := (application.PathSet{Tracker: tracker, RigFiles: files, Err: &errs}).
+		Run(context.Background(), "mw-e.2", "", []string{"rig=nac-service-media", "branch=main"}); err != nil {
+		t.Fatalf("a rig not here must not refuse: %v", err)
+	}
+	if !strings.Contains(errs.String(), "WARN:") {
+		t.Errorf("expected a WARN line, got %q", errs.String())
+	}
+}
+
+func TestFileRefusesAStoryWhoseBranchTheRigsOriginDoesNotHave(t *testing.T) {
+	_, rigs, files := aMediaRig(t, true)
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	plan := twoStoryPlan()
+	plan.Epic.Defaults.Rig = "nac-service-media"
+	plan.Epic.Defaults.Branch = "main"
+	plan.Stories = []domain.PlanStory{{Key: "talk", Title: "Talk sends twice", Acceptance: "make test passes\nExpect: none, because a test plan"}}
+
+	_, err := application.File{Tracker: tracker, Rigs: rigs, RigFiles: files}.Run(context.Background(), plan)
+	if err == nil {
+		t.Fatal("expected the plan to be refused")
+	}
+	for _, said := range []string{"talk", "branch=main", "branch=master"} {
+		if !strings.Contains(err.Error(), said) {
+			t.Errorf("expected the refusal to say %q, got %q", said, err)
+		}
+	}
+	if epics := tracker.Epics(); len(epics) != 0 {
+		t.Errorf("expected nothing filed, got %v", epics)
+	}
+}
