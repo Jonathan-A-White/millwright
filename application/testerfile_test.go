@@ -708,3 +708,35 @@ func TestTesterFilingKeepsTheHostOfAnEpicWithAHostWhy(t *testing.T) {
 		}
 	}
 }
+
+func TestTesterFilerWarnsOfACriterionThatNeedsTheLiveSite(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	var out bytes.Buffer
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules, Out: &out}
+	finding := testerFinding()
+	finding.Acceptance = "curl -s https://postern.allmymind.org/ shows the page number\nSweep: every viewport effect in src/ is grepped for state it drops"
+
+	filed, err := filer.File(context.Background(), "mw-e.2", finding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filed.ID == "" {
+		t.Fatalf("expected the finding filed, got %+v", filed)
+	}
+	for _, want := range []string{"WARN: " + filed.ID, "criterion 1", "live URL", "after-landing check"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected the output to hold %q, got %q", want, out.String())
+		}
+	}
+
+	// A criterion a Builder can run warns of nothing.
+	out.Reset()
+	other := testerFinding()
+	other.Title = "The page number is lost after a second rotate"
+	if _, err := filer.File(context.Background(), "mw-e.2", other); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "WARN:") {
+		t.Errorf("expected no warning for a runnable criterion, got %q", out.String())
+	}
+}
