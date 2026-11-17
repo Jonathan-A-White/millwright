@@ -545,7 +545,7 @@ func newDoctorCmd() *cobra.Command {
 				doctor.NewVaultDirty(vault, host, store),
 				formulasCheck,
 				doctor.NewTimers(units),
-				&doctor.BeadsSize{Dir: vault, Budget: beadsBudget, Home: beadsServedHere(), Squash: beadsSquash},
+				beadsSizeCheck(vault, host, beadsBudget, beadsSquash, cmd.ErrOrStderr()),
 				doctor.NewBeadsStores(vault),
 				doctor.NewBeadsBatch(vault, mwGateway(vault, host).AutoCommit),
 				beadsFlushCheck,
@@ -839,6 +839,40 @@ func (b brokenFlushLog) Last(context.Context) (application.BeadsFlushRecord, err
 }
 
 func (b brokenFlushLog) Record(context.Context, application.BeadsFlushRecord) error { return b.err }
+
+// beadsSizeCheck is the beads-size check with the cure it can run: the daily
+// collection (the tracker's GC, never the squash) after the quiet wait every bd
+// writer takes, recording when it ran under the same key the daily job does, so
+// that the next sync's own due-check and this check's both see it (mw-gq6.1403).
+func beadsSizeCheck(vault, host string, budget int64, squash bool, errs io.Writer) *doctor.BeadsSize {
+	gateway := mwGateway(vault, host)
+	return &doctor.BeadsSize{
+		Dir: vault, Budget: budget, Home: beadsServedHere(), Squash: squash,
+		LastCollected: func(ctx context.Context) (time.Time, error) {
+			text, err := gateway.Note(ctx, application.LastGCKey(host))
+			if err != nil || text == "" {
+				return time.Time{}, err
+			}
+			return time.Parse(application.LastSyncFormat, text)
+		},
+		Collect: func(ctx context.Context) error {
+			release, err := application.BdRetry{
+				Turn:  bdTurn([]string{"doctor", "beads-size"}),
+				Quiet: newBdQuiet(),
+				Dir:   vault,
+				Err:   errs,
+			}.WaitQuiet(ctx)
+			if err != nil {
+				return err
+			}
+			defer release()
+			if err := gateway.GC(ctx); err != nil {
+				return err
+			}
+			return gateway.SetNote(ctx, application.LastGCKey(host), time.Now().UTC().Format(application.LastSyncFormat)) //mw:realclock the wall-clock stamp the daily job writes the same way
+		},
+	}
+}
 
 // beadsServedHere says whether this host's beads server runs on this host: the
 // environment bd reads names a server at a loopback address. mw doctor's

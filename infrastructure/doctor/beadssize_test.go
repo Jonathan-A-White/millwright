@@ -2,10 +2,12 @@ package doctor_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -233,5 +235,155 @@ func TestBeadsSizeAwayFromTheHomeStillSaysNoCureRuns(t *testing.T) {
 	check := &doctor.BeadsSize{Dir: bsVault(t, 200), Budget: 100, Squash: true}
 	if wayBack := check.WayBack(); !strings.Contains(wayBack, "no cure runs") || strings.Contains(wayBack, "squash") {
 		t.Fatalf("expected a host away from the home to say no cure runs, got %q", wayBack)
+	}
+}
+
+// bsFake stands in for the tracker's side of the beads-size cure: a sizer that
+// reads one number, a collector that shrinks it (or fails) and records when it
+// ran, and the clock they share. It is the daily collection's own record
+// (host.<host>.last_gc) that makes a second cure inside the interval a no-op.
+type bsFake struct {
+	now      time.Time
+	size     int64
+	last     time.Time // zero: never collected
+	shrinkTo int64
+	failWith error
+	calls    int
+}
+
+func (f *bsFake) check() *doctor.BeadsSize {
+	return &doctor.BeadsSize{
+		Dir:    "/no/such/vault",
+		Budget: 5_000,
+		Now:    func() time.Time { return f.now },
+		Sizer:  func(context.Context) (int64, error) { return f.size, nil },
+		LastCollected: func(context.Context) (time.Time, error) {
+			return f.last, nil
+		},
+		Collect: func(context.Context) error {
+			f.calls++
+			if f.failWith != nil {
+				return f.failWith
+			}
+			f.size = f.shrinkTo
+			f.last = f.now
+			return nil
+		},
+	}
+}
+
+func TestBeadsSizeOverBudgetWithAStaleCollectionRunsItAsTheCure(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 5_034, shrinkTo: 3_230}
+	f.last = f.now.Add(-9*time.Hour - 32*time.Minute)
+	check := f.check()
+
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("expected the cure to bring .beads under budget, got %v", err)
+	}
+	if f.calls != 1 {
+		t.Fatalf("expected the collection to run once, ran %d times", f.calls)
+	}
+	way := check.WayBack()
+	for _, want := range []string{"5034", "3230", "2026-11-17T10:00:00Z"} {
+		if !strings.Contains(way, want) {
+			t.Fatalf("expected the way back to name the size before and after and when the collection ran (%q), got %q", want, way)
+		}
+	}
+}
+
+func TestBeadsSizeNeverCollectedCountsAsStale(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000, shrinkTo: 1_000}
+	if err := f.check().Cure(context.Background()); err != nil || f.calls != 1 {
+		t.Fatalf("expected one collection and no error, got %d calls, %v", f.calls, err)
+	}
+}
+
+func TestBeadsSizeStillOverAfterTheCollectionIsTheFaultSaidWithBothSizes(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000, shrinkTo: 8_500}
+	f.last = f.now.Add(-7 * time.Hour)
+
+	err := f.check().Cure(context.Background())
+	if err == nil {
+		t.Fatal("expected the cure to fail while .beads is still over budget")
+	}
+	for _, want := range []string{"9000", "8500", "5000", "2026-11-17T10:00:00Z"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected the failure to name %q, got %q", want, err.Error())
+		}
+	}
+}
+
+func TestBeadsSizeOverBudgetWithAFreshCollectionRunsNoCure(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000, shrinkTo: 1_000}
+	f.last = f.now.Add(-2 * time.Hour)
+
+	err := f.check().Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no cure") {
+		t.Fatalf("expected the no-cure word while the last collection is fresh, got %v", err)
+	}
+	if f.calls != 0 {
+		t.Fatalf("expected no collection inside the interval, ran %d", f.calls)
+	}
+	if !strings.Contains(err.Error(), "2026-11-17T08:00:00Z") {
+		t.Fatalf("expected the word to name when the last collection ran, got %q", err.Error())
+	}
+}
+
+func TestBeadsSizeCollectorErrorIsTheCureFailingWithThatError(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000, failWith: errors.New("command denied to user 'beads'")}
+
+	err := f.check().Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "command denied to user 'beads'") {
+		t.Fatalf("expected the collector's own error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "9000") {
+		t.Fatalf("expected the size before to be named, got %q", err.Error())
+	}
+}
+
+func TestBeadsSizeRunsNoSecondCureInsideTheInterval(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000, shrinkTo: 8_000}
+	check := f.check()
+
+	if err := check.Cure(context.Background()); err == nil {
+		t.Fatal("expected the first cure to leave .beads over budget")
+	}
+	f.now = f.now.Add(5*time.Hour + 59*time.Minute)
+	if err := check.Cure(context.Background()); err == nil || !strings.Contains(err.Error(), "no cure") {
+		t.Fatalf("expected no second cure inside the interval, got %v", err)
+	}
+	if f.calls != 1 {
+		t.Fatalf("expected one collection inside the interval, ran %d", f.calls)
+	}
+	f.now = f.now.Add(2 * time.Minute)
+	_ = check.Cure(context.Background())
+	if f.calls != 2 {
+		t.Fatalf("expected the collection to run again once the interval passed, ran %d", f.calls)
+	}
+}
+
+func TestBeadsSizeCollectEveryIsTheIntervalWhenSet(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000, shrinkTo: 1_000}
+	f.last = f.now.Add(-2 * time.Hour)
+	check := f.check()
+	check.CollectEvery = time.Hour
+	if err := check.Cure(context.Background()); err != nil || f.calls != 1 {
+		t.Fatalf("expected a collection past the hour, got %d calls, %v", f.calls, err)
+	}
+}
+
+func TestBeadsSizeProbeReadsTheSizerWhenOneIsGiven(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Now(), size: 9_000}
+	verdict, reason := f.check().Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "9000") {
+		t.Fatalf("expected faulty at 9000 bytes, got %v: %s", verdict, reason)
 	}
 }
