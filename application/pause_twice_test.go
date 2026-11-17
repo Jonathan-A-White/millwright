@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,5 +62,46 @@ func TestASecondPauseKeepsTheMaxBoxesTheFirstSaved(t *testing.T) {
 	}
 	if len(set.Hosts) != 1 || set.Hosts[0].Cap != "3" {
 		t.Errorf("paused.json holds hosts %+v, want the laptop with its cap 3", set.Hosts)
+	}
+}
+
+// mw-gq6.1372: a pause run with cloud.max_boxes already 0 (a hand drain) keeps 0
+// as the value to put back, so mw resume leaves it at 0; the pause must say so.
+func TestPauseOfAMaxBoxesAlreadyZeroSaysResumeLeavesItZero(t *testing.T) {
+	book := apptest.NewFakePauseBook()
+	config := &apptest.FakePauseConfig{Value: "0", Set: true}
+	now := time.Date(2026, 11, 12, 15, 4, 0, 0, time.UTC)
+	fleet := apptest.NewFakePauseFleet()
+	fleet.Add(application.FleetHostPause{Host: "laptop", Cap: "3", Notes: apptest.NewFakeTracker(), Stories: apptest.NewFakeTracker(),
+		Runner: apptest.NewFakeRunner(), Git: apptest.NewFakePauseGit()})
+	var out bytes.Buffer
+	set, err := application.Pause{
+		Fleet: fleet, Cloud: apptest.NewFakePauseCloud(), Config: config, Book: book,
+		Host: "laptop", Now: func() time.Time { return now }, Out: &out,
+	}.Run(context.Background(), application.PauseRequest{Reason: "99.0% used", Until: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := strings.Join(set.Notes, "\n")
+	if !strings.Contains(said, "cloud.max_boxes was already 0") || !strings.Contains(said, "mw resume leaves it at 0") {
+		t.Errorf("the pause's notes %q do not say cloud.max_boxes was already 0 and mw resume leaves it at 0", said)
+	}
+	if !strings.Contains(out.String(), "mw resume leaves it at 0") {
+		t.Errorf("the pause's report does not say mw resume leaves cloud.max_boxes at 0:\n%s", out.String())
+	}
+
+	// A max_boxes of 4 is put back, and nothing is said of a 0.
+	book4 := apptest.NewFakePauseBook()
+	four := &apptest.FakePauseConfig{Value: "4", Set: true}
+	var out4 bytes.Buffer
+	set4, err := application.Pause{
+		Fleet: fleet, Cloud: apptest.NewFakePauseCloud(), Config: four, Book: book4,
+		Host: "laptop", Now: func() time.Time { return now }, Out: &out4,
+	}.Run(context.Background(), application.PauseRequest{Reason: "99.0% used", Until: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(set4.Notes, "\n"), "already 0") {
+		t.Errorf("a max_boxes of 4 was said to be already 0: %v", set4.Notes)
 	}
 }

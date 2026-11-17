@@ -604,6 +604,12 @@ type PauseCloud interface {
 	Down(ctx context.Context, box string) (string, error)
 }
 
+// maxBoxesZeroKeptSaid is the note of a pause that found cloud.max_boxes already
+// 0, as a hand drain leaves it: 0 is the value kept, so mw resume puts back 0
+// (mw-gq6.1372).
+const maxBoxesZeroKeptSaid = "cloud.max_boxes was already 0, so mw resume leaves it at 0 and no box is made; " +
+	"set cloud.max_boxes in the [cloud] table of the home's ~/.config/mw/config.toml to the value wanted, or run mw cloud undrain if it was drained"
+
 // PauseConfig is the home's cloud.max_boxes.
 type PauseConfig interface {
 	// MaxBoxes reads it; set is false when the config says none.
@@ -771,6 +777,9 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 		}
 	}
 	set.Unreached, set.NoMw = nil, noMw
+	if !paused && set.MaxBoxesSet && strings.TrimSpace(set.MaxBoxes) == "0" {
+		set.Notes = append(set.Notes, maxBoxesZeroKeptSaid)
+	}
 
 	wait := req.Wait
 	results := make([]HostPaused, len(hosts))
