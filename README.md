@@ -1753,7 +1753,7 @@ name = "night"                     # optional: mw status shows "cap 4: night win
 from = "23:00"
 to   = "06:00"
 tz   = "America/New_York"          # a tz database zone, so a change of clocks is read; the first window that holds the moment wins
-cap  = 4                           # and any of builder_jobs, builder_nice, room_load_per_core, room_min_free_mb; a key it leaves out keeps its root value
+cap  = 4                           # and any of builder_jobs, builder_nice, room_load_per_core, room_min_free_mb, min_drive_free_gb; a key it leaves out keeps its root value
 # A story running when a window closes is not stopped; the lower cap holds back new starts. A malformed window is skipped, the root values apply, and mw doctor dispatch-windows names the key.
 
 [rigs]

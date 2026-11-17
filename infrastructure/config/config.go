@@ -1512,7 +1512,8 @@ func Room() (RoomSettings, error) {
 }
 
 // RoomAt is Room at the instant now: a [[dispatch.windows]] entry that holds now
-// answers room_load_per_core and room_min_free_mb ahead of the [dispatch] table.
+// answers room_load_per_core, room_min_free_mb and min_drive_free_gb ahead of the
+// [dispatch] table; the grist keys are the table's only.
 func RoomAt(now time.Time) (RoomSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1524,7 +1525,7 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 		return RoomSettings{}, err
 	}
 	if window := activeWindow(path, now); window != nil {
-		for _, key := range []string{"room_load_per_core", "room_min_free_mb"} {
+		for _, key := range []string{"room_load_per_core", "room_min_free_mb", "min_drive_free_gb"} {
 			if said := window.Values[key]; said != "" {
 				table[key] = said
 			}

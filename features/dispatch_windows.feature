@@ -1,6 +1,6 @@
 Feature: a host's session cap and Builder knobs follow the clock
   A [[dispatch.windows]] entry in ~/.config/mw/config.toml (from, to, tz, and any of cap,
-  builder_jobs, builder_nice, room_load_per_core, room_min_free_mb) overrides the root
+  builder_jobs, builder_nice, room_load_per_core, room_min_free_mb, min_drive_free_gb) overrides the root
   values while the host's local clock in that tz is inside the window. Outside it, and for
   every knob the window does not name, the root values apply. A window may wrap midnight.
   A story already running when a window closes is not stopped: a lower cap only holds back
@@ -159,3 +159,55 @@ Feature: a host's session cap and Builder knobs follow the clock
       cap = 4
       """
     Then the windows are refused, naming the key from
+
+  Scenario: a window can carry min_drive_free_gb, and 0 turns the Windows-drive guard off while it holds
+    Given a host config file holding:
+      """
+      [dispatch]
+      min_drive_free_gb = 10
+
+      [[dispatch.windows]]
+      name = "night"
+      from = "23:00"
+      to = "06:00"
+      tz = "America/New_York"
+      min_drive_free_gb = 0
+
+      [[dispatch.windows]]
+      name = "morning"
+      from = "06:00"
+      to = "08:00"
+      tz = "America/New_York"
+      min_drive_free_gb = 5
+      """
+    When the clock reads "2026-10-15 23:30" in America/New_York
+    Then the Windows-drive guard is off
+    When the clock reads "2026-10-16 07:00" in America/New_York
+    Then the Windows-drive guard is on
+    And the Windows drive needs at least 5 GB free
+    When the clock reads "2026-10-15 12:00" in America/New_York
+    Then the Windows-drive guard is on
+    And the Windows drive needs at least 10 GB free
+    And the windows are not refused
+
+  Scenario Outline: min_drive_free_gb in a window is a whole number from 0 up
+    Given a host config file holding:
+      """
+      [dispatch]
+      min_drive_free_gb = 10
+
+      [[dispatch.windows]]
+      from = "23:00"
+      to = "06:00"
+      tz = "America/New_York"
+      min_drive_free_gb = <said>
+      """
+    When the clock reads "2026-10-15 23:30" in America/New_York
+    Then the Windows drive needs at least 10 GB free
+    And the windows are refused, naming the key min_drive_free_gb
+
+    Examples:
+      | said  |
+      | -1    |
+      | lots  |
+      | 1.5   |
