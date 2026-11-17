@@ -142,7 +142,7 @@ func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundl
 	triage.Name, triage.File, triage.Keep = "triage dump", SleepTriageFile, true
 	bundle := SleepBundle{triage}
 	bundle = append(bundle, g.diffPart(ctx, window, dump.String()))
-	bundle = append(bundle, cutPart(deep, "queue", SleepQueueFile, g.said(g.Mw(ctx, "queue", "--json"))))
+	bundle = append(bundle, cutQueue(deep, g.said(g.Mw(ctx, "queue", "--json"))))
 	bundle = append(bundle, g.gitPart(ctx, window))
 	bundle = append(bundle, cutPart(deep, "runs", SleepRunsFile, g.runs(ctx, window, now)))
 	// The report's text form, which carries what the rule reads; its JSON is
@@ -879,4 +879,86 @@ func oldHoldsText(holds []OldHold) string {
 		fmt.Fprintf(&out, "- %s %q: held %d %s. Reason: %s\n", h.ID, h.Title, h.Days, plural(h.Days, "day", "days"), h.Reason)
 	}
 	return out.String()
+}
+
+
+// cutQueue is the queue.json part: mw queue --json, which prints a story over
+// nine lines, compacted to a line to a story when it is over its budget, so a
+// cut by lines no longer drops the ready stories past it unsaid (mw-gq6.1384).
+// If the compact form is still over, the stories that matter least are left
+// out, the blocked first, then the parents, then the ready ones from the end
+// (the dispatch's order puts the most urgent first), and the part says how many
+// of each. A text that is not the report falls to a cut by lines.
+func cutQueue(deep bool, text string) SleepPart {
+	budget := SleepBudgetFor(deep, SleepQueueFile)
+	if len(text) <= budget {
+		return SleepPart{Name: "queue", File: SleepQueueFile, Text: text, Budget: budget}
+	}
+	var report QueueReport
+	if err := json.Unmarshal([]byte(text), &report); err != nil || len(report.Ready) == 0 {
+		return cutPart(deep, "queue", SleepQueueFile, text)
+	}
+	ready, parents, blocked := len(report.Ready), len(report.Parents), len(report.Blocked)
+	out := renderQueue(report, "")
+	for len(out) > budget && (len(report.Blocked) > 0 || len(report.Parents) > 0 || len(report.Ready) > 0) {
+		switch {
+		case len(report.Blocked) > 0:
+			report.Blocked = report.Blocked[:len(report.Blocked)-1]
+		case len(report.Parents) > 0:
+			report.Parents = report.Parents[:len(report.Parents)-1]
+		default:
+			report.Ready = report.Ready[:len(report.Ready)-1]
+		}
+		out = renderQueue(report, queueLeftOut(ready-len(report.Ready), parents-len(report.Parents), blocked-len(report.Blocked)))
+	}
+	note := fmt.Sprintf("was %s bytes, compacted to %s: a line to a story", Thousands(len(text)), Thousands(len(out)))
+	if left := queueLeftOut(ready-len(report.Ready), parents-len(report.Parents), blocked-len(report.Blocked)); left != "" {
+		note = fmt.Sprintf("was %s bytes, compacted to %s: a line to a story, and %s", Thousands(len(text)), Thousands(len(out)), left)
+	}
+	return SleepPart{Name: "queue", File: SleepQueueFile, Text: out, Budget: budget, Cut: note}
+}
+
+// queueLeftOut says how many stories were left out, "" when none were.
+func queueLeftOut(ready, parents, blocked int) string {
+	var said []string
+	if ready > 0 {
+		said = append(said, fmt.Sprintf("%d ready stories left out", ready))
+	}
+	if parents > 0 {
+		said = append(said, fmt.Sprintf("%d parents left out", parents))
+	}
+	if blocked > 0 {
+		said = append(said, fmt.Sprintf("%d blocked stories left out", blocked))
+	}
+	return strings.Join(said, ", ")
+}
+
+// renderQueue is the report as JSON with a line to each story; left, when not
+// empty, is said in a field at the end.
+func renderQueue(r QueueReport, left string) string {
+	var b strings.Builder
+	host, _ := json.Marshal(r.Host)
+	b.WriteString("{\"host\":" + string(host) + ",\n")
+	rows := func(name string, n int, row func(i int) any) {
+		b.WriteString("\"" + name + "\":[")
+		for i := 0; i < n; i++ {
+			enc, _ := json.Marshal(row(i))
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString("\n" + string(enc))
+		}
+		b.WriteString("]")
+	}
+	rows("ready", len(r.Ready), func(i int) any { return r.Ready[i] })
+	b.WriteString(",\n")
+	rows("parents", len(r.Parents), func(i int) any { return r.Parents[i] })
+	b.WriteString(",\n")
+	rows("blocked", len(r.Blocked), func(i int) any { return r.Blocked[i] })
+	if left != "" {
+		enc, _ := json.Marshal("mw cut this part: " + left)
+		b.WriteString(",\n\"mw_cut\":" + string(enc))
+	}
+	b.WriteString("}\n")
+	return b.String()
 }

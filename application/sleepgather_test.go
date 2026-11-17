@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -604,5 +605,83 @@ func TestTriageDiffCutDumpIsReadWithoutItsCutLine(t *testing.T) {
 	}
 	if !strings.Contains(diff, "mw-a.1") {
 		t.Errorf("the diff does not say what moved:\n%s", diff)
+	}
+}
+
+// queueText is an mw queue --json report of ready stories, indented as the
+// command prints it.
+func queueText(t *testing.T, ready int) string {
+	t.Helper()
+	report := application.QueueReport{Host: "cloud2", Ready: []application.QueueRow{}, Parents: []application.QueueRow{}, Blocked: []application.QueueBlocked{}}
+	for i := 0; i < ready; i++ {
+		report.Ready = append(report.Ready, application.QueueRow{
+			ID: fmt.Sprintf("mw-gq6.%d", 2000+i), Title: fmt.Sprintf("[bug] A story number %d with a title about as long as the ones filed from findings", i),
+			Rig: "millwright", Priority: 2, Age: "3d", Size: "S", Why: "priority 2, filed 3d ago, size S",
+		})
+	}
+	report.Blocked = append(report.Blocked, application.QueueBlocked{ID: "mw-gq6.9000", Title: "blocked", Rig: "millwright", Priority: 2, WaitsOn: []string{"mw-gq6.2000"}})
+	out, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out) + "\n"
+}
+
+func TestANightlyQueueKeepsAReadyLineForEveryStory(t *testing.T) {
+	const ready = 115
+	queue := queueText(t, ready)
+	if lines := strings.Count(queue, "\n"); lines < 1000 {
+		t.Fatalf("the fixture queue is %d lines, want a live-sized one of about 1,046", lines)
+	}
+	if len(queue) <= application.SleepBudgetOf(application.SleepQueueFile) {
+		t.Fatalf("the fixture queue is %d bytes, it should be over the nightly budget", len(queue))
+	}
+	g := gatherFixture()
+	g.Mw = func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "queue" {
+			return queue, nil
+		}
+		return "mw " + strings.Join(args, " ") + "\n", nil
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)[application.SleepQueueFile]
+	if len(part.Text) > part.Budget {
+		t.Errorf("queue.json is %d bytes, over its budget of %d", len(part.Text), part.Budget)
+	}
+	kept := strings.Count(part.Text, `"id":"mw-gq6.2`)
+	if kept == ready {
+		return
+	}
+	// A story left out is said, with how many.
+	want := fmt.Sprintf("%d ready stories left out", ready-kept)
+	if !strings.Contains(part.Text, want) || !strings.Contains(part.Cut, want) {
+		t.Errorf("queue.json holds %d of %d ready stories and does not say %q:\ntext tail: ...%s\ncut: %q",
+			kept, ready, want, part.Text[max(0, len(part.Text)-300):], part.Cut)
+	}
+	// What is kept is the most urgent: the head of the order.
+	if !strings.Contains(part.Text, `"id":"mw-gq6.2000"`) {
+		t.Error("the first ready story is not kept")
+	}
+}
+
+func TestAQueueThatFitsItsBudgetIsLeftAsItIs(t *testing.T) {
+	queue := queueText(t, 5)
+	g := gatherFixture()
+	g.Mw = func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "queue" {
+			return queue, nil
+		}
+		return "", nil
+	}
+	bundle, err := g.Gather(context.Background(), application.SleepWindow{Date: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := partsByFile(bundle)[application.SleepQueueFile]
+	if part.Text != queue || part.Cut != "" {
+		t.Errorf("a queue under its budget was changed: cut %q", part.Cut)
 	}
 }
