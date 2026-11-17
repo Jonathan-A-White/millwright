@@ -341,7 +341,8 @@ type foundPlacing struct {
 // foundPlace reads which rig the finding lines are about. Its files name
 // another rig when they lead with that rig's directory (Cairn/vite.config.ts),
 // and the prefix is then dropped from the file; failing that, its words name
-// one other rig and not the finder's own. Files of two rigs, of another rig
+// one other rig and not the finder's own (a name after an article, as in "the
+// legend", is a common word and does not count). Files of two rigs, of another rig
 // and of the finder's own, or words naming two other rigs, say no rig. The
 // rig's defaults are those of its newest story among beads: branch, formula and
 // the harness, model and effort the rig's stories use; the finder's host, size,
@@ -430,9 +431,24 @@ func (n Next) foundPlace(lines []string, finder domain.Path, beads []StoryDetail
 	return foundPlacing{elsewhere: true, path: foundNoRigPlace(foundFiles(lines, ""), finder)}
 }
 
-// foundNamesRig says text names the rig, in any case, as a word of its own.
+var (
+	foundArticleBefore = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_\-])(?:the|a|an|this|that|these|those|its|our|their)\s+$`)
+	foundRigNounAfter  = regexp.MustCompile(`(?i)^\s+(?:rig|repo|repository)\b`)
+)
+
+// foundNamesRig says text names the rig, in any case, as a word of its own. A
+// name right after an article or a demonstrative (the legend, a legend, this
+// legend) is the common word and not the rig, unless the words go on to say rig
+// or repo (the legend rig).
 func foundNamesRig(text, lowerName string) bool {
-	return regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_\-])` + regexp.QuoteMeta(lowerName) + `(?:$|[^A-Za-z0-9_\-])`).MatchString(text)
+	pattern := regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_\-])(` + regexp.QuoteMeta(lowerName) + `)(?:$|[^A-Za-z0-9_\-])`)
+	for _, m := range pattern.FindAllStringSubmatchIndex(text, -1) {
+		if foundArticleBefore.MatchString(text[:m[2]]) && !foundRigNounAfter.MatchString(text[m[3]:]) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // foundNoRigPlace is the path of a bug whose rig cannot be told: no rig, branch
