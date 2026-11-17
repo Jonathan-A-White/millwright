@@ -95,7 +95,9 @@ func newHostTrimSetupCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if !check {
-				fmt.Fprintf(out, "Once per WSL host, in Windows PowerShell:\n\n%s\n\n", doctor.WSLTrimPowerShellLine())
+				// One line alone in a fenced block, no prompt: a whole-block copy runs it
+				// (mw-gq6.1381).
+				fmt.Fprintf(out, "Once per WSL host, in Windows PowerShell:\n\n```\n%s\n```\n\n", doctor.WSLTrimPowerShellLine())
 			}
 
 			names := []string{here}

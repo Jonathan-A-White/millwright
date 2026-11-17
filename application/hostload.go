@@ -31,6 +31,13 @@ type LoadReading struct {
 	SwapInKBPerS  float64
 	SwapOutKBPerS float64
 	SwapKnown     bool
+	// DriveName and DriveFreeBytes are the Windows drive holding a WSL host's
+	// vhdx and the space it has left, from the report the Windows task writes
+	// into WSL, when DriveKnown. A host that is not WSL, or has no current
+	// report, leaves DriveKnown false, and no floor applies (mw-gq6.1381).
+	DriveName      string
+	DriveFreeBytes int64
+	DriveKnown     bool
 }
 
 // Busy reports whether the load has reached the core count: every core has
@@ -58,6 +65,11 @@ func (r LoadReading) FarOver() bool { return r.Cores > 0 && r.Load >= GateFarOve
 const (
 	DefaultRoomLoadPerCore       = 1.0
 	DefaultRoomMinFreeMB   int64 = 2048
+	// DefaultRoomMinDriveFreeGB is the free space a WSL host's Windows drive must
+	// have to take a story: the desktop's D: went read-only twice at under 1 GB
+	// (mw-gq6.1381). The config file's [dispatch] min_drive_free_gb changes it,
+	// and 0 turns the guard off.
+	DefaultRoomMinDriveFreeGB int64 = 10
 )
 
 // RoomLimits is how much room a host must have before it starts a story. The
@@ -68,6 +80,18 @@ type RoomLimits struct {
 	LoadPerCore float64
 	// MinFreeMB is the memory available below which the host has no room.
 	MinFreeMB int64
+	// MinDriveFreeGB is the free space, in gigabytes, a WSL host's Windows drive
+	// must have; zero reads DefaultRoomMinDriveFreeGB, and NoDriveGuard turns the
+	// guard off.
+	MinDriveFreeGB int64
+	NoDriveGuard   bool
+}
+
+func (l RoomLimits) minDriveFreeGB() int64 {
+	if l.MinDriveFreeGB <= 0 {
+		return DefaultRoomMinDriveFreeGB
+	}
+	return l.MinDriveFreeGB
 }
 
 func (l RoomLimits) loadPerCore() float64 {
@@ -98,6 +122,9 @@ func (r LoadReading) NoRoom(limits RoomLimits) string {
 	}
 	if floor := limits.minFreeMB(); r.MemKnown && r.MemAvailableMB < floor {
 		why = append(why, fmt.Sprintf("%d MB free, under %d MB", r.MemAvailableMB, floor))
+	}
+	if floor := limits.minDriveFreeGB(); !limits.NoDriveGuard && r.DriveKnown && r.DriveFreeBytes < floor<<30 {
+		why = append(why, fmt.Sprintf("%s has %.1f GB free, under %d GB: the WSL disk cannot grow", r.DriveName, float64(r.DriveFreeBytes)/(1<<30), floor))
 	}
 	return strings.Join(why, "; ")
 }

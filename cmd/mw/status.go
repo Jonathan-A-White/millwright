@@ -300,7 +300,7 @@ func newStatusCmd() *cobra.Command {
 				Drained:          atOnce == 0,
 				CapWhy:           capWhy,
 				Load:             hostload.Proc{},
-				Room:             application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
+				Room:             roomLimits(room),
 				Grist:            hostGristRoom(room),
 				VPSNginx:         vps,
 				Standby:          standby,

@@ -153,3 +153,41 @@ func TestUptimeIsTheLineTheProgramPrints(t *testing.T) {
 		t.Errorf("a program that is not there was no error")
 	}
 }
+
+// mw-gq6.1381: the report the Windows task writes into WSL says how much its
+// drive has left; a host with no such report is not a WSL host and has none.
+func TestProcReadsTheWindowsDrivesFreeSpaceFromTheTasksReport(t *testing.T) {
+	dir := t.TempDir()
+	load := filepath.Join(dir, "loadavg")
+	drive := filepath.Join(dir, "windows-drive-free")
+	if err := os.WriteFile(load, []byte("1.00 1.00 1.00 1/1 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1763245200, 0)
+	proc := hostload.Proc{File: load, Cores: 4, DriveFile: drive, Now: func() time.Time { return now }}
+
+	got, err := proc.Load(context.Background())
+	if err != nil || got.DriveKnown {
+		t.Fatalf("no report: got %+v, %v; want the drive unknown", got, err)
+	}
+	if err := os.WriteFile(drive, []byte("D: 10737418240 1763245150\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = proc.Load(context.Background())
+	if err != nil || !got.DriveKnown || got.DriveName != "D:" || got.DriveFreeBytes != 10737418240 {
+		t.Errorf("got %+v, %v; want D: with 10 GB", got, err)
+	}
+	// a report that has stopped being written is not read as the drive's state now
+	now = now.Add(25 * time.Hour)
+	if got, _ = proc.Load(context.Background()); got.DriveKnown {
+		t.Errorf("a report 25 hours old was read as current: %+v", got)
+	}
+	// one that is not '<drive> <bytes> <seconds>' is unknown, not a failed reading
+	now = time.Unix(1763245200, 0)
+	if err := os.WriteFile(drive, []byte("garbage\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = proc.Load(context.Background()); err != nil || got.DriveKnown {
+		t.Errorf("garbage: got %+v, %v; want the drive unknown", got, err)
+	}
+}

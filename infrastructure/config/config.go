@@ -43,6 +43,7 @@
 //	[dispatch]                         # the room a host needs to start a story (mw-t0z3fu.1)
 //	room_load_per_core = 1.0           # none while the 1-minute load is this many a core
 //	room_min_free_mb   = 2048          # none while less memory than this is available
+//	min_drive_free_gb  = 10            # none while a WSL host's Windows drive has less free than this; 0 is off (mw-gq6.1381)
 //	grist_cap          = 4             # stories at once while a tutor is in use (default: cap less 2)
 //	grist_recent_s     = 600           # a tutor is in use this long after its last answer
 //	grist_slow_factor  = 1.5           # none while tutor answers take over this times their par
@@ -1442,6 +1443,9 @@ const DispatchTable = "dispatch"
 const (
 	DefaultRoomLoadPerCore       = 1.0
 	DefaultRoomMinFreeMB   int64 = 2048
+	// DefaultRoomMinDriveFreeGB is the free space a WSL host's Windows drive must
+	// have to start a story (mw-gq6.1381); 0 in the table turns the guard off.
+	DefaultRoomMinDriveFreeGB int64 = 10
 	// DefaultGristRecentSeconds and DefaultGristSlowFactor are the same for
 	// grist (mw-t0z3fu.4).
 	DefaultGristRecentSeconds = 600
@@ -1454,6 +1458,9 @@ type RoomSettings struct {
 	LoadPerCore float64
 	// MinFreeMB is the memory available, in megabytes, under which it has none.
 	MinFreeMB int64
+	// MinDriveFreeGB is the free space, in gigabytes, the Windows drive of a WSL
+	// host must have; 0 is the guard off (mw-gq6.1381).
+	MinDriveFreeGB int64
 	// GristCap is how many sessions the host runs at once while a tutor is in
 	// use (mw-t0z3fu.4), 0 for the host's cap less 2. GristRecentSeconds is how
 	// long after the last tutor answer one still is, and GristSlowFactor the
@@ -1465,8 +1472,10 @@ type RoomSettings struct {
 }
 
 // Room reports the `[dispatch]` table of ~/.config/mw/config.toml:
-// `room_load_per_core` (a number above zero, default 1.0) and `room_min_free_mb`
-// (a whole number, 1 or more, default 2048), and grist's own: `grist_cap` (a whole
+// `room_load_per_core` (a number above zero, default 1.0), `room_min_free_mb`
+// (a whole number, 1 or more, default 2048), `min_drive_free_gb` (a whole
+// number, 0 for off, default 10: the free space a WSL host's Windows drive must
+// have) and grist's own: `grist_cap` (a whole
 // number, 1 or more, default the host's cap less 2), `grist_recent_s` (seconds,
 // default 600) and `grist_slow_factor` (above 1, default 1.5); each its default
 // when the table says nothing.
@@ -1493,7 +1502,7 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 			}
 		}
 	}
-	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB}
+	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB, MinDriveFreeGB: DefaultRoomMinDriveFreeGB}
 	if said := strings.TrimSpace(table["room_load_per_core"]); said != "" {
 		n, err := strconv.ParseFloat(said, 64)
 		if err != nil || n <= 0 || math.IsInf(n, 0) || math.IsNaN(n) {
@@ -1507,6 +1516,13 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says room_min_free_mb = %q: it must be a whole number of megabytes, 1 or more", DispatchTable, path, said)
 		}
 		settings.MinFreeMB = n
+	}
+	if said := strings.TrimSpace(table["min_drive_free_gb"]); said != "" {
+		n, err := strconv.ParseInt(said, 10, 64)
+		if err != nil || n < 0 {
+			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says min_drive_free_gb = %q: it must be a whole number of gigabytes, 0 (the guard off) or more", DispatchTable, path, said)
+		}
+		settings.MinDriveFreeGB = n
 	}
 	settings.GristRecentSeconds, settings.GristSlowFactor = DefaultGristRecentSeconds, DefaultGristSlowFactor
 	for _, key := range []string{"grist_cap", "grist_recent_s"} {
