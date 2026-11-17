@@ -540,19 +540,30 @@ func (g *Gateway) overlaid(ctx context.Context, stories []bead) ([]application.S
 
 // BlockedForHost implements application.WorkTracker. `bd blocked --json` finds
 // the stories a dependency holds back, but not their epic: its rows carry
-// neither a parent nor metadata, unlike `bd list` and `bd ready`. So each
-// candidate is read back with `bd show`, as ShowStory does — all of them in one
-// bd — and the epics' defaults are overlaid once for all of them, each epic read
-// once however many stories hang from it.
+// no parent, and no labels. So the candidates are read back, all of them in one
+// bd list (readOwn) and not a bd show apiece, which against a server was a
+// connection and a dozen statements each: 240 connections and 3,565 statements
+// took 195.87 s at load 25 (mw-gq6.1341). A listing prints a story's links as
+// edges, closed blockers among them, so what a story waits on is narrowed to
+// the blockers its row in `bd blocked` names, as bd show narrows it. The epics'
+// defaults are overlaid once for all of them, each epic read once however many
+// stories hang from it.
 //
 // The poured steps of every running story are in `bd blocked` too, each waiting
 // on the step before it, and there are far more of them than stories. A row
 // carries nothing to tell a step by but its id, whose "-mol-" bd gives every
 // bead of a molecule (the same mark the event spring reads), so steps are left
 // out before any read: over a slow link each read is seconds.
+//
+// A Gateway with a kept connection reads the blocked stories from the live
+// beads (liveListing.blockedForHost) and starts no bd: `bd blocked` alone was
+// 385 statements and 25 s for 188 blocked stories (mw-gq6.1341).
 func (g *Gateway) BlockedForHost(ctx context.Context, host string) ([]application.StoryDetail, error) {
 	if host == "" {
 		return nil, fmt.Errorf("which host are the blocked stories for?")
+	}
+	if live, ok := g.liveOverConnection(ctx); ok {
+		return live.blockedForHost(host), nil
 	}
 	out, err := g.call(ctx, "blocked", "--json")
 	if err != nil {
@@ -564,13 +575,15 @@ func (g *Gateway) BlockedForHost(ctx context.Context, host string) ([]applicatio
 	}
 
 	var wanted []string
+	stillOpen := map[string][]string{}
 	for _, candidate := range candidates {
 		if candidate.Type == TypeEpic || candidate.Status != StatusOpen || candidate.Assignee != "" || isPouredStep(candidate.ID) {
 			continue
 		}
 		wanted = append(wanted, candidate.ID)
+		stillOpen[candidate.ID] = candidate.BlockedBy
 	}
-	read, err := g.readBeads(ctx, wanted)
+	read, err := g.readOwn(ctx, wanted)
 	if err != nil {
 		return nil, fmt.Errorf("reading the blocked stories: %w", err)
 	}
@@ -589,6 +602,9 @@ func (g *Gateway) BlockedForHost(ctx context.Context, host string) ([]applicatio
 
 	var blocked []application.StoryDetail
 	for _, detail := range details {
+		if open := stillOpen[detail.Story.ID]; len(open) > 0 {
+			detail.Needs = slices.DeleteFunc(slices.Clone(detail.Needs), func(need string) bool { return !slices.Contains(open, need) })
+		}
 		if detail.Merged().Host == host {
 			blocked = append(blocked, detail)
 		}

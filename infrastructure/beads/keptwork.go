@@ -122,6 +122,38 @@ func (l *liveListing) ready() []application.StoryDetail {
 	return l.readyWhere(func(b bead) bool { return b.Assignee == "" })
 }
 
+// blockedForHost is what the gateway's `bd blocked` and bd show come to: the
+// open, unclaimed beads that are no epic and no step of a poured formula,
+// waiting on a bead not closed, on host, as snapshot.BlockedForHost reads them:
+// the most urgent first, the newest first among those as urgent.
+func (l *liveListing) blockedForHost(host string) []application.StoryDetail {
+	var waiting []bead
+	for _, b := range l.beads {
+		if b.Type == TypeEpic || b.Status != StatusOpen || b.Assignee != "" || isPouredStep(b.ID) || !l.waiting(b) {
+			continue
+		}
+		waiting = append(waiting, b)
+	}
+	sort.SliceStable(waiting, func(i, j int) bool {
+		if waiting[i].priority() != waiting[j].priority() {
+			return waiting[i].priority() < waiting[j].priority()
+		}
+		return waiting[i].created().After(waiting[j].created())
+	})
+	return onHostExactly(l.details(waiting), host)
+}
+
+// onHostExactly narrows details to the ones whose merged Path names host.
+func onHostExactly(details []application.StoryDetail, host string) []application.StoryDetail {
+	var on []application.StoryDetail
+	for _, detail := range details {
+		if detail.Merged().Host == host {
+			on = append(on, detail)
+		}
+	}
+	return on
+}
+
 // readyWithLabel is what `bd ready --label label --exclude-type epic` lists:
 // ready does not ask for the unassigned, so a bead somebody holds that is still
 // open is there too.

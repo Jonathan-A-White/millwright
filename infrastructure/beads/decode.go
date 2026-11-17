@@ -38,6 +38,9 @@ type bead struct {
 	Parent           string            `json:"parent"`
 	Dependencies     []json.RawMessage `json:"dependencies"`
 	CommentCount     int               `json:"comment_count"`
+	// BlockedBy is the ids `bd blocked` says a row still waits on; no other
+	// listing prints it.
+	BlockedBy []string `json:"blocked_by"`
 }
 
 // linked is a bead's dependency as `bd show` prints it: the whole linked bead,

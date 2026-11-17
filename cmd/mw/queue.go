@@ -26,7 +26,16 @@ func newQueueCmd() *cobra.Command {
 			"started, and it takes the order from the dispatch's own sort, never a copy of it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			gateway, err := beads.FromConfig()
+			vault, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			// What is ready, blocked and running are read over one connection
+			// kept for the command's life, where a bd for each was ten, each
+			// several new connections and seconds of the server's time: 195.87 s
+			// at load 25 (mw-gq6.1341). A host with no server reads by bd.
+			defer keepBeadsConnection(vault, cmd.ErrOrStderr())()
+			gateway, err := beads.FromConfig(followerGatewayOptions...)
 			if err != nil {
 				return err
 			}

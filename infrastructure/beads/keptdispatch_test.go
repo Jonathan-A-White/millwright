@@ -671,3 +671,33 @@ func TestWithNoKeptConnectionTheReadsTogetherAreTheReadsOneAtATime(t *testing.T)
 		t.Errorf("expected bd show asked for the molecule roots one at a time, got:\n%s", strings.Join(bdCallsSince(t, asked, from), "\n"))
 	}
 }
+
+// mw-gq6.1341: mw queue read what is blocked by `bd blocked` (385 statements
+// for 188 stories) and each story back by bd. Over the kept connection the
+// blocked stories are the live beads waiting on a bead not closed, read with
+// the ready ones, and no bd starts.
+func TestTheBlockedStoriesAreReadOverTheKeptConnection(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard))
+
+	blocked, err := g.BlockedForHost(ctx, "desktop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(detailIDs(blocked), " "); got != "mw-e.4" {
+		t.Errorf("expected only mw-e.4 blocked on the desktop (mw-e.2 waits on a closed bead), got %s", got)
+	}
+	if len(blocked) == 1 {
+		if strings.Join(blocked[0].Needs, " ") != "mw-e.5" || blocked[0].Merged().Rig != "millwright" {
+			t.Errorf("expected mw-e.4 to wait on mw-e.5 with its epic's path, got needs %v, path %+v", blocked[0].Needs, blocked[0].Merged())
+		}
+	}
+	if away, err := g.BlockedForHost(ctx, "laptop"); err != nil || len(away) != 0 {
+		t.Errorf("expected nothing blocked on the laptop, got %v, %v", detailIDs(away), err)
+	}
+	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
+		t.Errorf("expected no bd started, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
+	}
+}
