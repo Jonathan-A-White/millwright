@@ -163,8 +163,14 @@ const beadColumns = "select i.id as id, i.title as title, i.description as descr
 	" left join (select issue_id, count(*) as n from comments group by issue_id) cc on cc.issue_id = i.id"
 
 // listingQueries are the three reads of a listing: its beads, their labels and
-// their edges.
-type listingQueries struct{ beads, labels, edges string }
+// their edges. A listing whose edges are read by the ids of the beads it found
+// (edgesOf) leaves edges empty: the server finds them by an index on those ids,
+// where a join with the beads' own condition scanned the 90,000 dependencies
+// and took three times as long (mw-gq6.1340).
+type listingQueries struct {
+	beads, labels, edges string
+	edgesOf              func(ids []string) string
+}
 
 // listAllOverConnection is the beads `bd list --all --json` prints, read over
 // the kept connection in three queries, less mail and event beads; ok is false
@@ -174,7 +180,7 @@ func (g *Gateway) listAllOverConnection(ctx context.Context) (all []bead, ok boo
 	if db == nil {
 		return nil, false
 	}
-	all, err := readListing(ctx, db, listingQueries{beadsListQuery, beadLabelsQuery, beadEdgesQuery}, nil)
+	all, err := readListing(ctx, db, listingQueries{beads: beadsListQuery, labels: beadLabelsQuery, edges: beadEdgesQuery}, nil)
 	if err != nil {
 		g.keptFailed(ctx, "every bead", err)
 		return nil, false
@@ -256,7 +262,18 @@ func readListing(ctx context.Context, db *sql.DB, q listingQueries, targets map[
 		return nil, err
 	}
 
-	edges, err := db.QueryContext(bounded, q.edges)
+	edgesQuery := q.edges
+	if q.edgesOf != nil {
+		if len(all) == 0 {
+			return all, nil
+		}
+		ids := make([]string, len(all))
+		for i, b := range all {
+			ids[i] = b.ID
+		}
+		edgesQuery = q.edgesOf(ids)
+	}
+	edges, err := db.QueryContext(bounded, edgesQuery)
 	if err != nil {
 		return nil, err
 	}

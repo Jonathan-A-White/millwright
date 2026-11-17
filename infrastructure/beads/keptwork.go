@@ -36,6 +36,33 @@ const (
 		" left join issues t on t.id = d.depends_on_issue_id where " + liveWhere + " order by d.issue_id, d.created_at"
 )
 
+// liveEdgesOf is liveEdgesQuery for the beads ids names: the server reads each
+// bead's edges by the index on the bead's id, where the join with the live
+// condition read every dependency there is, 1.0 to 1.4 s of the 90,000 at load
+// 14 and 0.4 s this way (mw-gq6.1340).
+func liveEdgesOf(ids []string) string {
+	quoted := make([]string, len(ids))
+	for i, id := range ids {
+		quoted[i] = sqlQuoted(id)
+	}
+	return "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id," +
+		" d.type, t.status as target_status from dependencies d" +
+		" left join issues t on t.id = d.depends_on_issue_id where d.issue_id in (" + strings.Join(quoted, ", ") + ")" +
+		" order by d.issue_id, d.created_at"
+}
+
+// withoutTexts is a listing's query with the description, the acceptance
+// criteria and the count of comments of each bead left out (read as empty and
+// 0): the first two are most of its 2.9 MB, and with the third, the grouping of
+// every comment there is, they were over half of the server's time at load 14
+// (mw-gq6.1340).
+func withoutTexts(query string) string {
+	return strings.NewReplacer("i.description as description", "'' as description",
+		"i.acceptance_criteria as acceptance_criteria", "'' as acceptance_criteria",
+		"coalesce(cc.n, 0) as comment_count", "0 as comment_count",
+		" left join (select issue_id, count(*) as n from comments group by issue_id) cc on cc.issue_id = i.id", "").Replace(query)
+}
+
 // liveListing is the live beads as one read over the kept connection found
 // them.
 type liveListing struct {
@@ -47,14 +74,37 @@ type liveListing struct {
 }
 
 // liveOverConnection reads the live beads over the kept connection; ok is false
-// when there is no connection or it failed, and the caller starts a bd.
+// when there is no connection or it failed, and the caller starts a bd. A
+// Gateway given a run cache (WithRunCache) reads them once, until it writes:
+// mw queue asks for what is ready, blocked and running, and each was a whole
+// read of 2.9 MB (mw-gq6.1340).
 func (g *Gateway) liveOverConnection(ctx context.Context) (*liveListing, bool) {
+	if g.cache == nil {
+		return g.readLiveOverConnection(ctx)
+	}
+	live, err := g.cache.live.get(func() (*liveListing, error) {
+		l, ok := g.readLiveOverConnection(ctx)
+		if !ok {
+			return nil, errNoKeptConnection
+		}
+		return l, nil
+	})
+	return live, err == nil
+}
+
+// readLiveOverConnection is one whole read of the live beads over the kept
+// connection.
+func (g *Gateway) readLiveOverConnection(ctx context.Context) (*liveListing, bool) {
 	db := g.keptDB()
 	if db == nil {
 		return nil, false
 	}
 	targets := map[string]string{}
-	all, err := readListing(ctx, db, listingQueries{liveBeadsQuery, liveLabelsQuery, liveEdgesQuery}, targets)
+	beadsQuery := liveBeadsQuery
+	if g.withoutTexts {
+		beadsQuery = withoutTexts(beadsQuery)
+	}
+	all, err := readListing(ctx, db, listingQueries{beads: beadsQuery, labels: liveLabelsQuery, edgesOf: liveEdgesOf}, targets)
 	if err != nil {
 		g.keptFailed(ctx, "the live beads", err)
 		return nil, false

@@ -82,6 +82,8 @@ type Gateway struct {
 	// cache keeps what one run of a command that only reads asked of bd
 	// (WithRunCache); nil asks bd every time.
 	cache *runCache
+	// withoutTexts is set by WithoutStoryTexts.
+	withoutTexts bool
 	// repackErr is why the repack the last successful Sync ended with failed,
 	// and repackMu guards it (TakeRepackErr).
 	repackMu  sync.Mutex
@@ -96,6 +98,15 @@ var (
 
 // Option is a setting of a Gateway, given to New.
 type Option func(*Gateway)
+
+// WithoutStoryTexts makes the live beads the kept connection reads (the ready,
+// blocked and running stories) carry no description and no acceptance criteria:
+// they are most of a 2.9 MB read that took over a second at load 14, and a
+// command that prints neither (mw queue) is better without them (mw-gq6.1340).
+// A story read this way must not be shown or written back from what it holds.
+func WithoutStoryTexts() Option {
+	return func(g *Gateway) { g.withoutTexts = true }
+}
 
 // WithProgram names the beads command to run, for a host that keeps it
 // somewhere unusual — and for a test that needs a stand-in for bd rather than
