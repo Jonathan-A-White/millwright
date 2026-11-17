@@ -274,6 +274,11 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	}
 	filed.ID = id
 	f.say("filed %s, held, under %s: %s\n", id, orStandalone(landed.EpicID), title)
+	// A criterion no Builder can run before landing is warned of as mw file and
+	// mw path set warn of it (PathSet.notRunnableWarning, mw-gq6.1411).
+	if line := (PathSet{Rules: f.Rules}).notRunnableWarning(ctx, id, path.Rig, story.Acceptance); line != "" {
+		f.say("%s\n", line)
+	}
 	if len(shared) > 0 {
 		f.say("  waits on %s: they name the same file as it\n", strings.Join(shared, ", "))
 	}
