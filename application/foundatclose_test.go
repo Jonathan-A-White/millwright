@@ -642,6 +642,27 @@ func TestFoundAtCloseFindingNamingAnotherRigInItsWordsIsFiledInThatRig(t *testin
 	}
 }
 
+// A rig named like a common word (legend) in the prose of a finding about the
+// finder's own rig, with no file of another rig, does not move the bug to that
+// rig (mw-gq6.1350).
+func TestFoundAtCloseFindingUsingARigNameAsACommonWordKeepsItsRig(t *testing.T) {
+	for name, finding := range map[string]string{
+		"the":  "The parser drops the legend of the table (package.json:3). AC: go test ./application passes. By design? no",
+		"a":    "The config is a legend for the build (package.json:3). AC: go test ./application passes. By design? no",
+		"this": "This legend is dropped by the config (package.json:3). AC: go test ./application passes. By design? no",
+	} {
+		t.Run(name, func(t *testing.T) {
+			filed := aFindingOfAnotherRigRun(t, finding)
+			if len(filed) != 1 {
+				t.Fatalf("expected 1 bug filed, got %d", len(filed))
+			}
+			if got := filed[0]; got.Rig != "lampas" || got.Files != "package.json" {
+				t.Errorf("expected rig=lampas files=package.json, got %s", got.Summary())
+			}
+		})
+	}
+}
+
 // A finding whose rig cannot be told is filed with no rig, never the reporting
 // story's: its files name two other rigs, or one of them and one of its own.
 func TestFoundAtCloseFindingWhoseRigCannotBeToldIsFiledWithNoRig(t *testing.T) {
