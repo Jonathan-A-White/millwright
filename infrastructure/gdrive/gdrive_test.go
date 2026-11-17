@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -125,12 +126,28 @@ func (g *fakeGoogle) serve(t *testing.T) gdrive.Endpoints {
 			for _, row := range in.Values {
 				cells += len(row)
 			}
+			// Sheets stores what a formula works out to, not the text sent.
+			stored := make([][]string, len(in.Values))
+			for i, row := range in.Values {
+				for _, v := range row {
+					if v == "=1+1" {
+						v = "2"
+					}
+					stored[i] = append(stored[i], v)
+				}
+			}
+			wtab, _, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v4/spreadsheets/"+id+"/values/"), "?"), "!")
+			g.mu.Lock()
+			g.sheets[strings.Trim(wtab, "'")] = stored
+			g.mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{"updatedRange": in.Range, "updatedCells": cells, "updatedRows": len(in.Values)})
 			return
 		}
 		tab, _, _ := strings.Cut(values, "!")
 		tab = strings.Trim(tab, "'")
+		g.mu.Lock()
 		rows := g.sheets[tab]
+		g.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"range": values, "majorDimension": "ROWS", "values": rows})
 	})
 	server := httptest.NewServer(mux)
@@ -388,6 +405,9 @@ func TestWriteUpdatesInPlaceAsUserEntered(t *testing.T) {
 	}
 	if done.Range != "Main!A1:C1" || done.Cells != 3 {
 		t.Fatalf("unexpected result %+v", done)
+	}
+	if want := [][]string{{"a", "2", "c"}}; !reflect.DeepEqual(done.After, want) {
+		t.Fatalf("After is %v, want the stored cells %v, not the values sent", done.After, want)
 	}
 	var put string
 	for i, c := range g.calls() {

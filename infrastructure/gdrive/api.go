@@ -295,7 +295,8 @@ type Written struct {
 
 // Write puts values in one row starting at a1 (a range like Sheet1!A1:C1),
 // USER_ENTERED, as if typed. A file whose name contains "Budget" (any case) is
-// refused unless yes, before anything is changed.
+// refused unless yes, before anything is changed. The After of what it returns
+// is read from the sheet after the write.
 func (s Session) Write(ctx context.Context, id, a1 string, values []string, yes bool) (Written, error) {
 	title, err := s.title(ctx, id)
 	if err != nil {
@@ -321,7 +322,13 @@ func (s Session) Write(ctx context.Context, id, a1 string, values []string, yes 
 	if err := s.call(ctx, http.MethodPut, address, body, &out); err != nil {
 		return Written{}, err
 	}
-	return Written{Title: title, Range: out.UpdatedRange, Cells: out.UpdatedCells, Before: before, After: [][]string{values}}, nil
+	// After is a fresh read of the cells, not the values sent: Sheets may store
+	// something else (a formula's result, a number's own form).
+	after, err := s.values(ctx, id, a1)
+	if err != nil {
+		return Written{}, fmt.Errorf("the write went through, but reading the cells back failed: %w", err)
+	}
+	return Written{Title: title, Range: out.UpdatedRange, Cells: out.UpdatedCells, Before: before, After: after}, nil
 }
 
 // SelftestName is the name of the scratch spreadsheet mw gdrive selftest makes.
