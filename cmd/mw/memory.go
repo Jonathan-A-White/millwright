@@ -464,7 +464,9 @@ func newMemoryMakeRoomCmd() *cobra.Command {
 			"for the next, but a decision first gets a second question, its subject's words plus those first\n" +
 			"eight words. After those, a decision whose subject is one file (not 'general') with a since over 2 days ago\n" +
 			"and then, for a rig too young for those rules, a gotcha or decision of any age whose source is a story that is\n" +
-			"closed and landed, oldest first, each asked by its slug's words first. It prints the render before, each demotion and the\n" +
+			"closed and landed, oldest first, each asked by its slug's words first. No tier takes a fact placed within the\n" +
+			"last 2 days: lines placed in one sitting stay in the render, and an add --make-room that cannot make room\n" +
+			"from older facts adds nothing and says why. It prints the render before, each demotion and the\n" +
 			"render after. When the facts that qualify cannot free N bytes it changes nothing and exits 1.\n" +
 			"--bytes 0 gets the render under the budget. --dry-run prints 'would demote <slug>' for each\n" +
 			"and the render before and after, and writes nothing.",

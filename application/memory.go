@@ -1471,9 +1471,10 @@ type roomMove struct {
 // 'general', placed over MakeRoomKeepDays days ago, then, for a rig too young for
 // those rules, a gotcha or decision placed over MakeRoomKeepDays days ago whose
 // source is a story that is closed and landed (Landed); last, a gotcha or decision
-// of any age whose subject is one file (a Builder whose story names that file
-// still reads it at boot), the one placed longest ago first, never the newest
-// placed of the rig, which is the fact just added; never a sentence beginning 'His ' or holding 'the
+// whose subject is one file and whose placed time is over MakeRoomKeepDays days
+// ago (a Builder whose story names that file still reads it at boot), the one
+// placed longest ago first; never a fact placed within MakeRoomKeepDays days,
+// whichever the tier, so lines placed in one sitting stay together; never a sentence beginning 'His ' or holding 'the
 // Governor', "Governor's" or 'his words'; never an aged one with
 // a since within MakeRoomKeepDays days, except by that last rule; the oldest since first, then, of one day, the
 // one placed first (the moment it was added), then the subject least queried (as
@@ -1534,8 +1535,8 @@ func (m Memory) makeRoom(ctx context.Context, rig string, bytes int, extra *RigF
 		if decisionsSkipped == 1 {
 			noun = "decision"
 		}
-		return fmt.Errorf("make-room can leave %d bytes free at most, not the %d asked (render %d/%d now): no gotcha or decision over %d days qualifies to demote (%d %s skipped for their age or their question); nothing was changed",
-			m.Budget-after, bytes, size, m.Budget, MakeRoomDecisionDays, decisionsSkipped, noun)
+		return fmt.Errorf("make-room can leave %d bytes free at most, not the %d asked (render %d/%d now): no gotcha or decision over %d days qualifies to demote, and a fact placed within %d days is never taken (%d %s skipped for their age or their question); nothing was changed",
+			m.Budget-after, bytes, size, m.Budget, MakeRoomDecisionDays, MakeRoomKeepDays, decisionsSkipped, noun)
 	}
 	fmt.Fprintf(m.Out, "render before: %d/%d bytes\n", size, m.Budget)
 	for _, move := range moves {
@@ -1565,12 +1566,11 @@ const (
 	// whose source is a story that is closed and landed: a fact placed within
 	// those days is never taken, whatever its story.
 	roomLanded
-	// roomFileFact is a gotcha or decision of any age, a story's fact or not,
-	// whose subject is one file: tried last, for a rig that places so many facts
-	// a day that none reaches the days above. A Builder whose story names the
-	// file still reads it first at boot (RenderBootMemory), so no reader that
-	// needs it is lost. The newest placed fact of the rig, the one just added,
-	// is never taken by it.
+	// roomFileFact is a gotcha or decision whose subject is one file and which
+	// was placed over MakeRoomKeepDays days ago (by its placed time, not its
+	// since): tried last. A Builder whose story names the file still reads it
+	// first at boot (RenderBootMemory), so no reader that needs it is lost. A
+	// fact placed within those days is never taken by any tier (roomFresh).
 	roomFileFact
 )
 
@@ -1603,17 +1603,11 @@ func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, 
 	queried := orderedFacts(known)
 
 	landed := m.landedStories(ctx, all)
-	// The fact just added is the newest placed; when it is not about to be added
-	// (extra) it is already in all, and the last tier leaves it.
-	newest := ""
-	if extra == nil {
-		newest = newestPlaced(all)
-	}
 	var candidates []roomCandidate
 	for _, fact := range all {
 		if tier, ok := m.roomTier(fact, landed); ok {
 			candidates = append(candidates, roomCandidate{fact, tier})
-		} else if namesOneFile(fact.Subject) && m.roomBase(fact) && fact.Slug != newest {
+		} else if namesOneFile(fact.Subject) && m.roomBase(fact) && !m.roomFresh(fact) {
 			candidates = append(candidates, roomCandidate{fact, roomFileFact})
 		} else if m.roomDecisionTooNew(fact) {
 			held++
@@ -1660,16 +1654,14 @@ func (m Memory) planRoom(ctx context.Context, rig, about string, all []RigFact, 
 	return moves, skipped, held, size
 }
 
-// newestPlaced is the slug of the current boot fact placed last, "" when none
-// says when it was placed.
-func newestPlaced(all []RigFact) string {
-	slug, latest := "", ""
-	for _, fact := range all {
-		if fact.Status == FactCurrent && !fact.Unbooted && fact.Placed > latest {
-			slug, latest = fact.Slug, fact.Placed
-		}
+// roomFresh reports whether a fact was placed within MakeRoomKeepDays days, which
+// no tier of make-room takes: by its placed time when it has one, else by its
+// since. A Builder's lines placed minutes apart stay in the render together.
+func (m Memory) roomFresh(fact RigFact) bool {
+	if placed, err := time.Parse(time.RFC3339, fact.Placed); err == nil {
+		return placed.After(m.clock().UTC().AddDate(0, 0, -MakeRoomKeepDays))
 	}
-	return slug
+	return !m.sinceBefore(fact, MakeRoomKeepDays)
 }
 
 // roomQuestion is the first question that puts fact in the top EvalTop results
