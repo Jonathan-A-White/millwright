@@ -65,6 +65,7 @@ func newHostCmd() *cobra.Command {
 	root.AddCommand(newHostWSLFlagCmd())
 	root.AddCommand(newHostGiveWayCmd())
 	root.AddCommand(newHostSweepCmd())
+	root.AddCommand(newHostHiddenCmd())
 	return root
 }
 

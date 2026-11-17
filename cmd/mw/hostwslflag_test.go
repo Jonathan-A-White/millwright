@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -447,4 +448,40 @@ func TestWSLFlagInstallLinesCheckElevationBeforeWritingAnything(t *testing.T) {
 	}
 	assertElevationFirst(t, "wsl-flag short line", short)
 	assertElevationFirst(t, "wsl-flag inline line", WSLFlagInstallLineInline())
+}
+
+// The wsl-flag task runs powershell.exe under conhost.exe --headless, as give way's
+// tasks do, so that no console flashes every 2 minutes and at logon; on a Windows
+// build older than give way's minimum the line keeps -WindowStyle Hidden (mw-gq6.1430).
+func TestWSLFlagTaskLaunchesHeadless(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	out, err := runMw(t, "host", "wsl-flag", "--install-line")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reg string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "Register-ScheduledTask") && strings.Contains(l, "-Force") {
+			reg = l
+		}
+	}
+	if reg == "" {
+		t.Fatalf("no Register-ScheduledTask line in:\n%s", out)
+	}
+	// the Register-ScheduledTask statement is the headless one; the fallback for an old build follows it
+	headless := reg[strings.Index(reg, "Register-ScheduledTask"):]
+	headless = headless[:strings.Index(headless, "-Force")]
+	if !strings.Contains(headless, "-Execute conhost.exe") || !strings.Contains(headless, `-Argument "--headless powershell.exe `) {
+		t.Errorf("the task must run conhost.exe with an Argument starting --headless powershell.exe:\n%s", headless)
+	}
+	if strings.Contains(headless, "-WindowStyle Hidden") {
+		t.Errorf("the headless task must not rely on -WindowStyle Hidden:\n%s", headless)
+	}
+	if !strings.Contains(reg, fmt.Sprintf("Version.Build -lt %d", giveWayMinBuild)) {
+		t.Errorf("the old-build fallback needs the build check (%d):\n%s", giveWayMinBuild, reg)
+	}
+	// older builds keep the hidden window
+	if !strings.Contains(reg, "-Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden") {
+		t.Errorf("an older build keeps powershell.exe -WindowStyle Hidden:\n%s", reg)
+	}
 }
