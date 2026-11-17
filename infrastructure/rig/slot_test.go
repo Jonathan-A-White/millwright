@@ -548,12 +548,18 @@ func queuedTickets(queue string) int {
 // order, and gives the slot back at once.
 func takeSlotInTheBackground(t *testing.T, dir, holder string, poll time.Duration, order *[]string, mu *sync.Mutex, done chan<- error) {
 	t.Helper()
+	takeSlotInTheBackgroundUnder(t, context.Background(), dir, holder, poll, order, mu, done)
+}
+
+// takeSlotInTheBackgroundUnder is takeSlotInTheBackground for a Take asked under ctx.
+func takeSlotInTheBackgroundUnder(t *testing.T, ctx context.Context, dir, holder string, poll time.Duration, order *[]string, mu *sync.Mutex, done chan<- error) {
+	t.Helper()
 	waiting := make(chan struct{})
 	var once sync.Once
 	slots := rig.NewSlots(rig.WithSlotPoll(poll),
 		rig.WithSlotNotice(func(string) { once.Do(func() { close(waiting) }) }))
 	go func() {
-		held, err := slots.Take(context.Background(), dir, holder)
+		held, err := slots.Take(ctx, dir, holder)
 		if err == nil {
 			mu.Lock()
 			*order = append(*order, holder)
@@ -604,6 +610,41 @@ func TestWaitersTakeARigsMergeSlotInTheOrderTheyBeganWaiting(t *testing.T) {
 		if want := "closing out mw-a,closing out mw-b,closing out mw-c"; got != want {
 			t.Fatalf("round %d: expected the waiters to take the slot in the order a, b, c, got %s", round, got)
 		}
+	}
+}
+
+// A batch's wait for its rig's merge slot goes ahead of the close-outs and checks
+// that began waiting before it, as its waits for the gate lock and a test-runner
+// slot do (mw-gq6.1450).
+func TestABatchsWaitForTheMergeSlotGoesAheadOfCloseOutsThatQueuedBeforeIt(t *testing.T) {
+	dir := aRigDir(t)
+	first, err := rig.NewSlots().Take(context.Background(), dir, "closing out mw-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	var mu sync.Mutex
+	done := make(chan error, 2)
+	takeSlotInTheBackground(t, dir, "closing out mw-a", 2*time.Millisecond, &order, &mu, done)
+	takeSlotInTheBackgroundUnder(t, application.WithQueuePrecedence(context.Background()), dir, "mw land on laptop, landing a batch of lampas", 2*time.Millisecond, &order, &mu, done)
+	if err := first.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatal("a waiter never took the merge slot")
+		}
+	}
+	mu.Lock()
+	got := strings.Join(order, ",")
+	mu.Unlock()
+	if want := "mw land on laptop, landing a batch of lampas,closing out mw-a"; got != want {
+		t.Fatalf("expected the batch to take the slot first, got %s", got)
 	}
 }
 

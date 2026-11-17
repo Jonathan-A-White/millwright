@@ -197,6 +197,12 @@ type aWaiterAtTheSlots struct {
 
 func startAWaiter(t *testing.T, dir, name string, at time.Time) *aWaiterAtTheSlots {
 	t.Helper()
+	return startAWaiterUnder(t, context.Background(), dir, name, at)
+}
+
+// startAWaiterUnder is startAWaiter for a start asked under ctx.
+func startAWaiterUnder(t *testing.T, ctx context.Context, dir, name string, at time.Time) *aWaiterAtTheSlots {
+	t.Helper()
 	w := &aWaiterAtTheSlots{waiting: make(chan struct{}, 100), go_: make(chan struct{}), done: make(chan error, 1)}
 	runs := rig.NewTestRuns(dir, 1, rig.WithTestRunsClock(
 		func() time.Time { return at },
@@ -210,7 +216,7 @@ func startAWaiter(t *testing.T, dir, name string, at time.Time) *aWaiterAtTheSlo
 			}
 		}))
 	go func() {
-		release, err := runs.Take(context.Background(), name)
+		release, err := runs.Take(ctx, name)
 		w.release = release
 		w.done <- err
 	}()
@@ -274,5 +280,58 @@ func TestATestRunnerSlotIsGivenToTheOldestWaiter(t *testing.T) {
 		second.release()
 	case <-time.After(10 * time.Second):
 		t.Fatal("the second to wait did not take the slot once the first's run ended")
+	}
+}
+
+// A batch's gate parts take the next free test-runner slot ahead of Builders' own
+// test runs (mw-gq6.1450): lampas's batch 555 waited again and again while all
+// three slots went from one Builder's run to the next. A start asked under
+// application.WithQueuePrecedence goes ahead of a start that began waiting before it.
+func TestABatchsPartTakesTheNextFreeSlotAheadOfABuildersRunThatWaitedLonger(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Date(2026, 11, 17, 19, 56, 0, 0, time.UTC)
+	holder, err := rig.NewTestRuns(dir, 1, rig.WithTestRunsClock(func() time.Time { return start }, nil)).Take(context.Background(), "tests of lampas")
+	if err != nil {
+		t.Fatalf("taking the one slot: %v", err)
+	}
+
+	builder := startAWaiter(t, dir, "a Builder's tests of lampas", start.Add(time.Second))
+	builder.lookedAndWaited(t, "the Builder's run")
+	batch := startAWaiterUnder(t, application.WithQueuePrecedence(context.Background()), dir, "batch 555 of lampas", start.Add(time.Minute))
+	batch.lookedAndWaited(t, "the batch's part")
+
+	// The slot is free, and the Builder's run, which waited longer, looks first.
+	holder()
+	builder.go_ <- struct{}{}
+	select {
+	case err := <-builder.done:
+		t.Fatalf("the Builder's run took the slot ahead of the batch's part (%v)", err)
+	case <-builder.waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the Builder's run neither took a slot nor waited again")
+	}
+
+	// The batch's part looks and starts.
+	batch.go_ <- struct{}{}
+	select {
+	case err := <-batch.done:
+		if err != nil {
+			t.Fatalf("the batch's part: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the batch's part did not take the free slot when it looked")
+	}
+
+	// Then, its part over, the Builder's run starts.
+	batch.release()
+	builder.go_ <- struct{}{}
+	select {
+	case err := <-builder.done:
+		if err != nil {
+			t.Fatalf("the Builder's run: %v", err)
+		}
+		builder.release()
+	case <-time.After(10 * time.Second):
+		t.Fatal("the Builder's run did not take the slot once the batch's part ended")
 	}
 }
