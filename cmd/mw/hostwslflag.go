@@ -102,13 +102,22 @@ var wslFlagCommit = func() string {
 }
 
 // wslFlagRegister is the part of the install line that registers the task
-// with the script already under $d.
+// with the script already under $d. The task runs powershell.exe under
+// conhost.exe --headless, as give way's tasks do, so that no console shows every
+// 2 minutes and at logon. On a Windows build older than giveWayMinBuild, whose
+// conhost.exe does not take --headless, the action is then replaced by
+// powershell.exe -WindowStyle Hidden, which still flashes one but runs. (The
+// line goes to a phone: the second action is a short Set-ScheduledTask, not a
+// second Register-ScheduledTask.)
 func wslFlagRegister() string {
-	return `Register-ScheduledTask -TaskName '` + wslFlagTask + `' ` +
-		"-Action (New-ScheduledTaskAction -Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `\"$d\\wsl-flag-watch.ps1`\"\") " +
+	return "$f=\"-ExecutionPolicy Bypass -File `\"$d\\wsl-flag-watch.ps1`\"\"; " +
+		`Register-ScheduledTask -TaskName '` + wslFlagTask + `' ` +
+		"-Action (New-ScheduledTaskAction -Execute conhost.exe -Argument \"--headless powershell.exe -NoProfile $f\") " +
 		`-Trigger @((New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)),(New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)) ` +
 		`-Principal (New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest) ` +
-		`-Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force`
+		`-Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force; ` +
+		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { ", giveWayMinBuild) +
+		"Set-ScheduledTask -TaskName '" + wslFlagTask + "' -Action (New-ScheduledTaskAction -Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden $f\") | Out-Null }"
 }
 
 // WSLFlagInstallLine is the one line of admin PowerShell that downloads the

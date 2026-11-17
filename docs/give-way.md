@@ -47,6 +47,8 @@ next `mw dispatch` tick, so a missed lock costs at most that.
 (that flag still flashes a console for a moment). `conhost.exe --headless` needs Windows 10 build 19041 or
 later, or Windows 11; the install paste refuses to register anything on an older build. The Laptop is build
 26200; the desktop's build is read by the paste. `wsl.exe` is started from the same hidden console.
+`mw host hidden` prints one paste that gives every other 'millwright' task (the hand-written keeper and watchdog
+included) the same headless action; `mw host wsl-flag --install-line` registers its task headless too.
 
 **A failure of `wsl.exe`** (WSL down, the distro missing) is written to the log and the script exits 0: no
 error box.
