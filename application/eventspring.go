@@ -296,6 +296,7 @@ type springState struct {
 	inFlight bool
 	again    string    // why one more pass is wanted when this ends
 	told     time.Time // when the Mayor was last mailed of a failed pass
+	held     string    // why a pass is held back while a restart waits (mw-gq6.1389)
 }
 
 // Spring springs the jobs the log's new events and the clocks want. It
@@ -405,6 +406,17 @@ func (s *EventSpring) Wait() { s.wg.Wait() }
 
 // launch writes the pass's scheduled event and begins it. s.mu is held.
 func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, reason string) {
+	// A pass that runs an agent does not begin while a restart of the follower
+	// waits for the model runs under way: it would lengthen the wait, and be cut
+	// at its limit. It is kept, and begun by the first Spring after the hold ends.
+	if j.RunsAgent && RunsHeld(ctx, s.Runs, s.now()) {
+		if st.held == "" && s.Err != nil {
+			fmt.Fprintf(s.Err, "mw events follow: %s is held back while a restart of the follower waits for the model runs to end\n", j.Name)
+		}
+		st.held = reason
+		return
+	}
+	st.held = ""
 	st.inFlight = true
 	st.lastRun = s.now()
 	s.say(j, s.write(ctx, j, st, events.JobScheduled, reason))

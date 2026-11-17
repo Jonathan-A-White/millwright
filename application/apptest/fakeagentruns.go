@@ -3,6 +3,7 @@ package apptest
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -12,10 +13,13 @@ import (
 type FakeAgentRunMarks struct {
 	mu   sync.Mutex
 	live map[string]application.AgentRun
+	held map[string]time.Time
 	// Gone are the marks left by a process that is not there.
 	Gone []application.AgentRun
 	// OpenErr is what Open fails with.
 	OpenErr error
+	// HeldErr is what Held fails with.
+	HeldErr error
 }
 
 var _ application.AgentRunMarks = (*FakeAgentRunMarks)(nil)
@@ -64,4 +68,39 @@ func (f *FakeAgentRunMarks) Forget(_ context.Context, run application.AgentRun) 
 	}
 	f.Gone = kept
 	return nil
+}
+
+// Hold implements application.AgentRunMarks.
+func (f *FakeAgentRunMarks) Hold(_ context.Context, who string, until time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.held == nil {
+		f.held = map[string]time.Time{}
+	}
+	f.held[who] = until
+	return nil
+}
+
+// Release implements application.AgentRunMarks.
+func (f *FakeAgentRunMarks) Release(_ context.Context, who string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.held, who)
+	return nil
+}
+
+// Held implements application.AgentRunMarks.
+func (f *FakeAgentRunMarks) Held(_ context.Context, now time.Time) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.HeldErr != nil {
+		return nil, f.HeldErr
+	}
+	var who []string
+	for w, until := range f.held {
+		if now.Before(until) {
+			who = append(who, w)
+		}
+	}
+	return who, nil
 }

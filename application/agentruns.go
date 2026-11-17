@@ -54,6 +54,29 @@ type AgentRunMarks interface {
 	Open(ctx context.Context) (live, gone []AgentRun, err error)
 	// Forget takes the mark of a gone run away once it is written down.
 	Forget(ctx context.Context, run AgentRun) error
+	// Hold says that who, a restart of the follower, waits for the runs under way
+	// to end, until the time given: no model run begins while it is held
+	// (mw-gq6.1389). A hold has an end so that a restarter that died leaves none
+	// held for good. Hold again by the same who moves the end.
+	Hold(ctx context.Context, who string, until time.Time) error
+	// Release takes who's hold away.
+	Release(ctx context.Context, who string) error
+	// Held lists who holds at now: the holds not yet at their end.
+	Held(ctx context.Context, now time.Time) ([]string, error)
+}
+
+// RestartHold is the name a restart of the follower holds the model runs under.
+const RestartHold = "restart"
+
+// RunsHeld says whether a restart of the follower waits for the model runs, so
+// that the run a job is about to begin is to be held back. Marks that cannot be
+// read hold nothing back: a pass is not lost to a fault of the marks.
+func RunsHeld(ctx context.Context, marks AgentRunMarks, now time.Time) bool {
+	if marks == nil {
+		return false
+	}
+	who, err := marks.Held(ctx, now)
+	return err == nil && len(who) > 0
 }
 
 // CutRun is a model run that did not end: the job, when it began, how long it
@@ -145,6 +168,11 @@ func (g *RunGuardedRestarter) TryRestart(ctx context.Context, unit string) (bool
 	}
 	asked := g.now()
 	var waited []AgentRun
+	// While it waits, no new model run begins: a run that began in the wait would
+	// lengthen it, up to the limit, and be cut there. The hold ends with the wait.
+	if err := g.Runs.Hold(ctx, RestartHold, asked.Add(limit+holdMargin)); err == nil {
+		defer func() { _ = g.Runs.Release(context.WithoutCancel(ctx), RestartHold) }()
+	}
 	for {
 		live, _, err := g.Runs.Open(ctx)
 		if err != nil {
@@ -170,6 +198,27 @@ func (g *RunGuardedRestarter) TryRestart(ctx context.Context, unit string) (bool
 		}
 	}
 	return g.Units.TryRestart(ctx, unit)
+}
+
+// holdMargin is how long past the limit a restart's hold lasts, so that it does
+// not lapse before the restart that holds it has ended.
+const holdMargin = time.Minute
+
+// HoldRuns holds the model runs from beginning, for a restart left to a later
+// tick (mw-gq6.1389), until the limit has passed since since.
+func (g *RunGuardedRestarter) HoldRuns(ctx context.Context, since time.Time) error {
+	if g.Runs == nil {
+		return nil
+	}
+	return g.Runs.Hold(ctx, RestartHold, since.Add(g.WaitLimit()+holdMargin))
+}
+
+// ReleaseRuns lets the model runs begin again.
+func (g *RunGuardedRestarter) ReleaseRuns(ctx context.Context) error {
+	if g.Runs == nil {
+		return nil
+	}
+	return g.Runs.Release(ctx, RestartHold)
 }
 
 // WaitLimit is how long a restart of the follower waits for a model run, at most.

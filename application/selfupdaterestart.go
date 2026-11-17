@@ -22,6 +22,10 @@ type runAwareRestarter interface {
 	WaitLimit() time.Duration
 	LiveRuns(ctx context.Context) ([]AgentRun, error)
 	RestartCutting(ctx context.Context, unit string, live []AgentRun, since time.Time) (bool, error)
+	// HoldRuns keeps a new model run from beginning while the restart waits, and
+	// ReleaseRuns lets it (mw-gq6.1389).
+	HoldRuns(ctx context.Context, since time.Time) error
+	ReleaseRuns(ctx context.Context) error
 }
 
 // restartPendingMark is the key, in Built, under which a host remembers when the
@@ -44,7 +48,15 @@ func (s SelfUpdate) restartFactoryUnits(ctx context.Context) []string {
 		return said
 	}
 	notes, _ := restartFactoryUnits(ctx, s.Units, FollowerUnit, s.Units.TryRestart)
-	if held, _ := s.Built.Built(ctx, restartPendingMark(FollowerUnit)); held != "" {
+	// The runs wait for the restart, so none begins to lengthen the wait: held
+	// until the limit has passed since the restart was first asked for.
+	asked := s.now()
+	held, _ := s.Built.Built(ctx, restartPendingMark(FollowerUnit))
+	if since, err := time.Parse(time.RFC3339, held); err == nil {
+		asked = since
+	}
+	_ = guard.HoldRuns(ctx, asked)
+	if held != "" {
 		return notes // asked for already, by an earlier build
 	}
 	said := fmt.Sprintf("%s is left to a later tick to restart on the new build: %s under way, waited for at most %s",
@@ -73,8 +85,10 @@ func (s SelfUpdate) finishPendingRestart(ctx context.Context) []string {
 	}
 	live, err := guard.LiveRuns(ctx)
 	if err == nil && len(live) > 0 && s.now().Sub(since) < guard.WaitLimit() {
+		_ = guard.HoldRuns(ctx, since) // kept while the runs go on, ending with the limit
 		return nil
 	}
+	defer func() { _ = guard.ReleaseRuns(context.WithoutCancel(ctx)) }()
 	if err := s.Built.MarkBuilt(ctx, restartPendingMark(FollowerUnit), ""); err != nil {
 		return []string{"the restart left to a later tick could not be taken off the list, so the follower is not restarted again: " + firstLine(err.Error())}
 	}

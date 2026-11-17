@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -122,4 +123,74 @@ func (m Marks) alive(pid int) bool {
 	}
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// holdPath is where a hold is kept, a file for each who, apart from the
+// marks of the runs so that Open does not read one as a run.
+func (m Marks) holdPath(who string) (string, error) {
+	if who == "" || strings.ContainsAny(who, `/\`) || strings.HasPrefix(who, ".") {
+		return "", fmt.Errorf("%q is not a name a hold can be kept under", who)
+	}
+	return filepath.Join(m.Dir, "holds", who+".hold"), nil
+}
+
+// Hold implements application.AgentRunMarks: a file holding the time the hold
+// ends, written whole and moved into place.
+func (m Marks) Hold(_ context.Context, who string, until time.Time) error {
+	path, err := m.holdPath(who)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("making %s: %w", filepath.Dir(path), err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(until.UTC().Format(time.RFC3339)+"\n"), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("moving %s into place: %w", tmp, err)
+	}
+	return nil
+}
+
+// Release implements application.AgentRunMarks.
+func (m Marks) Release(_ context.Context, who string) error {
+	path, err := m.holdPath(who)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// Held implements application.AgentRunMarks. A hold that cannot be read as an end
+// holds nothing.
+func (m Marks) Held(_ context.Context, now time.Time) ([]string, error) {
+	dir := filepath.Join(m.Dir, "holds")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("listing %s: %w", dir, err)
+	}
+	var who []string
+	for _, e := range entries {
+		name, ok := strings.CutSuffix(e.Name(), ".hold")
+		if e.IsDir() || !ok {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		until, err := time.Parse(time.RFC3339, strings.TrimSpace(string(raw)))
+		if err == nil && now.Before(until) {
+			who = append(who, name)
+		}
+	}
+	return who, nil
 }

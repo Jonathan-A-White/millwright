@@ -70,3 +70,30 @@ func TestThisProcessIsAliveToTheRealCheck(t *testing.T) {
 		t.Fatal("a job name that climbs out of the directory was taken")
 	}
 }
+
+func TestAHoldIsHeldUntilItsEndAndReleasedAtOnce(t *testing.T) {
+	m := agentruns.New(filepath.Join(t.TempDir(), "agent-runs"))
+	ctx := context.Background()
+	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	if who, err := m.Held(ctx, now); err != nil || len(who) != 0 {
+		t.Fatalf("nothing held yet: %v %v", who, err)
+	}
+	if err := m.Hold(ctx, "restart", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if who, _ := m.Held(ctx, now); len(who) != 1 || who[0] != "restart" {
+		t.Fatalf("held = %v", who)
+	}
+	if live, gone, _ := m.Open(ctx); len(live)+len(gone) != 0 {
+		t.Fatalf("a hold was read as a run: %v %v", live, gone)
+	}
+	if who, _ := m.Held(ctx, now.Add(2*time.Hour)); len(who) != 0 {
+		t.Fatalf("a lapsed hold still holds: %v", who)
+	}
+	if err := m.Release(ctx, "restart"); err != nil {
+		t.Fatal(err)
+	}
+	if who, _ := m.Held(ctx, now); len(who) != 0 {
+		t.Fatalf("a released hold still holds: %v", who)
+	}
+}
