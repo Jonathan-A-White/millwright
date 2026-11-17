@@ -35,6 +35,7 @@ type cloudContext struct {
 func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 	c := &cloudContext{}
 	c.registerCapSteps(ctx)
+	c.registerHoldSteps(ctx)
 
 	ctx.Given(`^a cloud of at most (\d+) boxes, capped at \$([0-9.]+) a month, idle after (\d+) minutes, at \$([0-9.]+) an hour$`, c.aCloud)
 	ctx.Given(`^the hosts "([^"]*)" and "([^"]*)" run (\d+) sessions each, and a cloud box runs (\d+)$`, c.theHosts)
@@ -420,6 +421,7 @@ func (c *cloudContext) checkIn(ctx context.Context) error {
 	report, err := application.CloudCheck{
 		Work:     c.tracker,
 		Notes:    c.tracker,
+		Holds:    c.tracker,
 		Provider: c.provider,
 		Book:     c.book,
 		Log:      c.log,
@@ -456,6 +458,7 @@ func (c *cloudContext) boxesComeUp() error {
 		err := application.CloudMake{
 			Provider: c.provider,
 			Book:     c.book,
+			Holds:    c.tracker,
 			Log:      c.log,
 			Notice:   c.notice,
 			Host:     "desktop",
@@ -513,6 +516,7 @@ func (c *cloudContext) statusSays(text string) error {
 	if err != nil {
 		return err
 	}
+	reading.ReadHolds(context.Background(), c.tracker, c.now)
 	report := application.StatusReport{Host: "desktop", Cloud: reading}.String()
 	if !strings.Contains(report, text) {
 		return fmt.Errorf("mw status does not say %q:\n%s", text, report)

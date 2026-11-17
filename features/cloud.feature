@@ -408,3 +408,44 @@ Feature: The cloud grows and shrinks by demand
     When "cloud1" dispatches and its sync reaches the beads server
     And a minute passes and the cloud check runs
     Then a cloud event says "up cloud1: its first dispatch reached the beads server"
+
+  # A hold a box's name kept from an older box is not the new box's (mw-gq6.1394).
+  Scenario: A box made under a name whose harness stop outlived its old box has the stop cleared
+    Given every host is full
+    And 1 story waits for any host
+    And the note "host.cloud1.harness_hold" holds "2026-11-20T00:00:00Z usage-limit You've hit your weekly limit"
+    When the cloud check runs
+    Then a cloud event says "cloud1: cleared the harness hold an older box of that name left"
+    And the cloud check said "claims nothing new until 2026-11-20T00:00:00Z"
+    And the note "host.cloud1.harness_hold" holds nothing
+
+  Scenario: A box made under a name the Governor held is kept held, and mw status says so loudly
+    Given every host is full
+    And 1 story waits for any host
+    And the note "host.cloud1.harness_hold" holds "2027-01-01T00:00:00Z governor laptop-only: no new claims on cloud boxes"
+    When the cloud check runs
+    Then a cloud event says "cloud1: the Governor's hold stands on this name and is kept"
+    And the cloud check said "bd kv clear host.cloud1.harness_hold"
+    And the note "host.cloud1.harness_hold" still holds "2027-01-01T00:00:00Z governor laptop-only: no new claims on cloud boxes"
+    And mw status says "HELD BY THE GOVERNOR: cloud1"
+    And mw status says "claims nothing new until 2027-01-01T00:00Z"
+    And mw status says "the box is billed idle meanwhile"
+    And mw status says "bd kv clear host.cloud1.harness_hold"
+    And mw status says "laptop-only: no new claims on cloud boxes"
+
+  Scenario: A make that comes up under a hold says it, for the box is billed idle
+    Given every host is full
+    And 1 story waits for any host
+    And the cloud check runs and the box is still being made
+    And the note "host.cloud1.harness_hold" holds "2027-01-01T00:00:00Z governor laptop-only: no new claims on cloud boxes"
+    When the box being made comes up
+    Then a cloud event says "made cloud1"
+    And 1 cloud event says "cloud1: the Governor's hold stands on this name and is kept"
+
+  Scenario: mw cloud undrain clears the holds mw cloud drain set, on a box still up and on one destroyed since
+    Given the home "laptop" is drained with "cloud2" and "cloud3" up and max_boxes 4
+    When mw cloud drain is run
+    Then "cloud2" and "cloud3" claim nothing new, held by the drain
+    When "cloud3" is destroyed and mw cloud undrain is run
+    Then max_boxes is put back at 4
+    And "cloud2" and "cloud3" claim what they are given
