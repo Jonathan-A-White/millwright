@@ -1839,64 +1839,121 @@ func aTodaysFilesRig() (*editableFiles, application.Memory, *bytes.Buffer) {
 	return files, m, &out
 }
 
-func TestMakeRoomOnARigOfFactsPlacedTodayTakesTheFilesFactsPlacedLongestAgo(t *testing.T) {
+func TestMakeRoomOnARigOfFactsPlacedTodayTakesNoneOfThemAndChangesNothing(t *testing.T) {
 	files, m, out := aTodaysFilesRig()
-	want := roomLine("application/zulu.go", "The zulu probe answers only on its own port.") +
-		roomLine("application/yank.go", "The yank probe answers only on its own port.")
-	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
-		t.Fatalf("%v\n%s", err, out)
+	want := roomLine("application/zulu.go", "The zulu probe answers only on its own port.")
+	err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want})
+	if err == nil {
+		t.Fatalf("want a refusal: every fact was placed within %d days\n%s", application.MakeRoomKeepDays, out)
 	}
-	if !demoted(files, "zulu") || !demoted(files, "yank") {
-		t.Errorf("want zulu and yank, the files' facts placed longest ago, demoted:\n%s", out)
+	if !strings.Contains(err.Error(), "nothing was changed") || !strings.Contains(err.Error(), "placed within") {
+		t.Errorf("want the refusal to say fresh facts are kept and nothing changed: %v", err)
 	}
-	for _, kept := range []string{"xray", "wolf", "gov", "plain"} {
-		if demoted(files, kept) {
-			t.Errorf("%s was demoted: the fact just added, the Governor's and a fact of no file must stay\n%s", kept, out)
-		}
+	if len(files.wrote) != 0 {
+		t.Errorf("wrote %v\n%s", files.wrote, out)
 	}
-	for _, slug := range []string{"zulu", "yank"} {
-		if !strings.Contains(out.String(), slug+" (tier: file fact)") {
-			t.Errorf("want %s said with its tier's name:\n%s", slug, out)
+	for _, slug := range []string{"zulu", "yank", "xray", "wolf", "gov", "plain"} {
+		if demoted(files, slug) {
+			t.Errorf("%s was demoted though placed within %d days\n%s", slug, application.MakeRoomKeepDays, out)
 		}
 	}
 }
 
-func TestAddWithMakeRoomOnARigOfFactsPlacedTodayEndsUnderBudgetWithTheNewFact(t *testing.T) {
+// three adds with --make-room in a row on a rig at budget, as a Builder's closing
+// comment places its lines: none may demote a fact placed minutes before.
+func TestThreeAddsWithMakeRoomInARowDemoteNoneOfTheThree(t *testing.T) {
 	files, m, out := aTodaysFilesRig()
-	delete(files.files, "wolf.md")
+	files.files["alfa.md"] = roomFact("alfa", "gotcha", "2026-10-10", "The alfa probe answers only on its own port.")
+	files.files["bravo.md"] = roomFact("bravo", "gotcha", "2026-10-11", "The bravo probe answers only on its own port.")
+	files.files["charly.md"] = roomFact("charly", "gotcha", "2026-10-12", "The charly probe answers only on its own port.")
+	files.files["delta.md"] = roomFact("delta", "gotcha", "2026-10-13", "The delta probe answers only on its own port.")
+	files.files["echo.md"] = roomFact("echo", "gotcha", "2026-10-14", "The echo probe answers only on its own port.")
 	m.Budget = renderSize(files)
+	for _, slug := range []string{"one", "two", "three"} {
+		err := m.Add(context.Background(), application.MemoryAdd{
+			Rig: "kiln", Slug: slug, Subject: "application/" + slug + ".go", Source: "mw-9", Kind: application.FactGotcha, MakeRoom: true,
+			Sentence: "The " + slug + " probe answers only on its own port.",
+		})
+		if err != nil {
+			t.Fatalf("add %s: %v\n%s", slug, err, out)
+		}
+		m.Now = func() time.Time { return time.Date(2026, 10, 18, 12, 5, 0, 0, time.UTC) }
+	}
+	for _, slug := range []string{"one", "two", "three"} {
+		if files.files[slug+".md"] == "" || demoted(files, slug) {
+			t.Errorf("%s, just placed, is missing or demoted:\n%s", slug, out)
+		}
+	}
+	for _, slug := range []string{"zulu", "yank", "xray", "wolf"} {
+		if demoted(files, slug) {
+			t.Errorf("%s, placed today, was demoted\n%s", slug, out)
+		}
+	}
+	if size := renderSize(files); size > m.Budget {
+		t.Errorf("the render is %d/%d", size, m.Budget)
+	}
+}
+
+func TestAddWithMakeRoomWhenOnlyFreshFactsRemainAddsNothingAndSaysWhy(t *testing.T) {
+	files, m, out := aTodaysFilesRig()
 	err := m.Add(context.Background(), application.MemoryAdd{
-		Rig: "kiln", Slug: "wolf", Subject: "application/wolf.go", Source: "mw-1", Kind: application.FactGotcha, MakeRoom: true,
-		Sentence: "The wolf probe answers only on its own port.",
+		Rig: "kiln", Slug: "vict", Subject: "application/vict.go", Source: "mw-9", Kind: application.FactGotcha, MakeRoom: true,
+		Sentence: "The vict probe answers only on its own port.",
+	})
+	if err == nil {
+		t.Fatalf("want add to refuse\n%s", out)
+	}
+	if files.files["vict.md"] != "" {
+		t.Errorf("the fact was written though no room was made")
+	}
+	if !strings.Contains(out.String(), "not added:") || !strings.Contains(out.String(), "placed within") {
+		t.Errorf("want 'not added' with the reason:\n%s", out)
+	}
+	for _, slug := range []string{"zulu", "yank", "xray", "wolf"} {
+		if demoted(files, slug) {
+			t.Errorf("%s was demoted\n%s", slug, out)
+		}
+	}
+}
+
+func TestMakeRoomTakesAFileFactPlacedOverKeepDaysAgoWhateverItsSince(t *testing.T) {
+	files, m, out := aTodaysFilesRig()
+	// a fact with no usable since, placed 5 days ago, has no age but its placed time.
+	files.files["old.md"] = "---\nsubject: application/old.go\nkind: gotcha\nstatus: current\nsource: mw-1\nsince: 2026-10-18\nplaced: 2026-10-13T09:00:00Z\n---\n\nThe old probe answers only on its own port.\n"
+	m.Budget = renderSize(files)
+	want := roomLine("application/old.go", "The old probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "old") || demoted(files, "zulu") {
+		t.Errorf("want the fact placed 5 days ago taken, today's kept:\n%s", out)
+	}
+	if !strings.Contains(out.String(), "old (tier: file fact)") {
+		t.Errorf("want the tier said:\n%s", out)
+	}
+}
+
+func TestMakeRoomDryRunOnFactsPlacedTodayPlansNothingAndChangesNothing(t *testing.T) {
+	files, m, out := aTodaysFilesRig()
+	want := roomLine("application/zulu.go", "The zulu probe answers only on its own port.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want, DryRun: true}); err == nil {
+		t.Fatalf("want a refusal\n%s", out)
+	}
+	if strings.Contains(out.String(), "would demote") || len(files.wrote) != 0 || demoted(files, "zulu") {
+		t.Errorf("a dry run planned a fresh fact or wrote %v\n%s", files.wrote, out)
+	}
+}
+
+func TestASupersedeOfABootFactLeavesTheNewFactInBoot(t *testing.T) {
+	files, m, out := aTodaysFilesRig()
+	err := m.Supersede(context.Background(), application.MemorySupersede{
+		Rig: "kiln", Old: "zulu", Slug: "zulu-new", Source: "mw-9", Sentence: "The zulu probe answers on port nine.",
 	})
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if files.files["wolf.md"] == "" || demoted(files, "wolf") {
-		t.Errorf("the fact just added is missing or demoted:\n%s", out)
-	}
-	if !demoted(files, "zulu") || demoted(files, "gov") || demoted(files, "plain") {
-		t.Errorf("want zulu, the first placed of a file's facts, demoted, the Governor's and a fact of no file kept:\n%s", out)
-	}
-	if size := renderSize(files); size > m.Budget {
-		t.Errorf("the render is %d/%d after the add", size, m.Budget)
-	}
-	if !strings.Contains(out.String(), "zulu (tier: file fact)") {
-		t.Errorf("want the demoted fact said with its tier's name:\n%s", out)
-	}
-}
-
-func TestMakeRoomDryRunNamesTheFileFactTierAndChangesNothing(t *testing.T) {
-	files, m, out := aTodaysFilesRig()
-	want := roomLine("application/zulu.go", "The zulu probe answers only on its own port.")
-	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want, DryRun: true}); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if !strings.Contains(out.String(), "would demote zulu") || !strings.Contains(out.String(), "(tier: file fact)") {
-		t.Errorf("want the plan to name zulu and the tier:\n%s", out)
-	}
-	if len(files.wrote) != 0 || demoted(files, "zulu") {
-		t.Errorf("a dry run wrote %v\n%s", files.wrote, out)
+	if demoted(files, "zulu-new") || files.files["zulu-new.md"] == "" {
+		t.Errorf("the new fact is missing or out of boot:\n%s", files.files["zulu-new.md"])
 	}
 }
 
