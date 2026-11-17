@@ -325,8 +325,11 @@ func (s Suite) calmed(ctx context.Context, before string) (reading LoadReading, 
 	}
 
 	reading, read = look()
+	if read && reading.overOnlyByPartWorkers() {
+		s.say("  wait    %s\n", reading.notWaitedOut(s.Host, before))
+	}
 	if read && reading.Busy() {
-		s.say("  wait    %s is at load %.1f of %d cores: waiting up to %s for it to calm before %s\n", s.Host, reading.Load, reading.Cores, bound, before)
+		s.say("  wait    %s is at %s: waiting up to %s for it to calm before %s\n", s.Host, reading.loadSaid(), bound, before)
 	}
 	for read && reading.Busy() {
 		if waited >= bound {
@@ -656,12 +659,12 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		busy := lastLoad
 		if after, err := s.Load.Load(ctx); err == nil {
 			lastLoad = after
-			if after.Busy() {
+			if after.OverCores() {
 				busy = after
 			}
 		}
 		if !busy.FarOver() {
-			if busy.Busy() {
+			if busy.OverCores() {
 				result.Notes = append(result.Notes, fmt.Sprintf("`%s` failed at load %.1f of %d cores, under %.0f times them, so the failure counts and it was not run again", command, busy.Load, busy.Cores, GateFarOver))
 			}
 			return run, nil

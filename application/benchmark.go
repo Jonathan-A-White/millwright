@@ -659,7 +659,7 @@ func failureLines(output string) []string {
 // before the code is blamed. Only what a failed test printed is read (mw-gq6.923:
 // a path named timeout in an ETXTBSY failure said "timeout under load").
 func TimeoutUnderLoad(output string, at LoadReading) bool {
-	if !at.Busy() {
+	if !at.OverCores() {
 		return false
 	}
 	return timeoutMarker.MatchString(strings.ToLower(strings.Join(failureLines(output), "\n")))

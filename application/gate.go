@@ -175,6 +175,9 @@ func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what 
 // again after it (gatecalm.go, mw-gq6.1420).
 func (n Next) calmedThen(ctx context.Context, report *NextReport, c *closeOut, what, then string, handBack, again bool) (reading LoadReading, gaveUp bool, err error) {
 	reading, ok := n.readLoad(ctx)
+	if ok && reading.overOnlyByPartWorkers() {
+		n.print("  wait    " + reading.notWaitedOut(n.Host, what) + "\n")
+	}
 	if !ok || !reading.Busy() {
 		return reading, false, nil
 	}
@@ -191,8 +194,8 @@ func (n Next) calmWait(ctx context.Context, report *NextReport, c *closeOut, wha
 		// What is left of the call's one deadline already counts what was spent.
 		bound, spent = max(n.LoadBoundLeft(), 0), 0
 	}
-	n.print(fmt.Sprintf("  wait    %s is at load %.1f of %d cores: waiting up to %s for it to calm before %s\n",
-		n.Host, reading.Load, reading.Cores, max(bound-spent, 0), what))
+	n.print(fmt.Sprintf("  wait    %s is at %s: waiting up to %s for it to calm before %s\n",
+		n.Host, reading.loadSaid(), max(bound-spent, 0), what))
 	// The close-out says it is waiting, and says it is running again once it stops.
 	n.markCloseOut(ctx, c.id, c.began, true)
 	defer n.markCloseOut(ctx, c.id, c.began, false)
@@ -523,13 +526,13 @@ func (n Next) mergedResultGate(ctx context.Context, c *closeOut, report *NextRep
 	}
 	busy := before
 	if !m.gaveUp {
-		if after, ok := n.readLoad(ctx); ok && after.Busy() {
+		if after, ok := n.readLoad(ctx); ok && after.OverCores() {
 			busy = after
 		}
 	}
 	if !busy.FarOver() {
 		c.gate.settle(checked, nil, busy)
-		if busy.Busy() {
+		if busy.OverCores() {
 			n.noteCountedAtOnce(report, onMerged, busy)
 		}
 		return gated{Checked: checked}, ""
@@ -666,13 +669,13 @@ func (n Next) gateOnACalmHostHolding(ctx context.Context, c *closeOut, report *N
 	busy := before
 	if !gaveUp {
 		after, ok := n.readLoad(ctx)
-		if ok && after.Busy() {
+		if ok && after.OverCores() {
 			busy = after
 		}
 	}
 	if !busy.FarOver() {
 		c.gate.settle(checked, nil, busy)
-		if busy.Busy() {
+		if busy.OverCores() {
 			n.noteCountedAtOnce(report, what, busy)
 		}
 		return gated{Checked: checked}
@@ -736,11 +739,11 @@ func (n Next) waitToRunAgain(ctx context.Context, c *closeOut, report *NextRepor
 	if !ok && n.Load == nil {
 		return busy, false, nil
 	}
-	if ok && reading.Busy() {
+	if ok && reading.OverCores() {
 		busy = reading
 	}
 	if !busy.FarOver() {
-		if busy.Busy() {
+		if busy.OverCores() {
 			n.noteCountedAtOnce(report, what, busy)
 		}
 		return busy, false, nil
