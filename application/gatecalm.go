@@ -15,14 +15,17 @@ import (
 // gives it back for the wait and takes it again behind whoever queued meanwhile;
 // when that take waited for another gate, the host that gate leaves is read again,
 // and a host busy again is waited on with what is left of the same bound, the
-// lock given back once more. The wait for the lock is no part of the bound.
+// lock given back once more. The wait for the lock is no part of the bound. A
+// batch's gate takes the lock again ahead of single stories' checks and close-outs
+// (WithQueuePrecedence, mw-gq6.1450): one of them may have it meanwhile, but none
+// that queued while the batch waited goes before it.
 
 // calmedWithoutTheLock is calmedThen's wait, begun at reading with the host busy,
 // made with the gate lock c holds given back.
 func (n Next) calmedWithoutTheLock(ctx context.Context, report *NextReport, c *closeOut, what, then string, handBack, again bool, reading LoadReading) (LoadReading, bool, error) {
 	var spent time.Duration
 	for {
-		gaveBack := n.giveTheLockBackForTheCalm(c, report, what)
+		gaveBack := n.giveTheLockBackForTheCalm(ctx, c, report, what)
 		var gaveUp bool
 		var err error
 		reading, gaveUp, spent, err = n.calmWait(ctx, report, c, what, then, handBack, again, reading, spent)
@@ -48,12 +51,16 @@ func (n Next) calmedWithoutTheLock(ctx context.Context, report *NextReport, c *c
 // giveTheLockBackForTheCalm gives back the gate lock c holds, when it holds one,
 // for a wait for the host to calm before what, and says so. It reports whether it
 // gave one back.
-func (n Next) giveTheLockBackForTheCalm(c *closeOut, report *NextReport, what string) bool {
+func (n Next) giveTheLockBackForTheCalm(ctx context.Context, c *closeOut, report *NextReport, what string) bool {
 	if c.turns == nil || c.turns.lock == nil {
 		return false
 	}
-	n.print(fmt.Sprintf("  wait    %s gives %s's gate lock back while it waits for the host to calm before %s, and takes it again behind whoever waits for it\n",
-		c.id, n.Host, what))
+	again := "behind whoever waits for it"
+	if HasQueuePrecedence(ctx) {
+		again = "ahead of single stories' checks and close-outs"
+	}
+	n.print(fmt.Sprintf("  wait    %s gives %s's gate lock back while it waits for the host to calm before %s, and takes it again %s\n",
+		c.id, n.Host, what, again))
 	n.giveTheGateLockBack(report, c.turns.lock)
 	c.turns.lock = nil
 	return true

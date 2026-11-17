@@ -19,7 +19,10 @@ import (
 // the slot alone again, and asks for it again once it has the slot, but only when
 // somebody is queued for the lock (LockWaiters) or another holder shares the slot,
 // a check not yet queued for the lock (mw-gq6.1351): with neither the lock keeps
-// its place and no gate queued meanwhile is let in ahead of it (mw-gq6.1319).
+// its place and no gate queued meanwhile is let in ahead of it (mw-gq6.1319). A
+// batch asks for the lock again ahead of single stories' checks and close-outs
+// (WithQueuePrecedence, mw-gq6.1450), but the give-back itself is made for any
+// waiter, as it cannot tell a check sharing its slot from one of another rig.
 
 // slotAndLockTries is how many times a close-out that gives its merge slot up for
 // a wait for the gate lock gives the lock back to take the slot alone again, and
