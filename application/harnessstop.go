@@ -374,6 +374,38 @@ func harnessStopOfAttempt(ctx context.Context, vault Vault, detail StoryDetail, 
 	return harnessStopOfRun(ctx, vault, detail, detail.Attempts, now)
 }
 
+// HarnessStopState is the dimension of a story's state that holds, as Unix
+// seconds, the time a harness stop it was given back for names
+// (mw-gq6.1382): written by mw next beside run:blocked, so that what reads the
+// story's labels alone (the refused-open alarm) can tell a story that waits
+// for the time it was promised from one nothing will take.
+const HarnessStopState = "harness-stop"
+
+// markHarnessStop writes the time stop names on the story, before the close-out
+// records run:blocked, so that no story is seen refused without it. One that
+// cannot be written is a note, and the stop stands.
+func (n Next) markHarnessStop(ctx context.Context, c *closeOut, report *NextReport, stop HarnessStop) {
+	until := strconv.FormatInt(stop.Until.Unix(), 10)
+	if err := n.Tracker.SetStoryState(ctx, c.id, HarnessStopState, until, string(stop.Reason)); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"the time the harness stop names could not be written on %s, so the refused-open alarm may name it before then: %v", c.id, err))
+	}
+}
+
+// harnessStopPending says the story's labels hold a harness stop whose time has
+// not come at now: it waits for mw dispatch to give it back, as it said it
+// would, and no person has anything to do.
+func harnessStopPending(labels []string, now time.Time) bool {
+	for _, label := range labels {
+		if value, found := strings.CutPrefix(strings.TrimSpace(label), HarnessStopState+":"); found {
+			if secs, err := strconv.ParseInt(value, 10, 64); err == nil && time.Unix(secs, 0).After(now) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // HarnessHoldKey is the note a host's hold on new claims is kept under: the time
 // it lasts until, the reason and the harness's words.
 func HarnessHoldKey(host string) string { return "host." + host + ".harness_hold" }

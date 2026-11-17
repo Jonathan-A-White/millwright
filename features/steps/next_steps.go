@@ -273,6 +273,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerBatchLandSteps(ctx, c)
 	registerBatchLandTagSteps(ctx, c)
 	registerVaultLeftoversSteps(ctx, c)
+	registerHarnessOverloadSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)

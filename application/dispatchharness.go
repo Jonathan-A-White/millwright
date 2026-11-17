@@ -28,6 +28,15 @@ func (d Dispatch) retryHarnessStop(ctx context.Context, detail StoryDetail, name
 	}
 
 	id := detail.Story.ID
+	// The run state first, as mw retry does it: it is what keeps a story out of
+	// every tick's reach and out of the starved alarm's, and cleared before the
+	// give-back so that no open story is ever seen carrying it (mw-gq6.1382). One
+	// that cannot be cleared leaves the claim as it was, for the next tick.
+	if err := d.Tracker.ClearRunState(ctx, id); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: the harness stopped it (%s) and the time it named has come, but its run state could not be cleared, so it is held: %v", id, stop.Reason, err))
+		return false
+	}
 	if err := d.Tracker.ReleaseClaimHeldBy(ctx, id, detail.Assignee); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: the harness stopped it (%s) and the time it named has come, but its claim could not be given back, so it is held: %v", id, stop.Reason, err))

@@ -1660,6 +1660,7 @@ func (n Next) harnessStopped(ctx context.Context, c *closeOut, report *NextRepor
 	notes, told := holdHostForLogin(ctx, n.Memory, n.Mailbox, n.Host, c.id, stop, n.now())
 	report.Notes = append(report.Notes, notes...)
 	c.loginTold = told
+	n.markHarnessStop(ctx, c, report, stop)
 	return n.stop(ctx, c, report, stop.Reason, n.harnessStopWhy(stop), "")
 }
 
