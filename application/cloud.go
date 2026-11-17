@@ -577,6 +577,8 @@ type CloudCheck struct {
 	// Notes is where a box's first dispatch is seen to reach the beads server.
 	// Nil sees none, and no box is said up.
 	Notes CloudNotes
+	// Holds is where the hold notes of a box's name are read and cleared.
+	Holds CloudHolds
 	// Gate is where each box's gate note is written, which the box's dispatch
 	// reads before it takes a story. Nil writes none: the book alone says which
 	// box may work.
@@ -1683,6 +1685,7 @@ func (p *cloudPass) make(ctx context.Context) {
 		return
 	}
 	p.move(ctx, fmt.Sprintf("making %s: %d stories wait for any host, %d sessions free", name, p.report.Waiting, p.report.Free))
+	p.standingHolds(ctx, name)
 	p.dirty = "making " + name
 	if err := p.check.Provider.Begin(ctx, name); err != nil {
 		// Nothing is making it, so nothing is billed: it is not in the book.
@@ -2291,6 +2294,8 @@ type CloudReading struct {
 	// FeeLimitUntil is when a box is tried again after it, zero when a box
 	// destroyed since has freed room.
 	FeeLimitUntil time.Time
+	// Holds are the Governor's holds standing on the boxes' names (ReadHolds).
+	Holds []CloudBoxHold
 }
 
 // ReadCloud reads the book for mw status: the boxes, the latest moves and the
@@ -2372,6 +2377,7 @@ func (r CloudReading) write(b *strings.Builder) {
 		}
 		faults()
 	}
+	r.writeHolds(b)
 	if !r.FeeLimitAt.IsZero() {
 		clip(b, "  Vultr fee limit reached since "+r.FeeLimitAt.UTC().Format("01-02 15:04Z"))
 		clip(b, "    raise it at my.vultr.com, or wait for the month")

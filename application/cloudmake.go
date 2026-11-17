@@ -26,6 +26,7 @@ import (
 type CloudMake struct {
 	Provider CloudProvider
 	Book     CloudBook
+	Holds    CloudHolds
 	Log      EventLog
 	Notice   CloudNotice
 	Host     string
@@ -118,7 +119,7 @@ func (m CloudMake) locked(ctx context.Context, change func(p *cloudPass)) error 
 	if err != nil {
 		return fmt.Errorf("reading the cloud's book: %w", err)
 	}
-	p := &cloudPass{check: CloudCheck{Provider: m.Provider, Book: m.Book, Log: m.Log, Notice: m.Notice, Host: m.Host, Plan: m.Plan, Now: m.Now, Out: m.Out}, now: m.now(), state: state}
+	p := &cloudPass{check: CloudCheck{Provider: m.Provider, Book: m.Book, Log: m.Log, Notice: m.Notice, Holds: m.Holds, Host: m.Host, Plan: m.Plan, Now: m.Now, Out: m.Out}, now: m.now(), state: state}
 	p.roll()
 	p.billed = p.askBilled(ctx)
 	change(p)
@@ -212,6 +213,7 @@ func (m CloudMake) settle(ctx context.Context, name string, try int, started tim
 			// Vultr's word is that the box runs, not that it works: a check says
 			// it up once its first dispatch reaches the beads server.
 			p.move(ctx, fmt.Sprintf("made %s in %s%s; %s", name, Clock(p.now.Sub(started)), note, cloudUpWhen))
+			p.standingHolds(ctx, name)
 			p.dirty = "made " + name
 			done = true
 			return

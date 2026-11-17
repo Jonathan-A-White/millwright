@@ -1192,6 +1192,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	if s.Cloud != nil {
 		if reading, err := ReadCloud(ctx, s.Cloud, s.CloudPlan, s.now()); err == nil {
+			reading.ReadHolds(ctx, s.Notes, s.now())
 			report.Cloud = reading
 			report.BoxHarness = s.boxHarness(ctx, reading)
 		} else {

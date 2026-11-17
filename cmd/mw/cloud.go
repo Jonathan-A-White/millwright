@@ -254,6 +254,7 @@ func newCloudMakeCmd() *cobra.Command {
 			return application.CloudMake{
 				Provider: check.Provider,
 				Book:     check.Book,
+				Holds:    check.Holds,
 				Log:      check.Log,
 				Notice:   check.Notice,
 				Host:     check.Host,
@@ -336,6 +337,9 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 		Work:    gateway,
 		Stories: gateway,
 		Notes:   gateway,
+		// A hold a box's name kept from an older box is cleared as a box is made
+		// under it (mw-gq6.1394).
+		Holds: gateway,
 		// Each box's gate note, which its dispatch reads before it takes a story
 		// (mw-gq6.1172).
 		Gate:     gateway,
