@@ -2247,14 +2247,9 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		// a close-out holds the story on main's fix instead of refusing it, and
 		// a check says so (mw-gq6.645).
 		if red := n.mainAlone(ctx, c, report, checked, base); red != nil {
-			why = fmt.Sprintf("main is red: %s fail on %s alone too (`%s`), so the failure is not this branch's", red.tests(), c.target, checked.Command)
-			held := "main's fix"
-			if red.Gap != nil {
-				why = fmt.Sprintf("host gap: %s: %s; %s fail on %s alone on %s too (`%s`) and pass on %s, so the failure is not this branch's", red.Gap.Host, red.Gap.Line, red.tests(), c.target, red.Gap.Host, checked.Command, red.Gap.Home)
-				held = red.Gap.Host + "'s fix"
-			}
+			why = red.RefusedWhy(c.target, checked.Command)
 			if all {
-				why += "; mw next holds the story on " + held + " and runs its close-out again once that is closed"
+				why += "; mw next holds the story on " + red.HeldOn() + " and runs its close-out again once that is closed"
 			} else {
 				c.mainRed = red
 			}

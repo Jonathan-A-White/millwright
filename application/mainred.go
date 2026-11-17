@@ -256,6 +256,23 @@ func (m MainRed) Reason() Reason {
 	return ReasonMainRed
 }
 
+// RefusedWhy is the why of a refusal for tests the target (or a host's run of it)
+// fails too: main is red, or the host has a gap.
+func (m MainRed) RefusedWhy(target, command string) string {
+	if g := m.Gap; g != nil {
+		return fmt.Sprintf("host gap: %s: %s; %s fail on %s alone on %s too (`%s`) and pass on %s, so the failure is not this branch's", g.Host, g.Line, m.tests(), target, g.Host, command, g.Home)
+	}
+	return fmt.Sprintf("main is red: %s fail on %s alone too (`%s`), so the failure is not this branch's", m.tests(), target, command)
+}
+
+// HeldOn is whose fix a story held on this finding waits for.
+func (m MainRed) HeldOn() string {
+	if m.Gap != nil {
+		return m.Gap.Host + "'s fix"
+	}
+	return "main's fix"
+}
+
 // isHeldOnMainsFailure says a refusal's reason is the one a hold on main's red
 // or on a host's gap answers.
 func isHeldOnMainsFailure(r Reason) bool { return r == ReasonMainRed || r == ReasonHostGap }
