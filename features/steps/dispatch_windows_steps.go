@@ -39,6 +39,9 @@ func InitializeDispatchWindowsScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^builder_nice in force is (\d+)$`, c.builderNiceInForceIs)
 	ctx.Then(`^the room needs at least (\d+) MB free$`, c.theRoomNeedsMB)
 	ctx.Then(`^the room allows a load of ([0-9.]+) a core$`, c.theRoomAllowsLoad)
+	ctx.Then(`^the Windows-drive guard is off$`, c.theDriveGuardIsOff)
+	ctx.Then(`^the Windows-drive guard is on$`, c.theDriveGuardIsOn)
+	ctx.Then(`^the Windows drive needs at least (\d+) GB free$`, c.theDriveNeedsGB)
 	ctx.Then(`^the cap is explained as "([^"]*)"$`, c.theCapIsExplainedAs)
 	ctx.Then(`^the windows are refused, naming the key (\w+)$`, c.theWindowsAreRefused)
 	ctx.Then(`^the windows are not refused$`, c.theWindowsAreNotRefused)
@@ -173,6 +176,41 @@ func (c *dispatchWindowsContext) theWindowsAreRefused(key string) error {
 func (c *dispatchWindowsContext) theWindowsAreNotRefused() error {
 	if problems := config.DispatchWindowProblems(); len(problems) != 0 {
 		return fmt.Errorf("the windows were refused: %v", problems)
+	}
+	return nil
+}
+
+// theDriveGuardIsOff reads the room as cmd/mw/dispatch.go builds its limits: the
+// guard is off when min_drive_free_gb is 0.
+func (c *dispatchWindowsContext) theDriveGuardIsOff() error {
+	room, err := config.RoomAt(c.now)
+	if err != nil {
+		return err
+	}
+	if room.MinDriveFreeGB != 0 {
+		return fmt.Errorf("the Windows-drive guard at %s needs %d GB free, want it off (0)", c.now.Format(time.RFC3339), room.MinDriveFreeGB)
+	}
+	return nil
+}
+
+func (c *dispatchWindowsContext) theDriveGuardIsOn() error {
+	room, err := config.RoomAt(c.now)
+	if err != nil {
+		return err
+	}
+	if room.MinDriveFreeGB == 0 {
+		return fmt.Errorf("the Windows-drive guard at %s is off, want it on", c.now.Format(time.RFC3339))
+	}
+	return nil
+}
+
+func (c *dispatchWindowsContext) theDriveNeedsGB(want int64) error {
+	room, err := config.RoomAt(c.now)
+	if err != nil {
+		return err
+	}
+	if room.MinDriveFreeGB != want {
+		return fmt.Errorf("the Windows drive needs %d GB free at %s, want %d", room.MinDriveFreeGB, c.now.Format(time.RFC3339), want)
 	}
 	return nil
 }
