@@ -108,6 +108,10 @@ func newLandCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			gateTurnsLimit, err := config.GateTurnsLimit()
+			if err != nil {
+				return err
+			}
 			// The landing takes story worktrees away; it works from the vault,
 			// which it never does, as mw next does.
 			if err := os.Chdir(dir); err != nil {
@@ -151,23 +155,25 @@ func newLandCmd() *cobra.Command {
 				GateParts:      checks,
 				GateRecords:    files,
 
-				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
-				Bench:     benchmarkLimits(bench), // the par of a landed story, from the past benchmarks withVaultPorts reads (mw-gq6.966)
-				Slot:      rig.NewSlots(),
-				GateLock:  hostGateLock(),
-				Mailbox:   gateway,
-				Memory:    gateway,
-				Runner:    tmux.New(),
-				Boot:      builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
-				GiveWay:   hostGiveWayGate(host), // no fixer and no part of the gate starts once the host gives way (mw-2891blf.19)
-				Events:    homeEventLog(),
-				Seat:      BuilderSeat,
-				Host:      host,
-				Rigs:      rigs,
-				PushTries: pushTries,
-				PushWait:  time.Duration(pushWaitSeconds) * time.Second,
-				Out:       cmd.OutOrStdout(),
-				Err:       cmd.ErrOrStderr(),
+				Load:     hostload.Proc{SwapSample: benchmarkSwapSample},
+				Bench:    benchmarkLimits(bench), // the par of a landed story, from the past benchmarks withVaultPorts reads (mw-gq6.966)
+				Slot:     rig.NewSlots(),
+				GateLock: hostGateLock(),
+				Mailbox:  gateway,
+				// A batch's turns end once they waited this long for other gates (mw-gq6.1420).
+				GateTurnsLimit: gateTurnsLimit,
+				Memory:         gateway,
+				Runner:         tmux.New(),
+				Boot:           builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
+				GiveWay:        hostGiveWayGate(host), // no fixer and no part of the gate starts once the host gives way (mw-2891blf.19)
+				Events:         homeEventLog(),
+				Seat:           BuilderSeat,
+				Host:           host,
+				Rigs:           rigs,
+				PushTries:      pushTries,
+				PushWait:       time.Duration(pushWaitSeconds) * time.Second,
+				Out:            cmd.OutOrStdout(),
+				Err:            cmd.ErrOrStderr(),
 
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs), rig.WithAfterTestRuns(testRuns)),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
