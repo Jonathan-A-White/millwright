@@ -808,10 +808,6 @@ type WorkTracker interface {
 	// writes nothing.
 	LiveEpics(ctx context.Context) ([]string, error)
 
-	// ReadyStories lists the stories of an epic that can be started on a host
-	// right now: open, unclaimed, unblocked, and whose Path names that host.
-	ReadyStories(ctx context.Context, epicID, host string) ([]StoryDetail, error)
-
 	// ReadyForHost lists every story in the tracker that can be started on a
 	// host right now, whatever epic it belongs to — what a dispatcher may take.
 	// Each story comes back with its own epic's defaults overlaid, and a story

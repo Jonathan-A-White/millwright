@@ -1773,7 +1773,8 @@ func (f *FakeTracker) note(call string) {
 	f.asked = append(f.asked, call)
 }
 
-// ReadyStories implements application.WorkTracker.
+// ReadyStories lists an epic's stories that are ready on a host. It is the fake's
+// alone: the gateway's bd ready --parent timed out and had no caller (mw-gq6.1343).
 func (f *FakeTracker) ReadyStories(_ context.Context, epicID, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

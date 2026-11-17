@@ -885,38 +885,6 @@ func (g *Gateway) LiveEpics(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// ReadyStories implements application.WorkTracker. The epic's defaults are read
-// once and overlaid on every story under it, including stories nested deeper
-// than one level: the epic asked for is what sets the defaults.
-func (g *Gateway) ReadyStories(ctx context.Context, epicID, host string) ([]application.StoryDetail, error) {
-	epic, err := g.showOne(ctx, epicID)
-	if err != nil {
-		return nil, fmt.Errorf("reading the epic %s: %w", epicID, err)
-	}
-	defaults := domain.PathFromMetadata(epic.pathMetadata())
-
-	out, err := g.call(ctx, "ready", "--parent", epicID, "--unassigned", "--exclude-type", "epic", "--json")
-	if err != nil {
-		return nil, err
-	}
-	stories, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading the ready stories of %s: %w", epicID, err)
-	}
-
-	// The host a story is worked on may be its own or the epic's, so the
-	// filtering is on the overlaid Path rather than on the story's metadata.
-	var ready []application.StoryDetail
-	for _, story := range stories {
-		detail := story.detail(defaults)
-		if detail.Merged().Host != host {
-			continue
-		}
-		ready = append(ready, detail)
-	}
-	return ready, nil
-}
-
 // ClaimStory implements application.WorkTracker. `bd update --claim` is
 // already the conditional claim: it takes a story nobody holds, is harmless on
 // one this actor holds, and refuses one another actor holds, writing nothing —

@@ -16,18 +16,6 @@ import (
 // answers in about a second (mw-gq6.994). A boot sheet reads the frontier of a
 // big parent from a brief, not from `bd ready --parent`.
 
-// noReadyQuery is a tracker that fails the test if it is asked the question
-// that is slow on a big parent.
-type noReadyQuery struct {
-	*apptest.FakeTracker
-	t *testing.T
-}
-
-func (n noReadyQuery) ReadyStories(ctx context.Context, epicID, host string) ([]application.StoryDetail, error) {
-	n.t.Errorf("the brief asked the tracker for the ready stories of %s: that is bd ready --parent, which times out on a big parent", epicID)
-	return n.FakeTracker.ReadyStories(ctx, epicID, host)
-}
-
 func TestABriefGivesTheFrontierOfAParentWithoutAskingForItsReadyStories(t *testing.T) {
 	fake := apptest.NewFakeTracker()
 	fake.AddEpic("mw-big", domain.Path{})
@@ -39,7 +27,7 @@ func TestABriefGivesTheFrontierOfAParentWithoutAskingForItsReadyStories(t *testi
 		t.Fatal(err)
 	}
 
-	report, err := application.Brief{Tracker: noReadyQuery{FakeTracker: fake, t: t}}.Run(context.Background(), "mw-big")
+	report, err := application.Brief{Tracker: fake}.Run(context.Background(), "mw-big")
 	if err != nil {
 		t.Fatalf("briefing: %v", err)
 	}
