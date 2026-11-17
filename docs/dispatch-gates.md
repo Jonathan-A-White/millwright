@@ -457,6 +457,18 @@ load and `mw check <story> --part N`, counted once for the attempt when repeated
 its call is not started either. Before this a part started at any load, and on the
 desktop's three or four suites at once (load 25 to 30 of 16 cores) outran the call.
 
+Every wait for a calm host (a close-out's gate, a batch's, `mw suite`, a whole check, a
+part) takes the factory's own part workers off the load it tests (`LoadReading.Busy`,
+mw-gq6.1422): the `mw check <story> --part N --part-worker --no-slot` processes running
+their part's command, counted from `/proc` by `hostload.Proc`, at `PartWorkerLoad` (4.0,
+measured on the Laptop at `builder_jobs` 4) each. They run outside the gate lock and the
+merge slot by design and keep coming, so on the Laptop two of them held the load at 18 to
+26 of 20 and every wait ran to its bound. The wait's line says the share taken off ("load
+26.0 of 20 cores, 8.0 of it its 2 running part workers' (4.0 each) and taken off, so
+18.0"). A host at twice its cores or more on the load as read, part workers counted
+(`FarOver`), is still waited on and refused, and whether a failed run is run again is
+still judged on the load as read (`LoadReading.OverCores`).
+
 A part that fails while the host is at twice its cores or more (read before it began or
 after it ended, `GateFarOver`) is run once more after the same wait for a calm host, as a
 whole check's tests are (`Check.runPartAgain`, mw-gq6.1060, after mw-gq6.228): only the

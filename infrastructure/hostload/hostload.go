@@ -36,6 +36,9 @@ type Proc struct {
 	// directory. Now is the clock that report's age is read on; nil is time.Now.
 	DriveFile string
 	Now       func() time.Time
+	// ProcDir is where the kernel lists the host's processes, read for the part
+	// workers running their part (LoadReading.PartWorkers); empty is /proc.
+	ProcDir string
 }
 
 var _ application.HostLoad = Proc{}
@@ -66,6 +69,7 @@ func (p Proc) Load(_ context.Context) (application.LoadReading, error) {
 	reading.MemAvailableMB, reading.MemKnown = p.memAvailableMB()
 	reading.DriveName, reading.DriveFreeBytes, reading.DriveKnown = p.driveFree()
 	reading.SwapInKBPerS, reading.SwapOutKBPerS, reading.SwapKnown = p.swapRate()
+	reading.PartWorkers = p.partWorkers()
 	return reading, nil
 }
 

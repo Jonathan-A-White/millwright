@@ -38,11 +38,68 @@ type LoadReading struct {
 	DriveName      string
 	DriveFreeBytes int64
 	DriveKnown     bool
+	// PartWorkers is how many of the factory's own part workers were running
+	// their part when the load was read: the processes mw check --part N starts
+	// as mw check <story> --part N --part-worker --no-slot, outside the gate lock
+	// and the merge slot by design (mw-gq6.1422).
+	PartWorkers int
 }
 
-// Busy reports whether the load has reached the core count: every core has
-// something waiting its turn.
-func (r LoadReading) Busy() bool { return r.Cores > 0 && r.Load >= float64(r.Cores) }
+// Busy reports whether a wait for a calm host goes on waiting at this reading:
+// the load less the share of the factory's own running part workers
+// (PartWorkersShare) has reached the core count, or the load as read is far over
+// it (FarOver, which counts the part workers). The part workers run outside the
+// gate lock by design (PartNeedsSlot) and keep coming, so a wait that counted
+// them ran to its bound every time on the Laptop (mw-gq6.1422).
+func (r LoadReading) Busy() bool {
+	return r.Cores > 0 && (r.Load-r.PartWorkersShare() >= float64(r.Cores) || r.FarOver())
+}
+
+// OverCores reports whether the load, as read, has reached the core count: every
+// core has something waiting its turn. It is how busy a host was when a run
+// failed on it, the part workers counted.
+func (r LoadReading) OverCores() bool { return r.Cores > 0 && r.Load >= float64(r.Cores) }
+
+// PartWorkerLoad is the load one running part worker keeps up. Measured on the
+// Laptop (20 cores, builder_jobs 4, so VITEST_MAX_WORKERS 4) on 2026-11-17: over
+// 1496 vitest shards run there as part workers, vitest's own phase times over the
+// shard's wall time give a median of 3.98 workers busy (p25 3.88, p90 4.02).
+const PartWorkerLoad = 4.0
+
+// PartWorkersShare is the load taken off for the running part workers: their
+// count times PartWorkerLoad, never more than the load itself.
+func (r LoadReading) PartWorkersShare() float64 {
+	if r.PartWorkers <= 0 {
+		return 0
+	}
+	return min(float64(r.PartWorkers)*PartWorkerLoad, r.Load)
+}
+
+// loadSaid is the load of a reading as a wait's line says it: 'load 26.0 of 20
+// cores', and, when part workers were running, how much of it was theirs and
+// taken off, so that a gate that starts on a busy host is read from one line.
+func (r LoadReading) loadSaid() string {
+	said := fmt.Sprintf("load %.1f of %d cores", r.Load, r.Cores)
+	if r.PartWorkers <= 0 {
+		return said
+	}
+	workers := fmt.Sprintf("%d running part workers'", r.PartWorkers)
+	if r.PartWorkers == 1 {
+		workers = "1 running part worker's"
+	}
+	return fmt.Sprintf("%s, %.1f of it its %s (%.1f each) and taken off, so %.1f",
+		said, r.PartWorkersShare(), workers, PartWorkerLoad, r.Load-r.PartWorkersShare())
+}
+
+// notWaitedOut is the line a wait for a calm host says when the host is over its
+// cores only by its part workers' share, and so is not waited on before what.
+func (r LoadReading) notWaitedOut(host, what string) string {
+	return fmt.Sprintf("%s is at %s: under its cores, so there is no wait for it to calm before %s", host, r.loadSaid(), what)
+}
+
+// overOnlyByPartWorkers says the host is over its cores as read, but not once
+// the part workers' share is taken off.
+func (r LoadReading) overOnlyByPartWorkers() bool { return r.OverCores() && !r.Busy() }
 
 // GateFarOver is how many times the core count a load must reach to be far over
 // it (mw-gq6.903). It is where the desktop's 11 gates run twice (2026-10-16 to
