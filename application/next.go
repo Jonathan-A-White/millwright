@@ -1329,6 +1329,10 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 			return n.closeATested(ctx, c, &report)
 		}
 	}
+	if why := n.offHostCloseOut(ctx, c); why != "" {
+		report.tester = false
+		return report, fmt.Errorf("closing out %s: %s", storyID, why)
+	}
 	if err := n.recordRescope(ctx, c, &report); err != nil {
 		return report, err
 	}
