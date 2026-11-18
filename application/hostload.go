@@ -186,6 +186,17 @@ func (r LoadReading) NoRoom(limits RoomLimits) string {
 	return strings.Join(why, "; ")
 }
 
+// NoRoomBesidesPartWorkers is NoRoom with the load less the share of the
+// factory's own running part workers (PartWorkersShare), as Busy reads it: the
+// part workers run outside the gate lock by design and a wait for room that
+// counted them found none on a host they alone held over its cores (mw-gq6.1438).
+// A story's start counts them and uses NoRoom.
+func (r LoadReading) NoRoomBesidesPartWorkers(limits RoomLimits) string {
+	r.Load -= r.PartWorkersShare()
+	r.PartWorkers = 0
+	return r.NoRoom(limits)
+}
+
 // ReadRoom reads the host once and says why it has no room, or "" when it has
 // room. read is false when the host could not be asked at all — there is no
 // load to ask, or it failed — and then it is not held back: the cap still
