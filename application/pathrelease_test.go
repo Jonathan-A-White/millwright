@@ -163,3 +163,93 @@ func TestPathSetAndReleasePacedGiveTheSameReasonForTheUsage(t *testing.T) {
 		t.Errorf("expected release-paced to say %q, it said %q", reason, pacedOut)
 	}
 }
+
+// overCallers sets the path of mw-gq6.2 from mw-gq6.1 with the given keys, on a
+// rig whose checkout has callers test callers for its files, and says what it
+// printed on stdout and stderr. rules is the rig's file (aReleasingRig's, or one
+// with no release_on_path).
+func overCallers(t *testing.T, tracker *apptest.FakeTracker, rules *apptest.FakeEpicRules, callers int, pairs ...string) (string, string) {
+	t.Helper()
+	files := apptest.NewFakeRigFiles()
+	files.SetTestCallers("/rigs/millwright", callers)
+	var out, errs strings.Builder
+	_, err := application.PathSet{Tracker: tracker, Rules: rules, Out: &out, Err: &errs, After: []string{},
+		Rigs: map[string]string{"millwright": "/rigs/millwright"}, RigFiles: files}.
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", pairs)
+	if err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	return out.String(), errs.String()
+}
+
+func TestPathSetKeepsAStoryOverItsTestCallersHeldOnAReleasingRig(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	out, _ := overCallers(t, tracker, rules, 11, "size=S", "files=application/a.go")
+
+	if got := statusOf(t, tracker, "mw-gq6.2"); got != application.StatusHeld {
+		t.Errorf("expected the story held at 11 test callers for size S, got %s", got)
+	}
+	comments, _ := tracker.StoryComments(context.Background(), "mw-gq6.2")
+	if len(comments) != 1 || !application.IsHoldComment(comments[0].Text) ||
+		!strings.Contains(comments[0].Text, "test callers 11 for size S (allows 10)") {
+		t.Errorf("expected one HELD: comment naming the count and the limit, got %+v", comments)
+	}
+	if !strings.Contains(out, "NOT released") || !strings.Contains(out, "test callers 11 for size S (allows 10)") {
+		t.Errorf("expected stdout to say the story was NOT released and why, got:\n%s", out)
+	}
+}
+
+func TestPathSetReleasesAStoryOverItsCallersWhenSizedUpOrWaived(t *testing.T) {
+	for name, pairs := range map[string][]string{
+		"sized up": {"size=M", "files=application/a.go"},
+		"waived":   {"size=S", "files=application/a.go", "callers_ok=additive only"},
+	} {
+		tracker, rules := aReleasingRig(t)
+		out, _ := overCallers(t, tracker, rules, 11, pairs...)
+		if got := statusOf(t, tracker, "mw-gq6.2"); got == application.StatusHeld {
+			t.Errorf("%s: expected the story released, got %s", name, got)
+		}
+		if !strings.Contains(out, application.ReleasedOnPathSet) || strings.Contains(out, "NOT released") {
+			t.Errorf("%s: expected the story released on path set, got:\n%s", name, out)
+		}
+	}
+}
+
+func TestPathSetReleasesAStoryHeldForItsCallersOnceItIsSizedUp(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	overCallers(t, tracker, rules, 11, "size=S", "files=application/a.go")
+	out, _ := overCallers(t, tracker, rules, 11, "size=M")
+
+	if got := statusOf(t, tracker, "mw-gq6.2"); got == application.StatusHeld {
+		t.Errorf("expected the story released by the second path set, got %s with:\n%s", got, out)
+	}
+}
+
+func TestPathSetKeepsAStillOverStoryHeldWithoutAnotherComment(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	overCallers(t, tracker, rules, 11, "size=S", "files=application/a.go")
+	overCallers(t, tracker, rules, 11, "size=S")
+
+	if got := statusOf(t, tracker, "mw-gq6.2"); got != application.StatusHeld {
+		t.Errorf("expected the story still held, got %s", got)
+	}
+	if comments, _ := tracker.StoryComments(context.Background(), "mw-gq6.2"); len(comments) != 1 {
+		t.Errorf("expected the one HELD: comment, got %+v", comments)
+	}
+}
+
+func TestPathSetOnlyWarnsOfCallersOnARigThatDoesNotReleaseOnPath(t *testing.T) {
+	tracker, _ := aReleasingRig(t)
+	rules := apptest.NewFakeEpicRules()
+	out, errs := overCallers(t, tracker, rules, 11, "size=S", "files=application/a.go")
+
+	if !strings.Contains(errs, "WARN: 11 test callers for size S") {
+		t.Errorf("expected the WARN on stderr, got %q", errs)
+	}
+	if strings.Contains(out, "NOT released") {
+		t.Errorf("expected no NOT released line on a rig without release_on_path, got:\n%s", out)
+	}
+	if comments, _ := tracker.StoryComments(context.Background(), "mw-gq6.2"); len(comments) != 0 {
+		t.Errorf("expected no comment, got %+v", comments)
+	}
+}
