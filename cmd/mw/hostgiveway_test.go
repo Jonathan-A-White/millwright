@@ -79,9 +79,8 @@ func TestGiveWayInstallLineStartsWithACommentWithItsWayBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := strings.SplitN(line, "\n", 2)[0]
-	if !strings.HasPrefix(first, "# ") || !strings.Contains(first, "mw host giveway --uninstall-line") {
-		t.Errorf("the paste must begin with a comment saying what it does and its way back, got %q", first)
+	if !strings.HasPrefix(line, "<# ") || !strings.Contains(line[:strings.Index(line, "#>")], "mw host giveway --uninstall-line") {
+		t.Errorf("the paste must begin with a block comment saying what it does and its way back, got %.120q", line)
 	}
 }
 
@@ -134,7 +133,7 @@ func TestGiveWayInstallLineRegistersFourTasksWithTheTriggersForAnyUser(t *testin
 		t.Errorf("the paste must refuse to run under any account but the one that owns WSL")
 	}
 	// the folder, the mode file and the print of what was registered
-	for _, want := range []string{`$env:ProgramData\millwright\giveway`, `"$d\mode"`, "-Value freeze", "Get-ScheduledTaskInfo", "NextRunTime"} {
+	for _, want := range []string{`$env:ProgramData\millwright\giveway`, `"$mwgw_d\mode"`, "-Value freeze", "Get-ScheduledTaskInfo", "NextRunTime"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the paste lacks %q", want)
 		}
@@ -164,12 +163,12 @@ func TestGiveWayInstallLineHasALogoffTaskOnTheUserProfileServiceEvent(t *testing
 		}
 	}
 	// the logoff task has the event trigger and no other
-	m := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(logoff\)'[^\n]*`).FindString(line)
-	if m == "" || !strings.Contains(m, "-Event logoff") || !strings.Contains(m, "$lo") || strings.Contains(m, "$t") || strings.Contains(m, "-AtLogOn") {
+	m := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(logoff\)'[^;]*`).FindString(line)
+	if m == "" || !strings.Contains(m, "-Event logoff") || !strings.Contains(m, "$mwgw_lo") || strings.Contains(m, "$mwgw_t") || strings.Contains(m, "-AtLogOn") {
 		t.Errorf("the logoff task must run -Event logoff on the event trigger alone, got %q", m)
 	}
-	if !strings.Contains(line, "$lo=") {
-		t.Errorf("the event trigger must be built once, as $lo, and handed to the logoff task")
+	if !strings.Contains(line, "$mwgw_lo=") {
+		t.Errorf("the event trigger must be built once, as $mwgw_lo, and handed to the logoff task")
 	}
 }
 
@@ -180,18 +179,18 @@ func TestGiveWayRemoteDesktopTriggersAreOnTheUnlockAndLockTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unlock := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(unlock\)'[^\n]*`).FindString(line)
-	lock := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(lock\)'[^\n]*`).FindString(line)
+	unlock := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(unlock\)'[^;]*`).FindString(line)
+	lock := regexp.MustCompile(`Register-ScheduledTask -TaskName 'millwright give way \(lock\)'[^;]*`).FindString(line)
 	// each session-state trigger is built once, as $tN for StateChange=N, and handed to the tasks
 	for _, n := range []string{"3", "4"} {
-		if !strings.Contains(line, "$t"+n+"=") || !strings.Contains(line, "StateChange="+n+";") {
+		if !strings.Contains(line, "$mwgw_t"+n+"=") || !strings.Contains(line, "StateChange="+n+";") {
 			t.Errorf("the paste must build the session-state trigger %s", n)
 		}
 	}
-	if !strings.Contains(unlock, "$t3") || !strings.Contains(unlock, "$t1") || !strings.Contains(unlock, "$t8") {
+	if !strings.Contains(unlock, "$mwgw_t3") || !strings.Contains(unlock, "$mwgw_t1") || !strings.Contains(unlock, "$mwgw_t8") {
 		t.Errorf("the unlock task must carry session states 8 (unlock), 1 (console connect) and 3 (remote connect): %q", unlock)
 	}
-	if !strings.Contains(lock, "$t7") || !strings.Contains(lock, "$t2") || !strings.Contains(lock, "$t4") {
+	if !strings.Contains(lock, "$mwgw_t7") || !strings.Contains(lock, "$mwgw_t2") || !strings.Contains(lock, "$mwgw_t4") {
 		t.Errorf("the lock task must carry session states 7 (lock), 2 (console disconnect) and 4 (remote disconnect): %q", lock)
 	}
 }
@@ -297,8 +296,8 @@ func TestGiveWayUninstallLineRemovesTheFourTasksAndTheFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out, "# ") {
-		t.Errorf("must begin with a comment, got %.60q", out)
+	if !strings.HasPrefix(out, "<# ") {
+		t.Errorf("must begin with a block comment, got %.60q", out)
 	}
 	for _, want := range []string{"millwright give way (unlock)", "millwright give way (lock)", "millwright give way (logoff)", "millwright give way (tick)",
 		"Unregister-ScheduledTask", "Remove-Item", `millwright\giveway`, "giveway off --by windows-uninstall"} {
@@ -318,7 +317,7 @@ func TestGiveWayModeLine(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", mode, err)
 		}
-		if !strings.HasPrefix(out, "# ") || !strings.Contains(out, "mw host giveway --mode-line ") {
+		if !strings.HasPrefix(out, "<# ") || !strings.Contains(out, "mw host giveway --mode-line ") {
 			t.Errorf("%s: must begin with a comment that names its way back, got %.80q", mode, out)
 		}
 		if !strings.Contains(out, `Set-Content -Path "$env:ProgramData\millwright\giveway\mode" -Value `+mode) {

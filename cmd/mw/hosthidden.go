@@ -22,21 +22,19 @@ const hostHiddenTaskLike = "millwright*"
 // already headless is left alone, so a second run changes nothing. It throws
 // before reading any task on a Windows build older than giveWayMinBuild.
 func HostHiddenLine() string {
-	return "# millwright host hidden (mw host hidden): every scheduled task named '" + hostHiddenTaskLike + "' whose action is not already\n" +
-		"# conhost.exe starts under conhost.exe --headless instead (no window), keeping its old exe and arguments. Run it twice and the second\n" +
-		"# run changes nothing. To undo it: the paste prints, before it changes anything, one line that restores each task.\n" +
-		windowsElevationCheck + "\n" +
-		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { throw 'needs Windows 10 build %d or later (conhost.exe --headless): nothing changed' }\n", giveWayMinBuild, giveWayMinBuild) +
-		`$q = { param($s) "'" + ("$s" -replace "'", "''") + "'" }` + "\n" +
-		`$done = { param($a) (-not $a.Execute) -or ([IO.Path]::GetFileName("$($a.Execute)".Trim('"')) -ieq 'conhost.exe') }` + "\n" +
-		`$hide = { param($a) $x = "$($a.Execute)"; if ($x -match '\s' -and $x -notmatch '^"') { $x = '"' + $x + '"' }; $arg = ("--headless $x $($a.Arguments)").TrimEnd(); if ($a.WorkingDirectory) { New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $arg -WorkingDirectory $a.WorkingDirectory } else { New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $arg } }` + "\n" +
-		`$back = { param($a) $w = if ($a.WorkingDirectory) { " -WorkingDirectory " + (& $q $a.WorkingDirectory) } else { '' }; "(New-ScheduledTaskAction -Execute " + (& $q $a.Execute) + " -Argument " + (& $q $a.Arguments) + $w + ")" }` + "\n" +
-		`$todo = @(Get-ScheduledTask | Where-Object { $_.TaskName -like '` + hostHiddenTaskLike + `' } | Where-Object { @($_.Actions | Where-Object { -not (& $done $_) }).Count -gt 0 })` + "\n" +
-		`if ($todo.Count -eq 0) { Write-Host 'already headless: every millwright task, nothing changed'; return }` + "\n" +
-		`Write-Host "Way back (the old exe and arguments of each task; paste these lines in an elevated PowerShell to restore them):"` + "\n" +
-		`foreach ($t in $todo) { Write-Host ("# " + $t.TaskName + ": " + (($t.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join ' ; ')); Write-Host ("Set-ScheduledTask -TaskName " + (& $q $t.TaskName) + " -TaskPath " + (& $q $t.TaskPath) + " -Action @(" + (($t.Actions | ForEach-Object { & $back $_ }) -join ',') + ")") }` + "\n" +
-		`foreach ($t in $todo) { try { $new = @($t.Actions | ForEach-Object { if (& $done $_) { $_ } else { & $hide $_ } }); Set-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath -Action $new | Out-Null; Write-Host ("changed: " + $t.TaskName + ": " + (($new | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join ' ; ')) } catch { Write-Host ("NOT changed: " + $t.TaskName + ": " + $_.Exception.Message) } }` + "\n" +
-		`Get-ScheduledTask | Where-Object { $_.TaskName -like '` + hostHiddenTaskLike + `' -and @($_.Actions | Where-Object { -not (& $done $_) }).Count -eq 0 } | ForEach-Object { Write-Host ("already headless: " + $_.TaskName) }` + "\n"
+	return windowsPasteOneLine("millwright host hidden (mw host hidden): every scheduled task named '"+hostHiddenTaskLike+"' whose action is not already conhost.exe starts under conhost.exe --headless instead (no window), keeping its old exe and arguments. Run it twice and the second run changes nothing. To undo it: the paste prints, before it changes anything, one line that restores each task.",
+		windowsElevationCheck,
+		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { throw 'needs Windows 10 build %d or later (conhost.exe --headless): nothing changed' }", giveWayMinBuild, giveWayMinBuild)+
+			`$mwhd_q = { param($s) "'" + ("$s" -replace "'", "''") + "'" }`,
+		`$mwhd_done = { param($a) (-not $a.Execute) -or ([IO.Path]::GetFileName("$($a.Execute)".Trim('"')) -ieq 'conhost.exe') }`,
+		`$mwhd_hide = { param($a) $x = "$($a.Execute)"; if ($x -match '\s' -and $x -notmatch '^"') { $x = '"' + $x + '"' }; $arg = ("--headless $x $($a.Arguments)").TrimEnd(); if ($a.WorkingDirectory) { New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $arg -WorkingDirectory $a.WorkingDirectory } else { New-ScheduledTaskAction -Execute 'conhost.exe' -Argument $arg } }`,
+		`$mwhd_back = { param($a) $w = if ($a.WorkingDirectory) { " -WorkingDirectory " + (& $mwhd_q $a.WorkingDirectory) } else { '' }; "(New-ScheduledTaskAction -Execute " + (& $mwhd_q $a.Execute) + " -Argument " + (& $mwhd_q $a.Arguments) + $w + ")" }`,
+		`$mwhd_todo = @(Get-ScheduledTask | Where-Object { $_.TaskName -like '`+hostHiddenTaskLike+`' } | Where-Object { @($_.Actions | Where-Object { -not (& $mwhd_done $_) }).Count -gt 0 })`,
+		`if ($mwhd_todo.Count -eq 0) { Write-Host 'already headless: every millwright task, nothing changed'; return }`,
+		`Write-Host "Way back (one line: the old exe and arguments of each task; paste it in an elevated PowerShell to restore them):"`,
+		`Write-Host ((@($mwhd_todo | ForEach-Object { "Set-ScheduledTask -TaskName " + (& $mwhd_q $_.TaskName) + " -TaskPath " + (& $mwhd_q $_.TaskPath) + " -Action @(" + (($_.Actions | ForEach-Object { & $mwhd_back $_ }) -join ',') + ") | Out-Null" })) -join '; ')`,
+		`foreach ($mwhd_t in $mwhd_todo) { try { $mwhd_new = @($mwhd_t.Actions | ForEach-Object { if (& $mwhd_done $_) { $_ } else { & $mwhd_hide $_ } }); Set-ScheduledTask -TaskName $mwhd_t.TaskName -TaskPath $mwhd_t.TaskPath -Action $mwhd_new | Out-Null; Write-Host ("changed: " + $mwhd_t.TaskName + ": " + (($mwhd_new | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join ' ; ')) } catch { Write-Host ("NOT changed: " + $mwhd_t.TaskName + ": " + $_.Exception.Message) } }`,
+		`Get-ScheduledTask | Where-Object { $_.TaskName -like '`+hostHiddenTaskLike+`' -and @($_.Actions | Where-Object { -not (& $mwhd_done $_) }).Count -eq 0 } | ForEach-Object { Write-Host ("already headless: " + $_.TaskName) }`)
 }
 
 // newHostHiddenCmd builds `mw host hidden`.

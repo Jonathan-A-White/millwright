@@ -38,14 +38,14 @@ func TestHostHiddenPasteRewritesEveryMillwrightAction(t *testing.T) {
 	}
 	// the old exe and args are printed, with the line that restores them, before the first change
 	way := strings.Index(out, "Way back")
-	set := strings.Index(out, "Set-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath -Action $new")
+	set := strings.Index(out, "Set-ScheduledTask -TaskName $mwhd_t.TaskName -TaskPath $mwhd_t.TaskPath -Action $mwhd_new")
 	if set < 0 {
 		t.Fatalf("no change statement in:\n%s", out)
 	}
 	if way < 0 || way > set {
 		t.Errorf("the way back (%d) must be printed before the first change (%d)", way, set)
 	}
-	for _, want := range []string{"$_.Execute", "$_.Arguments", "New-ScheduledTaskAction -Execute", "Set-ScheduledTask -TaskName"} {
+	for _, want := range []string{"$a.Execute", "$a.Arguments", "New-ScheduledTaskAction -Execute", "Set-ScheduledTask -TaskName"} {
 		if !strings.Contains(out[:set], want) {
 			t.Errorf("the old %s must be printed before any change", want)
 		}
