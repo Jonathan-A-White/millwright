@@ -40,6 +40,11 @@ type HostSweepDir struct {
 	// Live, when it is not empty, says what keeps the directory: a process
 	// running in it, a change not committed, a commit not on main.
 	Live string
+	// Tracked is true when the vault's git tracks a file in the directory (the
+	// vault's runs/ is tracked): a sweep on one host would show as deletions in
+	// the git the vault's sync commits and the other hosts pull, so the sweep
+	// leaves it to the sync.
+	Tracked bool
 }
 
 // HostSweepTree is a story's worktree and branch in a rig, as the host holds
@@ -283,6 +288,10 @@ func (s HostSweep) Run(ctx context.Context) (HostSweepReport, error) {
 	for _, dir := range runs {
 		age := now.Sub(dir.Modified)
 		if age < runsAge {
+			continue
+		}
+		if dir.Tracked {
+			keep("run", dir.Path, "the vault's git tracks it: the vault's sync owns it")
 			continue
 		}
 		if liveStories[lastSegment(dir.Path)] {

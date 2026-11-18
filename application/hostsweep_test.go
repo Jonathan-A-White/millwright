@@ -276,3 +276,39 @@ func TestHostSweepKeepsATreeClosedLessThanAnHourAndAFailureIsANote(t *testing.T)
 		t.Errorf("the pass stopped at a failure: removed %v", host.removedDirs)
 	}
 }
+
+func TestHostSweepRunsAreLeftToTheVaultsSync(t *testing.T) {
+	host := hostSweepFixture()
+	host.runs = append(host.runs, application.HostSweepDir{
+		Path: "/v/runs/tracked", Modified: hostSweepNow.Add(-30 * 24 * time.Hour), Bytes: 1 << 20, Tracked: true,
+	})
+	for _, dry := range []bool{true, false} {
+		report, err := hostSweeper(host, dry, nil, nil).Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, act := range report.Acts {
+			if act.Path == "/v/runs/tracked" {
+				t.Errorf("dry=%v: the sweep means to take a run the vault's git tracks: %+v", dry, act)
+			}
+		}
+		kept := false
+		for _, k := range report.Kept {
+			if k.Path == "/v/runs/tracked" && strings.Contains(k.Why, "vault") {
+				kept = true
+			}
+		}
+		if !kept {
+			t.Errorf("dry=%v: the tracked run is not said to be kept for the vault: %+v", dry, report.Kept)
+		}
+	}
+	for _, path := range host.removedDirs {
+		if path == "/v/runs/tracked" {
+			t.Errorf("a run the vault's git tracks was removed")
+		}
+	}
+	// An untracked run past its age still goes.
+	if got := strings.Join(host.removedDirs, ","); !strings.Contains(got, "/v/runs/old") {
+		t.Errorf("the untracked old run was not removed: %q", got)
+	}
+}

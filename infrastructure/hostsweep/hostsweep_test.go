@@ -183,3 +183,34 @@ func TestLandingsRunsAndAsidesAreFoundWithTheirAge(t *testing.T) {
 	}
 	_ = trees
 }
+
+func TestRunsTheVaultsGitTracksAreSaidSo(t *testing.T) {
+	disk, _ := rigOnDisk(t)
+	vault := t.TempDir()
+	disk.Vault = vault
+	git(t, vault, "init", "-b", "main")
+	write(t, filepath.Join(vault, "runs", "mw-tracked", "result.json"), "{}")
+	git(t, vault, "add", "-A")
+	git(t, vault, "commit", "-m", "runs")
+	write(t, filepath.Join(vault, "runs", "mw-new", "result.json"), "{}")
+
+	runs, err := disk.Runs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, run := range runs {
+		got[filepath.Base(run.Path)] = run.Tracked
+	}
+	if len(got) != 2 || !got["mw-tracked"] || got["mw-new"] {
+		t.Errorf("tracked by run: %v, want mw-tracked only", got)
+	}
+
+	// Where git cannot say, a run is taken as tracked.
+	disk.Vault = t.TempDir()
+	write(t, filepath.Join(disk.Vault, "runs", "mw-x", "r"), "x")
+	runs, _ = disk.Runs(context.Background())
+	if len(runs) != 1 || !runs[0].Tracked {
+		t.Errorf("a run in a vault git cannot read: %+v", runs)
+	}
+}

@@ -324,11 +324,29 @@ func (d Disk) Landings(ctx context.Context) ([]application.HostSweepDir, error) 
 
 // Runs implements application.HostSweepFiles: each directory of the vault's
 // runs/, its time the newest file in it.
-func (d Disk) Runs(_ context.Context) ([]application.HostSweepDir, error) {
+func (d Disk) Runs(ctx context.Context) ([]application.HostSweepDir, error) {
 	if d.Vault == "" {
 		return nil, nil
 	}
-	return childDirs(filepath.Join(d.Vault, application.RunsDir), func(string) bool { return true })
+	runs, err := childDirs(filepath.Join(d.Vault, application.RunsDir), func(string) bool { return true })
+	if err != nil || len(runs) == 0 {
+		return runs, err
+	}
+	// The vault's runs/ is tracked in git: a directory with a tracked file is
+	// the vault's sync's. When git cannot say, every run is taken as tracked.
+	out, gitErr := d.git(ctx, d.Vault, "ls-files", "-z", "--", application.RunsDir)
+	tracked := map[string]bool{}
+	for _, file := range strings.Split(out, "\x00") {
+		file = strings.TrimSpace(file)
+		if rest, ok := strings.CutPrefix(file, application.RunsDir+"/"); ok {
+			name, _, _ := strings.Cut(rest, "/")
+			tracked[name] = true
+		}
+	}
+	for i := range runs {
+		runs[i].Tracked = gitErr != nil || tracked[filepath.Base(runs[i].Path)]
+	}
+	return runs, nil
 }
 
 // Asides implements application.HostSweepFiles: the beads-*-aside-* directories
