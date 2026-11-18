@@ -181,3 +181,64 @@ func TestAWindowWithNoMwNextIsReapedAsAlways(t *testing.T) {
 		t.Errorf("expected only an armed line and a closed line, got %q", log.lines)
 	}
 }
+
+// theGateQueue is the gate's waiter record as a reaper reads it: one holder
+// line for each live ticket, as the queue keeps them.
+type theGateQueue struct{ holders []string }
+
+func (q *theGateQueue) Holders() []string { return append([]string(nil), q.holders...) }
+
+func TestAWindowWhoseMwNextWaitsForTheGateIsNotClosedPastTheWait(t *testing.T) {
+	reap, windows, clock, log := aWatchOfAWindowRunningNext(t)
+	armed := clock.now
+	queue := &theGateQueue{holders: []string{"checking mw-86e9r1.25"}}
+	reap.GateWaiters = queue.Holders
+	// The run waits for the gate for two hours, past the 90 minutes, then ends.
+	endsAt := armed.Add(2 * time.Hour)
+	sleep := reap.Sleep
+	reap.Sleep = func(ctx context.Context, d time.Duration) error {
+		if !clock.now.Before(endsAt) {
+			queue.holders = nil
+			windows.EndsNext("@3")
+		}
+		return sleep(ctx, d)
+	}
+
+	report, err := reap.Run(context.Background())
+
+	if err != nil || report.Outcome != application.ReapClosed {
+		t.Fatalf("expected the window closed once the run ended, it ended %q with %v", report.Outcome, err)
+	}
+	if clock.now.Before(endsAt) {
+		t.Errorf("the window was closed at %s, before the run ended at %s", clock.now, endsAt)
+	}
+	all := strings.Join(log.lines, "\n")
+	if strings.Count(all, "waiting: mw next mw-86e9r1.25 waits for the gate") != 1 {
+		t.Errorf("expected one line saying the run waits for the gate, got %q", log.lines)
+	}
+	if strings.Contains(all, "gave up waiting") {
+		t.Errorf("a run waiting for the gate was given up on: %q", log.lines)
+	}
+	if closed := windows.ClosedIDs(); len(closed) != 1 {
+		t.Errorf("expected the window closed once, got %v", closed)
+	}
+}
+
+func TestAMwNextThatLeavesTheGateQueueIsGivenUpOnAfterTheWaitAsAlways(t *testing.T) {
+	reap, _, clock, log := aWatchOfAWindowRunningNext(t)
+	armed := clock.now
+	// Another story's ticket is in the queue; this run's is not.
+	reap.GateWaiters = func() []string { return []string{"checking mw-other.1"} }
+
+	report, err := reap.Run(context.Background())
+
+	if err != nil || report.Outcome != application.ReapClosed {
+		t.Fatalf("expected the window closed past the cap, it ended %q with %v", report.Outcome, err)
+	}
+	if got := clock.now.Sub(armed); got < 90*time.Minute || got > 91*time.Minute {
+		t.Errorf("expected the window closed about 90 minutes in, it was closed %s in", got)
+	}
+	if !strings.Contains(strings.Join(log.lines, "\n"), "gave up waiting for mw next mw-86e9r1.25") {
+		t.Errorf("expected the wait given up on, got %q", log.lines)
+	}
+}

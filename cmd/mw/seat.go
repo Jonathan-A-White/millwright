@@ -202,18 +202,19 @@ func newSeatReapCmd() *cobra.Command {
 				return err
 			}
 			reap := application.SeatReap{
-				Seats:    seatFiles,
-				Terminal: seatWindows(),
-				Log:      files,
-				Events:   homeEventLog(),
-				Seat:     args[0],
-				Host:     host,
-				Window:   window,
-				WhenIdle: whenIdle,
-				Settle:   application.TypeSettle,
-				Interval: interval,
-				Limit:    limit,
-				Out:      cmd.OutOrStdout(),
+				Seats:       seatFiles,
+				Terminal:    seatWindows(),
+				Log:         files,
+				Events:      homeEventLog(),
+				Seat:        args[0],
+				Host:        host,
+				Window:      window,
+				WhenIdle:    whenIdle,
+				GateWaiters: hostGateWaiters(),
+				Settle:      application.TypeSettle,
+				Interval:    interval,
+				Limit:       limit,
+				Out:         cmd.OutOrStdout(),
 			}
 			// The Deputy's window is not closed over mail waiting in its box.
 			if args[0] == application.DeputySeat {

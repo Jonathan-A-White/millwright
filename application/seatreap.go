@@ -225,6 +225,10 @@ const (
 // looks again on its usual interval, and closes the window when the run has
 // ended, or after NextWait if it has not, saying that it gave up waiting.
 //
+// A `mw next` that waits for the host's gate lock (GateWaiters names its story)
+// is waiting its turn, not stuck: it is not given up on however long it waits,
+// and NextWait runs from when it stopped waiting there (mw-gq6.1509).
+//
 // Nor is a window whose pane shows a background agent still running ("Waiting
 // for 1 background agent to finish", or the agent count of the status line):
 // the pane reads idle, but closing it kills the agent's work half done
@@ -280,6 +284,12 @@ type SeatReap struct {
 	// NextWait is how long a window with a running `mw next` in it is kept
 	// before it is closed over the run; zero is DefaultReapNextWait.
 	NextWait time.Duration
+
+	// GateWaiters, when set, is the holder line of each live ticket in the host's
+	// gate queue and test-runner queue, as Status reads them. A running `mw next`
+	// whose story a ticket names is waiting its turn for the gate, not stuck, and
+	// is not given up on while it does (mw-gq6.1509). Nil reads none.
+	GateWaiters func() []string
 
 	// AgentWait is how long a window showing a running background agent is
 	// kept before it is closed over the agent; zero is DefaultReapAgentWait.
@@ -356,6 +366,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 	// and whether the wait has run out.
 	var waitingSince time.Time
 	waitedOut := false
+	toldGate := false
 	toldLimit := false
 	toldPast := false
 	nextWait := s.NextWait
@@ -434,6 +445,19 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 				continue
 			case !running:
 				waitingSince = time.Time{}
+				toldGate = false
+			case s.waitsForGate(story):
+				// A run queued for the gate lock is waiting its turn: the time
+				// spent there does not count toward NextWait, which runs from
+				// when the gate was last seen to be waited on.
+				waitingSince = s.now()
+				if !toldGate {
+					toldGate = true
+					if _, err := s.say(ctx, fmt.Sprintf("waiting: %s waits for the gate", nextCommand(story))); err != nil {
+						return ReapReport{}, err
+					}
+				}
+				continue
 			case waitingSince.IsZero():
 				waitingSince = s.now()
 				if _, err := s.say(ctx, fmt.Sprintf("waiting: %s runs in this window", nextCommand(story))); err != nil {
@@ -513,6 +537,15 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 		return report, err
 	}
 	return report, fmt.Errorf("%s", report.Said)
+}
+
+// waitsForGate reports whether a ticket in the host's gate or test-runner queue
+// names the story: its `mw next` is waiting for its turn (mw-gq6.1509).
+func (s SeatReap) waitsForGate(story string) bool {
+	if story == "" || s.GateWaiters == nil {
+		return false
+	}
+	return (&gateTickets{holders: s.GateWaiters()}).hold(story)
 }
 
 // nextCommand is the running `mw next` as the log names it.
