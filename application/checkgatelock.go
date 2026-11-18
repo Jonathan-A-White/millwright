@@ -360,7 +360,7 @@ func (k Check) gateLockRefusal(ctx, waitCtx context.Context, c *closeOut, try sl
 		return GateLockHandBack{Why: line}
 	}
 	if k.HandBackAtOnce {
-		return GateLockHandBack{Why: k.limitReached(try.label, waited, fmt.Sprintf("%s's gate lock is still held by %s, since %s", k.Host, holder, sinceAt), holder)}
+		return GateLockHandBack{Why: k.limitReachedNoted(ctx, c, try.label, waited, fmt.Sprintf("%s's gate lock is still held by %s, since %s", k.Host, holder, sinceAt), holder)}
 	}
 	record := strings.TrimSuffix(try.record, ".slot") + "-gate.slot"
 	if earlier := k.noteWait(ctx, c.id, record, holder, since); earlier != "" {

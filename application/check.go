@@ -444,6 +444,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 			storyID, report.Attempt, k.Host, k.began.UTC().Format("15:04:05Z"))
 	}
 	k.kept.begin(report.Attempt)
+	k.forgetLimit(ctx, storyID, report.Attempt)
 	if detail.Closed() {
 		return report, fmt.Errorf("checking %s: it is closed already, so there is nothing left to land", storyID)
 	}

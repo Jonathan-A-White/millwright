@@ -2441,7 +2441,7 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 		} else if done {
 			return Refusal{}, false
 		}
-		if left, lockRefusal, lockLost := n.stepsLostToTheLock(ctx, report, root, open, closing == previewClosingStep); lockLost {
+		if left, lockRefusal, lockLost := n.stepsLostToAWait(ctx, c, report, root, open, closing == previewClosingStep); lockLost {
 			return lockRefusal, true
 		} else if open = left; len(open) == 0 {
 			return Refusal{}, false
@@ -3420,10 +3420,10 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	report.Why, report.Reason = why, reason
 	n.recordBenchmark(ctx, c, report, false)
 	giveBack := false
-	if reason == ReasonWorkflowScope {
+	if reason == ReasonWorkflowScope || reason == ReasonGateWait {
 		// Before the story is commented on and its claim given back: the
 		// attempt is tooling's and the story goes where the scope is held.
-		handed, repathed := n.workflowScopeHandOver(ctx, c, report, why)
+		handed, repathed := n.handOverOnStop(ctx, c, report, reason, why)
 		giveBack = repathed
 		if said != "" {
 			handed += "\n\n" + said
@@ -3464,7 +3464,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 				trouble = append(trouble, fmt.Sprintf("the reason %s is held could not be written on it: %v", c.id, err))
 			}
 		}
-	} else if reason == ReasonOpenSteps || reason == ReasonAcceptanceChanged || reason == ReasonNoClosingComment || reason == ReasonGristExampleUnproved || reason == ReasonTurnCap || reason == ReasonHarnessCrash || reason == ReasonHarnessMissing || (reason == ReasonWorkflowScope && giveBack) || (reason == ReasonNoFindings && IsTesterStory(c.detail)) {
+	} else if n.givesBackOpen(reason, c, giveBack) {
 		given, cleared, trouble = n.giveBackOpen(ctx, c, report)
 	}
 
@@ -3535,7 +3535,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		// Once per host per expiry, not per story (mw-gq6.781): the Mayor has the
 		// news in the mail holdHostForLogin sent.
 		mail = NewMessage{}
-	} else if reason == ReasonHarnessCrash || reason == ReasonHarnessMissing {
+	} else if reason == ReasonHarnessCrash || reason == ReasonHarnessMissing || reason == ReasonGateWait {
 		// A crash, or a missing harness, given back needs nobody (mw-gq6.1137): the story's comment and
 		// the ledger line say it, and the story is dispatched again. A second
 		// crash on the story stops as no-result and mails as that does.

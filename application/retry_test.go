@@ -896,7 +896,7 @@ func (failingSetNote) SetNote(context.Context, string, string) error {
 func TestOnlyTheGateTheMergeAndTheTurnCapHandABranchOn(t *testing.T) {
 	for reason, want := range map[application.Reason]bool{
 		application.ReasonTestsFail: true, application.ReasonMergedTestsFail: true, application.ReasonMergeConflict: true,
-		application.ReasonTurnCap: true, application.ReasonOpenSteps: true, application.ReasonNoClosingComment: true, application.ReasonLockfileSSH: true, application.ReasonTOCStale: true, application.ReasonGristExampleUnproved: true,
+		application.ReasonTurnCap: true, application.ReasonOpenSteps: true, application.ReasonNoClosingComment: true, application.ReasonLockfileSSH: true, application.ReasonTOCStale: true, application.ReasonGristExampleUnproved: true, application.ReasonGateWait: true,
 		application.ReasonUnmetCriterion: false, application.ReasonSignedCommit: false, application.ReasonTrackedBinary: false, application.ReasonNoCommits: false, application.ReasonUncommittedWork: false,
 	} {
 		if got := application.ContinuesFrom(reason); got != want {
@@ -1268,4 +1268,26 @@ func TestARetryHoldLeavesTheStoryDeferredWithNoAssignee(t *testing.T) {
 			}
 		}
 	})
+}
+
+// mw-gq6.1506: a gate wait refusal leaves the story's attempt count as it was and
+// names the attempt tooling, so that max_attempts does not count it.
+func TestAGateWaitRefusalLeavesTheAttemptCounterAsItWas(t *testing.T) {
+	tracker, lands, _ := aStoryWhoseStepCloseLostTheLock(t, false)
+	before, err := tracker.ShowStory(context.Background(), "mw-gq6.9")
+	mustDo(t, err)
+
+	report, _ := theCloseOutReadingTheRun(t, tracker, lands, map[string]string{"check-1-limit.slot": aGateWaitNote})
+
+	if report.Reason != application.ReasonGateWait {
+		t.Fatalf("expected a refusal for %s, got %s", application.ReasonGateWait, report.Reason)
+	}
+	after, err := tracker.ShowStory(context.Background(), "mw-gq6.9")
+	mustDo(t, err)
+	if after.Attempts != before.Attempts {
+		t.Errorf("expected the attempt counter unchanged at %d, it is %d", before.Attempts, after.Attempts)
+	}
+	if after.AttemptCauses[after.Attempts] != application.CauseTooling {
+		t.Errorf("expected attempt %d named %s, got causes %v", after.Attempts, application.CauseTooling, after.AttemptCauses)
+	}
 }

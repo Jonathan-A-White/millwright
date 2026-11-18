@@ -571,7 +571,7 @@ func (k Check) slotRefusal(ctx context.Context, c *closeOut, try slotTry, err er
 		return errors.New(line)
 	}
 	if k.HandBackAtOnce {
-		return errors.New(k.limitReached(try.label, waited.Waited, fmt.Sprintf("the merge slot of %s is still held by %s, since %s", c.path.Rig, waited.Holder, since), waited.Holder))
+		return errors.New(k.limitReachedNoted(ctx, c, try.label, waited.Waited, fmt.Sprintf("the merge slot of %s is still held by %s, since %s", c.path.Rig, waited.Holder, since), waited.Holder))
 	}
 	earlier := k.noteSlotWait(ctx, c.id, try.record, waited)
 	if earlier != "" {

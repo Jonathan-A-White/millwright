@@ -40,7 +40,7 @@ func (k Check) calmRefusal(ctx context.Context, c *closeOut, attempt int, readin
 		return errors.New(line)
 	}
 	if k.HandBackAtOnce {
-		return errors.New(k.limitReached("the rig's tests", waited, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load"))
+		return errors.New(k.limitReachedNoted(ctx, c, "the rig's tests", waited, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load"))
 	}
 	earlier := k.noteWait(ctx, c.id, CheckWholeCalmFileName(attempt), k.Host+" at "+load, since)
 	if earlier != "" {
@@ -71,7 +71,7 @@ func (k Check) calmRerunRefusal(ctx context.Context, c *closeOut, attempt int, l
 		return errors.New(line)
 	}
 	if k.HandBackAtOnce {
-		return errors.New(k.limitReached("the run again of the rig's tests, which failed once while "+k.Host+" was busy,", waited, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load"))
+		return errors.New(k.limitReachedNoted(ctx, c, "the run again of the rig's tests, which failed once while "+k.Host+" was busy,", waited, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load"))
 	}
 	earlier := k.noteWait(ctx, c.id, CheckWholeCalmAgainFileName(attempt), k.Host+" at "+load, since)
 	if earlier != "" {
