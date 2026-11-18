@@ -85,7 +85,7 @@ func newLandSmokeCmd() *cobra.Command {
 				Tracker:   gateway,
 				Mailbox:   gateway,
 				Smoke:     hostGristSmoke(gateway, host, rigs, rig.New(), cmd.OutOrStdout(), application.BatchLogPrefix+"grist smoke: "),
-				SmokeSlot: rig.NewSlots(rig.WithSlotSuffix(smokeSlotSuffix)),
+				SmokeSlot: hostSlots(rig.WithSlotSuffix(smokeSlotSuffix)),
 				Host:      host,
 				Rigs:      rigs,
 				Out:       cmd.OutOrStdout(),

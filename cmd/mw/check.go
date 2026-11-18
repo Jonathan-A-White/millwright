@@ -174,7 +174,7 @@ func newCheckCmd() *cobra.Command {
 					}
 					return application.GatePartExpectedFor(history, rigName, host, n, benchmarkLimits(bench))
 				}
-				slot = rig.NewSlots(
+				slot = hostSlots(
 					gateScaledSlotWait(vault.Benchmarks{Vault: mwVault(dir, host)}, rigs, host, benchmarkLimits(bench)),
 					rig.WithSlotNotice(func(said string) { fmt.Fprint(cmd.ErrOrStderr(), said) }))
 			}
