@@ -1201,3 +1201,71 @@ func TestRetryOfAHeldStoryCarryingQueuedGoesOnWhileABatchOfItsRigRuns(t *testing
 		})
 	}
 }
+
+// TestARetryHoldLeavesTheStoryDeferredWithNoAssignee pins mw-gq6.1465: a
+// --hold retry said it gave back the claim and held the story, and bd still
+// read it in_progress under its assignee. A write bd reported done and that did
+// not take is a failed give-back: the comment is written only once the story
+// reads deferred and unassigned, and a give-back that never takes leaves no
+// 'gave back the claim' comment and returns an error.
+func TestARetryHoldLeavesTheStoryDeferredWithNoAssignee(t *testing.T) {
+	t.Run("a write that was lost once is tried again and the story ends held", func(t *testing.T) {
+		tracker := apptest.NewFakeTracker()
+		aRetryStory(t, tracker, "mw-gq6.1")
+		tracker.FailReleases(apptest.ReleaseFault{})
+		retry := aRetry(tracker, &fakeRetryLanding{NoWorktree: true}, &apptest.FakeVaultFiles{}, &strings.Builder{})
+		retry.Hold = true
+		if _, err := retry.Run(context.Background(), "mw-gq6.1"); err != nil {
+			t.Fatalf("expected the retry to succeed, got: %v", err)
+		}
+		detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Status != application.StatusHeld || detail.Assignee != "" {
+			t.Errorf("expected the story deferred and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
+		}
+	})
+
+	t.Run("a write that never takes leaves no comment saying the claim was given back", func(t *testing.T) {
+		tracker := apptest.NewFakeTracker()
+		aRetryStory(t, tracker, "mw-gq6.1")
+		tracker.FailReleases(apptest.ReleaseFault{}, apptest.ReleaseFault{}, apptest.ReleaseFault{}, apptest.ReleaseFault{})
+		retry := aRetry(tracker, &fakeRetryLanding{NoWorktree: true}, &apptest.FakeVaultFiles{}, &strings.Builder{})
+		retry.Hold = true
+		_, err := retry.Run(context.Background(), "mw-gq6.1")
+		if err == nil {
+			t.Fatal("expected an error: the story was never given back")
+		}
+		for _, comment := range tracker.Comments("mw-gq6.1") {
+			if strings.Contains(comment, "gave back the claim") {
+				t.Errorf("expected no comment saying the claim was given back, got %q", comment)
+			}
+		}
+		detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Status != application.StatusInProgress {
+			t.Errorf("expected the story still in progress, got %q", detail.Status)
+		}
+	})
+
+	t.Run("a write that fails leaves no comment and returns the error", func(t *testing.T) {
+		tracker := apptest.NewFakeTracker()
+		aRetryStory(t, tracker, "mw-gq6.1")
+		boom := errors.New("the server went away")
+		tracker.FailReleases(apptest.ReleaseFault{Err: boom}, apptest.ReleaseFault{Err: boom}, apptest.ReleaseFault{Err: boom})
+		retry := aRetry(tracker, &fakeRetryLanding{NoWorktree: true}, &apptest.FakeVaultFiles{}, &strings.Builder{})
+		retry.Hold = true
+		_, err := retry.Run(context.Background(), "mw-gq6.1")
+		if err == nil || !strings.Contains(err.Error(), "the server went away") {
+			t.Fatalf("expected the write's error, got %v", err)
+		}
+		for _, comment := range tracker.Comments("mw-gq6.1") {
+			if strings.Contains(comment, "gave back the claim") {
+				t.Errorf("expected no comment saying the claim was given back, got %q", comment)
+			}
+		}
+	})
+}

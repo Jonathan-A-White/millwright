@@ -1000,19 +1000,59 @@ func (r Retry) release(ctx context.Context, report RetryReport) error {
 	if err := r.Tracker.ClearRunState(ctx, report.StoryID); err != nil {
 		return fmt.Errorf("the run state of %s could not be cleared: %w", report.StoryID, err)
 	}
+	// Each give-back is read back: bd can say a write is done and the story not
+	// change, and the comment saying the claim was given back is written only
+	// once the story reads as it should (mw-gq6.1465).
 	if report.unclaimed {
 		if r.Hold {
-			return r.Tracker.HoldStory(ctx, report.StoryID)
+			return r.giveBackTo(ctx, report.StoryID, StatusHeld, func(ctx context.Context) error { return r.Tracker.HoldStory(ctx, report.StoryID) })
 		}
 		if report.wasHeld {
-			return r.Tracker.ReleaseStory(ctx, report.StoryID)
+			return r.giveBackTo(ctx, report.StoryID, StatusOpen, func(ctx context.Context) error { return r.Tracker.ReleaseStory(ctx, report.StoryID) })
 		}
 		return nil
 	}
 	if r.Hold {
-		return r.Tracker.HoldClaimHeldBy(ctx, report.StoryID, report.holder)
+		return r.giveBackTo(ctx, report.StoryID, StatusHeld, func(ctx context.Context) error {
+			return r.Tracker.HoldClaimHeldBy(ctx, report.StoryID, report.holder)
+		})
 	}
-	return r.Tracker.ReleaseClaimHeldBy(ctx, report.StoryID, report.holder)
+	return r.giveBackTo(ctx, report.StoryID, StatusOpen, func(ctx context.Context) error {
+		return r.Tracker.ReleaseClaimHeldBy(ctx, report.StoryID, report.holder)
+	})
+}
+
+// giveBackTo runs write and reads the story back, until it reads status and
+// unassigned or GiveBackTries are used up. A write that fails is the retry's
+// error at once (a refusal, as the guard on the holder gives one, is not
+// tried again); one that bd reported done and did not take is tried again,
+// paused by RetryWait, or by PushWait alone when there is none.
+func (r Retry) giveBackTo(ctx context.Context, id, status string, write func(context.Context) error) error {
+	wait := r.RetryWait
+	if wait == nil {
+		wait = waitFor
+	}
+	var last error
+	for try := 1; try <= GiveBackTries; try++ {
+		if try > 1 {
+			if err := wait(ctx, r.PushWait); err != nil {
+				return fmt.Errorf("%w (and waiting %s to try giving it back again: %v)", last, r.PushWait, err)
+			}
+		}
+		if err := write(ctx); err != nil {
+			return err
+		}
+		detail, err := r.Tracker.ShowStory(ctx, id)
+		switch {
+		case err != nil:
+			last = fmt.Errorf("the give-back was accepted, but reading %s back failed: %w", id, err)
+		case !strings.EqualFold(strings.TrimSpace(detail.Status), status) || detail.Assignee != "":
+			last = fmt.Errorf("the give-back was accepted, but %s still reads %s, held by %q", id, detail.Status, detail.Assignee)
+		default:
+			return nil
+		}
+	}
+	return fmt.Errorf("%w (after %d tries)", last, GiveBackTries)
 }
 
 // heldSaid is what a --hold retry's comment says of the story: it is held, not
