@@ -108,3 +108,38 @@ func TestRevertOfReadsTheRemoteTrackingFormOfTheMergeMessage(t *testing.T) {
 		t.Fatalf("RevertOf(other) = %q, %v; want none", got, err)
 	}
 }
+
+// A landing from another host is on origin before it is in this checkout
+// (mw-gq6.1452): the sweep's Fetch brings origin's ref to it, and the history
+// reads of RevertOf then find the commit.
+func TestFetchLetsMainRefsHoldACommitAnotherHostLanded(t *testing.T) {
+	here, other := aRig(t)
+	ctx := context.Background()
+	write(t, other, "landed.txt", "from the desktop")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A landing from another host")
+	landed := run(t, other, "git", "rev-parse", "HEAD")
+	run(t, other, "git", "push", "-q", "origin", "main")
+
+	w := rig.New()
+	before, err := w.MainRefs(ctx, here)
+	if err != nil || len(before) == 0 || before[0].Sha == landed {
+		t.Fatalf("before the fetch MainRefs = %+v, %v; the checkout should be behind", before, err)
+	}
+	if _, err := w.Contains(ctx, here, before[0].Sha, landed); err == nil {
+		t.Fatal("the checkout should lack the commit before the fetch")
+	}
+	if err := w.Fetch(ctx, here); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	after, err := w.MainRefs(ctx, here)
+	if err != nil || len(after) == 0 || after[0].Name != "origin/main" || after[0].Sha != landed {
+		t.Fatalf("after the fetch MainRefs = %+v, %v; want origin/main at %s", after, err, landed)
+	}
+	if in, err := w.Contains(ctx, here, after[0].Sha, landed); err != nil || !in {
+		t.Fatalf("Contains after the fetch = %v, %v", in, err)
+	}
+	if got, err := w.RevertOf(ctx, here, after[0].Name, landed, "mw-x.9"); err != nil || got != "" {
+		t.Fatalf("RevertOf = %q, %v", got, err)
+	}
+}

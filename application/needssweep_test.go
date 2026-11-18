@@ -32,6 +32,22 @@ type sweepGit struct {
 	missing map[string]bool // commits the checkout lacks
 	revert  map[string]string
 	refs    []application.SweepRef
+	// fetched are the refs the checkout holds once it has fetched: what origin has.
+	fetched []application.SweepRef
+	fetches int
+	// fetchErr is what a fetch fails with, the checkout then keeping its refs.
+	fetchErr error
+}
+
+func (g *sweepGit) Fetch(context.Context, string) error {
+	g.fetches++
+	if g.fetchErr != nil {
+		return g.fetchErr
+	}
+	if g.fetched != nil {
+		g.refs = g.fetched
+	}
+	return nil
 }
 
 func (g *sweepGit) Contains(_ context.Context, _, outer, inner string) (bool, error) {
@@ -495,5 +511,69 @@ func TestNeedsSweepStoppedRunDoesNotSayItCommentedOnTheRest(t *testing.T) {
 		if (strings.HasPrefix(l, "b ") || strings.HasPrefix(l, "c ")) && (strings.Contains(l, "commented VERIFIED") || strings.Contains(l, "would comment")) {
 			t.Errorf("a line claims a comment that was not written: %q", l)
 		}
+	}
+}
+
+const sweepNewMaster = "cccccccccccccccccccccccccccccccccccccccc"
+
+// A landing from another host is on origin's branch while this host's checkout
+// sits behind it (mw-gq6.1452): the sweep fetches before it judges, and the line
+// names the rig's own branch, master here.
+func TestNeedsSweepJudgesLandedWhenCommitIsOnOriginButNotInLocalCheckout(t *testing.T) {
+	r := newSweepRig(t)
+	r.landed("b", 48*time.Hour, "1111111", internalTxt)
+	delete(r.git.in, sweepMain+" 1111111")
+	r.git.refs = []application.SweepRef{{Name: "master", Sha: sweepMain}}
+	r.git.fetched = []application.SweepRef{{Name: "origin/master", Sha: sweepNewMaster}, {Name: "master", Sha: sweepMain}}
+	r.git.in[sweepNewMaster+" 1111111"] = true
+
+	res := r.run(t, application.NeedsSweepOptions{Write: true})
+	if got := r.classOf(res, "b"); got != "internal" {
+		t.Fatalf("class %q, want internal; output:\n%s", got, r.out.String())
+	}
+	if !r.wrote("b") {
+		t.Fatalf("not written; output:\n%s", r.out.String())
+	}
+	text := r.beads.Written[0].Text
+	if !strings.Contains(text, "x master") || strings.Contains(text, "x main") {
+		t.Errorf("the comment must name the rig's own branch, master, not main: %q", text)
+	}
+	if r.git.fetches != 1 {
+		t.Errorf("fetched %d times, want once for the rig", r.git.fetches)
+	}
+}
+
+func TestNeedsSweepNamesTheRigsBranchWhereTheLandingIsNotFound(t *testing.T) {
+	r := newSweepRig(t)
+	r.landed("b", 48*time.Hour, "1111111", internalTxt)
+	delete(r.git.in, sweepMain+" 1111111")
+	r.git.refs = []application.SweepRef{{Name: "origin/master", Sha: sweepMain}}
+	res := r.run(t, application.NeedsSweepOptions{})
+	if got := r.classOf(res, "b"); got != "unproven" {
+		t.Fatalf("class %q, want unproven", got)
+	}
+	if out := r.out.String(); !strings.Contains(out, "x master") || strings.Contains(out, "x main") {
+		t.Errorf("the line must name master, not main: %q", out)
+	}
+}
+
+func TestNeedsSweepJudgesOnTheCheckoutItHasWhenTheFetchFails(t *testing.T) {
+	r := newSweepRig(t)
+	r.landed("b", 48*time.Hour, "1111111", internalTxt)
+	r.git.fetchErr = errors.New("could not resolve host")
+	res := r.run(t, application.NeedsSweepOptions{})
+	if got := r.classOf(res, "b"); got != "internal" {
+		t.Fatalf("class %q, want internal; output:\n%s", got, r.out.String())
+	}
+}
+
+func TestNeedsSweepNamesTheFetchFaultWhenTheLandingIsNotFoundAfterIt(t *testing.T) {
+	r := newSweepRig(t)
+	r.landed("b", 48*time.Hour, "1111111", internalTxt)
+	delete(r.git.in, sweepMain+" 1111111")
+	r.git.fetchErr = errors.New("could not resolve host")
+	r.run(t, application.NeedsSweepOptions{})
+	if out := r.out.String(); !strings.Contains(out, "could not resolve host") {
+		t.Errorf("the line must say the fetch failed: %q", out)
 	}
 }
