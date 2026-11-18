@@ -229,7 +229,7 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 	}
 	// Taken before the limit's clock starts: waiting for a slot is not the
 	// command running long.
-	release, err := a.runs.Take(ctx, "after-landing of "+rig)
+	release, err := a.runs.Take(ctx, application.TestRunHolder(ctx, "after-landing of "+rig))
 	if err != nil {
 		return application.Ran{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
