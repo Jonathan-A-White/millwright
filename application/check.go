@@ -34,6 +34,10 @@ import (
 // that fails, because a session that fixes one and runs it again pays for the
 // tests each time.
 type Check struct {
+	// BdLocks names the steps whose close a mw bd gave up on for the bd lock, so that the
+	// check says so and not that they are open (mw-gq6.1505).
+	BdLocks BdLockNotes
+
 	// waiting is the one line a foreground check ended with, set when a wait ran
 	// out and its place was kept; shared by every copy of the Check one check()
 	// makes.
@@ -602,6 +606,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	var read NextReport
 	report.Refusals = Next{
 		Tracker:       k.Tracker,
+		BdLocks:       k.BdLocks,
 		Landing:       k.Landing,
 		Checks:        checks,
 		GateLock:      gateLock,

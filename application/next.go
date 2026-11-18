@@ -102,8 +102,9 @@ const (
 	// ReasonTOCStale is a branch that changes a .md whose table of contents is
 	// stale or missing (mw-nft5a06.3): the cure is the one command mw toc fix,
 	// which the session runs in its own worktree, so the branch is continued.
-	ReasonTOCStale  Reason = "toc-stale"
-	ReasonOpenSteps Reason = "open-steps"
+	ReasonTOCStale      Reason = "toc-stale"
+	ReasonOpenSteps     Reason = "open-steps"
+	ReasonStepCloseLock Reason = "step-close-lock" // bd lock lost the Builder's step close (mw-gq6.1505); handed back as host-busy is
 	// ReasonGristExampleUnproved is a branch that adds or changes a grind
 	// example (grinds/examples/<kind>/<name>.json) whose closing comment has no
 	// 'mw grist eval <app> <kind> --example <name>' line with PASS (mw-gq6.772):
@@ -236,6 +237,7 @@ const (
 // story that did not land says so in both places.
 type Next struct {
 	Tracker   WorkTracker
+	BdLocks   BdLockNotes // step closes that gave up on the bd lock (mw-gq6.1505)
 	Worktrees Worktrees
 	Landing   Landing
 	Checks    Checks
@@ -1461,8 +1463,8 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 				return rep, nil
 			}
 		}
-		if found[0].Reason == ReasonHostBusy {
-			return n.handBack(ctx, c, report, ReasonHostBusy, found[0].Why)
+		if found[0].Reason == ReasonHostBusy || found[0].Reason == ReasonStepCloseLock {
+			return n.handBack(ctx, c, report, found[0].Reason, found[0].Why)
 		}
 		report.Refused = true
 		return n.stop(ctx, c, report, found[0].Reason, found[0].Why, found[0].Said)
@@ -2437,6 +2439,11 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 		if done, refusal, refused := n.closeStepsMetByTheClosingComment(ctx, c, report, closing, root, open, base); refused {
 			return refusal, true
 		} else if done {
+			return Refusal{}, false
+		}
+		if left, lockRefusal, lockLost := n.stepsLostToTheLock(ctx, report, root, open, closing == previewClosingStep); lockLost {
+			return lockRefusal, true
+		} else if open = left; len(open) == 0 {
 			return Refusal{}, false
 		}
 		written := false

@@ -194,6 +194,7 @@ func newCheckCmd() *cobra.Command {
 			callBudget := checkCallBudget(cmd, keepPlace, call)
 			k := application.Check{
 				Tracker:        mwGateway(dir, host),
+				BdLocks:        hostBdLockNotes(),
 				Landing:        worktrees,
 				Checks:         checks,
 				SpecChecks:     checks,

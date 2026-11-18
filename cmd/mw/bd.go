@@ -80,6 +80,17 @@ func bdTurn(args []string) application.BdTurn {
 	return hostlock.NewBdTurn(filepath.Join(home, SyncLockStateDir), "mw bd "+strings.Join(args, " "))
 }
 
+// hostBdLockNotes is where this host keeps what a mw bd leaves for mw next when
+// a close of formula steps gave up on the bd lock (mw-gq6.1505), beside the bd
+// turn. A host with no home directory keeps none.
+func hostBdLockNotes() application.BdLockNotes {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return hostlock.NewBdLockNotes(filepath.Join(home, SyncLockStateDir))
+}
+
 // newBdCmd builds `mw bd <bd arguments>`: the real bd, run again when it meets a
 // passing fault of the beads server. The Builder's session finds it as `bd`.
 func newBdCmd() *cobra.Command {
@@ -101,7 +112,8 @@ func newBdCmd() *cobra.Command {
 			"and no mw sync running (a bd of a test suite's throwaway vault in the temporary directory is not\n" +
 			"counted, nor is a bd of another beads directory, by its -C or where it runs). It waits for up to two minutes; a leading " + bdWaitFlag + " <duration> (or " + bdWaitEnv + ")\n" +
 			"changes that, 0 waits for nothing. When the limit passes it runs no bd, exits 1 and names the process\n" +
-			"it waited for and the mw bd command to run again. bd's own environment and exit status are the caller's.",
+			"it waited for and the mw bd command to run again; a close of formula steps that gives up so leaves a note,\n" +
+			"and mw next then names the steps' close as lost to the bd lock, not as steps left open. bd's own environment and exit status are the caller's.",
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		SilenceErrors:      true,
@@ -126,6 +138,7 @@ func newBdCmd() *cobra.Command {
 				Quiet:     newBdQuiet(),
 				QuietWait: wait,
 				Dir:       bdOwnDir(args),
+				LockNotes: hostBdLockNotes(),
 				Out:       cmd.OutOrStdout(),
 				Err:       cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), args)

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -70,6 +71,10 @@ type BdRetry struct {
 	// Dir is the beads directory this bd works on (its -C, else where it runs):
 	// a bd of another one is not waited for. Empty counts every bd.
 	Dir string
+	// LockNotes, when set, is told of a close whose wait for the bd lock ran out,
+	// and of a close that went through, for the close-out to tell the steps such
+	// a close left open from steps the Builder left open (mw-gq6.1505).
+	LockNotes BdLockNotes
 	// args is the command line Run was given, for the line that says what to run
 	// again.
 	args []string
@@ -201,6 +206,10 @@ func (r BdRetry) Run(ctx context.Context, args []string) (int, error) {
 	r.args = args
 	release, err := r.take(ctx)
 	if err != nil {
+		var busy *BdBusyError
+		if errors.As(err, &busy) {
+			r.noteLockLost(ctx, args, busy)
+		}
 		return 1, err
 	}
 	defer release()
@@ -209,6 +218,9 @@ func (r BdRetry) Run(ctx context.Context, args []string) (int, error) {
 		return 1, nil
 	}
 	exit, err := r.attempt(ctx, run)
+	if err == nil && exit == 0 {
+		r.noteClosed(ctx, run)
+	}
 	if err == nil && exit == 0 && len(comments) > 0 && !r.writeOverClaim(ctx, parseBdCall(run), comments) {
 		return 1, nil
 	}

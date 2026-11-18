@@ -284,6 +284,7 @@ func newNextCmd() *cobra.Command {
 			}
 			_, err = application.Next{
 				Tracker:    gateway,
+				BdLocks:    hostBdLockNotes(),
 				Worktrees:  worktrees,
 				Landing:    worktrees,
 				Changes:    worktrees,
