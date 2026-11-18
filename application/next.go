@@ -246,7 +246,7 @@ type Next struct {
 	// it gives up the rig's merge slot to the waiters that can share it until
 	// the function it returns is called, which takes it back alone. A batch
 	// landing sets it, so that a Builder's check of the rig runs beside the
-	// wait (mw-4hqh0en); mw next leaves it nil and holds the slot throughout.
+	// wait (mw-4hqh0en); mw next sets it for its merge (mergeYielding, mw-gq6.1424).
 	SlotYield func(ctx context.Context) (resume func())
 	// SlotShared, when set, says whether another holder shares the slot the
 	// close-out yielded (SlotSharers): it keeps the gate lock only if nobody is
@@ -809,6 +809,8 @@ type closeOut struct {
 	// slot for waits (Next.SlotYield), so that the slot is taken alone again with the
 	// lock given back (gateslotlock.go); nil otherwise.
 	gateHold *slotYieldingLock
+	// slot is the rig's merge slot as the merge yields it (mergeYielding); nil before.
+	slot     *batchSlot
 	detail   StoryDetail
 	path     domain.Path
 	rigDir   string
@@ -1491,7 +1493,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.stop(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
 	}
 	n.takeCrossSlot(ctx, c, report)
-	landed, landErr := n.merge(ctx, c, report)
+	landed, landErr := n.mergeYielding(ctx, c, report, holding)
 	report.Notes = append(report.Notes, c.cross.Release(ctx)...)
 	c.cross = nil
 	if c.merged.lock != nil {
@@ -1506,9 +1508,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		if ctx.Err() != nil {
 			return n.interrupted(ctx, c, report)
 		}
-		if reasonOf(landErr) == ReasonHostBusy {
-			// The host's load, not the story: only the close-out is run again.
-			return n.handBack(ctx, c, report, ReasonHostBusy, firstLine(landErr.Error()))
+		if r := reasonOf(landErr); r == ReasonHostBusy || errors.Is(landErr, ErrSlotCap) {
+			// The host's load, or a slot not had back after a wait, not the story: only the close-out is run again.
+			return n.handBack(ctx, c, report, r, firstLine(landErr.Error()))
 		}
 		kept := n.keepLandingError(ctx, c, report, landErr)
 		switch {
@@ -1561,40 +1563,6 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	s.merge, s.atTarget = landed.Commit, landed.Commit
 	t.walk(singleAfterPush, s)
 	return t.walkFinish(s)
-}
-
-// takeCrossSlot waits for the rig's merge slot across hosts and takes it, and
-// the report says what became of it.
-func (n Next) takeCrossSlot(ctx context.Context, c *closeOut, report *NextReport) {
-	cross, said := n.CrossSlot.Take(ctx, c.path.Rig, Holders(n.Seat, n.Host, c.id))
-	report.CrossSlot = append(report.CrossSlot, said...)
-	c.cross = cross
-}
-
-// waitOffTheSlot gives the rig's merge slot across hosts back while the gate on
-// a merged result waits for this host, for waits, and takes it again once it
-// is done waiting (mw-gq6.422): the other host lands meanwhile, and the next
-// try starts over from a fresh fetch. It is no try lost, since nothing was
-// pushed, and it cannot come round for ever: the gate lock, once had, is kept,
-// and the host is let calm once before each run.
-func (n Next) waitOffTheSlot(ctx context.Context, c *closeOut, report *NextReport, waits string) {
-	if c.cross != nil {
-		report.CrossSlot = append(report.CrossSlot, fmt.Sprintf("gave the cross-host merge slot of %s back while it waited for %s before %s",
-			c.path.Rig, waits, c.merged.what()))
-	}
-	report.Notes = append(report.Notes, c.cross.Release(ctx)...)
-	c.cross = nil
-	n.waitForTheMergedGate(ctx, c, report)
-	n.takeCrossSlot(ctx, c, report)
-}
-
-// offTheSlot is a try at a landing that stopped before its gate on the merged
-// result, which would have waited for this host, for waits, while holding the
-// rig's merge slot across hosts.
-type offTheSlot struct{ waits string }
-
-func (o offTheSlot) Error() string {
-	return "the rig's tests on the merged result wait for " + o.waits + ", which is not waited for under the merge slot across hosts"
 }
 
 // queueStamp leaves a chain stamp of the landed commit for the follower's
@@ -3055,7 +3023,9 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 		case err == nil:
 			return landed, nil
 		case errors.As(err, &off):
-			n.waitOffTheSlot(ctx, c, report, off.waits)
+			if err := n.waitOffTheSlot(ctx, c, report, off.waits); err != nil {
+				return Landed{}, err
+			}
 		case Rejected(err):
 			if firstLost == nil {
 				firstLost = err
@@ -3174,6 +3144,9 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 		}
 	}
 
+	if err := c.slotLostBeforePush(); err != nil {
+		return Landed{}, err
+	}
 	if err := n.pushRetrying(ctx, report, dir, c.target); err != nil {
 		return Landed{}, err
 	}

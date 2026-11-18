@@ -13,7 +13,8 @@ import (
 // takes the slot alone again, which waits for those checks to end and keeps new
 // ones out, so a check never runs beside the batch's own run of the tests. A
 // holding that cannot be yielded (a fake, or a slot of another kind) is simply
-// kept: the batch waits as it always did.
+// kept: the batch waits as it always did. A close-out of one story yields its
+// slot the same way for the waits of its merge (mergeYielding, mw-gq6.1424).
 //
 // The one lock order of the rig's merge slot and the host's gate lock is the slot,
 // then the lock (a check and a close-out keep it; the after-landing lock is no
