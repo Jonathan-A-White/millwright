@@ -1260,3 +1260,40 @@ func TestAStaleHostsHoldIsNotNamedBesideAnotherHostsFreshOne(t *testing.T) {
 		t.Errorf("expected only the laptop's hold, got %+v", alarms)
 	}
 }
+
+// mw-gq6.1439: one host's pass that passes a rig's ready stories over for two
+// holds keeps both in its note, and the alarm line names both.
+func TestAHostPassingARigsStoriesOverForTwoHoldsNamesBothInTheAlarm(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _ := aSmokeHeldRig(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.3", Title: "Landed, its close lost"})
+	if err := tracker.SetLabels("mw-gq6.3", application.RunState+":"+application.RunLanded); err != nil {
+		t.Fatal(err)
+	}
+	dispatch.Now = func() time.Time { return statusNow.Add(-4 * time.Hour) }
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+
+	kept, _ := tracker.Note(ctx, application.StarvedKey("vps"))
+	holds := map[string]bool{}
+	for _, r := range application.ParseStarved(kept) {
+		holds[r.Hold] = true
+	}
+	if !holds["smoke hold"] || !holds["lost close"] {
+		t.Fatalf("expected the note to keep the smoke hold and the lost close, got %q", kept)
+	}
+
+	alarms := starvedAlarms(t, tracker)
+	if len(alarms) != 1 {
+		t.Fatalf("expected one alarm, got %+v", alarms)
+	}
+	for _, want := range []string{"smoke hold", "the grist smoke of cairn failed", "lost close", "its last run landed it"} {
+		if !strings.Contains(alarms[0].Text, want) {
+			t.Errorf("expected %q in the alarm line, got %q", want, alarms[0].Text)
+		}
+	}
+	if strings.Contains(alarms[0].Identity, "hold") {
+		t.Errorf("expected the identity to leave the holds out, got %q", alarms[0].Identity)
+	}
+}

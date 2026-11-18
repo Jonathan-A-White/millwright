@@ -154,10 +154,11 @@ func (r StarvedRig) current(now time.Time) bool {
 	return true
 }
 
-// FormatStarved is the note's value, its lines in rig order.
+// FormatStarved is the note's value, its lines in rig order; a rig held by
+// several holds has a line each, in the order given (mw-gq6.1439).
 func FormatStarved(rigs []StarvedRig) string {
 	sorted := slices.Clone(rigs)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Rig < sorted[j].Rig })
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Rig < sorted[j].Rig })
 	lines := make([]string, 0, len(sorted))
 	for _, r := range sorted {
 		field := func(s string) string { return strings.Join(strings.Fields(s), " ") }
@@ -190,10 +191,10 @@ func ParseStarved(value string) []StarvedRig {
 // starvedPass reads the rigs a dispatch pass held back whole: each rig with a
 // ready story passed over, other than for the Governor's own or a hold the Mayor
 // put on it (held-for), and no story
-// running or started in it. The hold named is the one most of its stories were
-// passed over for, the first of them winning a tie; the reason is the first
-// such story's own.
-func starvedPass(ready []StoryDetail, passed []Passed, running []StoryDetail, started []Started) map[string]StarvedRig {
+// running or started in it. Each hold a story of the rig was passed over for is
+// named, the one most of its stories were passed over for first (the first of
+// them winning a tie), with the reason of the first such story (mw-gq6.1439).
+func starvedPass(ready []StoryDetail, passed []Passed, running []StoryDetail, started []Started) map[string][]StarvedRig {
 	rigOf := map[string]string{}
 	for _, detail := range ready {
 		rigOf[detail.Story.ID] = detail.Merged().Rig
@@ -227,22 +228,20 @@ func starvedPass(ready []StoryDetail, passed []Passed, running []StoryDetail, st
 		}
 		holds[rig][hold].count++
 	}
-	found := map[string]StarvedRig{}
+	found := map[string][]StarvedRig{}
 	for rig, byHold := range holds {
-		best := order[rig][0]
-		for _, hold := range order[rig][1:] {
-			if byHold[hold].count > byHold[best].count {
-				best = hold
-			}
+		names := slices.Clone(order[rig])
+		sort.SliceStable(names, func(i, j int) bool { return byHold[names[i]].count > byHold[names[j]].count })
+		for _, hold := range names {
+			found[rig] = append(found[rig], StarvedRig{Rig: rig, Hold: hold, Reason: byHold[hold].reason})
 		}
-		found[rig] = StarvedRig{Rig: rig, Hold: best, Reason: byHold[best].reason}
 	}
 	return found
 }
 
 // keepStarved brings the host's note level with the pass: a rig found held back
 // whole for the first time is held from now, one held before keeps the time it
-// was first held (with the hold of this pass), and one with a story running or
+// was first held (with the holds of this pass), and one with a story running or
 // started, or nothing left ready, is taken off. The note is written only when it
 // changes. A dry run writes nothing.
 func (d Dispatch) keepStarved(ctx context.Context, ready []StoryDetail, running []StoryDetail, report *DispatchReport) {
@@ -250,19 +249,24 @@ func (d Dispatch) keepStarved(ctx context.Context, ready []StoryDetail, running 
 		return
 	}
 	was, _ := d.Memory.Note(ctx, StarvedKey(d.Host))
-	before := map[string]StarvedRig{}
+	// A rig is held from the earliest of its lines in the note.
+	before := map[string]time.Time{}
 	for _, r := range ParseStarved(was) {
-		before[r.Rig] = r
+		if first, ok := before[r.Rig]; !ok || r.Since.Before(first) {
+			before[r.Rig] = r.Since
+		}
 	}
 	now := starvedPass(ready, report.Passed, running, report.Started)
 	var kept []StarvedRig
 	for _, rig := range slices.Sorted(maps.Keys(now)) {
-		found := now[rig]
-		found.Since = d.now()
+		since := d.now()
 		if earlier, held := before[rig]; held {
-			found.Since = earlier.Since
+			since = earlier
 		}
-		kept = append(kept, found)
+		for _, found := range now[rig] {
+			found.Since = since
+			kept = append(kept, found)
+		}
 	}
 	value := FormatStarved(kept)
 	if value == FormatStarved(ParseStarved(was)) {
@@ -325,7 +329,16 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 			continue
 		}
 		text := fmt.Sprintf("%s: %d ready, none running for %s, held by %s", rig, len(ready), elapsed(now.Sub(r.Since)), holdsWords(holding[rig]))
-		if way := harnessWayOut(r, work); way != "" {
+		// The oldest host's own holds decide whether it is a wait and whether a
+		// harness stop is among them (mw-gq6.1439).
+		own := hostsHolds(holding[rig], r.Host)
+		way := ""
+		for _, h := range own {
+			if way = harnessWayOut(h, work); way != "" {
+				break
+			}
+		}
+		if way != "" {
 			text += ". " + way
 		}
 		// The rig and the stories ready are the alarm; how long it has lasted, the
@@ -333,7 +346,10 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		// starved rig is one fact whatever it is held by, so its identity leaves the
 		// hold out: the hold flipping from no room to no grist key and back is not
 		// news (mw-gq6.984, mw-gq6.1194). Whether it is a wait or a fault is Wait.
-		wait := holdIsAWait(r)
+		wait := true
+		for _, h := range own {
+			wait = wait && holdIsAWait(h)
+		}
 		identity := strings.Join(append([]string{rig}, slices.Sorted(slices.Values(ready))...), "\t")
 		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity, Wait: wait})
 	}
@@ -341,14 +357,13 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 }
 
 // holdsWords is what holds a rig, in the alarm's words. One host's note is its
-// hold and the reason dispatch gave. Several hosts' notes are each named with the
-// host, the oldest first: a story that could run on several hosts is passed over
-// by each, and the hold of the host that is the real block (the laptop's no room)
-// is not hidden behind another's (cloud1 has no checkout) (mw-gq6.1399).
+// hold and the reason dispatch gave; a host that passed the rig's stories over for
+// several holds names each, the commonest first, joined by " + " (mw-gq6.1439).
+// Several hosts' notes are each named with the host, the oldest first: a story
+// that could run on several hosts is passed over by each, and the hold of the host
+// that is the real block (the laptop's no room) is not hidden behind another's
+// (cloud1 has no checkout) (mw-gq6.1399).
 func holdsWords(held []StarvedRig) string {
-	if len(held) == 1 {
-		return holdWords(held[0])
-	}
 	sorted := slices.Clone(held)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if !sorted[i].Since.Equal(sorted[j].Since) {
@@ -356,11 +371,33 @@ func holdsWords(held []StarvedRig) string {
 		}
 		return sorted[i].Host < sorted[j].Host
 	})
-	words := make([]string, len(sorted))
-	for i, r := range sorted {
-		words[i] = r.Host + ": " + holdWords(r)
+	var hosts []string
+	byHost := map[string][]string{}
+	for _, r := range sorted {
+		if _, seen := byHost[r.Host]; !seen {
+			hosts = append(hosts, r.Host)
+		}
+		byHost[r.Host] = append(byHost[r.Host], holdWords(r))
+	}
+	if len(hosts) == 1 {
+		return strings.Join(byHost[hosts[0]], " + ")
+	}
+	words := make([]string, len(hosts))
+	for i, host := range hosts {
+		words[i] = host + ": " + strings.Join(byHost[host], " + ")
 	}
 	return strings.Join(words, "; ")
+}
+
+// hostsHolds are the notes of the rig that host wrote, in the order given.
+func hostsHolds(held []StarvedRig, host string) []StarvedRig {
+	var own []StarvedRig
+	for _, r := range held {
+		if r.Host == host {
+			own = append(own, r)
+		}
+	}
+	return own
 }
 
 // holdWords is one note's hold with the reason dispatch gave it.
