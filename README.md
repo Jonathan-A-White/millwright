@@ -459,10 +459,12 @@ A host has **room** for a story of any host, `auto` or named, only while its
 1-minute load average is under `room_load_per_core` of a core each (default 1.0,
 so under its core count) and at least `room_min_free_mb` of memory is available
 (default 2048, from `MemAvailable` in `/proc/meminfo`); both are in the config
-file's `[dispatch]` table. A WSL host also needs `min_drive_free_gb` (default 10,
+file's `[dispatch]` table. A WSL host also needs `min_drive_free_gb` (default 15,
 `0` turns it off) free on the Windows drive holding its vhdx, read from the report
 the Windows task writes into WSL (`~/.local/state/mw/windows-drive-free`; a host
-with no current report is not held back). The cap on sessions is still the ceiling: room only holds
+with no current report is not held back, but `mw doctor wsl-drive-free` is faulty naming the line that installs
+the task). `mw status` names a refusal for the drive under DAMPERS, with the free space and the floor, and
+`mw doctor wsl-drive-free` warns, 'low, not yet refusing', under `drive_warn_gb` (default 30, `0` is off). The cap on sessions is still the ceiling: room only holds
 back a story the cap would have let through, which stays ready and claimed by
 nobody. A load or memory that cannot be read holds nothing back. A host that loses
 its room, and one that has it back, are each one `job` event (`dispatch-room@<host>`,

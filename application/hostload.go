@@ -124,9 +124,10 @@ const (
 	DefaultRoomMinFreeMB   int64 = 2048
 	// DefaultRoomMinDriveFreeGB is the free space a WSL host's Windows drive must
 	// have to take a story: the desktop's D: went read-only twice at under 1 GB
-	// (mw-gq6.1381). The config file's [dispatch] min_drive_free_gb changes it,
-	// and 0 turns the guard off.
-	DefaultRoomMinDriveFreeGB int64 = 10
+	// (mw-gq6.1381). It is 15, because a Builder's worktree and node_modules may
+	// take several GB (mw-gq6.1428, provisional). The config file's [dispatch]
+	// min_drive_free_gb changes it, and 0 turns the guard off.
+	DefaultRoomMinDriveFreeGB int64 = 15
 )
 
 // RoomLimits is how much room a host must have before it starts a story. The
@@ -184,6 +185,24 @@ func (r LoadReading) NoRoom(limits RoomLimits) string {
 		why = append(why, fmt.Sprintf("%s has %.1f GB free, under %d GB: the WSL disk cannot grow", r.DriveName, float64(r.DriveFreeBytes)/(1<<30), floor))
 	}
 	return strings.Join(why, "; ")
+}
+
+// DriveFloorAlarm is the DAMPERS line for a host whose dispatch starts no new
+// Builder because the Windows drive's free space is under the floor: the host,
+// the drive, what it has free and the floor (mw-gq6.1428). It is the same test
+// NoRoom makes, so the line is there exactly while dispatch is refusing for it;
+// false for a host with no current report, one that is not WSL, or the guard off.
+func (r LoadReading) DriveFloorAlarm(host string, limits RoomLimits) (DamperAlarm, bool) {
+	floor := limits.minDriveFreeGB()
+	if limits.NoDriveGuard || !r.DriveKnown || r.DriveFreeBytes >= floor<<30 {
+		return DamperAlarm{}, false
+	}
+	return DamperAlarm{
+		Principle: DamperDriveFloor,
+		Text: fmt.Sprintf("%s: %s has %.1f GB free, under the %d GB floor: dispatch starts no new Builder on %s until space is freed (`mw doctor wsl-drive-free`)",
+			host, r.DriveName, float64(r.DriveFreeBytes)/(1<<30), floor, host),
+		Identity: "drive-floor:" + host,
+	}, true
 }
 
 // NoRoomBesidesPartWorkers is NoRoom with the load less the share of the

@@ -44,7 +44,8 @@
 //	[dispatch]                         # the room a host needs to start a story (mw-t0z3fu.1)
 //	room_load_per_core = 1.0           # none while the 1-minute load is this many a core
 //	room_min_free_mb   = 2048          # none while less memory than this is available
-//	min_drive_free_gb  = 10            # none while a WSL host's Windows drive has less free than this; 0 is off (mw-gq6.1381)
+//	min_drive_free_gb  = 15            # none while a WSL host's Windows drive has less free than this; 0 is off (mw-gq6.1381, mw-gq6.1428)
+//	drive_warn_gb      = 30            # mw doctor warns, before dispatch stops, under this much free on that drive; 0 is off (mw-gq6.1428)
 //	grist_cap          = 4             # stories at once while a tutor is in use (default: cap less 2)
 //	grist_recent_s     = 600           # a tutor is in use this long after its last answer
 //	grist_slow_factor  = 1.5           # none while tutor answers take over this times their par
@@ -1472,8 +1473,14 @@ const (
 	DefaultRoomLoadPerCore       = 1.0
 	DefaultRoomMinFreeMB   int64 = 2048
 	// DefaultRoomMinDriveFreeGB is the free space a WSL host's Windows drive must
-	// have to start a story (mw-gq6.1381); 0 in the table turns the guard off.
-	DefaultRoomMinDriveFreeGB int64 = 10
+	// have to start a story (mw-gq6.1381); 0 in the table turns the guard off. It
+	// is 15: a Builder's worktree and node_modules may take several GB
+	// (mw-gq6.1428, provisional).
+	DefaultRoomMinDriveFreeGB int64 = 15
+	// DefaultDriveWarnGB is the free space under which mw doctor warns that the
+	// Windows drive is low, before dispatch refuses (mw-gq6.1428, provisional); 0
+	// in the table turns the warning off.
+	DefaultDriveWarnGB int64 = 30
 	// DefaultGristRecentSeconds and DefaultGristSlowFactor are the same for
 	// grist (mw-t0z3fu.4).
 	DefaultGristRecentSeconds = 600
@@ -1489,6 +1496,10 @@ type RoomSettings struct {
 	// MinDriveFreeGB is the free space, in gigabytes, the Windows drive of a WSL
 	// host must have; 0 is the guard off (mw-gq6.1381).
 	MinDriveFreeGB int64
+	// DriveWarnGB is the free space, in gigabytes, under which mw doctor warns
+	// that the drive is low though dispatch is not yet refusing; 0 is off
+	// (mw-gq6.1428).
+	DriveWarnGB int64
 	// GristCap is how many sessions the host runs at once while a tutor is in
 	// use (mw-t0z3fu.4), 0 for the host's cap less 2. GristRecentSeconds is how
 	// long after the last tutor answer one still is, and GristSlowFactor the
@@ -1531,7 +1542,7 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 			}
 		}
 	}
-	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB, MinDriveFreeGB: DefaultRoomMinDriveFreeGB}
+	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB, MinDriveFreeGB: DefaultRoomMinDriveFreeGB, DriveWarnGB: DefaultDriveWarnGB}
 	if said := strings.TrimSpace(table["room_load_per_core"]); said != "" {
 		n, err := strconv.ParseFloat(said, 64)
 		if err != nil || n <= 0 || math.IsInf(n, 0) || math.IsNaN(n) {
@@ -1552,6 +1563,13 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says min_drive_free_gb = %q: it must be a whole number of gigabytes, 0 (the guard off) or more", DispatchTable, path, said)
 		}
 		settings.MinDriveFreeGB = n
+	}
+	if said := strings.TrimSpace(table["drive_warn_gb"]); said != "" {
+		n, err := strconv.ParseInt(said, 10, 64)
+		if err != nil || n < 0 {
+			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says drive_warn_gb = %q: it must be a whole number of gigabytes, 0 (the warning off) or more", DispatchTable, path, said)
+		}
+		settings.DriveWarnGB = n
 	}
 	settings.GristRecentSeconds, settings.GristSlowFactor = DefaultGristRecentSeconds, DefaultGristSlowFactor
 	for _, key := range []string{"grist_cap", "grist_recent_s"} {

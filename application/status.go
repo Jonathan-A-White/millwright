@@ -1382,6 +1382,16 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
+	if s.Load != nil {
+		// A host whose dispatch refuses for its Windows drive says so here, with the
+		// free space and the floor, and not only as a 'no room' line (mw-gq6.1428).
+		if reading, err := s.Load.Load(ctx); err == nil {
+			if alarm, found := reading.DriveFloorAlarm(s.Host, s.Room); found {
+				report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
+			}
+		}
+	}
+
 	if alarm, found := needsFilesKeyAlarm(report.Ready, report.NoFilesKey); found {
 		report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
 	}

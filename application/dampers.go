@@ -197,6 +197,10 @@ const (
 	// after the plan's slow-make limit: it is billed and takes no story, and it
 	// names the box and what Vultr says of it (mw-gq6.1113).
 	DamperCloudMake = "cloud make"
+	// DamperDriveFloor is the alarm for a WSL host whose Windows drive has less
+	// free than the floor: dispatch starts no new Builder there while it lasts
+	// (mw-gq6.1428).
+	DamperDriveFloor = "drive floor"
 )
 
 // damperNamed is how many beads an alarm's line names before it counts the rest.

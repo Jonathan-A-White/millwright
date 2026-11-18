@@ -26,10 +26,11 @@ func TestNoRoomSaysWhyAWSLHostWhoseWindowsDriveIsNearlyFull(t *testing.T) {
 		limits  application.RoomLimits
 		want    string
 	}{
-		{"drive under the default 10 GB", aDriveWith(gb / 2), application.RoomLimits{}, "D: has 0.5 GB free, under 10 GB: the WSL disk cannot grow"},
-		{"drive at the default 10 GB", aDriveWith(10 * gb), application.RoomLimits{}, ""},
+		{"drive under the default 15 GB", aDriveWith(gb / 2), application.RoomLimits{}, "D: has 0.5 GB free, under 15 GB: the WSL disk cannot grow"},
+		{"drive just under the default 15 GB", aDriveWith(14 * gb), application.RoomLimits{}, "D: has 14.0 GB free, under 15 GB: the WSL disk cannot grow"},
+		{"drive at the default 15 GB", aDriveWith(15 * gb), application.RoomLimits{}, ""},
 		{"drive well over", aDriveWith(200 * gb), application.RoomLimits{}, ""},
-		{"a higher minimum", aDriveWith(15 * gb), application.RoomLimits{MinDriveFreeGB: 20}, "D: has 15.0 GB free, under 20 GB: the WSL disk cannot grow"},
+		{"a higher minimum", aDriveWith(16 * gb), application.RoomLimits{MinDriveFreeGB: 20}, "D: has 16.0 GB free, under 20 GB: the WSL disk cannot grow"},
 		{"the guard off", aDriveWith(0), application.RoomLimits{NoDriveGuard: true}, ""},
 		{"drive not read", application.LoadReading{Load: 1, Cores: 8}, application.RoomLimits{}, ""},
 	}
@@ -68,7 +69,7 @@ func TestDispatchClaimsNothingOnAWSLHostWhoseWindowsDriveIsUnderTheMinimum(t *te
 			why = p.Why
 		}
 	}
-	if !strings.Contains(why, "D: has 0.0 GB free, under 10 GB") || strings.Contains(why, "\n") {
+	if !strings.Contains(why, "D: has 0.0 GB free, under 15 GB") || strings.Contains(why, "\n") {
 		t.Errorf("want one no-room line naming the drive, got %q (passed %+v)", why, report.Passed)
 	}
 }
@@ -78,7 +79,7 @@ func TestDispatchGoesOnWhereTheWindowsDriveHasTheMinimumOrTheGuardIsOff(t *testi
 		reading application.LoadReading
 		limits  application.RoomLimits
 	}{
-		"at the minimum": {aDriveWith(10 * gb), application.RoomLimits{}},
+		"at the minimum": {aDriveWith(15 * gb), application.RoomLimits{}},
 		"guard off":      {aDriveWith(gb / 100), application.RoomLimits{NoDriveGuard: true}},
 		"not a WSL host": {application.LoadReading{Load: 1, Cores: 8}, application.RoomLimits{}},
 	} {

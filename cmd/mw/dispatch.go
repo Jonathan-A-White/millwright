@@ -302,8 +302,9 @@ func newDispatchCmd() *cobra.Command {
 			"A host starts a story only while it has room (mw-t0z3fu.1), whatever host the story names: its\n" +
 			"1-minute load under room_load_per_core of a core each (default 1.0) and at least room_min_free_mb\n" +
 			"of memory available (default 2048), both under the config file's [dispatch] table. On a WSL host\n" +
-			"it also needs min_drive_free_gb (default 10, 0 is off) free on the Windows drive holding the\n" +
-			"vhdx, read from the report the Windows task writes (mw host wsl-flag --install-line). The cap is still\n" +
+			"it also needs min_drive_free_gb (default 15, 0 is off) free on the Windows drive holding the\n" +
+			"vhdx, read from the report the Windows task writes (mw host wsl-flag --install-line); mw status\n" +
+			"names the refusal under DAMPERS. The cap is still\n" +
 			"the ceiling. A story held back stays ready and claimed by nobody; a host that loses its room, and one\n" +
 			"that has it back, are each one event, and mw status says why. A load or memory that cannot be read\n" +
 			"holds nothing back.\n\n" +

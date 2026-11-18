@@ -2314,14 +2314,14 @@ func TestRoomIsReadFromTheTable(t *testing.T) {
 	}
 }
 
-// mw-gq6.1381: the Windows drive's floor is 10 GB until the table says another,
-// and 0 turns the guard off.
+// mw-gq6.1381: the Windows drive's floor is 15 GB (10 before mw-gq6.1428) until
+// the table says another, and 0 turns the guard off.
 func TestMinDriveFreeGBIsReadFromTheTable(t *testing.T) {
 	writeConfig(t, "host = \"laptop\"\n")
-	if got, err := config.Room(); err != nil || got.MinDriveFreeGB != 10 {
-		t.Fatalf("expected 10 GB by default, got %+v, %v", got, err)
+	if got, err := config.Room(); err != nil || got.MinDriveFreeGB != 15 {
+		t.Fatalf("expected 15 GB by default, got %+v, %v", got, err)
 	}
-	for said, want := range map[string]int64{"15": 15, "0": 0} {
+	for said, want := range map[string]int64{"20": 20, "0": 0} {
 		writeConfig(t, "[dispatch]\nmin_drive_free_gb = "+said+"\n")
 		if got, err := config.Room(); err != nil || got.MinDriveFreeGB != want {
 			t.Errorf("min_drive_free_gb = %s: got %+v, %v, want %d", said, got, err, want)
@@ -3241,6 +3241,32 @@ func TestNeedsMinAgeDefaultsToADayAndReadsHoursAndDays(t *testing.T) {
 		writeConfig(t, "[needs]\nmin_age = "+bad+"\n")
 		if _, err := config.Needs(); err == nil || !strings.Contains(err.Error(), "min_age") {
 			t.Errorf("min_age = %s was not refused: %v", bad, err)
+		}
+	}
+}
+
+// mw-gq6.1428: the two floors of the Windows drive are config keys of the
+// [dispatch] table: min_drive_free_gb (dispatch starts no Builder under it,
+// default 15) and drive_warn_gb (mw doctor warns under it, default 30).
+func TestDriveFloorKeys(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Room()
+	if err != nil || got.MinDriveFreeGB != 15 || got.DriveWarnGB != 30 {
+		t.Fatalf("expected floors 15 and 30 by default, got %+v, %v", got, err)
+	}
+	writeConfig(t, "[dispatch]\nmin_drive_free_gb = 20\ndrive_warn_gb = 50\n")
+	got, err = config.Room()
+	if err != nil || got.MinDriveFreeGB != 20 || got.DriveWarnGB != 50 {
+		t.Fatalf("expected the floors set to 20 and 50, got %+v, %v", got, err)
+	}
+	writeConfig(t, "[dispatch]\ndrive_warn_gb = 0\n")
+	if got, err := config.Room(); err != nil || got.DriveWarnGB != 0 || got.MinDriveFreeGB != 15 {
+		t.Errorf("expected drive_warn_gb = 0 to turn the warning off, got %+v, %v", got, err)
+	}
+	for _, bad := range []string{"drive_warn_gb = -1\n", "drive_warn_gb = lots\n", "drive_warn_gb = 1.5\n"} {
+		writeConfig(t, "[dispatch]\n"+bad)
+		if _, err := config.Room(); err == nil || !strings.Contains(err.Error(), "drive_warn_gb") {
+			t.Errorf("expected %q to be refused naming the key, got %v", bad, err)
 		}
 	}
 }
