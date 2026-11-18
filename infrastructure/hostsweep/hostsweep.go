@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,16 @@ var cacheNames = map[string]bool{"node_modules": true, "ms-playwright": true}
 // mainRefs are the branches a commit may be on to be on the rig's main.
 var mainRefs = []string{"refs/remotes/origin/main", "refs/heads/main", "refs/remotes/origin/master", "refs/heads/master"}
 
+// attemptSuffix is what mw keeps a branch under when a retry sets it aside:
+// mw/<story>-attempt<N>, with -<n> added when that name was taken.
+var attemptSuffix = regexp.MustCompile(`-attempt[0-9]+(-[0-9]+)?$`)
+
+// storyOfBranch is the story a branch cut as mw/<story>, or set aside by a
+// retry as mw/<story>-attempt<N>, belongs to.
+func storyOfBranch(branch string) string {
+	return attemptSuffix.ReplaceAllString(strings.TrimPrefix(branch, application.BranchPrefix), "")
+}
+
 func (d Disk) program() string {
 	if d.Program != "" {
 		return d.Program
@@ -70,7 +81,7 @@ func (d Disk) Trees(ctx context.Context) ([]application.HostSweepTree, error) {
 	byStory := map[string]*application.HostSweepTree{}
 	var order []string
 	add := func(tree application.HostSweepTree) {
-		key := tree.RigDir + "\x00" + tree.Story
+		key := tree.RigDir + "\x00" + tree.Story + "\x00" + tree.Branch
 		if _, seen := byStory[key]; seen {
 			return
 		}
@@ -81,6 +92,7 @@ func (d Disk) Trees(ctx context.Context) ([]application.HostSweepTree, error) {
 
 	// The worktrees: each directory of a .mw-worktrees beside a rig is a story's.
 	seenDirs := map[string]bool{}
+	dirStories := map[string]bool{}
 	for _, rigDir := range d.rigDirs() {
 		parent := filepath.Join(filepath.Dir(rigDir), application.WorktreesDir)
 		if seenDirs[parent] {
@@ -108,15 +120,17 @@ func (d Disk) Trees(ctx context.Context) ([]application.HostSweepTree, error) {
 		}
 	}
 
-	// The branches of stories with no worktree left: a branch cut as mw/<story>.
+	// The branches of stories with no worktree left: a branch cut as mw/<story>,
+	// or set aside by a retry as mw/<story>-attempt<N>, which is judged by the
+	// story it was cut for.
 	for _, rigDir := range d.rigDirs() {
 		out, err := d.git(ctx, rigDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/"+application.BranchPrefix)
 		if err != nil {
 			continue
 		}
 		for _, branch := range strings.Fields(out) {
-			story := strings.TrimPrefix(branch, application.BranchPrefix)
-			if _, seen := byStory[rigDir+"\x00"+story]; seen {
+			story := storyOfBranch(branch)
+			if story == strings.TrimPrefix(branch, application.BranchPrefix) && dirStories[rigDir+"\x00"+story] {
 				continue
 			}
 			add(d.look(ctx, application.HostSweepTree{Story: story, Rig: d.nameOf(rigDir), RigDir: rigDir, Branch: branch}))

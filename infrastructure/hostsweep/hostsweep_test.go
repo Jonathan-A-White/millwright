@@ -214,3 +214,39 @@ func TestRunsTheVaultsGitTracksAreSaidSo(t *testing.T) {
 		t.Errorf("a run in a vault git cannot read: %+v", runs)
 	}
 }
+
+// A branch a retry set aside (mw/<story>-attempt<N>, with -<n> added when that
+// name was taken) belongs to the story it was cut for, so the sweep asks the
+// tracker about that story and not about a story called mw-x-attempt1.
+func TestAttemptBranchesAreJudgedByTheirStory(t *testing.T) {
+	disk, _ := rigOnDisk(t)
+	rigDir := disk.Rigs["rig"]
+	for _, branch := range []string{"mw/s-retried", "mw/s-retried-attempt1", "mw/s-retried-attempt2-2", "mw/s-clean-attempt1"} {
+		git(t, rigDir, "branch", branch, "main")
+	}
+	found, err := disk.Trees(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	storyOf := map[string]string{}
+	for _, tree := range found {
+		if tree.Branch != "" {
+			storyOf[tree.Branch] = tree.Story
+		}
+	}
+	want := map[string]string{
+		"mw/s-retried":            "s-retried",
+		"mw/s-retried-attempt1":   "s-retried",
+		"mw/s-retried-attempt2-2": "s-retried",
+		"mw/s-clean-attempt1":     "s-clean",
+		"mw/s-clean":              "s-clean",
+		"mw/s-branch-only":        "s-branch-only",
+	}
+	for branch, story := range want {
+		if got, ok := storyOf[branch]; !ok {
+			t.Errorf("the branch %s is not listed at all (listed: %v)", branch, storyOf)
+		} else if got != story {
+			t.Errorf("the branch %s is judged by story %q, want %q", branch, got, story)
+		}
+	}
+}
