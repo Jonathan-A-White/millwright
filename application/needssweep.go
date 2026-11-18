@@ -55,6 +55,9 @@ type SweepRef struct {
 // infrastructure/rig's Worktrees, the tests use a fake.
 type SweepGit interface {
 	CommitHistory
+	// Fetch brings the checkout's remote refs up to date: a landing made on
+	// another host is on origin's branch before it is in this checkout.
+	Fetch(ctx context.Context, dir string) error
 	// MainRefs are the refs of the rig's main that exist in the checkout,
 	// origin's first.
 	MainRefs(ctx context.Context, dir string) ([]SweepRef, error)
@@ -113,6 +116,8 @@ type NeedsSweepLine struct {
 	Commit string `json:"commit,omitempty"`
 	// Revert is the commit that reverted it, for the reverted class.
 	Revert string `json:"revert,omitempty"`
+	// Branch is the rig's own branch the landing was judged against: main, master.
+	Branch string `json:"branch,omitempty"`
 	// Action is what the line says it writes: the comment, the mail line or nothing.
 	Action string `json:"action"`
 	Wrote  bool   `json:"wrote,omitempty"`
@@ -168,6 +173,7 @@ type sweepFacts struct {
 	byID     map[string]TriageBead
 	bugs     []TriageBead
 	mains    map[string][]SweepRef
+	fetched  map[string]error // by checkout: nil when the fetch worked
 	sites    map[string]string
 	comments map[string][]Comment
 }
@@ -183,7 +189,7 @@ func (s NeedsSweep) Run(ctx context.Context, opts NeedsSweepOptions) (NeedsSweep
 	}
 	facts := &sweepFacts{
 		opts: opts, now: now, run: result.Run, byID: map[string]TriageBead{},
-		mains: map[string][]SweepRef{}, sites: map[string]string{},
+		mains: map[string][]SweepRef{}, fetched: map[string]error{}, sites: map[string]string{},
 	}
 	for _, b := range all {
 		facts.byID[b.ID] = b
@@ -356,12 +362,21 @@ func (s NeedsSweep) classify(ctx context.Context, f *sweepFacts, b TriageBead, c
 
 	refs, ok := f.mains[dir]
 	if !ok {
+		// A landing from another host is on origin's branch before it is in
+		// this checkout: fetch once for the checkout, and judge on what it has
+		// when the fetch fails, saying so where the commit is then not found.
+		_, fetched := f.fetched[dir]
+		if !fetched {
+			f.fetched[dir] = s.Git.Fetch(ctx, dir)
+		}
 		var err error
 		if refs, err = s.Git.MainRefs(ctx, dir); err != nil {
 			return skip(SweepUnproven, "main of "+rig+" could not be read: "+err.Error())
 		}
 		f.mains[dir] = refs
 	}
+	branch := sweepBranchOf(refs)
+	line.Branch = branch
 	var main SweepRef
 	var contained bool
 	var askErr error
@@ -373,14 +388,19 @@ func (s NeedsSweep) classify(ctx context.Context, f *sweepFacts, b TriageBead, c
 		}
 		if in {
 			main, contained = ref, true
+			line.Branch = sweepBranchName(ref.Name)
 			break
 		}
 	}
+	fetchNote := ""
+	if err := f.fetched[dir]; err != nil {
+		fetchNote = fmt.Sprintf(" (the fetch of %s failed, so this is the checkout as it is: %v)", rig, err)
+	}
 	switch {
 	case !contained && askErr != nil:
-		return skip(SweepUnproven, fmt.Sprintf("commit %s could not be found in %s main: %v", shortSha(commit), rig, askErr))
+		return skip(SweepUnproven, fmt.Sprintf("commit %s could not be found in %s %s: %v%s", shortSha(commit), rig, branch, askErr, fetchNote))
 	case !contained:
-		return skip(SweepUnproven, fmt.Sprintf("commit %s is not in %s main", shortSha(commit), rig))
+		return skip(SweepUnproven, fmt.Sprintf("commit %s is not in %s %s%s", shortSha(commit), rig, branch, fetchNote))
 	}
 
 	revert, err := s.Git.RevertOf(ctx, dir, main.Name, commit, b.ID)
@@ -483,12 +503,29 @@ func (s NeedsSweep) livePageStates(ctx context.Context, f *sweepFacts, rig, depl
 // verifiedText is the VERIFIED comment: its first word is VERIFIED, it says it is
 // not his use, and names the commit, where it was seen and when.
 func (s NeedsSweep) verifiedText(f *sweepFacts, b TriageBead, rig, commit string, main SweepRef, deployed string, age time.Duration, tail string) string {
-	seen := fmt.Sprintf("commit %s is in %s main (%s at %s)", shortSha(commit), rig, main.Name, shortSha(main.Sha))
+	seen := fmt.Sprintf("commit %s is in %s %s (%s at %s)", shortSha(commit), rig, sweepBranchName(main.Name), main.Name, shortSha(main.Sha))
 	if deployed != "" {
 		seen += fmt.Sprintf(" and in the deployed commit %s", shortSha(deployed))
 	}
 	return fmt.Sprintf("%s by the factory's own check, not by his use (mw needs sweep, run %s). Checked %s: %s; closed %s ago; no message of the Governor's on this bead since it closed and no open bug names it. %s",
 		VerifiedWord, f.run, f.now.Format(verifyTimeFormat), seen, sweepAge(age), tail)
+}
+
+// sweepBranchName is the branch a main ref names: origin/master is master.
+func sweepBranchName(ref string) string {
+	if i := strings.LastIndex(ref, "/"); i >= 0 {
+		return ref[i+1:]
+	}
+	return ref
+}
+
+// sweepBranchOf is the rig's own branch as its refs name it: the branch of the
+// first ref (origin's), main where the checkout holds none.
+func sweepBranchOf(refs []SweepRef) string {
+	if len(refs) == 0 {
+		return "main"
+	}
+	return sweepBranchName(refs[0].Name)
 }
 
 func shortSha(sha string) string {
@@ -535,8 +572,12 @@ func (s NeedsSweep) mailedBefore() map[string]bool {
 func (s NeedsSweep) mailReverted(ctx context.Context, lines []NeedsSweepLine) error {
 	var body strings.Builder
 	for _, l := range lines {
-		fmt.Fprintf(&body, "%s  %s\n  landed at %s in %s, reverted by %s, and no later merge of its branch is in main. It is closed as landed and is not in main.\n\n",
-			l.Bead, l.Title, shortSha(l.Commit), l.Rig, l.Revert)
+		branch := l.Branch
+		if branch == "" {
+			branch = "main"
+		}
+		fmt.Fprintf(&body, "%s  %s\n  landed at %s in %s, reverted by %s, and no later merge of its branch is in %s. It is closed as landed and is not in %s.\n\n",
+			l.Bead, l.Title, shortSha(l.Commit), l.Rig, l.Revert, branch, branch)
 	}
 	body.WriteString("The sweep wrote no comment on these. Whether to land them again is yours.")
 	_, err := s.Mailbox.Send(ctx, NewMessage{
