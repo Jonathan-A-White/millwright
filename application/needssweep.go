@@ -222,10 +222,10 @@ func (s NeedsSweep) Run(ctx context.Context, opts NeedsSweepOptions) (NeedsSweep
 		mode = "writing"
 	}
 	s.say("mw needs sweep (%s): %d unverified landings\n", mode, len(result.Lines))
-	for _, l := range result.Lines {
-		s.say("%-16s %-14s %s\n", l.Bead, l.Class, l.Action)
-	}
 	if !opts.Write {
+		for _, l := range result.Lines {
+			s.say("%-16s %-14s %s\n", l.Bead, l.Class, l.Action)
+		}
 		return result, nil
 	}
 	return s.write(ctx, facts, result)
@@ -252,7 +252,15 @@ func (s NeedsSweep) write(ctx context.Context, f *sweepFacts, result NeedsSweepR
 		l.Wrote = true
 		l.Action = "commented VERIFIED (" + l.Class + ")"
 		result.Wrote++
-		s.say("commented on %s\n", l.Bead)
+	}
+	// The lines are said once the writing is done, so each says what happened:
+	// the 'would comment' of the dry run is never printed for a write run.
+	for i := range result.Lines {
+		l := &result.Lines[i]
+		if l.text != "" && !l.Wrote {
+			l.Action = "not commented (" + l.Class + ")"
+		}
+		s.say("%-16s %-14s %s\n", l.Bead, l.Class, l.Action)
 	}
 	var mailErr error
 	if stopped == nil {
