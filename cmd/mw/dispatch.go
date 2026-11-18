@@ -457,7 +457,7 @@ func newDispatchCmd() *cobra.Command {
 				return err
 			}
 			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs, host)
-			dispatch := withHostRechecks(application.Dispatch{
+			dispatch := withHostRoom(withHostRechecks(application.Dispatch{
 				Tracker:   gateway,
 				Worktrees: worktrees,
 				Landing:   worktrees,
@@ -482,8 +482,6 @@ func newDispatchCmd() *cobra.Command {
 				PushWait:      closePushWait(),
 				VaultDir:      dir,
 				Load:          hostload.Proc{},
-				Room:          roomLimits(room),
-				Grist:         hostGristRoom(room),
 				Rigs:          rigs,
 				Changes:       worktrees,
 				Rules:         files,
@@ -502,7 +500,7 @@ func newDispatchCmd() *cobra.Command {
 				Rebases:         worktrees,
 
 				HasGristTestKey: hostHasGristTestKey,
-			}, recheckSuite)
+			}, recheckSuite), room)
 			dispatch.CloudBook, dispatch.CloudPlan = cloudStatus(dir, host)
 			// The mill answers what it left waiting, on the host that is home and
 			// where a [grist] table says so. A mill that cannot be set up costs
@@ -569,6 +567,18 @@ func newDispatchCmd() *cobra.Command {
 	cmd.Flags().IntVar(&capOverride, "cap", 0,
 		"how many sessions may run at once, instead of what the config file says")
 	return cmd
+}
+
+// withHostRoom gives a dispatch what it judges the host's room by: the load and
+// memory limits, the WSL drive floor and the grist room, all from one config's
+// room. The timer's dispatch and the one that ends a close-out are both built
+// through it, so a Builder started straight after a close-out meets the same room
+// as one the timer starts (mw-gq6.1469;
+// TestEveryDispatchCmdMwBuildsIsGivenTheHostRoom).
+func withHostRoom(d application.Dispatch, room config.RoomSettings) application.Dispatch {
+	d.Room = roomLimits(room)
+	d.Grist = hostGristRoom(room)
+	return d
 }
 
 // roomLimits is the config file's room as dispatch and status judge a host by:
