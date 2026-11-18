@@ -7,6 +7,7 @@ package application
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -790,15 +791,25 @@ func (w HostWork) writeDoctor(b *strings.Builder) {
 }
 
 // DoctorAlarms are the DAMPERS alarms of a host's doctor, one for each check
-// its fresh report left faulty: a stale report is said under the host, but is
-// not an alarm about a fault it may no longer have.
+// its fresh report left faulty. A stale report is said under the host, and is
+// no alarm about a fault it may no longer have, except for a fix the Governor
+// installs by hand (DoctorInstallChecks): the host's doctor that stopped
+// reporting is the host nobody has been to, and the install is still missing
+// until a report says it is not (mw-gq6.1429).
 func (w HostWork) DoctorAlarms() []DamperAlarm {
-	if w.DoctorSaid == "" || w.DoctorUnreadable || w.DoctorStale() {
+	if w.DoctorSaid == "" || w.DoctorUnreadable {
 		return nil
 	}
+	stale := w.DoctorStale()
 	var alarms []DamperAlarm
 	for _, f := range w.Doctor.Faulty {
-		alarms = append(alarms, DamperAlarm{Principle: DamperDoctor, Text: fmt.Sprintf("%s: %s faulty: %s", w.Host, f.Check, f.Reason)})
+		switch {
+		case !stale:
+			alarms = append(alarms, DamperAlarm{Principle: DamperDoctor, Text: fmt.Sprintf("%s: %s faulty: %s", w.Host, f.Check, f.Reason)})
+		case slices.Contains(DoctorInstallChecks, f.Check):
+			alarms = append(alarms, DamperAlarm{Principle: DamperDoctor,
+				Text: fmt.Sprintf("%s: %s faulty, its doctor report is %s old: stale, and it last said: %s", w.Host, f.Check, gcAge(w.Now.Sub(w.Doctor.At)), f.Reason)})
+		}
 	}
 	return alarms
 }

@@ -203,6 +203,12 @@ const (
 	DamperDriveFloor = "drive floor"
 )
 
+// DoctorInstallChecks are the checks of mw doctor that say a fix the Governor
+// installs by hand is not installed on a WSL host: the fstrim drop-ins and the
+// Windows drive's report. DAMPERS goes on naming one a host's last report left
+// faulty after that report has gone stale (mw-gq6.1429).
+var DoctorInstallChecks = []string{"wsl-trim", "wsl-drive-free"}
+
 // damperNamed is how many beads an alarm's line names before it counts the rest.
 const damperNamed = 5
 

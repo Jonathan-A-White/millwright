@@ -15,7 +15,11 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-var _ application.DoctorCheck = (*WSLTrim)(nil)
+var (
+	_ application.DoctorCheck           = (*WSLTrim)(nil)
+	_ application.DoctorStandsAfterCure = (*WSLTrim)(nil)
+	_ application.DoctorStandsAfterCure = (*WSLDriveFree)(nil)
+)
 
 // WSLTrimName is what the check is called: in the log, and on the command
 // line as `mw doctor wsl-trim`.
@@ -117,6 +121,9 @@ type WSLTrim struct {
 	Program string
 	// DetectVirt says what systemd-detect-virt prints. Nil runs the real one.
 	DetectVirt func(ctx context.Context) (string, error)
+	// DropIns are the files whose absence says the drop-ins are not installed.
+	// Nil reads WSLTrimDropIns.
+	DropIns []string
 	// Now is the clock. Nil reads the wall clock.
 	Now func() time.Time
 	// Note puts text in the Mayor's way. Nil writes nothing.
@@ -148,14 +155,38 @@ func (w *WSLTrim) Probe(ctx context.Context) (application.Verdict, string) {
 	}
 	last, ran := lastTrigger(props["LastTriggerUSec"])
 	if !ran {
-		return application.DoctorFaulty, "fstrim.timer has never run on this WSL host, so its vhdx is never trimmed; cure: " + WSLTrimCureCommand
+		return application.DoctorFaulty, "fstrim.timer has never run on this WSL host, so its vhdx is never trimmed" + w.installSaid() + "; cure: " + WSLTrimCureCommand
 	}
 	age := w.now().Sub(last)
 	if age > WSLTrimMaxAge {
-		return application.DoctorFaulty, fmt.Sprintf("fstrim.timer last ran %d days ago on this WSL host; cure: %s", int(age/(24*time.Hour)), WSLTrimCureCommand)
+		return application.DoctorFaulty, fmt.Sprintf("fstrim.timer last ran %d days ago on this WSL host%s; cure: %s", int(age/(24*time.Hour)), w.installSaid(), WSLTrimCureCommand)
 	}
 	return application.DoctorOK, fmt.Sprintf("fstrim.timer last ran %d days ago", int(age/(24*time.Hour)))
 }
+
+// installSaid says, for a faulty line, that the drop-ins this check's cure
+// installs are not there: the fix was never made, not made and lost. It is
+// empty when they are there, and the timer then stopped for another reason.
+func (w *WSLTrim) installSaid() string {
+	dropIns := w.DropIns
+	if dropIns == nil {
+		dropIns = WSLTrimDropIns[:]
+	}
+	var missing []string
+	for _, path := range dropIns {
+		if _, err := os.Stat(path); err != nil {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (the fstrim drop-ins are not installed: %s missing)", strings.Join(missing, ", "))
+}
+
+// CureLeavesFault implements application.DoctorStandsAfterCure: the cure is a
+// note, and the drop-ins stay uninstalled after it.
+func (w *WSLTrim) CureLeavesFault() bool { return true }
 
 // Cure implements application.DoctorCheck: one note to the Mayor, nothing on
 // the host changed. A note that cannot be written fails the cure, so the
@@ -355,7 +386,11 @@ func (w *WSLDriveFree) Probe(ctx context.Context) (application.Verdict, string) 
 			drive, float64(free)/(1<<30), WSLDriveFreeMin>>30, reportAge(age))
 	}
 	if age > WSLDriveFreeMaxAge {
-		return application.DoctorCannotTell, fmt.Sprintf("the report of the Windows drive's free space is %s: the Windows task has stopped writing it; `mw host wsl-flag --install-line` prints the line that installs the task", reportAge(age))
+		// A report over a day old is no report: the task is not installed, or has
+		// stopped, and nothing here sees the drive. That is the standing alarm of a
+		// missing install, not a thing the doctor cannot tell (mw-gq6.1429).
+		w.last = driveNoReport
+		return application.DoctorFaulty, fmt.Sprintf("the report of the Windows drive's free space is %s: the Windows task has stopped writing it, so nothing on this WSL host sees its drive; `mw host wsl-flag --install-line` prints the line that installs the task", reportAge(age))
 	}
 	if warn := w.warnGB(); warn > 0 && free < warn<<30 {
 		w.last = driveLow
@@ -427,6 +462,10 @@ func (w *WSLDriveFree) Cure(ctx context.Context) error {
 	return w.Note(ctx, fmt.Sprintf("wsl-drive-free: the Windows drive holding this WSL host's vhdx has under %d GB free; "+
 		"at 0 WSL will not start (E_FAIL, the desktop's D: on 2026-11-15). Free space on it, or run `mw host trim-setup --check` to see which WSL hosts have no trim step yet.", WSLDriveFreeMin>>30))
 }
+
+// CureLeavesFault implements application.DoctorStandsAfterCure: the cure is a
+// note, and the drive stays as the probe found it after it.
+func (w *WSLDriveFree) CureLeavesFault() bool { return true }
 
 // Damper implements application.DoctorCheck.
 func (w *WSLDriveFree) Damper() (time.Duration, int) {

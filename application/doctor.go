@@ -96,6 +96,16 @@ type DoctorCoolingQuiet interface {
 	QuietWhileCooling() bool
 }
 
+// DoctorStandsAfterCure is an optional addition to a DoctorCheck whose cure
+// only tells somebody (a note to the Mayor) and changes nothing on the host: the
+// fault it found stands after the cure, so the verdict the run leaves for the
+// other hosts still says it faulty, as it does on every other tick, and does not
+// flicker to ok on the tick that wrote the note (mw-gq6.1429). The result is not
+// Faulty, as for any cure that ran, so the run's exit status is as it was.
+type DoctorStandsAfterCure interface {
+	CureLeavesFault() bool
+}
+
 // DoctorCureEndsEpisode is an optional addition to a DoctorCheck, for a check
 // whose fault's cause regrows under normal load (a cache several Builders
 // keep growing): a cure that returned no error and, by the check's own
@@ -266,6 +276,10 @@ type DoctorResult struct {
 	// Reason of a failed cure is the cure's own error, which says why it could
 	// not put the fault right and not what the fault is.
 	Found string
+	// Standing is a cure that ran and left the fault standing (a
+	// DoctorStandsAfterCure check's): the verdict says it faulty, and Found is
+	// what the probe said.
+	Standing bool
 }
 
 // line is how one result is logged, dated by the caller: "<check> <verdict>
@@ -929,6 +943,9 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 	}
 
 	result := DoctorResult{Check: name, Verdict: "cured", Reason: reason, WayBack: check.WayBack()}
+	if stands, ok := check.(DoctorStandsAfterCure); ok && stands.CureLeavesFault() {
+		result.Standing, result.Found = true, reason
+	}
 	if err := d.append(ctx, result); err != nil {
 		return DoctorResult{}, err
 	}
@@ -1124,7 +1141,7 @@ func (d Doctor) leaveVerdict(ctx context.Context, report DoctorReport) {
 	}
 	verdict := DoctorVerdict{At: d.now()}
 	for _, result := range report.Results {
-		if result.Faulty {
+		if result.Faulty || result.Standing {
 			verdict.Faulty = append(verdict.Faulty, DoctorFinding{Check: result.Check, Reason: oneLine(result.Found)})
 		}
 	}

@@ -4429,10 +4429,10 @@ Windows drive that holds the vhdx, so every tick of the `wsl-flag-watch.ps1` tas
 also writes one line, `<drive> <free bytes> <unix seconds>`, to
 `~/.local/state/mw/windows-drive-free` inside WSL. The `wsl-drive-free` check of
 `mw doctor` reads it: faulty under 5 GB free (a note to the Mayor, at most every 6
-hours), cannot-tell when there is no report or it is over a day old (naming `mw host
-wsl-flag --install-line`, which installs the task again with the new script), inert
-off WSL. A task installed before this change writes no report until its line is run
-again. Test: `go test ./infrastructure/doctor -run WSLDriveFree`.
+hours), and faulty, not cannot-tell, when there is no report or it is over a day old
+(mw-gq6.1429: the task is not installed or has stopped; naming `mw host wsl-flag
+--install-line`, which installs the task again with the new script), inert off WSL.
+A task installed before this change writes no report until its line is run again. Test: `go test ./infrastructure/doctor -run WSLDriveFree`.
 
 **Restart or compact WSL with no visit to the desk (mw-gq6.1039).** WSL on the
 desktop is sealed from Windows, so nothing inside it can start a Windows program;
@@ -6226,11 +6226,21 @@ budget is raised or the drive has room.
 **wsl-trim** is the check that a WSL host trims its disk (mw-gq6.1020; see *WSL host
 upkeep*). On a host whose `systemd-detect-virt` says `wsl`, it asks `systemctl show
 fstrim.timer` when the timer last triggered: faulty when it never did or did over 8 days
-ago, naming `mw host trim-setup`; cannot-tell when the timer has no unit file; inert
+ago, naming `mw host trim-setup` and saying so when the two drop-ins are not installed
+(mw-gq6.1429); cannot-tell when the timer has no unit file; inert
 (`n/a`) on a host that is not WSL. It changes nothing on the host, since the cure needs
 root: its cure is one note to the Mayor, its damper is 24 hours with no cap, and its way
 back says how to undo the step it names. The root-disk-budget check above reads ext4
 used bytes, which trimming does not change, so it cannot see this.
+
+Both are standing alarms, not one-off ones (mw-gq6.1429): a host's doctor leaves its
+verdict faulty on the tick that writes the note as on every other tick (the note-only
+cure leaves the fault standing), and `mw status` DAMPERS goes on naming `wsl-trim` and
+`wsl-drive-free` from a host's report when that report is over a day old, saying how
+old, since the host that has not been visited is the one whose doctor stopped
+reporting. The alarm goes when a report says the install is there. Test: `go test
+./infrastructure/doctor -run TestAWSLHost` and `go test ./application -run
+TestDampersNamesAWSLHostMissingAnInstall`.
 
 **mayor-gone** respawns the Mayor when the window its own vault-local
 `.mayor-acting` names is gone, or is open but its pane holds nothing but a

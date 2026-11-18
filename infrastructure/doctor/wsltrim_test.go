@@ -282,11 +282,12 @@ func TestWSLDriveFreeIsFaultyWithoutAReportAndNamesTheInstallLine(t *testing.T) 
 	}
 }
 
-func TestWSLDriveFreeCannotTellFromAReportItCannotReadOrOneThatIsStale(t *testing.T) {
+// A report it cannot read is one it cannot tell from; one over a day old is a
+// task that is not running, faulty (TestAWSLHostMissingEitherInstallIsAStandingAlarm).
+func TestWSLDriveFreeCannotTellFromAReportItCannotRead(t *testing.T) {
 	for name, text := range map[string]string{
-		"garbage":       "not a report\n",
-		"no number":     "D: lots " + fmt.Sprint(trimNow.Unix()) + "\n",
-		"stale by days": report("D:", 100, 3*24*time.Hour),
+		"garbage":   "not a report\n",
+		"no number": "D: lots " + fmt.Sprint(trimNow.Unix()) + "\n",
 	} {
 		verdict, reason := driveFreeCheck(t, "wsl", text, false).Probe(context.Background())
 		if verdict != application.DoctorCannotTell {
