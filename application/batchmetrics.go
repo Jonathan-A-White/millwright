@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"time"
 )
@@ -115,15 +116,36 @@ func rigBatches(lines []BatchMetric, rig string) []BatchMetric {
 // not the host's, which holds a batch it never tested.
 func (m BatchMetric) heldRed() bool { return m.Outcome == BatchHeld && m.Red }
 
-// HeldRedTogether is the rig's last batch line when that batch was held red
-// with more than one story in it: one story's fault held the rest, so its
-// stories are landed again one at a time (mw-gq6.1246).
+// HeldRedTogether is the rig's last batch held red with more than one story in
+// it, reached from the end of lines past the batches of one story that were
+// landed alone after it: one story's fault held the rest, so its stories are
+// landed again one at a time (mw-gq6.1246). A line of one story, landed or held
+// red alone, does not end the drain, so a follower made anew goes on with it
+// (mw-m634lgt); a batch of several stories since, or one that left no ids,
+// does. The stories held red alone since are left out of the batch returned.
 func HeldRedTogether(lines []BatchMetric) (BatchMetric, bool) {
-	if len(lines) == 0 {
-		return BatchMetric{}, false
+	var heldAlone []string
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if len(line.IDs) == 1 {
+			if line.heldRed() {
+				heldAlone = append(heldAlone, line.IDs[0])
+			}
+			continue
+		}
+		if !line.heldRed() || len(line.IDs) < 2 {
+			return BatchMetric{}, false
+		}
+		var rest []string
+		for _, id := range line.IDs {
+			if !slices.Contains(heldAlone, id) {
+				rest = append(rest, id)
+			}
+		}
+		line.IDs = rest
+		return line, len(rest) > 0
 	}
-	last := lines[len(lines)-1]
-	return last, last.heldRed() && len(last.IDs) > 1
+	return BatchMetric{}, false
 }
 
 // HeldRedAlone are the stories held red when landed alone since the rig last

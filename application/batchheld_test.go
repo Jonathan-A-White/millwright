@@ -89,6 +89,70 @@ func TestAFollowerBegunAfterABatchWasHeldRedStillLandsItsStoriesOneAtATime(t *te
 	}
 }
 
+// mw-m634lgt: after batch 552 of lampas held six stories red, two were landed
+// alone (553, 554) and batch 555 took six together again: a follower made anew
+// read only the rig's last line, which was the first story landed alone.
+func TestAFollowerMadeAnewGoesOnLandingAHeldBatchAlone(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingBatch)
+	j.queued("lampas", "lp-2", 200)
+	j.queued("lampas", "lp-3", 100)
+	j.queued("lampas", "lp-4", 5) // queued after the batch was held
+	history := &apptest.FakeBatchMetrics{}
+	ctx := context.Background()
+	mustDo(t, history.AppendBatch(ctx, heldBatch(j.now.Add(-30*time.Minute), 552, "lp-1", "lp-2", "lp-3")))
+	// lp-1 was landed alone and the follower stopped: its line is the last.
+	mustDo(t, history.AppendBatch(ctx, application.BatchMetric{Kind: application.BatchKind, At: j.now.Add(-10 * time.Minute),
+		Rig: "lampas", Batch: 553, Stories: 1, IDs: []string{"lp-1"}, Outcome: application.BatchGreen}))
+	landings := j.landingsOn(j.tracker)
+	landings.History = history
+
+	mustDo(t, landings.Job().Run(ctx))
+	if want := []string{"lampas one=true", "lampas one=true"}; !reflect.DeepEqual(j.asked, want) {
+		t.Fatalf("expected the other two of the held batch landed alone, got %v", j.asked)
+	}
+}
+
+// A story the drain already held red alone is not landed alone again by a
+// follower made anew, and a batch of several that landed since ends the drain.
+func TestTheDrainOfAHeldBatchEndsAtTheNextBatchOfSeveralAndSkipsWhatWasHeldAlone(t *testing.T) {
+	ctx := context.Background()
+	single := func(at time.Time, number int, outcome string, ids ...string) application.BatchMetric {
+		return application.BatchMetric{Kind: application.BatchKind, At: at, Rig: "lampas", Batch: number,
+			Stories: len(ids), IDs: ids, Outcome: outcome, Red: outcome == application.BatchHeld}
+	}
+	t.Run("held alone", func(t *testing.T) {
+		j := newLandingJob(t)
+		j.rule("lampas", domain.LandingBatch)
+		j.queued("lampas", "lp-2", 200) // held red alone in 553
+		j.queued("lampas", "lp-3", 100)
+		history := &apptest.FakeBatchMetrics{}
+		mustDo(t, history.AppendBatch(ctx, heldBatch(j.now.Add(-30*time.Minute), 552, "lp-1", "lp-2", "lp-3")))
+		mustDo(t, history.AppendBatch(ctx, single(j.now.Add(-20*time.Minute), 553, application.BatchHeld, "lp-2")))
+		landings := j.landingsOn(j.tracker)
+		landings.History = history
+		mustDo(t, landings.Job().Run(ctx))
+		if want := []string{"lampas one=true"}; !reflect.DeepEqual(j.asked, want) {
+			t.Fatalf("expected only lp-3 landed alone, got %v", j.asked)
+		}
+	})
+	t.Run("a batch of several since", func(t *testing.T) {
+		j := newLandingJob(t)
+		j.rule("lampas", domain.LandingBatch)
+		j.queued("lampas", "lp-2", 200)
+		j.queued("lampas", "lp-3", 100)
+		history := &apptest.FakeBatchMetrics{}
+		mustDo(t, history.AppendBatch(ctx, heldBatch(j.now.Add(-30*time.Minute), 552, "lp-1", "lp-2", "lp-3")))
+		mustDo(t, history.AppendBatch(ctx, single(j.now.Add(-20*time.Minute), 553, application.BatchGreen, "lp-4", "lp-5")))
+		landings := j.landingsOn(j.tracker)
+		landings.History = history
+		mustDo(t, landings.Job().Run(ctx))
+		if want := []string{"lampas one=false"}; !reflect.DeepEqual(j.asked, want) {
+			t.Fatalf("expected one batch, got %v", j.asked)
+		}
+	})
+}
+
 // A batch held for the host, not its tests (it never ran them red), and a
 // held story landed alone, are not landed one at a time: the first is the
 // load's, the second has no other story to free.
