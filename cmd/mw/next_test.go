@@ -100,3 +100,14 @@ func TestNextEndOfLandingDispatchDoesNothingWhileTheHostDispatchLockIsHeld(t *te
 		t.Fatalf("expected nothing started, got %+v", report)
 	}
 }
+
+// The --rescoped-by-mayor paragraph of mw next --help names the lines a closing
+// comment needs, which isClosingComment reads (mw-gq6.1486).
+func TestNextHelpNamesTheLinesAClosingCommentNeeds(t *testing.T) {
+	help := strings.Join(strings.Fields(newNextCmd().Long), " ")
+	for _, want := range []string{"A closing comment counts only when it holds 'For the rig memory' and either 'HOW TO CHECK IT' or 'Internal: nothing for the Governor to look at'"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("expected mw next --help to say %q", want)
+		}
+	}
+}

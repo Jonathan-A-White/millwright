@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // A story whose work was done and whose closing comment was written, but whose
@@ -17,7 +18,7 @@ import (
 // comment of a claim given back.
 func OpenStepsWayOut(id string) string {
 	return "mw next " + id + ` --no-dispatch --met-by-mayor "<what he ran and what it printed>" (or --rescoped-by-mayor "<why>")` +
-		" closes the formula's open steps as met by that comment, and runs the gate and the landing"
+		" closes the formula's open steps as met by that comment, and runs the gate and the landing. " + strings.TrimSuffix(ClosingCommentLinesSaid, ".")
 }
 
 // openStepsFlagsSaid is what the refusal for open steps says of the Mayor's

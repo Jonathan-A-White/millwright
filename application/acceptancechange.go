@@ -102,7 +102,7 @@ func acceptanceChangedRefusal(c *closeOut) (Refusal, bool) {
 		said += fmt.Sprintf("\n%d line(s) the claim had were taken out or changed.", change.Dropped)
 	}
 	said += "\nThe claim is given back and the branch kept: the next session works the whole acceptance."
-	said += "\nIf the Mayor re-scoped it on purpose and wrote a closing comment after the change, " + RescopeRecipe(c.id) + " lands it without a fresh session."
+	said += "\n" + rescopeRecipeSaid(c.id)
 	return Refusal{ReasonAcceptanceChanged, "the acceptance changed after the claim of " + c.id, said}, true
 }
 
@@ -115,12 +115,17 @@ func (n Next) acceptanceRefusal(ctx context.Context, c *closeOut, report *NextRe
 	if !changed {
 		return Refusal{}, false
 	}
-	rescoped, err := n.acceptanceRescoped(ctx, c, report, base)
+	answer, err := n.rescopeAnswer(ctx, c, report, base)
 	if err != nil {
 		return readRefusal(err)
 	}
-	if rescoped {
+	if answer.answered {
 		return Refusal{}, false
+	}
+	if answer.pinned {
+		// The Mayor ran the recipe already: say what his closing comment lacks,
+		// not the recipe again (mw-gq6.1486).
+		refusal.Said = strings.TrimSuffix(refusal.Said, "\n"+rescopeRecipeSaid(c.id)) + "\n" + answer.lacks(c.id)
 	}
 	return refusal, true
 }
@@ -140,6 +145,30 @@ const (
 // own, then runs this.
 func RescopeRecipe(id string) string {
 	return "mw next " + id + ` --no-dispatch --rescoped-by-mayor "<why>"`
+}
+
+// rescopeRecipeSaid is the line of the acceptance-changed refusal that gives the
+// Mayor the command to run, with the lines his closing comment needs.
+func rescopeRecipeSaid(id string) string {
+	return "If the Mayor re-scoped it on purpose and wrote a closing comment after the change, " + RescopeRecipe(id) +
+		" lands it without a fresh session. " + ClosingCommentLinesSaid
+}
+
+// ClosingCommentLinesSaid is the lines a closing comment must hold for mw next
+// to read it as one (isClosingComment), as a refusal quotes them.
+const ClosingCommentLinesSaid = "A closing comment counts only when it holds the line 'For the rig memory' and either 'HOW TO CHECK IT' or 'Internal: nothing for the Governor to look at'."
+
+// closingCommentLacks names which of the lines isClosingComment wants a text
+// does not hold, in words; "" when it holds them.
+func closingCommentLacks(text string) string {
+	var lacks []string
+	if !strings.Contains(text, "For the rig memory") {
+		lacks = append(lacks, "'For the rig memory'")
+	}
+	if !strings.Contains(text, "HOW TO CHECK IT") && !strings.Contains(text, "Internal: nothing for the Governor to look at") {
+		lacks = append(lacks, "'HOW TO CHECK IT' or 'Internal: nothing for the Governor to look at'")
+	}
+	return strings.Join(lacks, " and ")
 }
 
 // builderAuthor says a comment was written by a Builder session rather than by
@@ -182,38 +211,78 @@ func (n Next) newestCommit(ctx context.Context, c *closeOut, report *NextReport,
 	return newest, nil
 }
 
+// rescopeAnswered is what the bead's comments say of the Mayor's answer to a
+// changed acceptance (mw-gq6.1147, mw-gq6.1486).
+type rescopeAnswered struct {
+	// pinned: a RESCOPED-BY-MAYOR: comment pins the acceptance the story holds now.
+	pinned bool
+	// answered: pinned, and a closing comment not written by a Builder stands
+	// after the branch's newest commit.
+	answered bool
+	// committed is when the branch was last committed to.
+	committed time.Time
+	// nearMisses are the comments after the newest commit, not a Builder's, that
+	// are not closing comments, each with what it lacks.
+	nearMisses []string
+}
+
+// lacks says, of a pinned re-scope no closing comment answers, what the Mayor's
+// comments lack.
+func (a rescopeAnswered) lacks(id string) string {
+	said := "The bead holds a " + RescopedMark + " comment that pins this acceptance, but no closing comment of the Mayor's written after the branch's newest commit (" +
+		a.committed.UTC().Format(time.RFC3339) + ") counts."
+	if len(a.nearMisses) == 0 {
+		said += " No comment but a Builder's stands after that commit."
+	} else {
+		said += "\nComments of the Mayor's after that commit that do not count:\n" + bulletList(a.nearMisses)
+	}
+	return said + "\n" + ClosingCommentLinesSaid + " Write one after the re-scope, then run " + RescopeRecipe(id) + " again."
+}
+
+// rescopeAnswer reads the Mayor's answer to the change of the story's
+// acceptance. A read that fails is the error (a closeReadError), not a no.
+func (n Next) rescopeAnswer(ctx context.Context, c *closeOut, report *NextReport, base string) (rescopeAnswered, error) {
+	var answer rescopeAnswered
+	comments, err := readRetrying(ctx, n, report, "the comments of "+c.id, func() ([]Comment, error) {
+		return n.Tracker.StoryComments(ctx, c.id)
+	})
+	if err != nil {
+		return answer, &closeReadError{ReasonTrackerFailed, "the comments of " + c.id, err}
+	}
+	now := AcceptanceAtClaim(c.detail.Acceptance)
+	for _, comment := range comments {
+		if hash := rescopeHash(comment); hash != "" {
+			answer.pinned = hash == now
+		}
+	}
+	if !answer.pinned {
+		return answer, nil
+	}
+	answer.committed, err = n.newestCommit(ctx, c, report, base)
+	if err != nil {
+		return answer, err
+	}
+	for _, comment := range comments {
+		if !comment.Created.After(answer.committed) || builderAuthor(comment.Author) || rescopeHash(comment) != "" {
+			continue
+		}
+		if isClosingComment(comment.Text) {
+			answer.answered = true
+			return answer, nil
+		}
+		answer.nearMisses = append(answer.nearMisses, fmt.Sprintf("written %s, lacks %s", comment.Created.UTC().Format(time.RFC3339), closingCommentLacks(comment.Text)))
+	}
+	return answer, nil
+}
+
 // acceptanceRescoped says the Mayor answered the change of the story's
 // acceptance since the claim (mw-gq6.1147): the bead holds a RESCOPED-BY-MAYOR:
 // comment pinning the acceptance it holds now, and a closing comment not
 // written by a Builder, after the branch's newest commit. A read that fails is
 // the error (a closeReadError), not a no.
 func (n Next) acceptanceRescoped(ctx context.Context, c *closeOut, report *NextReport, base string) (bool, error) {
-	comments, err := readRetrying(ctx, n, report, "the comments of "+c.id, func() ([]Comment, error) {
-		return n.Tracker.StoryComments(ctx, c.id)
-	})
-	if err != nil {
-		return false, &closeReadError{ReasonTrackerFailed, "the comments of " + c.id, err}
-	}
-	now := AcceptanceAtClaim(c.detail.Acceptance)
-	pinned := false
-	for _, comment := range comments {
-		if hash := rescopeHash(comment); hash != "" {
-			pinned = hash == now
-		}
-	}
-	if !pinned {
-		return false, nil
-	}
-	committed, err := n.newestCommit(ctx, c, report, base)
-	if err != nil {
-		return false, err
-	}
-	for _, comment := range comments {
-		if comment.Created.After(committed) && !builderAuthor(comment.Author) && isClosingComment(comment.Text) {
-			return true, nil
-		}
-	}
-	return false, nil
+	answer, err := n.rescopeAnswer(ctx, c, report, base)
+	return answer.answered, err
 }
 
 // recordRescope writes the RESCOPED-BY-MAYOR: comment a --rescoped-by-mayor

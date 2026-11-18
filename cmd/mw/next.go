@@ -76,7 +76,9 @@ func newNextCmd() *cobra.Command {
 			"Mayor re-scoped it on purpose after the work was done, reworded the criteria and wrote a closing comment of\n" +
 			"his own, run `mw next <story> --no-dispatch --rescoped-by-mayor \"<why>\"`: the why is written on the bead\n" +
 			"(RESCOPED-BY-MAYOR:, with the acceptance it answers; who and when are the comment's own) and the story\n" +
-			"lands. A change no closing comment of the Mayor's answers, or one made after the re-scope, is still refused.\n\n" +
+			"lands. A change no closing comment of the Mayor's answers, or one made after the re-scope, is still refused,\n" +
+			"and the refusal says what is lacking. A closing comment counts only when it holds 'For the rig memory' and\n" +
+			"either 'HOW TO CHECK IT' or 'Internal: nothing for the Governor to look at'.\n\n" +
 			"A story whose Builder's closing comment says an acceptance criterion is not met, and which the Mayor (or the\n" +
 			"Tester) ran himself and found met, lands without the acceptance changing: `mw next <story> --no-dispatch\n" +
 			"--met-by-mayor \"<what he ran and what it printed>\"` writes a MET-BY-MAYOR: comment on the bead naming the\n" +
