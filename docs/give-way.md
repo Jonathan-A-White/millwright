@@ -117,7 +117,11 @@ windows-uninstall` in WSL so that a host left frozen, or with WSL down in `shutd
 - **WSL: `~/.local/state/mw/giveway.log`** (`mw giveway status` prints the last 5 lines): one JSON line per
   `on`, `off`, renew, `expired` and `mark`, with `took_ms`, the sessions and processes stopped,
   `MemAvailable`, `load1` and the `--note` values (`windows_free_mb`, `windows_ms`, and the `by` of the
-  caller: `windows-unlock`, `windows-lock`, `windows-logoff`, `windows-tick`).
+  caller: `windows-unlock`, `windows-lock`, `windows-logoff`, `windows-tick`). An `off` or `expired`
+  line's `gave_way_ms` is how long the host gave way (`mw giveway status` says the last one, from when to
+  when, while the host does not give way); a whole `mw check` not kept to a Builder's call (`--wait`,
+  `--background`, the gate worker) reads it and does not count that span against its wait limit, for it
+  was stopped then and waited for nobody (mw-gq6.1458).
 
 Right at unlock: the Windows line's `on` exit=0 and its `ms` a second or two at most, and the WSL line of
 event `on` by `windows-unlock` within a couple of seconds of the unlock, with a `mark` ten seconds later whose

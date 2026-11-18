@@ -769,8 +769,8 @@ func (g GiveWay) append(ctx context.Context, entry GiveWayEntry) error {
 
 // Off lets the host go on: every process the marker names (by pid and start
 // time) and any process of a Builder session still stopped gets SIGCONT, the
-// marker goes, and the log says how long it took and how long the host gave way.
-// Then, untimed, a session whose pane died is retried.
+// log says how long it took and how long the host gave way, and then the marker
+// goes. Then, untimed, a session whose pane died is retried.
 func (g GiveWay) Off(ctx context.Context, req GiveWayRequest) error {
 	return g.off(ctx, req, "off")
 }
@@ -828,11 +828,6 @@ func (g GiveWay) off(ctx context.Context, req GiveWayRequest, event string) erro
 			lastCont = g.now()
 		}
 	}
-	if there {
-		if err := g.Marker.Remove(ctx); err != nil {
-			return fmt.Errorf("removing the give-way marker: %w", err)
-		}
-	}
 	took := lastCont.Sub(start)
 	// The note for the home goes after the host has gone on, and a failure of it
 	// is the log's word and nothing else. The expired path lands here too.
@@ -847,8 +842,17 @@ func (g GiveWay) off(ctx context.Context, req GiveWayRequest, event string) erro
 	if there {
 		entry.GaveWayMs = ms(start.Sub(marker.Since))
 	}
-	if err := g.append(ctx, entry); err != nil {
-		return err
+	// The line goes before the marker goes: a process woken by the continues reads
+	// the span it was stopped for from one or the other (GaveWayBetween,
+	// mw-gq6.1458), so there is no moment when neither names it.
+	appended := g.append(ctx, entry)
+	if there {
+		if err := g.Marker.Remove(ctx); err != nil {
+			return fmt.Errorf("removing the give-way marker: %w", err)
+		}
+	}
+	if appended != nil {
+		return appended
 	}
 	switch {
 	case scoped:
@@ -1016,6 +1020,16 @@ func (g GiveWay) Status(ctx context.Context) error {
 			g.say("the marker is stale (not renewed for over %s): the next dispatch tick lifts it", g.stale())
 		}
 		g.sayLowered(ctx, marker)
+	}
+	if !there {
+		// How long the host last gave way: the span every wait a give-way stopped
+		// does not count (GaveWayBetween, mw-gq6.1458).
+		if all, err := g.Log.Tail(ctx, GiveWaySpanLines); err == nil {
+			if span, ok := lastGaveWay(all); ok {
+				g.say("last gave way for %s, from %s to %s", span.to.Sub(span.from).Round(time.Second),
+					span.from.UTC().Format(time.RFC3339), span.to.UTC().Format(time.RFC3339))
+			}
+		}
 	}
 	lines, err := g.Log.Tail(ctx, 5)
 	if err != nil {

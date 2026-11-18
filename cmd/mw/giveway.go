@@ -84,6 +84,18 @@ func hostGiveWay(host string) (application.GiveWay, bool) {
 	return way, true
 }
 
+// hostGiveWaySpans is how long this host gave way, read from its own marker and
+// giveway.log and nothing else (mw-gq6.1458): nil, which counts no span, when the
+// host has no state directory to keep them in.
+func hostGiveWaySpans() application.GiveWaySpans {
+	dir, err := config.GiveWayDir()
+	if err != nil {
+		return nil
+	}
+	store := giveway.Store{Dir: dir}
+	return application.GiveWay{Marker: store, Log: store}
+}
+
 // hostGiveWayGate is this host's give-way marker as the gate every place mw starts a
 // Builder session, or a part of a gate, reads right before it starts
 // (application.GivesWayNow, mw-2891blf.19): mw next's sends and a batch landing's
@@ -214,11 +226,13 @@ func newGiveWayCmd() *cobra.Command {
 			"                     last stop it makes no beads call, no ssh and no network call. A second `on` only renews\n" +
 			"                     the marker's seen time and stops what is new (event renew).\n" +
 			"  mw giveway off     continues (SIGCONT) every process the marker names, matched by pid and start time, and any\n" +
-			"                     Builder-session process still stopped; removes the marker; logs event off with took_ms and\n" +
-			"                     how long the host gave way. Then, not timed, a session whose pane died is retried (mw retry)\n" +
+			"                     Builder-session process still stopped; logs event off with took_ms and how long the host\n" +
+			"                     gave way (gave_way_ms), then removes the marker. A whole mw check's waits do not count that\n" +
+			"                     span. Then, not timed, a session whose pane died is retried (mw retry)\n" +
 			"                     and said so in the log. With no marker it still continues what is stopped and says so.\n" +
-			"  mw giveway status  whether this host gives way, since when, the sessions and processes stopped, and the last\n" +
-			"                     5 lines of the log. Exit 0 either way.\n" +
+			"  mw giveway status  whether this host gives way, since when, the sessions and processes stopped (or, when it\n" +
+			"                     does not, how long it last gave way, from when to when), and the last 5 lines of the log.\n" +
+			"                     Exit 0 either way.\n" +
 			"  mw giveway mark    only appends a line of event mark with the --note k=v given: the Windows side puts its own\n" +
 			"                     measurements in the same log.\n\n" +
 			"After its last stop `on` writes a note for the home, host.<host>.gives_way = '<since> <by> <seen>', to the\n" +
