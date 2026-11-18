@@ -159,7 +159,7 @@ func newLandCmd() *cobra.Command {
 
 				Load:     hostload.Proc{SwapSample: benchmarkSwapSample},
 				Bench:    benchmarkLimits(bench), // the par of a landed story, from the past benchmarks withVaultPorts reads (mw-gq6.966)
-				Slot:     rig.NewSlots(),
+				Slot:     hostSlots(),
 				GateLock: hostGateLock(),
 				Mailbox:  gateway,
 				// A batch's turns end once they waited this long for other gates (mw-gq6.1420).
@@ -178,7 +178,7 @@ func newLandCmd() *cobra.Command {
 				Err:            cmd.ErrOrStderr(),
 
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs), rig.WithAfterTestRuns(testRuns)),
-				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
+				DeploySlot:   hostSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
 				LiveSite:     verifyWeb{},
 				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees, cmd.OutOrStdout(), application.BatchLogPrefix+"grist smoke: "),

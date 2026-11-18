@@ -305,7 +305,7 @@ func newNextCmd() *cobra.Command {
 				RelatedChecks: checks,
 
 				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
-				Slot:      rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
+				Slot:      hostSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
 				CrossSlot: application.CrossSlot{Notes: gateway, Host: host},
 				GateLock:  hostGateLock(),
 				// A gate's turns end once they waited this long for other gates (mw-gq6.1420).
@@ -339,7 +339,7 @@ func newNextCmd() *cobra.Command {
 				HeartbeatGrace: application.DefaultHeartbeatGrace,
 
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs), rig.WithAfterTestRuns(testRuns)),
-				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
+				DeploySlot:   hostSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
 				Integrity:    hostDeployedMarks(),
 				Box:          cloudBoxName(host),

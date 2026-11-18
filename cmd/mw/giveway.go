@@ -13,6 +13,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/pause"
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 
 	"github.com/spf13/cobra"
 )
@@ -94,6 +95,14 @@ func hostGiveWaySpans() application.GiveWaySpans {
 	}
 	store := giveway.Store{Dir: dir}
 	return application.GiveWay{Marker: store, Log: store}
+}
+
+// hostSlots is a merge slot (or a lock of its kind) of this host's rigs whose waits
+// do not count what this host gave way, read from its own give-way record: a
+// waiter the give-way stopped waited for nobody then (mw-gq6.1477). Every slot
+// mw takes is made here.
+func hostSlots(opts ...rig.SlotOption) *rig.Slots {
+	return rig.NewSlots(append([]rig.SlotOption{rig.WithSlotGaveWay(hostGiveWaySpans())}, opts...)...)
 }
 
 // hostGiveWayGate is this host's give-way marker as the gate every place mw starts a

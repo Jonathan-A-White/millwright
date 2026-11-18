@@ -68,7 +68,7 @@ func newAfterLandingCmd() *cobra.Command {
 			}
 			return application.AfterLandingRun{
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs), rig.WithAfterTestRuns(testRuns)),
-				Slot: rig.NewSlots(
+				Slot: hostSlots(
 					rig.WithSlotSuffix(rig.AfterLandingSlotSuffix),
 					rig.WithSlotNotice(func(said string) { cmd.ErrOrStderr().Write([]byte(said)) }),
 				),

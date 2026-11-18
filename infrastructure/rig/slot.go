@@ -78,6 +78,12 @@ type Slots struct {
 	// wait that goes on, with how long it has gone on. Nil says nothing.
 	notice      func(said string)
 	noticeEvery time.Duration
+
+	// gaveWay is how long this host gave way between two times, read from its
+	// give-way record: a wait does not count it, against the wait on one holder or
+	// the cap, for the give-way stopped the waiter and it waited for nobody then
+	// (mw-gq6.1477). Nil counts every span.
+	gaveWay application.GiveWaySpans
 }
 
 // Slots satisfies the port.
@@ -132,6 +138,25 @@ func WithSlotNotice(notice func(said string)) SlotOption {
 // long it has gone on, who it is waiting for (SlotNoticeEvery when not set).
 func WithSlotNoticeEvery(every time.Duration) SlotOption {
 	return func(s *Slots) { s.noticeEvery = every }
+}
+
+// WithSlotGaveWay sets the host's give-way record a wait reads, so that what the
+// host gave way while a waiter was stopped is not counted against its wait on one
+// holder or its cap (mw-gq6.1477).
+func WithSlotGaveWay(spans application.GiveWaySpans) SlotOption {
+	return func(s *Slots) { s.gaveWay = spans }
+}
+
+// waited is how long a wait begun at from has gone on at now, by the slot's
+// clock, less what the host gave way between: the give-way record is read only
+// once the time since has reached limit, so a wait well inside it does not read
+// the record at every poll.
+func (s *Slots) waited(ctx context.Context, from, now time.Time, limit time.Duration) time.Duration {
+	since := now.Sub(from)
+	if s.gaveWay == nil || since < limit || since <= 0 {
+		return since
+	}
+	return since - min(s.gaveWay.GaveWayBetween(ctx, from, now), since)
 }
 
 // NewSlots returns the merge slots of this host's rigs.
@@ -221,7 +246,8 @@ func (s *Slots) take(ctx context.Context, rigDir, holder string, shared bool) (a
 // holder whose process is gone: a live one is still at its close-out, its tests
 // or its merge, however slow a loaded host makes them, and giving up on it
 // costs a finished story a fresh attempt (mw-gq6.467). A live holder is waited
-// on up to the cap.
+// on up to the cap. Neither the wait nor the cap counts what the host gave way
+// (WithSlotGaveWay, mw-gq6.1477).
 func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path string, shared bool) error {
 	started := s.now()
 	tickets := &ticketq.Queue{Dir: path + SlotQueueSuffix, Cap: s.cap, Now: s.now}
@@ -304,13 +330,17 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, holder, path s
 					now.Sub(started).Round(time.Second), told, heldSince(said)))
 			}
 		}
-		if waited := now.Sub(started); waited >= s.cap {
+		if waited := s.waited(ctx, started, now, s.cap); waited >= s.cap {
 			return fmt.Errorf("the merge slot %s was still held by %q after %s, the overall most a close-out waits: its holder is still at its close-out, or close-outs are landing work on this rig one after another: %w",
 				path, held(path), waited.Round(time.Second), application.ErrSlotCap)
 		}
-		if waited := now.Sub(since); waited >= wait && !holderAlive(said) {
-			return fmt.Errorf("the merge slot %s is still held by %q after %s: one holder has had it that long and the process it names is gone, so whatever holds its lock is stuck (a close-out waits %s on one holder of this rig's slot)",
-				path, held(path), waited.Round(time.Second), wait)
+		// A live holder is never given up on here, so the give-way record is not read
+		// for one.
+		if now.Sub(since) >= wait && !holderAlive(said) {
+			if waited := s.waited(ctx, since, now, wait); waited >= wait {
+				return fmt.Errorf("the merge slot %s is still held by %q after %s: one holder has had it that long and the process it names is gone, so whatever holds its lock is stuck (a close-out waits %s on one holder of this rig's slot)",
+					path, held(path), waited.Round(time.Second), wait)
+			}
 		}
 
 		if err := s.sleep(ctx, s.poll); err != nil {
@@ -432,7 +462,7 @@ func (h *holding) Resume(ctx context.Context) error {
 			// conversion, so what is left is to wait for the slot.
 			notShared = true
 		}
-		if waited := s.now().Sub(started); waited >= s.cap {
+		if waited := s.waited(ctx, started, s.now(), s.cap); waited >= s.cap {
 			return fmt.Errorf("the merge slot %s was still held by %q after %s, the overall most a close-out waits, when the batch took it back: %w",
 				h.path, held(h.path), waited.Round(time.Second), application.ErrSlotCap)
 		}

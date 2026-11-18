@@ -47,7 +47,7 @@ func hostSelfUpdate(gateway *beads.Gateway, rigs, afterLanding map[string]string
 		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs)),
 		Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
 		Units:    hostUnits(),
-		Slot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
+		Slot:     hostSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 		Landed:   rig.New(),
 		Live:     hostDeployCheck(gateway, files, host),
 		Heal:     rig.New(),
