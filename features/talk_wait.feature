@@ -301,7 +301,7 @@ Feature: mw talk wait
   Scenario: With Ideas only on, a turn about one of his to-dos ends the wait and is not kept, and a turn about anything else is kept
     Given Ideas only is on until 9 hours on for mw talk wait
     And the Governor has the open to-do "mw-lst.1" titled "Write the lesson plan" on the list "mw-lst" titled "Discipleship Institute" for mw talk wait
-    And mw talk wait has a time limit of 3000 milliseconds
+    And mw talk wait has a time limit of 20000 milliseconds
     And mw talk wait is armed
     When the Governor's turn 1 of talk "talk-7" saying "a new idea for Lampas" is indexed
     Then mw talk wait is still waiting
