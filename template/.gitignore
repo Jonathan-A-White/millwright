@@ -27,9 +27,6 @@ runs/*/check-*.log
 # mw todo rank's pass logs
 runs/todo-rank/
 
-# The key metrics: mw report send's daily line and mw land's batch lines, kept per host
-/metrics/
-
 # A seat's host-local files beside the vault: its acting file (and the temp it
 # is written through), its reaper and talk logs, and the launch script and
 # settings the vault's own scripts start its session with

@@ -13,6 +13,12 @@ import (
 // section 3).
 const BatchKind = "batch"
 
+// MetricsFile is where the vault keeps the factory's metric lines, the day's
+// and each batch's: committed with what wrote them and merged by union
+// (MetricsMark), so that the home reads a batch another host landed
+// (mw-gq6.1462).
+const MetricsFile = "metrics/factory.jsonl"
+
 // The outcomes a batch line holds. A batch that landed is green; one a fixer
 // had to mend before it landed is fixed (Land Rush 5's); one that pushed
 // nothing is held.

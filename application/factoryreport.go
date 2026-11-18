@@ -103,6 +103,10 @@ type FactoryReport struct {
 	Notes     ReportNotes
 	Mailbox   Mailbox
 	Snapshots MetricSnapshots
+	// Vault, when set, commits the file a day's key metrics were kept in, so
+	// that the sync carries it to the other hosts and leaves the vault clean
+	// (mw-gq6.1462).
+	Vault vaultCommitter
 	// History, when set, is read for the daily snapshots a change on his time
 	// is judged from (Snapshots is read for them too); it writes nothing.
 	History MetricSnapshots

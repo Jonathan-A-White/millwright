@@ -1423,9 +1423,12 @@ stray edit is committed all the same), so a close-out that left them uncommitted
 would stop its own sync and every later one. The run record is committed so that the evidence behind a ledger
 line's fuel travels to the other host with the line; `runs/<story>/boot.md` beside
 it is never committed. Neither are the run's other leftovers — its result's
-`.tmp`, `next-<n>.log`, `check-<n>.log` — nor `metrics/` and the seats' dot
+`.tmp`, `next-<n>.log`, `check-<n>.log` — nor the seats' dot
 files beside the vault: the `.gitignore` `mw init` lays names each of them, so
 git status of the vault is quiet after a run (features/vault_leftovers.feature).
+`metrics/factory.jsonl` is committed, by `mw land` with the batch's records and by
+`mw report send` with the day's line, and merged by union, so that a batch landed on
+one host is in the history the other hosts read (mw-gq6.1462).
 A run record that is not there is said so in the report,
 and the other two are committed all the same. Anything else
 uncommitted in the vault is still somebody else's to commit, and the sync's

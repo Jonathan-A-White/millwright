@@ -28,6 +28,11 @@ const (
 const marking = "# Ledgers are appended to by both hosts and edited by neither,\n" +
 	"# so two hosts' appends merge by keeping every line rather than conflicting.\n"
 
+// metricsMarking is the same for the metric lines, which every host that lands
+// a batch appends to (mw-gq6.1462).
+const metricsMarking = "# The metric lines are appended to by every host that lands a batch:\n" +
+	"# keep both sides' lines rather than conflicting.\n"
+
 // The vault's files are kept level with the other host's by plain git: the
 // other host's commits are pulled and this host's are replayed on top, then
 // what this host has and the other one does not is pushed. Nothing is forced,
@@ -36,7 +41,7 @@ const marking = "# Ledgers are appended to by both hosts and edited by neither,\
 var _ application.VaultFiles = (*Vault)(nil)
 
 // MarkLedgers implements application.VaultFiles: it makes sure the vault's
-// .gitattributes carries application.LedgerMark, and reports whether it had to
+// .gitattributes carries application.LedgerMark and application.MetricsMark, and reports whether it had to
 // write it.
 //
 // The mark matters before a pull, not after: git reads it out of the working
@@ -49,7 +54,14 @@ func (v *Vault) MarkLedgers(_ context.Context) (bool, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return false, fmt.Errorf("reading %s: %w", path, err)
 	}
-	if marked(string(attributes)) {
+	var missing []string
+	if !marked(string(attributes), application.LedgerPattern) {
+		missing = append(missing, marking+application.LedgerMark)
+	}
+	if !marked(string(attributes), application.MetricsFile) {
+		missing = append(missing, metricsMarking+application.MetricsMark)
+	}
+	if len(missing) == 0 {
 		return false, nil
 	}
 
@@ -61,8 +73,7 @@ func (v *Vault) MarkLedgers(_ context.Context) (bool, error) {
 		}
 		write.WriteString("\n")
 	}
-	write.WriteString(marking)
-	write.WriteString(application.LedgerMark + "\n")
+	write.WriteString(strings.Join(missing, "\n\n") + "\n")
 
 	if err := os.WriteFile(path, []byte(write.String()), 0o644); err != nil {
 		return false, fmt.Errorf("writing %s: %w", path, err)
@@ -70,17 +81,17 @@ func (v *Vault) MarkLedgers(_ context.Context) (bool, error) {
 	return true, nil
 }
 
-// marked reports whether a .gitattributes already merges the vault's ledgers by
-// keeping every line. Comments and the order of the attributes after the
-// pattern are none of this adapter's business: what matters is that the ledger
+// marked reports whether a .gitattributes already merges the files of pattern
+// by keeping every line. Comments and the order of the attributes after the
+// pattern are none of this adapter's business: what matters is that the
 // pattern carries merge=union.
-func marked(attributes string) bool {
+func marked(attributes, pattern string) bool {
 	for _, line := range strings.Split(attributes, "\n") {
 		if comment := strings.Index(line, "#"); comment >= 0 {
 			line = line[:comment]
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 2 || fields[0] != application.LedgerPattern {
+		if len(fields) < 2 || fields[0] != pattern {
 			continue
 		}
 		for _, attribute := range fields[1:] {

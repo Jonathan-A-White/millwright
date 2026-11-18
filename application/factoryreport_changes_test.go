@@ -538,3 +538,33 @@ func TestChangesLandedTheSameDayOnTheSameMetricAreOneMailThatNamesThemAll(t *tes
 		t.Errorf("the mail names a change of another metric:\n%s", refusals[0])
 	}
 }
+
+// A day's key metrics, kept in metrics/factory.jsonl, are committed in the vault
+// the day they are kept, so that the sync carries them to the other hosts and
+// leaves the vault clean (mw-gq6.1462).
+func TestTheDaysKeyMetricsKeptAreCommittedInTheVault(t *testing.T) {
+	f := newChangeFactory(t)
+	committer := &apptest.FakeVaultFiles{}
+	var out strings.Builder
+	report := application.FactoryReport{
+		Tracker: f.tracker, Files: f.files, Seat: "builder", Benchmarks: &apptest.FakeBenchmarks{},
+		Now: func() time.Time { return f.now }, Out: &out,
+		Notes: f.tracker, Mailbox: f.mailbox, Snapshots: f.snapshots, History: f.snapshots,
+		Vault: committer,
+	}
+	if _, err := report.Run(context.Background()); err != nil {
+		t.Fatalf("mw report failed: %v", err)
+	}
+	commits := committer.Commits()
+	if len(commits) != 1 || len(commits[0].Paths) != 1 || commits[0].Paths[0] != application.MetricsFile {
+		t.Fatalf("commits %+v, want one of %s", commits, application.MetricsFile)
+	}
+
+	// The same day's snapshot is kept once, and committed once.
+	if _, err := report.Run(context.Background()); err != nil {
+		t.Fatalf("mw report failed: %v", err)
+	}
+	if got := len(committer.Commits()); got != 1 {
+		t.Fatalf("%d commits after a second report of the day, want 1", got)
+	}
+}

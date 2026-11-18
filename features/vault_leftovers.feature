@@ -38,6 +38,7 @@ Feature: A run leaves nothing stray in the vault
     When mw lands the batch of the rig
     Then the batch landed on "main" in one push, forcing nothing
     And git status of the vault is quiet
+    And the vault's git history holds "metrics/factory.jsonl", unmodified
 
   Scenario: What the seats, the daily report and the todo ranking write beside the runs leaves git status of the vault quiet
     When the mayor's and the millhand's reapers each note a line
@@ -72,3 +73,4 @@ Feature: A run leaves nothing stray in the vault
       | runs/suite/millwright/2026-10-16.log            |
       | seats/builder/ledger.md                         |
       | plans/investments/ledger.jsonl                  |
+      | metrics/factory.jsonl                           |

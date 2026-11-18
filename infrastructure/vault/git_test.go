@@ -155,9 +155,33 @@ func TestMarkLedgersKeepsWhatTheAttributesAlreadySay(t *testing.T) {
 	}
 }
 
+// The metric lines of a batch landed on one host reach the other by the sync, and
+// two hosts' appends to the file must not stop it (mw-gq6.1462).
+func TestMarkLedgersAddsTheMetricsMarkToAVaultThatHasOnlyTheLedgers(t *testing.T) {
+	here, _ := twoHosts(t)
+	write(t, here, vault.AttributesFile, application.LedgerMark+"\n")
+
+	marked, err := vault.New(here).MarkLedgers(context.Background())
+	if err != nil {
+		t.Fatalf("marking the ledgers: %v", err)
+	}
+	if !marked {
+		t.Fatal("expected a vault with no mark on the metrics file to be marked")
+	}
+	attributes, err := os.ReadFile(filepath.Join(here, vault.AttributesFile))
+	if err != nil {
+		t.Fatalf("reading the attributes: %v", err)
+	}
+	for _, want := range []string{application.LedgerMark, application.MetricsMark} {
+		if !strings.Contains(string(attributes), want) {
+			t.Fatalf("expected %q in the attributes, got %q", want, attributes)
+		}
+	}
+}
+
 func TestMarkLedgersReadsAMarkWrittenAnyOtherWay(t *testing.T) {
 	here, _ := twoHosts(t)
-	write(t, here, vault.AttributesFile, "seats/*/ledger.md text merge=union  # as the Mayor wrote it\n")
+	write(t, here, vault.AttributesFile, "seats/*/ledger.md text merge=union  # as the Mayor wrote it\nmetrics/factory.jsonl merge=union\n")
 
 	marked, err := vault.New(here).MarkLedgers(context.Background())
 	if err != nil {

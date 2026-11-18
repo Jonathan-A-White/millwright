@@ -141,6 +141,7 @@ func newReportSendCmd() *cobra.Command {
 					Notes:        gateway,
 					Mailbox:      gateway,
 					Snapshots:    files,
+					Vault:        files,
 					Review:       review,
 					InvestShare:  share, InvestShareMin: shareMin, InvestShareMax: shareMax,
 				},

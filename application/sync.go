@@ -19,6 +19,10 @@ const (
 	MergeUnion    = "merge=union"
 	LedgerMark    = LedgerPattern + " " + MergeUnion
 
+	// MetricsMark is the same for the file of metric lines: the day's and each
+	// batch's, which any host that lands appends to (mw-gq6.1462).
+	MetricsMark = MetricsFile + " " + MergeUnion
+
 	// LedgerAttributesFile is the vault file that carries LedgerMark.
 	LedgerAttributesFile = ".gitattributes"
 )

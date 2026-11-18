@@ -421,8 +421,14 @@ func (r FactoryReport) record(ctx context.Context, result FactoryReportResult, a
 		}
 	}
 	if r.Snapshots != nil && r.Rig == "" && r.Host == "" {
-		if err := r.keepSnapshot(ctx, r.takeSnapshot(all, result.Review, result.SeatFuel, sessions, now)); err != nil {
+		kept, err := r.keepSnapshot(ctx, r.takeSnapshot(all, result.Review, result.SeatFuel, sessions, now))
+		if err != nil {
 			problems = append(problems, err.Error())
+		}
+		if kept && r.Vault != nil {
+			if _, err := commitWritten(ctx, r.Vault, "Keep the key metrics of "+now.UTC().Format(LedgerDate), []string{MetricsFile}); err != nil {
+				problems = append(problems, NotCommittedLine([]string{MetricsFile}, err))
+			}
 		}
 	}
 	if len(problems) > 0 {
@@ -517,19 +523,20 @@ func (r FactoryReport) tellMayor(ctx context.Context, group []FactoryChange, at 
 	return nil
 }
 
-// keepSnapshot appends the snapshot, unless one of the same day is already kept.
-func (r FactoryReport) keepSnapshot(ctx context.Context, s MetricSnapshot) error {
+// keepSnapshot appends the snapshot, unless one of the same day is already
+// kept; appended says it was.
+func (r FactoryReport) keepSnapshot(ctx context.Context, s MetricSnapshot) (appended bool, err error) {
 	kept, err := r.Snapshots.Snapshots(ctx)
 	if err != nil {
-		return fmt.Errorf("the key metrics kept so far: %w", err)
+		return false, fmt.Errorf("the key metrics kept so far: %w", err)
 	}
 	for _, was := range kept {
 		if was.Day == s.Day {
-			return nil
+			return false, nil
 		}
 	}
 	if err := r.Snapshots.Append(ctx, s); err != nil {
-		return fmt.Errorf("keeping the day's key metrics: %w", err)
+		return false, fmt.Errorf("keeping the day's key metrics: %w", err)
 	}
-	return nil
+	return true, nil
 }

@@ -154,7 +154,14 @@ func (c *nextContext) theMayorIsHandedOver() error {
 }
 
 func (c *nextContext) theDaysMetricsAreKept() error {
-	return vault.New(c.vault).Append(context.Background(), application.MetricSnapshot{Day: "2026-10-16", Landed: 3})
+	files := vault.New(c.vault)
+	if err := files.Append(context.Background(), application.MetricSnapshot{Day: "2026-10-16", Landed: 3}); err != nil {
+		return err
+	}
+	// mw report send commits the file it kept the day's line in, as it does here
+	// (mw-gq6.1462): the metrics are committed, not ignored.
+	_, err := files.Commit(context.Background(), "Keep the key metrics of 2026-10-16", []string{application.MetricsFile})
+	return err
 }
 
 func (c *nextContext) aTodoRankingKeepsItsLog() error {

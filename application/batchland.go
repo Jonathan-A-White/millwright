@@ -1120,15 +1120,19 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 	}
 }
 
-// keepMetric appends the batch's line to metrics/factory.jsonl. One that cannot
-// be written is a note: the batch is landed, or held, as it is.
+// keepMetric appends the batch's line to metrics/factory.jsonl and names the
+// file among the batch's records to commit. One that cannot be written is a note: the batch is landed, or held, as it is.
 func (b BatchLand) keepMetric(ctx context.Context, report *BatchReport) {
 	if b.Metrics == nil {
 		return
 	}
 	if err := b.Metrics.AppendBatch(ctx, report.Metric(b.Next.now())); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the metrics line of %s could not be kept: %v", report.Label(), err))
+		return
 	}
+	// Committed with the batch's records, so that the sync carries it to the
+	// other hosts (mw-gq6.1462).
+	report.Records = append(report.Records, MetricsFile)
 }
 
 func storyIDs(stories []BatchStory) []string {
