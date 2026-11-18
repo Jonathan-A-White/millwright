@@ -226,7 +226,14 @@ func newNextCmd() *cobra.Command {
 				// Only the plan, not the book the timer's repath reads: its prefix
 				// says which host is a box whose gate is read (mw-gq6.1190).
 				_, boxPlan := cloudStatus(dir, host)
-				dispatcher = withHostDispatchLocks(withHostRechecks(application.Dispatch{
+				// The room the timer's dispatch reads, through the same constructor
+				// (mw-gq6.1469): a Builder started straight after a close-out meets
+				// the load, memory and WSL drive floors and the grist room too.
+				room, err := config.Room()
+				if err != nil {
+					return err
+				}
+				dispatcher = withHostDispatchLocks(withHostRoom(withHostRechecks(application.Dispatch{
 					Tracker:       gateway,
 					Worktrees:     worktrees,
 					Landing:       worktrees,
@@ -250,7 +257,7 @@ func newNextCmd() *cobra.Command {
 					RetryFromBranch: fromBranch,
 					Rebases:         worktrees,
 					HasGristTestKey: hostHasGristTestKey,
-				}, recheckSuite), dir)
+				}, recheckSuite), room), dir)
 			}
 
 			// A stamp queue that cannot be placed is said, and queues nothing: no
