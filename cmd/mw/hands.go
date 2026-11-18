@@ -151,8 +151,8 @@ func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) 
 
 // newHandsAddCmd builds `mw hands add`.
 func newHandsAddCmd() *cobra.Command {
-	var id, host, as, wayBack string
-	var after []string
+	var id, host, as, wayBack, allowWhy string
+	var after, allow []string
 	var replace, noPush, noView, heldOK bool
 
 	cmd := &cobra.Command{
@@ -186,7 +186,8 @@ func newHandsAddCmd() *cobra.Command {
 			"is sent for it (the view is still published). mw hands add then ends on the warning\n" +
 			"\"<bead> is held: the Governor sees no Run until it is open\" as its last line and exits\n" +
 			"non-zero, unless the bead is open or --held-ok says the hold is meant: then it exits 0\n" +
-			"and the warning is still the last line.",
+			"and the warning is still the last line.\n\n" +
+			application.PasteRulesHelp(application.PasteSurfaceHands),
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
 				return fmt.Errorf("mw hands add takes the bead and then, after --, the commands as one quoted argument; got %d argument(s)", len(args))
@@ -194,8 +195,20 @@ func newHandsAddCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			verdict, err := application.PasteCheck{
+				Surface: application.PasteSurfaceHands, Text: args[1], Also: []string{wayBack},
+				Allow: allow, Why: allowWhy, Bead: args[0],
+			}.Run()
+			if err != nil {
+				return err
+			}
 			gateway, viewHost, err := posternGateway()
 			if err != nil {
+				return err
+			}
+			// The reason is written before the step is kept: a held bead ends
+			// the add on a warning and a non-zero exit, with the step kept.
+			if err := verdict.Record(cmd.Context(), gateway); err != nil {
 				return err
 			}
 			retired, err := config.RetiredHosts()
@@ -239,6 +252,7 @@ func newHandsAddCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noView, "no-view", false, "do not publish the live view once the step is kept")
 	cmd.Flags().BoolVar(&heldOK, "held-ok", false, "the bead is held on purpose: the Governor sees no Run until it is open, so exit 0 (the warning is still said last)")
 	cmd.Flags().StringArrayVar(&after, "after", nil, "a bead that must finish first; it blocks this bead (repeatable)")
+	addPasteAllowFlags(cmd, &allow, &allowWhy)
 	for _, name := range []string{"id", "host", "as"} {
 		_ = cmd.MarkFlagRequired(name)
 	}

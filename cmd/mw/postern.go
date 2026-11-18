@@ -566,6 +566,8 @@ func newPosternSendCmd() *cobra.Command {
 	var chain, newPost, inFactory, long bool
 	var options, attach []string
 	var file, whyNow string
+	var allow []string
+	var allowWhy string
 
 	cmd := &cobra.Command{
 		Use:   "send [<text> | --file <path>]",
@@ -632,7 +634,9 @@ func newPosternSendCmd() *cobra.Command {
 			"decision-needed), not its options, and not the words inside a fenced code block (```). Over\n" +
 			"80 words (a card's question over 60) it prints one warning line to stderr and sends;\n" +
 			"over 120 (a card's question too) it refuses and sends nothing: trim, put the detail on\n" +
-			"the bead, or give --long, which sends past both limits.\n\n" +
+			"the bead, or give --long, which sends past both limits (--long is the alias of --allow words, and\n" +
+			"needs no bead).\n\n" +
+			application.PasteRulesHelp(application.PasteSurfaceSend) + "\n" +
 			"His review queue (open cards, open demos and unrun hands steps, as mw status DAMPERS counts it)\n" +
 			"has a limit, [dampers] review_queue (default 8). A card (--class decision-needed with --bead) asked\n" +
 			"while the queue is over it is not sent: the question, every --option and the --recommend are\n" +
@@ -683,11 +687,19 @@ func newPosternSendCmd() *cobra.Command {
 			if err := request.ValidateReplyFlags(); err != nil {
 				return err
 			}
-			warning, err := request.CheckLength(long)
+			allowBead := strings.TrimSpace(request.Bead)
+			if allowBead == "" {
+				allowBead = strings.TrimSpace(request.Thread)
+			}
+			pasteVerdict, err := application.PasteCheck{
+				Surface: application.PasteSurfaceSend, Text: text, Class: class, Long: long,
+				Also:  append(append([]string{}, options...), recommend),
+				Allow: allow, Why: allowWhy, Bead: allowBead,
+			}.Run()
 			if err != nil {
 				return err
 			}
-			if warning != "" {
+			for _, warning := range pasteVerdict.Warnings {
 				fmt.Fprintln(cmd.ErrOrStderr(), warning)
 			}
 			keys, err := posternKeys()
@@ -744,6 +756,9 @@ func newPosternSendCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := pasteVerdict.Record(cmd.Context(), gateway); err != nil {
+				return err
+			}
 			if verdict.Over {
 				return hold.Overrode(cmd.Context(), request, verdict, whyNow, txid)
 			}
@@ -766,10 +781,18 @@ func newPosternSendCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&inFactory, "factory", false, "with --re: the post it answers is in Factory, which has no channel flag; needed only for a post mw has not seen")
 	cmd.Flags().BoolVar(&newPost, "new", false, "post top-level in Factory on purpose, though the Governor's newest Factory post has no answer yet")
-	cmd.Flags().BoolVar(&long, "long", false, "send past the word limits (80 warns and 120 refuses; a card's question 60 and 120)")
+	cmd.Flags().BoolVar(&long, "long", false, "send past the word limits (80 warns and 120 refuses; a card's question 60 and 120): the alias of --allow words, needing no bead")
+	addPasteAllowFlags(cmd, &allow, &allowWhy)
 	cmd.Flags().BoolVar(&chain, "chain", false, "also broadcast the message on chain, for a phone that cannot reach the backend")
 	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare; with no channel flag the reply goes to its channel (refused with --bead)")
 	return cmd
+}
+
+// addPasteAllowFlags gives a command --allow and --allow-why, the override of
+// the paste rules (application.PasteRules).
+func addPasteAllowFlags(cmd *cobra.Command, allow *[]string, why *string) {
+	cmd.Flags().StringArrayVar(allow, "allow", nil, "send past this paste rule ("+strings.Join(application.PasteRuleNames(), ", ")+"; repeatable): needs --allow-why and a bead to write the reason on")
+	cmd.Flags().StringVar(why, "allow-why", "", "why --allow is right here; written on the bead as 'ALLOWED <rule>: <reason>' (empty is refused)")
 }
 
 // reviewQueueReader is where mw postern send counts his review queue from. A

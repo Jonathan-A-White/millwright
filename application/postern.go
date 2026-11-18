@@ -2656,16 +2656,12 @@ func (r PosternSendRequest) CheckLength(long bool) (warning string, err error) {
 	if long {
 		return "", nil
 	}
-	warn, refuse, what := PosternWarnWords, PosternRefuseWords, "message"
-	if r.Class == "decision-needed" {
-		warn, refuse, what = PosternCardWarnWords, PosternCardRefuseWords, "card question"
+	warn, refuse := lengthFindings(r.Text, r.Class)
+	if refuse != "" {
+		return "", fmt.Errorf("mw postern send: %s", refuse)
 	}
-	n := wordsOutsideFences(r.Text)
-	switch {
-	case n > refuse:
-		return "", fmt.Errorf("mw postern send: %d words, over the %d a %s may run: trim it, put the detail on the bead, or send it as it is with `mw postern send --long <text>`", n, refuse, what)
-	case n > warn:
-		return fmt.Sprintf("mw postern send: %d words; a phone shows about %d: trim, or say it in the bead", n, warn), nil
+	if warn != "" {
+		return "mw postern send: " + warn, nil
 	}
 	return "", nil
 }

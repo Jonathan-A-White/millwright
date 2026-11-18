@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -278,7 +279,8 @@ func newTalkSayCmd() *cobra.Command {
 	var talkID string
 	var turn int
 	var holding, end bool
-	var links []string
+	var links, allow []string
+	var allowWhy, allowBead string
 	cmd := &cobra.Command{
 		Use:   "say <text> --talk <id> --turn <n> [--holding|--end] [--link <bead>]...",
 		Short: "Answer the Governor in a talk",
@@ -291,9 +293,20 @@ func newTalkSayCmd() *cobra.Command {
 			"answer; --holding makes it the short answer sent while the real one is still coming, and --end\n" +
 			"the end of the talk. --link <bead> (repeatable) puts a bead id in the record's links field, for\n" +
 			"the Governor to open from the answer; it is never put in the spoken text. It refuses when\n" +
-			"postern_governor_key is not set.",
+			"postern_governor_key is not set.\n\n" +
+			application.PasteRulesHelp(application.PasteSurfaceSay),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			verdict, err := application.PasteCheck{
+				Surface: application.PasteSurfaceSay, Text: args[0],
+				Allow: allow, Why: allowWhy, Bead: allowBead,
+			}.Run()
+			if err != nil {
+				return err
+			}
+			for _, warning := range verdict.Warnings {
+				fmt.Fprintln(cmd.ErrOrStderr(), warning)
+			}
 			keys, err := posternKeys()
 			if err != nil {
 				return err
@@ -316,9 +329,21 @@ func newTalkSayCmd() *cobra.Command {
 			}.Run(cmd.Context(), application.TalkSayRequest{
 				Text: args[0], TalkID: talkID, Turn: turn, Holding: holding, End: end, Links: links,
 			})
-			return err
+			if err != nil {
+				return err
+			}
+			if len(verdict.Allowed) == 0 {
+				return nil
+			}
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			return verdict.Record(cmd.Context(), gateway)
 		},
 	}
+	addPasteAllowFlags(cmd, &allow, &allowWhy)
+	cmd.Flags().StringVar(&allowBead, "bead", "", "the bead --allow-why is written on (needed with --allow)")
 	cmd.Flags().StringVar(&talkID, "talk", "", "the id of the talk, as mw talk wait printed it")
 	cmd.Flags().IntVar(&turn, "turn", 0, "the number of the Governor's turn this answers")
 	cmd.Flags().BoolVar(&holding, "holding", false, "send a short holding answer; the real answer follows")
