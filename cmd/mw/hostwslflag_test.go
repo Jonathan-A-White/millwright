@@ -3,12 +3,10 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -346,52 +344,13 @@ func TestWSLFlagInstallLineDownloadsPinnedChecksAHashAndIsShort(t *testing.T) {
 	if strings.Contains(line, "FromBase64String") {
 		t.Errorf("the short line must not carry the script in itself")
 	}
-	// the task is registered exactly as the inline form registers it
-	reg1 := line[strings.Index(line, "Register-ScheduledTask"):]
-	inline := WSLFlagInstallLineInline()
-	if reg2 := inline[strings.Index(inline, "Register-ScheduledTask"):]; reg1 != reg2 {
-		t.Errorf("the task must be registered as the inline form does:\n%s\n%s", reg1, reg2)
-	}
 }
 
 func TestWSLFlagInstallLineRefusesWithNoCommitToPinAt(t *testing.T) {
 	wslFlagPinned(t, "")
 	out, err := runMw(t, "host", "wsl-flag", "--install-line")
-	if err == nil || !strings.Contains(err.Error(), "--inline") {
-		t.Errorf("expected a refusal naming --inline, got %v\n%s", err, out)
-	}
-	if out, err = runMw(t, "host", "wsl-flag", "--install-line", "--inline"); err != nil {
-		t.Errorf("--inline needs no commit: %v\n%s", err, out)
-	}
-}
-
-func TestWSLFlagInstallLineInlineCarriesTheScript(t *testing.T) {
-	out, err := runMw(t, "host", "wsl-flag", "--install-line", "--inline")
-	if err != nil {
-		t.Fatalf("mw host wsl-flag --install-line --inline failed: %v\n%s", err, out)
-	}
-	m := regexp.MustCompile(`FromBase64String\('([^']+)'\)`).FindStringSubmatch(out)
-	if m == nil {
-		t.Fatalf("expected the script carried in the line:\n%s", out)
-	}
-	script, err := base64.StdEncoding.DecodeString(m[1])
-	if err != nil || string(script) != millwright.WSLFlagWatch {
-		t.Errorf("the line must carry contrib/windows/wsl-flag-watch.ps1 as it is (err %v)", err)
-	}
-	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "Register-ScheduledTask") && !strings.Contains(l, "-Force") {
-			t.Errorf("the Register-ScheduledTask line must be whole on one line: %.80q", l)
-		}
-	}
-}
-
-func TestWSLFlagInlineGoesWithInstallLine(t *testing.T) {
-	dir := wslFlagHere(t, nil)
-	if out, err := runMw(t, "host", "wsl-flag", "restart", "--inline"); err == nil {
-		t.Errorf("expected --inline alone to be refused, got:\n%s", out)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "wsl-flag")); err == nil {
-		t.Errorf("a refused request must write no flag")
+	if err == nil || !strings.Contains(err.Error(), "rebuild") {
+		t.Errorf("expected a refusal saying to rebuild, got %v\n%s", err, out)
 	}
 }
 
@@ -447,7 +406,6 @@ func TestWSLFlagInstallLinesCheckElevationBeforeWritingAnything(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertElevationFirst(t, "wsl-flag short line", short)
-	assertElevationFirst(t, "wsl-flag inline line", WSLFlagInstallLineInline())
 }
 
 // The wsl-flag task runs powershell.exe under conhost.exe --headless, as give way's

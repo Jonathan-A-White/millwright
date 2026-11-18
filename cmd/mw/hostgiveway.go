@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"regexp"
@@ -100,9 +99,10 @@ func giveWayRegisterAll() string {
 // file (freeze), registers the four tasks and prints them. It refuses to run
 // under any other account, and on a Windows too old for a window-less task. The
 // script is downloaded from the public repo pinned at the commit this binary was
-// built from and held to the SHA-256 of the embedded copy; inline carries it in
-// the paste (base64) instead, for a host that cannot reach the repo.
-func GiveWayInstallLine(account string, inline bool) (string, error) {
+// built from and held to the SHA-256 of the embedded copy. There is no form that
+// carries the script in the paste: it would have to be encoded (base64), which an
+// antivirus took for a threat (mw-gq6.1431).
+func GiveWayInstallLine(account string) (string, error) {
 	if !giveWayAccountRe.MatchString(account) {
 		return "", fmt.Errorf("%q is not a Windows account name mw will put in a paste", account)
 	}
@@ -113,22 +113,16 @@ func GiveWayInstallLine(account string, inline bool) (string, error) {
 		"if ($env:USERNAME -ne '" + account + "') { throw 'run this as " + account + ", the account that owns WSL: nothing installed' }\n" +
 		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { throw 'needs Windows 10 build %d or later (a task without a window): nothing installed' }\n", giveWayMinBuild, giveWayMinBuild) +
 		`$d="` + giveWayDir + `"; New-Item -ItemType Directory -Force $d | Out-Null` + "\n"
-	var get string
-	if inline {
-		enc := base64.StdEncoding.EncodeToString([]byte(millwright.GiveWayScript))
-		get = `[IO.File]::WriteAllBytes("$d\giveway.ps1",[Convert]::FromBase64String('` + enc + `'))` + "\n"
-	} else {
-		commit := wslFlagCommit()
-		if len(commit) != 40 {
-			return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build); `--inline` prints the paste that carries the script in itself instead")
-		}
-		sum := sha256.Sum256([]byte(millwright.GiveWayScript))
-		get = `[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $t="$d\giveway.ps1.new"` + "\n" +
-			`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + giveWayScriptPath + `' -OutFile $t` + "\n" +
-			`if ((Get-FileHash -Algorithm SHA256 $t).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) +
-			`') { Remove-Item $t; throw 'giveway.ps1 does not match its expected SHA-256: nothing installed' }` + "\n" +
-			`Move-Item -Force $t "$d\giveway.ps1"` + "\n"
+	commit := wslFlagCommit()
+	if len(commit) != 40 {
+		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build)")
 	}
+	sum := sha256.Sum256([]byte(millwright.GiveWayScript))
+	get := `[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $t="$d\giveway.ps1.new"` + "\n" +
+		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + giveWayScriptPath + `' -OutFile $t` + "\n" +
+		`if ((Get-FileHash -Algorithm SHA256 $t).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) +
+		`') { Remove-Item $t; throw 'giveway.ps1 does not match its expected SHA-256: nothing installed' }` + "\n" +
+		`Move-Item -Force $t "$d\giveway.ps1"` + "\n"
 	return head + get + `Set-Content -Path "$d\mode" -Value freeze -Encoding ASCII` + "\n" + giveWayRegisterAll() + "\n", nil
 }
 
@@ -170,10 +164,10 @@ func GiveWayModeLine(mode string) (string, error) {
 
 // newHostGiveWayCmd builds `mw host giveway`.
 func newHostGiveWayCmd() *cobra.Command {
-	var installLine, uninstallLine, inline bool
+	var installLine, uninstallLine bool
 	var modeLine, account string
 	cmd := &cobra.Command{
-		Use:   "giveway --install-line [--inline] [--account <name>] | --uninstall-line | --mode-line freeze|shutdown",
+		Use:   "giveway --install-line [--account <name>] | --uninstall-line | --mode-line freeze|shutdown",
 		Short: "Print the paste that sets up, takes away or switches the Windows half of give way on a host a person also sits at",
 		Long: "The desktop is also another person's PC. `mw giveway on` freezes the factory while she is at the screen, `off` lets it go\n" +
 			"on; the Windows half (contrib/windows/giveway.ps1) calls them: four scheduled tasks of the account that owns\n" +
@@ -181,7 +175,7 @@ func newHostGiveWayCmd() *cobra.Command {
 			"disconnect), at logoff, and every 5 minutes (a renew). No window is shown. docs/give-way.md has what each does.\n\n" +
 			"  --install-line    one paste for a NEW admin Windows PowerShell as " + giveWayAccount + ": copies the script under ProgramData,\n" +
 			"                    writes the mode file (freeze), registers the four tasks and prints them. The script is\n" +
-			"                    downloaded pinned at this build's commit and held to its SHA-256; --inline carries it in the paste.\n" +
+			"                    downloaded pinned at this build's commit and held to its SHA-256. There is no form that carries the script in the paste.\n" +
 			"  --uninstall-line  the way back: the tasks and the folder removed, the host told to go on.\n" +
 			"  --mode-line M     the paste that flips the fallback mode: freeze (the default) or shutdown (WSL is shut down at\n" +
 			"                    unlock and started at lock).\n\n" +
@@ -197,14 +191,11 @@ func newHostGiveWayCmd() *cobra.Command {
 			if n != 1 {
 				return fmt.Errorf("say which: exactly one of --install-line, --uninstall-line, --mode-line freeze|shutdown")
 			}
-			if inline && !installLine {
-				return fmt.Errorf("--inline goes with --install-line")
-			}
 			var text string
 			var err error
 			switch {
 			case installLine:
-				text, err = GiveWayInstallLine(account, inline)
+				text, err = GiveWayInstallLine(account)
 			case uninstallLine:
 				text = GiveWayUninstallLine()
 			default:
@@ -220,7 +211,6 @@ func newHostGiveWayCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&installLine, "install-line", false, "print the paste that installs the script and registers the four tasks")
 	cmd.Flags().BoolVar(&uninstallLine, "uninstall-line", false, "print the paste that removes the four tasks and the folder")
 	cmd.Flags().StringVar(&modeLine, "mode-line", "", "print the paste that sets the mode: freeze or shutdown")
-	cmd.Flags().BoolVar(&inline, "inline", false, "with --install-line: carry the script in the paste (base64) instead of downloading it pinned at this build's commit")
 	cmd.Flags().StringVar(&account, "account", giveWayAccount, "with --install-line: the Windows account that owns WSL, the only one the paste will run under")
 	return cmd
 }

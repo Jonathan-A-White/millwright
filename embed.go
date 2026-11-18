@@ -56,8 +56,8 @@ var DispatchTimer string
 // task's script that restarts or compacts a sealed WSL host when a flag file
 // appears inside it. mw host wsl-flag --install-line pins a download of it in
 // the one PowerShell line it prints and holds the download to this copy's
-// SHA-256, so installing it needs no checkout on Windows; --inline carries it
-// in the line instead.
+// SHA-256, so installing it needs no checkout on Windows. No form carries it in
+// the line: it would have to be encoded, and an antivirus took that for a threat.
 //
 //go:embed contrib/windows/wsl-flag-watch.ps1
 var WSLFlagWatch string
@@ -65,8 +65,8 @@ var WSLFlagWatch string
 // GiveWayScript is contrib/windows/giveway.ps1: the Windows half of `mw giveway`,
 // run by three scheduled tasks of the account that owns the WSL distro (unlock,
 // lock, tick). mw host giveway --install-line pins a download of it in the paste
-// it prints and holds the download to this copy's SHA-256; --inline carries it
-// in the paste instead.
+// it prints and holds the download to this copy's SHA-256. No form carries it in
+// the paste: it would have to be encoded, and an antivirus took that for a threat.
 //
 //go:embed contrib/windows/giveway.ps1
 var GiveWayScript string

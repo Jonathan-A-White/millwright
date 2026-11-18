@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os/exec"
@@ -129,7 +128,7 @@ func wslFlagRegister() string {
 func WSLFlagInstallLine() (string, error) {
 	commit := wslFlagCommit()
 	if len(commit) != 40 {
-		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build); `--inline` prints the line that carries the script in itself instead")
+		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build)")
 	}
 	sum := sha256.Sum256([]byte(millwright.WSLFlagWatch))
 	return windowsElevationCheck + `; $d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
@@ -137,15 +136,6 @@ func WSLFlagInstallLine() (string, error) {
 		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + wslFlagScriptPath + `' -OutFile $t; ` +
 		`if ((Get-FileHash -Algorithm SHA256 $t).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) + `') { Remove-Item $t; throw 'wsl-flag-watch.ps1 does not match its expected SHA-256: nothing installed' }; ` +
 		`Move-Item -Force $t "$d\wsl-flag-watch.ps1"; ` + wslFlagRegister(), nil
-}
-
-// WSLFlagInstallLineInline is the same line with the watcher script carried in
-// it (base64), for a host that cannot reach the repo. It is over 8000 bytes,
-// too long for Postern.
-func WSLFlagInstallLineInline() string {
-	enc := base64.StdEncoding.EncodeToString([]byte(millwright.WSLFlagWatch))
-	return windowsElevationCheck + `; $d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
-		`[IO.File]::WriteAllBytes("$d\wsl-flag-watch.ps1",[Convert]::FromBase64String('` + enc + `')); ` + wslFlagRegister()
 }
 
 // WSLFlagWayBack is the one line that takes the task and its script away. It
@@ -160,7 +150,7 @@ func WSLFlagWayBack() string {
 func newHostWSLFlagCmd() *cobra.Command {
 	var host string
 	var limit time.Duration
-	var installLine, inline bool
+	var installLine bool
 	cmd := &cobra.Command{
 		Use:   "wsl-flag restart|compact [--host <host>] [--limit <duration>] | --install-line",
 		Short: "Ask a WSL host's Windows side to restart WSL, or to trim and compact its disk, with no visit to the desk",
@@ -176,11 +166,8 @@ func newHostWSLFlagCmd() *cobra.Command {
 			"`mw host wsl-flag --install-line` prints the one line of admin PowerShell, run once at the desk, that\n" +
 			"installs the task, and the line that takes it away. The line downloads the script from the public repo\n" +
 			"pinned at the commit this mw was built from and installs it only if its SHA-256 is the one mw carries;\n" +
-			"it is short enough to send to a phone. `--inline` prints the long form that carries the script in itself.",
+			"it is short enough to send to a phone. There is no form that carries the script in the line: it would have to be encoded.",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if inline && !installLine {
-				return fmt.Errorf("--inline goes with --install-line")
-			}
 			if installLine {
 				return cobra.NoArgs(cmd, args)
 			}
@@ -197,12 +184,9 @@ func newHostWSLFlagCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			if installLine {
-				line := WSLFlagInstallLineInline()
-				if !inline {
-					var err error
-					if line, err = WSLFlagInstallLine(); err != nil {
-						return err
-					}
+				line, err := WSLFlagInstallLine()
+				if err != nil {
+					return err
 				}
 				// The window and its prompt are named in the prose: a fenced block
 				// is copied whole, so it holds only the command.
@@ -232,7 +216,6 @@ func newHostWSLFlagCmd() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "the host whose WSL to ask about (default: this host)")
 	cmd.Flags().DurationVar(&limit, "limit", wslFlagLimit, "how long to wait for the result")
 	cmd.Flags().BoolVar(&installLine, "install-line", false, "print the one admin-PowerShell line that installs the Windows task, and its way back")
-	cmd.Flags().BoolVar(&inline, "inline", false, "with --install-line: carry the script in the line (base64, over 8000 bytes) instead of downloading it pinned at this build's commit")
 	return cmd
 }
 

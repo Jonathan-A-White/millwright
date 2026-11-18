@@ -181,9 +181,10 @@ func TestHostTrimSetupPrintsTheDropInAsOneLineAloneInAFencedBlock(t *testing.T) 
 // giveway's pastes are a script of several lines by design (each begins with a
 // comment saying what it does), so they are held to no prompt on any line.
 func TestTheOtherHostPastesCarryNoPromptAndWslFlagsIsOneLine(t *testing.T) {
-	out, err := runMw(t, "host", "wsl-flag", "--install-line", "--inline")
+	giveWayPinned(t)
+	out, err := runMw(t, "host", "wsl-flag", "--install-line")
 	if err != nil {
-		t.Fatalf("mw host wsl-flag --install-line --inline failed: %v\n%s", err, out)
+		t.Fatalf("mw host wsl-flag --install-line failed: %v\n%s", err, out)
 	}
 	blocks := pasteBlocks(out)
 	if len(blocks) != 2 {
@@ -195,7 +196,7 @@ func TestTheOtherHostPastesCarryNoPromptAndWslFlagsIsOneLine(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{
-		{"host", "giveway", "--install-line", "--inline"},
+		{"host", "giveway", "--install-line"},
 		{"host", "giveway", "--uninstall-line"},
 		{"host", "giveway", "--mode-line", "freeze"},
 	} {
