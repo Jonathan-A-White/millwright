@@ -119,7 +119,9 @@ type StuckFinder interface {
 //     that IsHoldComment accepts.
 //   - A claimed bead whose lease ran out more than StuckClaimAge ago, with no
 //     heartbeat since: a claim with no session. A claim bd shows no lease for is
-//     not listed, as StaleClaims does not list it.
+//     not listed, as StaleClaims does not list it. One queued for its rig's
+//     batch landing (run:queued) is listed as that, not as a claim with no
+//     session.
 //
 // A root is listed only when some live bead (open or in progress, not an epic)
 // waits behind it over 'blocks' links, through live beads only. It reads and
@@ -199,12 +201,32 @@ func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
 				continue
 			}
 			if live := behind(claim.Story.ID); len(live) > 0 {
-				roots = append(roots, StuckRoot{ID: claim.Story.ID, Why: "claimed, no session for over 6 hours", Behind: live})
+				roots = append(roots, StuckRoot{ID: claim.Story.ID, Why: staleClaimWhy(claim, now), Behind: live})
 			}
 		}
 	}
 	sort.Slice(roots, func(a, b int) bool { return roots[a].ID < roots[b].ID })
 	return StuckReport{Roots: roots}, nil
+}
+
+// staleClaimWhy is the reason a stale claim is a root. A story queued for its
+// batch (run:queued) has no session by design: its Builder finished and it
+// waits on its rig's batch landing, so it is named for that, with how long it
+// has been queued when the tracker said (mw-gq6.1425). Any other is a claim
+// with no session.
+func staleClaimWhy(claim StoryDetail, now time.Time) string {
+	if !QueuedForBatch(claim) {
+		return "claimed, no session for over 6 hours"
+	}
+	rig := "its rig"
+	if name := claim.Merged().Rig; name != "" {
+		rig = name
+	}
+	why := "queued for " + rig + "'s batch landing"
+	if !claim.QueuedAt.IsZero() {
+		why += " for over " + elapsed(now.Sub(claim.QueuedAt))
+	}
+	return why
 }
 
 func hasHoldLabel(labels []string) bool {

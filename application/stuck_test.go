@@ -310,3 +310,46 @@ func TestTheNeedsYouStaleListHoldsAnOpenRefusedStoryWithItsAgeAndCommand(t *test
 		t.Errorf("a refused story changed his review queue size to %d", got)
 	}
 }
+
+func TestAStoryQueuedForABatchLandingIsNamedAsQueuedNotAsClaimedWithNoSession(t *testing.T) {
+	f := &stuckFixture{graph: &apptest.FakeBeadGraph{}, tracker: apptest.NewFakeTracker()}
+	f.tracker.AddEpic("mw-s", domain.Path{Rig: "lampas"})
+	f.bead("mw-s.1", "open", nil)
+	f.bead("mw-s.2", "open", nil, "mw-s.1")
+	mustDo(t, f.tracker.SetStatus("mw-s.1", apptest.StatusInProgress))
+	mustDo(t, f.tracker.SetLeaseExpires("mw-s.1", stuckNow.Add(-7*time.Hour)))
+	mustDo(t, f.tracker.SetLabels("mw-s.1", application.RunState+":"+application.RunQueued))
+	mustDo(t, f.tracker.SetStoryMetadata(context.Background(), "mw-s.1",
+		map[string]string{application.QueuedAtField: stuckNow.Add(-8*time.Hour - 30*time.Minute).Format(time.RFC3339)}))
+
+	report := f.find(t)
+	if got := rootIDs(report); len(got) != 1 || got[0] != "mw-s.1" {
+		t.Fatalf("roots = %v, want only mw-s.1 (its 28 behind are really behind it)", got)
+	}
+	why := report.Roots[0].Why
+	if strings.Contains(why, "no session") {
+		t.Errorf("why = %q, a story queued for its batch has no session by design", why)
+	}
+	for _, want := range []string{"queued for lampas's batch landing", "8h30m"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("why = %q, want it to hold %q", why, want)
+		}
+	}
+	if said := report.String(); !strings.Contains(said, "mw-s.1 (queued for lampas's batch landing") {
+		t.Errorf("stuck said %q, want the root's line to name the batch landing", said)
+	}
+}
+
+func TestAClaimNotQueuedForABatchStillReadsClaimedNoSession(t *testing.T) {
+	f := newStuckFixture()
+	f.bead("mw-s.1", "open", nil)
+	f.bead("mw-s.2", "open", nil, "mw-s.1")
+	mustDo(t, f.tracker.SetStatus("mw-s.1", apptest.StatusInProgress))
+	mustDo(t, f.tracker.SetLeaseExpires("mw-s.1", stuckNow.Add(-7*time.Hour)))
+	mustDo(t, f.tracker.SetLabels("mw-s.1", application.RunState+":"+application.RunRunning))
+
+	report := f.find(t)
+	if len(report.Roots) != 1 || report.Roots[0].Why != "claimed, no session for over 6 hours" {
+		t.Fatalf("roots = %+v, want mw-s.1 claimed with no session for over 6 hours", report.Roots)
+	}
+}

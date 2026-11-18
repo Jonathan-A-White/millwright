@@ -3,9 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -77,21 +75,19 @@ func giveWayPinned(t *testing.T) {
 
 func TestGiveWayInstallLineStartsWithACommentWithItsWayBack(t *testing.T) {
 	giveWayPinned(t)
-	for _, inline := range []bool{false, true} {
-		line, err := GiveWayInstallLine("grace", inline)
-		if err != nil {
-			t.Fatal(err)
-		}
-		first := strings.SplitN(line, "\n", 2)[0]
-		if !strings.HasPrefix(first, "# ") || !strings.Contains(first, "mw host giveway --uninstall-line") {
-			t.Errorf("(inline %v) the paste must begin with a comment saying what it does and its way back, got %q", inline, first)
-		}
+	line, err := GiveWayInstallLine("grace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := strings.SplitN(line, "\n", 2)[0]
+	if !strings.HasPrefix(first, "# ") || !strings.Contains(first, "mw host giveway --uninstall-line") {
+		t.Errorf("the paste must begin with a comment saying what it does and its way back, got %q", first)
 	}
 }
 
 func TestGiveWayInstallLineRegistersFourTasksWithTheTriggersForAnyUser(t *testing.T) {
 	giveWayPinned(t)
-	line, err := GiveWayInstallLine("grace", false)
+	line, err := GiveWayInstallLine("grace")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +147,7 @@ func TestGiveWayInstallLineRegistersFourTasksWithTheTriggersForAnyUser(t *testin
 // the logoff task. It carries no user, so a sign-out of any account fires it.
 func TestGiveWayInstallLineHasALogoffTaskOnTheUserProfileServiceEvent(t *testing.T) {
 	giveWayPinned(t)
-	line, err := GiveWayInstallLine("grace", true)
+	line, err := GiveWayInstallLine("grace")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +176,7 @@ func TestGiveWayInstallLineHasALogoffTaskOnTheUserProfileServiceEvent(t *testing
 // Remote desktop connect and disconnect give way and let go like the console's.
 func TestGiveWayRemoteDesktopTriggersAreOnTheUnlockAndLockTasks(t *testing.T) {
 	giveWayPinned(t)
-	line, err := GiveWayInstallLine("grace", true)
+	line, err := GiveWayInstallLine("grace")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +244,7 @@ func TestGiveWayScriptLooksForASessionOfAnyUser(t *testing.T) {
 
 func TestGiveWayInstallLineChecksTheDownloadBeforeItRegistersAnything(t *testing.T) {
 	giveWayPinned(t)
-	line, err := GiveWayInstallLine("grace", false)
+	line, err := GiveWayInstallLine("grace")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,41 +270,24 @@ func TestGiveWayInstallLineChecksTheDownloadBeforeItRegistersAnything(t *testing
 	}
 }
 
-func TestGiveWayInstallLineWithNoCommitToPinAtSaysInline(t *testing.T) {
+func TestGiveWayInstallLineWithNoCommitToPinAtSaysToRebuild(t *testing.T) {
 	wslFlagPinned(t, "")
 	out, err := runMw(t, "host", "giveway", "--install-line")
-	if err == nil || !strings.Contains(err.Error(), "--inline") {
-		t.Errorf("expected a refusal naming --inline, got %v\n%s", err, out)
-	}
-	if out, err = runMw(t, "host", "giveway", "--install-line", "--inline"); err != nil {
-		t.Errorf("--inline needs no commit: %v\n%s", err, out)
-	}
-}
-
-func TestGiveWayInstallLineInlineCarriesTheScript(t *testing.T) {
-	out, err := runMw(t, "host", "giveway", "--install-line", "--inline")
-	if err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	m := regexp.MustCompile(`FromBase64String\('([^']+)'\)`).FindStringSubmatch(out)
-	if m == nil {
-		t.Fatalf("expected the script carried in the paste:\n%s", out)
-	}
-	script, err := base64.StdEncoding.DecodeString(m[1])
-	if err != nil || string(script) != millwright.GiveWayScript {
-		t.Errorf("the paste must carry contrib/windows/giveway.ps1 as it is (err %v)", err)
+	if err == nil || !strings.Contains(err.Error(), "rebuild") {
+		t.Errorf("expected a refusal saying to rebuild, got %v\n%s", err, out)
 	}
 }
 
 func TestGiveWayInstallLineTakesAnotherAccount(t *testing.T) {
-	line, err := GiveWayInstallLine("someone", true)
+	giveWayPinned(t)
+	line, err := GiveWayInstallLine("someone")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(line, "$env:USERNAME -ne 'someone'") {
 		t.Errorf("--account must change the account the paste insists on")
 	}
-	if _, err := GiveWayInstallLine("a'b", true); err == nil {
+	if _, err := GiveWayInstallLine("a'b"); err == nil {
 		t.Errorf("an account holding a quote must be refused")
 	}
 }
@@ -358,9 +337,6 @@ func TestGiveWayHostCommandWantsExactlyOneThing(t *testing.T) {
 	if out, err := runMw(t, "host", "giveway", "--install-line", "--uninstall-line"); err == nil {
 		t.Errorf("two flags must be refused, got:\n%s", out)
 	}
-	if out, err := runMw(t, "host", "giveway", "--inline", "--uninstall-line"); err == nil {
-		t.Errorf("--inline without --install-line must be refused, got:\n%s", out)
-	}
 }
 
 // windowsPowerShell is the real Windows PowerShell 5.1 from a WSL with interop;
@@ -388,17 +364,13 @@ func parseWithWindowsPowerShell(t *testing.T, text string) string {
 
 func TestWindowsPowerShellParsesTheScriptAndThePastes(t *testing.T) {
 	giveWayPinned(t)
-	short, err := GiveWayInstallLine("grace", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	inline, err := GiveWayInstallLine("grace", true)
+	short, err := GiveWayInstallLine("grace")
 	if err != nil {
 		t.Fatal(err)
 	}
 	mode, _ := GiveWayModeLine("shutdown")
 	for name, text := range map[string]string{
-		"giveway.ps1": millwright.GiveWayScript, "install-line": short, "install-line --inline": inline,
+		"giveway.ps1": millwright.GiveWayScript, "install-line": short,
 		"uninstall-line": GiveWayUninstallLine(), "mode-line": mode,
 	} {
 		if got := parseWithWindowsPowerShell(t, text); !strings.HasPrefix(got, "PARSEERRORS=0") {
@@ -413,13 +385,11 @@ func TestWindowsPowerShellParsesTheScriptAndThePastes(t *testing.T) {
 // before it writes anything (mw-2891blf.25).
 func TestGiveWayInstallLineChecksElevationBeforeWritingAnything(t *testing.T) {
 	giveWayPinned(t)
-	for _, inline := range []bool{false, true} {
-		line, err := GiveWayInstallLine("grace", inline)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertElevationFirst(t, fmt.Sprintf("giveway install (inline %v)", inline), line)
+	line, err := GiveWayInstallLine("grace")
+	if err != nil {
+		t.Fatal(err)
 	}
+	assertElevationFirst(t, "giveway install", line)
 }
 
 // The way back unregisters its tasks with -ErrorAction SilentlyContinue, so in a

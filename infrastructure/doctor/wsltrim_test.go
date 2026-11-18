@@ -2,11 +2,9 @@ package doctor_test
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -158,15 +156,27 @@ func TestWSLTrimRootScriptWritesBothDropInsAndRestartsTheTimer(t *testing.T) {
 			t.Errorf("expected the script to hold %q, got %q", want, script)
 		}
 	}
-	encoded := regexp.MustCompile(`echo ([A-Za-z0-9+/=]+) \| base64 -d`).FindAllStringSubmatch(script, -1)
-	if len(encoded) != 2 {
-		t.Fatalf("expected two encoded drop-ins, got %q", script)
-	}
-	for _, m := range encoded {
-		raw, err := base64.StdEncoding.DecodeString(m[1])
-		if err != nil || string(raw) != "[Unit]\nConditionVirtualization=\n" {
-			t.Errorf("expected the drop-in [Unit] then an empty ConditionVirtualization=, got %q (%v)", raw, err)
+}
+
+// An antivirus took the base64 form of this paste for a threat and quarantined
+// the Governor's PowerShell history (mw-gq6.1431): the drop-in text is in the
+// script as written, and nothing here decodes it.
+func TestWSLTrimRootScriptWritesPlainText(t *testing.T) {
+	script := doctor.WSLTrimRootScript()
+	for _, banned := range []string{"base64", "encodedcommand"} {
+		if strings.Contains(strings.ToLower(script), banned) {
+			t.Errorf("expected plain text, the script holds %q: %q", banned, script)
 		}
+	}
+	for _, path := range doctor.WSLTrimDropIns {
+		if !strings.Contains(script, "> "+path) {
+			t.Errorf("expected the script to write %s with a redirect, got %q", path, script)
+		}
+	}
+	// two printfs, each of the drop-in's own words: the [Unit] section and an
+	// empty ConditionVirtualization=
+	if got := strings.Count(script, `printf \[Unit]\\nConditionVirtualization=\\n > `); got != 2 {
+		t.Errorf("expected both drop-ins printed as written, got %d in %q", got, script)
 	}
 }
 

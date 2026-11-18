@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -58,17 +57,24 @@ const WSLTrimDistro = "Ubuntu-24.04"
 // writes both drop-ins, reloads systemd and restarts fstrim.timer (which is
 // Persistent, so it catches up the weeks it missed at once). It holds no
 // quote, backtick or dollar, so it passes unchanged through a PowerShell
-// single-quoted string and wsl.exe: the drop-in text goes in as base64.
+// single-quoted string and wsl.exe, and the drop-in text is written out in it
+// as plain text (printf, the opening bracket and each newline's backslash
+// escaped for the shell): an antivirus took the base64 form of this paste for
+// a threat and quarantined the Governor's PowerShell history (mw-gq6.1431).
 func WSLTrimRootScript() string {
-	encoded := base64.StdEncoding.EncodeToString([]byte(wslTrimDropInText))
 	var b strings.Builder
 	b.WriteString("mkdir -p /etc/systemd/system/fstrim.timer.d /etc/systemd/system/fstrim.service.d")
 	for _, path := range WSLTrimDropIns {
-		fmt.Fprintf(&b, " && echo %s | base64 -d > %s", encoded, path)
+		fmt.Fprintf(&b, " && printf %s > %s", wslTrimDropInPrintf, path)
 	}
 	b.WriteString(" && systemctl daemon-reload && systemctl restart fstrim.timer")
 	return b.String()
 }
+
+// wslTrimDropInPrintf is wslTrimDropInText as printf's argument with no quote:
+// the shell reads \[ as [ (so [Unit] is no glob) and \\n as \n, which printf
+// makes a newline.
+const wslTrimDropInPrintf = `\[Unit]\\nConditionVirtualization=\\n`
 
 // WSLTrimWayBack is the commands that undo WSLTrimRootScript.
 func WSLTrimWayBack() string {

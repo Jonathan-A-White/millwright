@@ -86,7 +86,7 @@ It prints one block of text that begins with a comment saying what it does and i
 block. It refuses to run under any account but that one (`--account <name>` changes it) and on a Windows
 older than build 19041; it makes the folder `C:\ProgramData\millwright\giveway`; downloads the script from the
 public repo pinned at the commit this mw was built from and refuses it unless its SHA-256 is the embedded
-copy's (`--inline` instead carries the script in the paste, base64, for a host that cannot reach the repo);
+copy's (no form carries the script in the paste: it would have to be base64, which an antivirus took for a threat, mw-gq6.1431);
 writes the `mode` file (`freeze`); registers `millwright give way (unlock)`, `millwright give way (lock)`, `millwright give way (logoff)` and
 `millwright give way (tick)` under that account (interactive logon, normal rights); and prints the four
 tasks with their state and next run (all but the tick have none: they run on their events).
