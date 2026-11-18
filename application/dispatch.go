@@ -1002,6 +1002,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	shares := fileShares{changes: d.Changes, rules: d.Rules, rigs: d.Rigs, remote: d.remote()}
 	reads := newCandidateReads(d.Tracker, d.Host, nil)
 	reads.takeClaims(running)
+	var closeOuts []StoryDetail
 	for _, detail := range running {
 		if detail.Hitl() {
 			continue
@@ -1021,9 +1022,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// run counts it as running.
 		if CloseOutAgain(detail) {
 			shares.add(detail)
-			if d.DryRun || d.closeOutAgain(ctx, detail, &report) {
-				report.Running++
-			}
+			closeOuts = append(closeOuts, detail) // run once the room is read (mw-gq6.1487)
 			continue
 		}
 		if !d.DryRun {
@@ -1120,6 +1119,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// A story pinned to a host that cannot take it is moved to host=auto before
 	// the ready stories are read, so this tick may take it (mw-gq6.1165).
 	d.repath(ctx, noRoom, network, &report)
+	report.Running += d.closeOutsAgain(ctx, closeOuts, noRoom, &report)
 	free := limit - report.Running
 
 	ready, err := d.Tracker.ReadyForHost(ctx, d.Host)

@@ -6,6 +6,19 @@ import (
 	"time"
 )
 
+// closeOutsAgain runs the close-out of each story handed back for it, once the
+// pass has read the room, and counts the stories that hold a session now. A dry
+// run counts them all and starts none.
+func (d Dispatch) closeOutsAgain(ctx context.Context, details []StoryDetail, noRoom string, report *DispatchReport) int {
+	running := 0
+	for _, detail := range details {
+		if d.DryRun || d.closeOutAgain(ctx, detail, noRoom, report) {
+			running++
+		}
+	}
+	return running
+}
+
 // closeOutAgain runs the close-out alone again of a story its last close-out
 // handed back at the merge slot's overall most (RunCloseOutAgain, mw-gq6.467):
 // its claim, worktree and committed branch were kept, so what runs is `mw next`
@@ -16,7 +29,7 @@ import (
 // the story holds a session now: one already running, or the one started.
 // Anything that fails is a note, and the story is left handed back for the
 // next tick to try again.
-func (d Dispatch) closeOutAgain(ctx context.Context, detail StoryDetail, report *DispatchReport) bool {
+func (d Dispatch) closeOutAgain(ctx context.Context, detail StoryDetail, noRoom string, report *DispatchReport) bool {
 	id := detail.Story.ID
 	name := SessionName(id)
 	// A story held on main's own red waits for the bead that carries the fix
@@ -51,6 +64,12 @@ func (d Dispatch) closeOutAgain(ctx context.Context, detail StoryDetail, report 
 	spec, err := d.Boot.CloseOut(ctx, detail, WorktreeDir(rigDir, id))
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: %v", id, err))
+		return false
+	}
+	// It runs the rig's tests, as a Builder's session does, so a host with no
+	// room starts none: the story stays handed back until it has (mw-gq6.1487).
+	if noRoom != "" {
+		report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-room", Why: fmt.Sprintf("%s has no room: %s", d.Host, noRoom)})
 		return false
 	}
 	// The marker is read again right before the close-out starts, as it is before
