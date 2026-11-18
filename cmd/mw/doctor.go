@@ -430,6 +430,17 @@ func newDoctorCmd() *cobra.Command {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLTrimName), text)
 			}
 			wslDriveFree := doctor.NewWSLDriveFree()
+			room, err := config.Room()
+			if err != nil {
+				return err
+			}
+			wslDriveFree.WarnGB, wslDriveFree.DispatchFloorGB = room.DriveWarnGB, room.MinDriveFreeGB
+			if room.DriveWarnGB == 0 {
+				wslDriveFree.WarnGB = -1
+			}
+			if room.MinDriveFreeGB == 0 {
+				wslDriveFree.DispatchFloorGB = -1
+			}
 			wslDriveFree.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLDriveFreeName), text)
 			}

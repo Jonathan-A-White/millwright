@@ -245,6 +245,13 @@ const WSLDriveFreeName = "wsl-drive-free"
 // (mw-gq6.1366).
 const WSLDriveFreeMin int64 = 5 << 30
 
+// WSLDriveWarnDefault is the free space on the Windows drive under which the
+// check warns, 'low, not yet refusing': 30 GB, above the 15 GB under which
+// dispatch starts no new Builder (application.DefaultRoomMinDriveFreeGB), so
+// the Mayor hears before dispatch stops (mw-gq6.1428, provisional). The
+// config's [dispatch] drive_warn_gb changes it, and 0 turns the warning off.
+const WSLDriveWarnDefault int64 = 30
+
 // WSLDriveFreeMaxAge is how old the Windows task's report may be before the
 // doctor says the task has stopped: the task writes every 2 minutes.
 const WSLDriveFreeMaxAge = 24 * time.Hour
@@ -267,11 +274,26 @@ const (
 )
 
 // WSLDriveFree is the check that the Windows drive holding a WSL host's vhdx
-// has room: faulty under WSLDriveFreeMin. It reads the report the Windows task
-// writes into WSL; with none, or one it cannot read, it cannot tell and says
-// how the report is installed. Inert on a host that is not WSL. Its cure is one
-// note to the Mayor: freeing a Windows drive is the Governor's hands.
+// has room: faulty under WSLDriveFreeMin, and faulty with a warning ('low, not
+// yet refusing') under the higher WarnGB, so that the Mayor hears before
+// dispatch stops at its own floor. It reads the report the Windows task writes
+// into WSL; with none, the host's drive is one nothing can see, and the check
+// is faulty naming the line that installs the task (mw-gq6.1428); with one it
+// cannot read, or a stale one, it cannot tell. Inert on a host that is not WSL.
+// Its cure is one note to the Mayor: freeing a Windows drive is the Governor's
+// hands.
 type WSLDriveFree struct {
+	// WarnGB is the free space, in gigabytes, under which the check warns that
+	// the drive is low; zero reads WSLDriveWarnDefault and a negative number
+	// turns the warning off.
+	WarnGB int64
+	// DispatchFloorGB is the floor under which dispatch starts no new Builder,
+	// said in the warning; zero reads application.DefaultRoomMinDriveFreeGB and a
+	// negative number says the guard is off.
+	DispatchFloorGB int64
+	// last is what the latest Probe found, for the note Cure writes.
+	last driveFinding
+
 	// Path is the report file. Empty reads WSLDriveFreeDir/WSLDriveFreeFile
 	// under the home directory.
 	Path string
@@ -282,6 +304,16 @@ type WSLDriveFree struct {
 	// Note puts text in the Mayor's way. Nil writes nothing.
 	Note func(ctx context.Context, text string) error
 }
+
+// driveFinding is what a Probe of the drive found, so that Cure says the same.
+type driveFinding int
+
+const (
+	driveFine driveFinding = iota
+	driveFull
+	driveLow
+	driveNoReport
+)
 
 // NewWSLDriveFree is the check over the real report file and systemd-detect-virt.
 func NewWSLDriveFree() *WSLDriveFree { return &WSLDriveFree{} }
@@ -302,10 +334,12 @@ func (w *WSLDriveFree) Probe(ctx context.Context) (application.Verdict, string) 
 	if err != nil {
 		return application.DoctorCannotTell, err.Error()
 	}
+	w.last = driveFine
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return application.DoctorCannotTell, "no report of the Windows drive's free space at " + path +
-			": nothing on this WSL host can see it; the Windows task writes it, and `mw host wsl-flag --install-line` prints the line that installs or updates the task"
+		w.last = driveNoReport
+		return application.DoctorFaulty, "no report of the Windows drive's free space at " + path +
+			": nothing on this WSL host can see it, so dispatch cannot tell when the drive is nearly full; the Windows task writes it, and `mw host wsl-flag --install-line` prints the line that installs or updates the task"
 	}
 	if err != nil {
 		return application.DoctorCannotTell, fmt.Sprintf("the report of the Windows drive's free space could not be read: %v", err)
@@ -316,13 +350,55 @@ func (w *WSLDriveFree) Probe(ctx context.Context) (application.Verdict, string) 
 	}
 	age := w.now().Sub(at)
 	if free < WSLDriveFreeMin {
+		w.last = driveFull
 		return application.DoctorFaulty, fmt.Sprintf("%s has %.1f GB free, under the %d GB the WSL vhdx needs to grow and start (report %s); cure: free space on it, then `wsl --shutdown` and start WSL; `mw host wsl-flag compact` gives back what the trim freed",
 			drive, float64(free)/(1<<30), WSLDriveFreeMin>>30, reportAge(age))
 	}
 	if age > WSLDriveFreeMaxAge {
 		return application.DoctorCannotTell, fmt.Sprintf("the report of the Windows drive's free space is %s: the Windows task has stopped writing it; `mw host wsl-flag --install-line` prints the line that installs the task", reportAge(age))
 	}
+	if warn := w.warnGB(); warn > 0 && free < warn<<30 {
+		w.last = driveLow
+		return application.DoctorFaulty, fmt.Sprintf("%s has %.1f GB free, under the %d GB warning floor: %s; cure: free space on it, `mw host wsl-flag compact` gives back what the trim freed",
+			drive, float64(free)/(1<<30), warn, w.lowSaid(free))
+	}
 	return application.DoctorOK, fmt.Sprintf("%s has %d GB free", drive, free>>30)
+}
+
+// warnGB is the warning floor in gigabytes, 0 when it is off.
+func (w *WSLDriveFree) warnGB() int64 {
+	switch {
+	case w.WarnGB < 0:
+		return 0
+	case w.WarnGB == 0:
+		return WSLDriveWarnDefault
+	}
+	return w.WarnGB
+}
+
+// lowSaid says what the warning means at this much free: 'low, not yet refusing'
+// while dispatch still starts Builders, or that it has stopped.
+func (w *WSLDriveFree) lowSaid(free int64) string {
+	floor := w.DispatchFloorGB
+	if floor == 0 {
+		floor = application.DefaultRoomMinDriveFreeGB
+	}
+	if floor > 0 && free < floor<<30 {
+		return "dispatch is refusing now: " + w.dispatchFloorSaid()
+	}
+	return "low, not yet refusing: " + w.dispatchFloorSaid()
+}
+
+// dispatchFloorSaid says where dispatch stops starting Builders, or that its
+// guard is off.
+func (w *WSLDriveFree) dispatchFloorSaid() string {
+	switch {
+	case w.DispatchFloorGB < 0:
+		return "dispatch's Windows-drive guard is off"
+	case w.DispatchFloorGB == 0:
+		return fmt.Sprintf("dispatch starts no new Builder under %d GB", application.DefaultRoomMinDriveFreeGB)
+	}
+	return fmt.Sprintf("dispatch starts no new Builder under %d GB", w.DispatchFloorGB)
 }
 
 // reportAge says how old a report is, in days when it is over a day.
@@ -339,6 +415,14 @@ func reportAge(age time.Duration) string {
 func (w *WSLDriveFree) Cure(ctx context.Context) error {
 	if w.Note == nil {
 		return nil
+	}
+	switch w.last {
+	case driveLow:
+		return w.Note(ctx, fmt.Sprintf("wsl-drive-free: the Windows drive holding this WSL host's vhdx is low: under %d GB free, and %s (low, not yet refusing, until it reaches that floor). "+
+			"Free space on it; `mw host wsl-flag compact` gives back what the trim freed.", w.warnGB(), w.dispatchFloorSaid()))
+	case driveNoReport:
+		return w.Note(ctx, "wsl-drive-free: this WSL host has no report of its Windows drive's free space, so nothing here can see the drive fill and dispatch cannot hold back before it does. "+
+			"`mw host wsl-flag --install-line` prints the one Windows PowerShell line that installs the task that writes it.")
 	}
 	return w.Note(ctx, fmt.Sprintf("wsl-drive-free: the Windows drive holding this WSL host's vhdx has under %d GB free; "+
 		"at 0 WSL will not start (E_FAIL, the desktop's D: on 2026-11-15). Free space on it, or run `mw host trim-setup --check` to see which WSL hosts have no trim step yet.", WSLDriveFreeMin>>30))

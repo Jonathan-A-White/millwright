@@ -246,15 +246,17 @@ func TestWSLDriveFreeIsFaultyUnderFiveGigabytes(t *testing.T) {
 	}
 }
 
-func TestWSLDriveFreeIsOkAtFiveGigabytesAndSaysTheFigure(t *testing.T) {
+func TestWSLDriveFreeIsOkWhenWellOverTheFloorsAndSaysTheFigure(t *testing.T) {
 	check := driveFreeCheck(t, "wsl", report("D:", 42, time.Minute), false)
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorOK || !strings.Contains(reason, "D:") || !strings.Contains(reason, "42 GB free") {
 		t.Fatalf("expected ok saying D: has 42 GB free, got %v %q", verdict, reason)
 	}
+	// At exactly 5 GB it is no longer the full drive's alarm: dispatch is
+	// refusing, said as a warning (mw-gq6.1428).
 	check = driveFreeCheck(t, "wsl", report("C:", 5, time.Minute), false)
-	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
-		t.Fatalf("expected ok at exactly 5 GB, got %v %q", verdict, reason)
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorFaulty || strings.Contains(reason, "wsl --shutdown") || !strings.Contains(reason, "refusing now") {
+		t.Fatalf("expected the warning that dispatch is refusing at exactly 5 GB, got %v %q", verdict, reason)
 	}
 }
 
@@ -266,13 +268,14 @@ func TestWSLDriveFreeIsInertOnAHostThatIsNotWSL(t *testing.T) {
 	}
 }
 
-// A WSL host with no report is a host whose Windows drive nothing can see:
-// said, with the line that installs the task that writes it.
-func TestWSLDriveFreeCannotTellWithoutAReport(t *testing.T) {
+// A WSL host with no report is a host whose Windows drive nothing can see: a
+// named alarm (the Laptop had none, mw-gq6.1428), with the line that installs
+// the task that writes it.
+func TestWSLDriveFreeIsFaultyWithoutAReportAndNamesTheInstallLine(t *testing.T) {
 	check := driveFreeCheck(t, "wsl", "", true)
 	verdict, reason := check.Probe(context.Background())
-	if verdict != application.DoctorCannotTell {
-		t.Fatalf("expected cannot-tell with no report, got %v %q", verdict, reason)
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty with no report, got %v %q", verdict, reason)
 	}
 	if !strings.Contains(reason, "mw host wsl-flag --install-line") {
 		t.Errorf("expected the reason to name the install line, got %q", reason)
@@ -315,5 +318,47 @@ func TestWSLDriveFreeCureWritesOneNoteAndChangesNothingElse(t *testing.T) {
 	}
 	if check.Name() != "wsl-drive-free" || check.WayBack() == "" {
 		t.Errorf("unexpected name %q or empty way back", check.Name())
+	}
+}
+
+// mw-gq6.1428: a second, higher floor (30 GB) warns before dispatch's own
+// (15 GB) stops it, and says so; the 5 GB faulty floor is as it was.
+func TestWSLDriveFreeWarnsUnderTheHigherFloor(t *testing.T) {
+	check := driveFreeCheck(t, "wsl", report("D:", 25, time.Minute), false)
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected a warning (faulty) for 25 GB free, got %v %q", verdict, reason)
+	}
+	for _, want := range []string{"D:", "25.0 GB", "30 GB", "low, not yet refusing", "15 GB"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("expected the warning to hold %q, got %q", want, reason)
+		}
+	}
+	if strings.Contains(reason, "wsl --shutdown") {
+		t.Errorf("a warning is not the full drive's alarm, got %q", reason)
+	}
+	// The cure's note says it is a low warning, not the drive full.
+	var note string
+	check.Note = func(_ context.Context, text string) error { note = text; return nil }
+	if err := check.Cure(context.Background()); err != nil || !strings.Contains(note, "not yet refusing") {
+		t.Errorf("expected the cure to note a low, not-yet-refusing drive, got %q (%v)", note, err)
+	}
+
+	check = driveFreeCheck(t, "wsl", report("D:", 40, time.Minute), false)
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK || !strings.Contains(reason, "40 GB free") {
+		t.Errorf("expected ok for 40 GB free, got %v %q", verdict, reason)
+	}
+
+	check = driveFreeCheck(t, "wsl", report("D:", 3, time.Minute), false)
+	verdict, reason = check.Probe(context.Background())
+	if verdict != application.DoctorFaulty || strings.Contains(reason, "not yet refusing") || !strings.Contains(reason, "wsl --shutdown") {
+		t.Errorf("expected the faulty alarm for 3 GB free, got %v %q", verdict, reason)
+	}
+
+	// The warning floor is the config's: 50 GB warns 40 GB free.
+	check = driveFreeCheck(t, "wsl", report("D:", 40, time.Minute), false)
+	check.WarnGB = 50
+	if verdict, _ := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+		t.Errorf("expected a warning at 40 GB free under a 50 GB warning floor, got %v", verdict)
 	}
 }
