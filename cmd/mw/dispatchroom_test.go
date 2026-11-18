@@ -63,3 +63,30 @@ func TestWithHostRoomGivesADispatchTheConfigsRoomLimits(t *testing.T) {
 		t.Errorf("min_drive_free_gb = 0 must turn the drive guard off, got %+v", off.Room)
 	}
 }
+
+// mw-gq6.1488: the dispatch mw next runs after a close-out is built through
+// withHostDispatchLocks(withHostRoom(withHostRechecks(...), room), vault), with the
+// room read by config.Room() from the [dispatch] table. A config saying
+// min_drive_free_gb = 15 must reach that dispatch's Room, and a config saying 0 must
+// turn its drive guard off. (The literal itself sits in next.go's RunE; the guard
+// test above keeps it wrapped in withHostRoom.)
+func TestNextsDispatchTakesTheDispatchTablesRoomKeys(t *testing.T) {
+	for _, tc := range []struct {
+		said    string
+		wantGB  int64
+		noGuard bool
+	}{{"15", 15, false}, {"0", 0, true}} {
+		mwConfig(t, "[dispatch]\nroom_load_per_core = 0.6\nroom_min_free_mb = 700\nmin_drive_free_gb = "+tc.said+"\n")
+		room, err := config.Room()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := withHostDispatchLocks(withHostRoom(withHostRechecks(application.Dispatch{Host: "laptop"}, application.Suite{}), room), t.TempDir())
+		if int64(got.Room.MinDriveFreeGB) != tc.wantGB || got.Room.NoDriveGuard != tc.noGuard {
+			t.Errorf("min_drive_free_gb = %s: Room = %+v, want MinDriveFreeGB %d, NoDriveGuard %v", tc.said, got.Room, tc.wantGB, tc.noGuard)
+		}
+		if got.Room.LoadPerCore != 0.6 || got.Room.MinFreeMB != 700 {
+			t.Errorf("Room = %+v, want the [dispatch] table's load and memory keys", got.Room)
+		}
+	}
+}
