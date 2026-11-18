@@ -1117,3 +1117,40 @@ func TestPullDoesNotCallAnotherRefusalASiblingsWrite(t *testing.T) {
 		t.Fatalf("expected a plain failure, got %v", err)
 	}
 }
+
+// A local merge commit ahead of upstream carries its own content (here a file
+// only the merge adds, as a conflict resolution would carry): a plain rebase
+// onto upstream drops the merge and that content with it, without a word. The
+// pull keeps the merge, so its content is still in the vault afterwards
+// (mw-gq6.1444).
+func TestPullKeepsTheContentOfALocalMergeCommit(t *testing.T) {
+	here, there := twoHosts(t)
+	run(t, here, "git", "checkout", "-q", "-b", "side")
+	write(t, here, "seats/mayor/side.md", "the side\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The side writes")
+	run(t, here, "git", "checkout", "-q", "main")
+	appendLedger(t, here, "2026-09-18 the main writes.")
+	run(t, here, "git", "merge", "-q", "--no-ff", "--no-commit", "side")
+	write(t, here, "seats/mayor/resolution.md", "only the merge says this\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Merge side, with a resolution")
+
+	write(t, there, "seats/mayor/other.md", "the other host\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host writes")
+	run(t, there, "git", "push", "-q")
+
+	if _, err := vault.New(here).Pull(context.Background()); err != nil {
+		t.Fatalf("expected the pull to finish, got %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(here, "seats/mayor/resolution.md")); err != nil || string(got) != "only the merge says this\n" {
+		t.Fatalf("expected the merge's own content to survive the pull, got %q (%v)", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(here, "seats/mayor/other.md")); err != nil {
+		t.Fatalf("expected the other host's file after the pull: %v", err)
+	}
+	if merges := strings.TrimSpace(run(t, here, "git", "log", "--merges", "--format=%s", "@{upstream}..HEAD")); merges == "" {
+		t.Fatalf("expected the merge commit to be kept ahead of upstream")
+	}
+}

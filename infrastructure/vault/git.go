@@ -262,7 +262,9 @@ func insideTheVault(path string) error {
 // Pull implements application.VaultFiles: a fetch and a rebase onto what it
 // fetched (what git pull --rebase does, without its race with a commit that
 // lands while it fetches), and the count of the other host's commits that came
-// in. A rebase that stops on a conflict is aborted, so that the vault is left
+// in. A vault holding a merge commit ahead of upstream is merged with upstream
+// instead of rebased, for a rebase would drop the merge's own content
+// (mw-gq6.1444). A rebase or merge that stops on a conflict is aborted, so that the vault is left
 // exactly as it was found and a person can look at it without first undoing a
 // half-finished merge.
 //
@@ -307,10 +309,24 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 		// the current branch, fast-forwards, and dies with "Not possible to
 		// fast-forward" when the local commit diverges (mw-gq6.713). The rebase
 		// reads HEAD when it starts, so a commit that landed meanwhile is replayed.
+		//
+		// A plain rebase drops every merge commit ahead of upstream, and the
+		// conflict resolution the merge held with it, and --rebase-merges
+		// re-makes the merge from its parents, losing that resolution too
+		// (mw-gq6.1444). A vault holding such a merge takes upstream in by a
+		// merge, which keeps every commit and the merge's own content.
 		if _, err := v.git(ctx, "fetch"); err != nil {
 			return err
 		}
-		_, err := v.git(ctx, append(append([]string(nil), config...), "rebase", "@{upstream}")...)
+		merges, err := v.git(ctx, "log", "--merges", "--format=%h", "@{upstream}..HEAD")
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(merges) != "" {
+			_, err = v.git(ctx, append(append([]string(nil), config...), "merge", "--no-edit", "@{upstream}")...)
+			return err
+		}
+		_, err = v.git(ctx, append(append([]string(nil), config...), "rebase", "@{upstream}")...)
 		return err
 	}
 
@@ -332,6 +348,7 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 			return 0, waited
 		}
 		_, _ = v.git(ctx, "rebase", "--abort") // nothing to undo when the rebase never began
+		_, _ = v.git(ctx, "merge", "--abort")  // nor when the merge never began
 		err = pull()
 	}
 	if err != nil {
@@ -342,8 +359,11 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 			// the wait and the retry, is told which refusal this is.
 			err = fmt.Errorf("%w: %w", application.ErrVaultBeingWritten, err)
 		}
+		_, mergeAborted := v.git(ctx, "merge", "--abort")
 		if _, aborted := v.git(ctx, "rebase", "--abort"); aborted == nil {
 			return 0, fmt.Errorf("%w (the rebase was undone: the vault is as it was)", err)
+		} else if mergeAborted == nil {
+			return 0, fmt.Errorf("%w (the merge was undone: the vault is as it was)", err)
 		}
 		return 0, err
 	}
