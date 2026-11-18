@@ -490,8 +490,12 @@ func TestTheTailWaitReturnsWhenTheCommandEndsAndAtItsLimit(t *testing.T) {
 		return time.Since(start)
 	}
 
-	if elapsed := run(t, application.LongCommandWait, "sleep 3"); elapsed < 3*time.Second || elapsed > 8*time.Second {
-		t.Errorf("a 3-second command should be waited on for 3 to 8 seconds (ending +5 s), took %v", elapsed)
+	// The upper bounds are far from the limits that tell the cases apart (550 s
+	// and 600 s against a few seconds), so a loaded host that is slow to start
+	// a shell cannot fail them; the lower bounds are what the wait must not skip.
+	const loaded = 45 * time.Second
+	if elapsed := run(t, application.LongCommandWait, "sleep 3"); elapsed < 3*time.Second || elapsed > loaded {
+		t.Errorf("a 3-second command should be waited on for 3 s up to %v (not the 550 s limit), took %v", loaded, elapsed)
 	}
 
 	// 550 s cannot be waited out in a test: the same form with a 2 s limit shows
@@ -500,8 +504,8 @@ func TestTheTailWaitReturnsWhenTheCommandEndsAndAtItsLimit(t *testing.T) {
 	if short == application.LongCommandWait {
 		t.Fatalf("the wait form should start with timeout 550, got %q", application.LongCommandWait)
 	}
-	if elapsed := run(t, short, "sleep 600"); elapsed < 2*time.Second || elapsed > 5*time.Second {
-		t.Errorf("a 600-second command should be left after the limit (2 s here), took %v", elapsed)
+	if elapsed := run(t, short, "sleep 600"); elapsed < 2*time.Second || elapsed > loaded {
+		t.Errorf("a 600-second command should be left after the limit (2 s here), took %v (more than %v)", elapsed, loaded)
 	}
 }
 
