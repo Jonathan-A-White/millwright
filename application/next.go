@@ -3168,7 +3168,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	// The story's changed specs again on a merged result, from the commit the
 	// merge started from.
 	if !landed.FastForward {
-		if refusal, stop := n.specsRefusal(ctx, c, report, dir, landed.Before, "on the merged result", ReasonMergedTestsFail, false); stop {
+		if refusal, stop := n.mergedSpecsRefusal(ctx, c, report, dir, landed.Before); stop {
 			return Landed{}, failedFor(refusal.Reason, fmt.Errorf("%s and %s do not pass together: %s, so nothing was pushed\n\n%s",
 				c.branch, c.target, refusal.Why, refusal.Said))
 		}
