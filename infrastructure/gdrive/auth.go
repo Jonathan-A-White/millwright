@@ -37,6 +37,7 @@ type Endpoints struct {
 	Token  string
 	Drive  string
 	Sheets string
+	Docs   string
 	Gmail  string
 }
 
@@ -46,6 +47,7 @@ var GoogleEndpoints = Endpoints{
 	Token:  "https://oauth2.googleapis.com/token",
 	Drive:  "https://www.googleapis.com",
 	Sheets: "https://sheets.googleapis.com",
+	Docs:   "https://docs.googleapis.com",
 	Gmail:  "https://gmail.googleapis.com",
 }
 

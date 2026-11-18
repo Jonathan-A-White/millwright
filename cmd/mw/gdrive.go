@@ -67,14 +67,14 @@ func gdriveSession() (gdrive.Session, error) {
 func newGdriveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gdrive",
-		Short: "Read and write his Google Drive and Sheets, signed in as him (auth, find, read, write, selftest, revoke)",
+		Short: "Read and write his Google Drive and Sheets, signed in as him (auth, find, read, write, doc, selftest, revoke)",
 		Long: "gdrive reads and writes his Google Drive and Sheets, signed in as him through his own Desktop\n" +
 			"OAuth client (scopes " + gdrive.DriveScope + ",\n" + gdrive.SheetsScope + " and " + gdrive.GmailScope + ", the last for mw gmail).\n" +
 			"Nothing is mirrored: a file is fetched only when a command names it. The client and the\n" +
 			"refresh token are kept in ~/.config/mw/gdrive/ (the directory mode 700, the files 600) and\n" +
 			"are never printed or logged.",
 	}
-	cmd.AddCommand(newGdriveAuthCmd(), newGdriveFindCmd(), newGdriveReadCmd(), newGdriveWriteCmd(), newGdriveSelftestCmd(), newGdriveRevokeCmd())
+	cmd.AddCommand(newGdriveAuthCmd(), newGdriveFindCmd(), newGdriveReadCmd(), newGdriveWriteCmd(), newGdriveDocCmd(), newGdriveSelftestCmd(), newGdriveRevokeCmd())
 	return cmd
 }
 
@@ -190,7 +190,8 @@ func newGdriveReadCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "read <file-id> [--sheet T] [--range A1:Z99]",
 		Short: "Print a spreadsheet's cells as CSV; with no --sheet, list its tabs",
-		Long: "read prints the cells of tab --sheet (limited to --range, in A1 notation, when given) as CSV.\n" +
+		Long: "read works on a spreadsheet; on a Google Doc it says so and names mw gdrive doc read.\n" +
+			"read prints the cells of tab --sheet (limited to --range, in A1 notation, when given) as CSV.\n" +
 			"With neither --sheet nor --range it lists the spreadsheet's tabs instead; with --range alone\n" +
 			"it reads that range of the first tab.",
 		Args: cobra.ExactArgs(1),
@@ -256,6 +257,65 @@ func newGdriveWriteCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "write to a file whose name contains 'Budget'")
 	return cmd
+}
+
+func newGdriveDocCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "doc",
+		Short: "Read a Google Doc as plain text, or add paragraphs to its end (read, append)",
+		Long: "doc works on a Google Doc, which read and write (spreadsheets only) cannot open. It uses the\n" +
+			"Drive scope already granted; no new consent is needed.",
+	}
+	cmd.AddCommand(newGdriveDocReadCmd(), newGdriveDocAppendCmd())
+	return cmd
+}
+
+func newGdriveDocReadCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "read <file-id>",
+		Short: "Print a Google Doc as plain text",
+		Long:  "read prints the Google Doc's text as Drive exports it as text/plain. It changes nothing.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := gdriveSession()
+			if err != nil {
+				return err
+			}
+			text, err := s.DocText(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			_, err = io.WriteString(cmd.OutOrStdout(), text)
+			return err
+		},
+	}
+}
+
+func newGdriveDocAppendCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "append <file-id> -- \"<text>\"",
+		Short: "Add text as a new paragraph at the end of a Google Doc; nothing is deleted or rewritten",
+		Long: "append adds the text as a new paragraph at the end of the Google Doc's body (Docs API\n" +
+			"batchUpdate, one insertText at the end of the body). It never deletes or rewrites what the Doc\n" +
+			"holds. It prints the Doc's title and the end index of its body after the text went in. Put the\n" +
+			"text after -- so a text starting with a dash is not read as a flag.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(args[1]) == "" {
+				return errors.New("there is no text to add: nothing was changed")
+			}
+			s, err := gdriveSession()
+			if err != nil {
+				return err
+			}
+			done, err := s.DocAppend(cmd.Context(), args[0], args[1])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "added to %q; the body now ends at index %d\n", oneLine(done.Title), done.EndIndex)
+			return nil
+		},
+	}
 }
 
 func newGdriveSelftestCmd() *cobra.Command {
