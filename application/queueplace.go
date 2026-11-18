@@ -99,3 +99,24 @@ func HasQueuePrecedence(ctx context.Context) bool {
 	ahead, _ := ctx.Value(queuePrecedenceKey{}).(bool)
 	return ahead
 }
+
+// A test run's ticket in the host's test-runner queue says whose run it is, so that
+// mw status can say which sessions wait for a slot (mw-gq6.1463): a story's check
+// asks, through the context of its runs, that the ticket name the story.
+
+type testRunForKey struct{}
+
+// WithTestRunFor has the test-runner tickets taken under ctx name the story they
+// are taken for.
+func WithTestRunFor(ctx context.Context, story string) context.Context {
+	return context.WithValue(ctx, testRunForKey{}, story)
+}
+
+// TestRunHolder is what a test-runner ticket says for the run of what under ctx:
+// what alone, or what followed by the story WithTestRunFor named.
+func TestRunHolder(ctx context.Context, what string) string {
+	if story, _ := ctx.Value(testRunForKey{}).(string); story != "" {
+		return what + " for " + story
+	}
+	return what
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
@@ -16,6 +17,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/synchalt"
+	"github.com/Jonathan-A-White/millwright/infrastructure/ticketq"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -170,6 +172,24 @@ func hostGateHolder() func() string {
 		return nil
 	}
 	return hostlock.NewGate(filepath.Join(home, SyncHaltStateDir)).Holder
+}
+
+// hostGateWaiters says whose wait each live ticket in this host's gate queue and
+// test-runner queue stands for: what mw status counts the sessions that wait for
+// the gate lock or a test-runner slot by (mw-gq6.1463). A host with no home
+// directory has none.
+func hostGateWaiters() func() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	state := filepath.Join(home, SyncHaltStateDir)
+	return func() []string {
+		now := time.Now
+		gate := &ticketq.Queue{Dir: filepath.Join(state, hostlock.GateQueueDir), Cap: hostlock.GateCap, Now: now}
+		runs := &ticketq.Queue{Dir: filepath.Join(state, TestRunsDir, rig.TestRunsQueueDir), Cap: rig.TestRunsCap, Now: now}
+		return append(gate.Holders(), runs.Holders()...)
+	}
 }
 
 // hostLandings are the landings alive on this host, as the batch-land job

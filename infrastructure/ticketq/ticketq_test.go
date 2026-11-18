@@ -378,3 +378,27 @@ func TestAFirstTicketOlderThanTheCapIsSkippedWhileItsOwnerLives(t *testing.T) {
 		t.Error("expected a first ticket past the cap to be skipped")
 	}
 }
+
+func TestHoldersAreTheLiveTicketsOldestFirstAndADroppedOneIsNotListed(t *testing.T) {
+	q := aQueue(t)
+	now := time.Now()
+	first, err := q.Join("mw-a", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := q.Join("mw-b", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(q.Holders()); got != "[mw-a mw-b]" {
+		t.Errorf("expected [mw-a mw-b], got %s", got)
+	}
+	first.Drop()
+	if got := fmt.Sprint(q.Holders()); got != "[mw-b]" {
+		t.Errorf("expected [mw-b] once the first dropped its ticket, got %s", got)
+	}
+	second.Drop()
+	if got := q.Holders(); len(got) != 0 {
+		t.Errorf("expected no holders, got %v", got)
+	}
+}

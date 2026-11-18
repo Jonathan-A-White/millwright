@@ -692,6 +692,40 @@ Feature: mw status
     And the report says "host: 1 of cap 4"
     And the report does not say the host is held back
 
+  # A session that waits for the gate lock or a test-runner slot holds one of the
+  # cap, and the host line says how many do (mw-gq6.1463).
+
+  Scenario: The host line says how many of the sessions counted against the cap wait for the gate
+    Given a status story "mw-gq6.1" filed under it
+    And the status story "mw-gq6.1" is claimed with its session running
+    And a status story "mw-gq6.2" filed under it
+    And the status story "mw-gq6.2" is claimed with its session running
+    And a status story "mw-gq6.3" filed under it
+    And the status story "mw-gq6.3" is claimed with its session running
+    And a status story "mw-gq6.4" filed under it
+    And the status story "mw-gq6.4" is claimed with its session running
+    And a status story "mw-gq6.5" filed under it
+    And the status story "mw-gq6.5" is claimed with its session running
+    And this host runs at most 5 sessions at once
+    And this host's gate queue holds a ticket for "mw-gq6.1"
+    And this host's gate queue holds a ticket for "mw-gq6.2"
+    And this host's gate queue holds a ticket for "mw-gq6.3"
+    And this host's test-runner queue holds a ticket for "mw-gq6.4"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "host: 5 of cap 5, 4 waiting for the gate"
+    And every line of the report is at most 60 columns wide
+
+  Scenario: The host line says nothing of waiting when no session waits for the gate
+    Given a status story "mw-gq6.1" filed under it
+    And the status story "mw-gq6.1" is claimed with its session running
+    And this host runs at most 4 sessions at once
+    And this host's gate queue holds a ticket for "mw-gq6.9"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "host: 1 of cap 4"
+    And the report does not say "waiting for the gate"
+
   Scenario: The report says which window sets the cap while one does (mw-gq6.429)
     Given this host runs at most 4 sessions at once
     And this host's cap is set by "night window to 06:00 America/New_York"

@@ -182,7 +182,11 @@ func (r StatusReport) String() string {
 		}
 	}
 	if r.Cap > 0 {
-		clip(&b, fmt.Sprintf("host: %d of cap %d", r.InUse, r.Cap))
+		hostLine := fmt.Sprintf("host: %d of cap %d", r.InUse, r.Cap)
+		if r.WaitingForGate > 0 {
+			hostLine += fmt.Sprintf(", %d waiting for the gate", r.WaitingForGate)
+		}
+		clip(&b, hostLine)
 		if r.CapWhy != "" {
 			clip(&b, fmt.Sprintf("  cap %d: %s", r.Cap, r.CapWhy))
 		}

@@ -424,3 +424,46 @@ func ticketHolder(path string) string {
 	}
 	return "somebody"
 }
+
+// Holders says whose wait each live ticket stands for, oldest first, as the tickets
+// say. It only reads: a ticket of a waiter that is gone, or past the cap, is left
+// for the waiters' own clearing (Head, Place) and not listed.
+func (q *Queue) Holders() []string {
+	entries, err := os.ReadDir(q.Dir)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".") {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+	var holders []string
+	for _, name := range names {
+		if q.alive(name) {
+			holders = append(holders, ticketHolder(filepath.Join(q.Dir, name)))
+		}
+	}
+	return holders
+}
+
+// alive is skipped's judgement of a ticket without its clearing: its owner holds
+// its flock, or kept it and the keep time is not past, and its wait is within the cap.
+func (q *Queue) alive(name string) bool {
+	if began, ok := began(name); ok && q.Now().Sub(began) >= q.Cap {
+		return false
+	}
+	file, err := os.Open(filepath.Join(q.Dir, name))
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	if syscall.Flock(int(file.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) == nil {
+		defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		until := readTicket(file).keepUntil
+		return !until.IsZero() && q.Now().Before(until)
+	}
+	return true
+}

@@ -207,6 +207,10 @@ type Status struct {
 	// (mw-gq6.858). Nil says neither.
 	Landings   LandingsInFlight
 	GateHolder func() string
+	// GateWaiters, when set, is the holder line of each live ticket in the host's
+	// gate queue and test-runner queue: which running stories wait for the gate
+	// lock or a test-runner slot (mw-gq6.1463). Nil says none do.
+	GateWaiters func() []string
 
 	// Batches, when set, is where the batch lines of metrics/factory.jsonl are
 	// read from, for the last batch of each rig under LAND RUSH; which rigs
@@ -621,6 +625,9 @@ type StatusReport struct {
 	CapWhy string
 	InUse  int
 	NoRoom string
+	// WaitingForGate is how many of the InUse sessions have a ticket in the host's
+	// gate queue or test-runner queue (mw-gq6.1463).
+	WaitingForGate int
 	// Drained is the host held at cap 0 (mw-gq6.1044).
 	Drained bool
 	// Grist is what the mill is doing, zero (Known false) when this host has none.
@@ -968,6 +975,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 
 	closing := closingOut(ctx, s.CloseOuts)
+	var tickets *gateTickets
 	for _, detail := range runningHere {
 		if detail.Hitl() {
 			// The Mayor works it beside the Governor: there is no session of its
@@ -991,6 +999,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			// neither holds a session, so the cap does not count it, as in mw
 			// dispatch.
 			report.InUse++
+			if tickets == nil {
+				tickets = s.gateTickets()
+			}
+			if tickets.hold(detail.Story.ID) {
+				report.WaitingForGate++
+			}
 		}
 	}
 	report.Drained = s.Drained

@@ -52,6 +52,9 @@ type statusContext struct {
 	// (mw-gq6.858).
 	landings   *apptest.FakeLandProcesses
 	gateHolder string
+	// gateTickets are the holder lines of the tickets in the host's gate queue and
+	// test-runner queue (mw-gq6.1463).
+	gateTickets []string
 
 	// network is the reading a scenario gave, nil for none, and heavy the rigs it
 	// named as installing dependencies (mw-gq6.702).
@@ -751,6 +754,10 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	if c.gateHolder != "" {
 		holder := c.gateHolder
 		status.GateHolder = func() string { return holder }
+	}
+	if c.gateTickets != nil {
+		tickets := c.gateTickets
+		status.GateWaiters = func() []string { return tickets }
 	}
 	if c.gristRuns != nil {
 		status.Grist = application.GristRoom{Runs: c.gristRuns, Now: func() time.Time { return c.now }}

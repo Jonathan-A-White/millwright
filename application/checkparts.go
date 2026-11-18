@@ -408,7 +408,7 @@ func (k Check) runPartKeeping(ctx context.Context, report CheckReport, c *closeO
 			ctx = WithRunProgress(ctx, progress)
 		}
 	}
-	checked, err := k.Parts.RunLine(ctx, c.path.Rig, c.worktree, part.Command)
+	checked, err := k.Parts.RunLine(WithTestRunFor(ctx, c.id), c.path.Rig, c.worktree, part.Command)
 	if err != nil {
 		return report, fmt.Errorf("checking %s: %s could not be run: %w", c.id, label, err)
 	}

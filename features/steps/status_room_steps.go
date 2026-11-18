@@ -22,6 +22,8 @@ func registerStatusRoomSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Given(`^this host is at load ([0-9.]+) of (\d+) cores with (\d+) MB of memory available$`, c.thisHostIsAtLoadWithMemory)
 	ctx.Given(`^this host's load cannot be read for the report$`, c.thisHostsLoadCannotBeReadForTheReport)
 	ctx.Given(`^this host's mill answered (\d+) tutor-turn grists in (\d+) seconds each long ago, then (\d+) in (\d+) seconds each in the last 5 minutes$`, c.thisHostsMillAnswered)
+	ctx.Given(`^this host's gate queue holds a ticket for "([^"]*)"$`, c.theGateQueueHoldsATicketFor)
+	ctx.Given(`^this host's test-runner queue holds a ticket for "([^"]*)"$`, c.theTestRunnerQueueHoldsATicketFor)
 	ctx.Then(`^the report does not say "([^"]*)"$`, c.theReportDoesNotSay)
 	ctx.Then(`^the report says "([^"]*)"$`, c.theReportSays)
 	ctx.Then(`^the report says the host is held back: "([^"]*)"$`, c.theReportSaysTheHostIsHeldBack)
@@ -104,5 +106,19 @@ func (c *statusContext) theReportDoesNotSay(text string) error {
 	if printed := c.report.String(); strings.Contains(printed, text) {
 		return fmt.Errorf("expected the report not to say %q, got:\n%s", text, printed)
 	}
+	return nil
+}
+
+// theGateQueueHoldsATicketFor leaves a ticket in the host's gate queue as a story's
+// check keeps it (Check.checkHolder).
+func (c *statusContext) theGateQueueHoldsATicketFor(story string) error {
+	c.gateTickets = append(c.gateTickets, "mw on cloud2 checking "+story)
+	return nil
+}
+
+// theTestRunnerQueueHoldsATicketFor leaves a ticket in the host's test-runner queue
+// as a story's run keeps it (application.TestRunHolder).
+func (c *statusContext) theTestRunnerQueueHoldsATicketFor(story string) error {
+	c.gateTickets = append(c.gateTickets, "tests of lampas for "+story)
 	return nil
 }

@@ -123,7 +123,9 @@ func newStatusCmd() *cobra.Command {
 			"is the median wall time of the last par_window landings of its rig, bug-or-not and model, or\n" +
 			"of its rig or all when fewer than par_min are of the kind), and each kind's par error over its\n" +
 			"last calibration_window landings, flagged past error_flag_percent with the change it suggests.\n\n" +
-			"A 'host: N of cap M' line says how many of the cap on sessions (config `cap`) are in use. When the\n" +
+			"A 'host: N of cap M' line says how many of the cap on sessions (config `cap`) are in use,\n" +
+			"and ', N waiting for the gate' when N of them hold a ticket in the host's gate queue or\n" +
+			"test-runner queue (they hold a session, not a slot of tests). When the\n" +
 			"host has no room to start another story - its 1-minute load at or above its core count, or\n" +
 			"less than 2 GB of memory available (the [dispatch] table's room_load_per_core and\n" +
 			"room_min_free_mb) - a 'held back, no room' line gives each reason, and mw dispatch starts\n" +
@@ -282,6 +284,7 @@ func newStatusCmd() *cobra.Command {
 				Log:              idleLog,
 				Landings:         hostLandings(),
 				GateHolder:       hostGateHolder(),
+				GateWaiters:      hostGateWaiters(),
 				IdleAfter:        idleAfter,
 				Harness:          procs.Harness{},
 				Control:          homeEventLog(),

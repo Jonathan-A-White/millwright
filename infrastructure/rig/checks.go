@@ -216,7 +216,7 @@ func (c *Checks) runLineWith(ctx context.Context, rig, dir, command string, extr
 	}
 	// The slot is taken before the run's own work, so a wait for it is no part of
 	// anything the run is given its time for.
-	release, err := c.runs.Take(ctx, "tests of "+rig)
+	release, err := c.runs.Take(ctx, application.TestRunHolder(ctx, "tests of "+rig))
 	if err != nil {
 		return application.Checked{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
