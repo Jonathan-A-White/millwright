@@ -34,8 +34,10 @@ func newLandCmd() *cobra.Command {
 			"Only when that run passes is the target branch pushed: a fast-forward, never forced. Each story\n" +
 			"is then closed run=landed, naming the batch's commit and its own merge commit, with a chain\n" +
 			"stamp, a ledger line naming the batch and a Landed mail; the rig's checkout is brought up and\n" +
-			"the after-landing command and the grist smoke run once. A set-aside story is mailed to the\n" +
-			"Mayor (Set aside) with its conflict.\n\n" +
+			"the after-landing command runs once and the grist smoke is begun, as a process of its own (mw\n" +
+			"land-smoke, its output in ~/.local/state/mw/land/smoke/<rig>.log) that goes on after land ends,\n" +
+			"so the rig's next batch can land meanwhile; a failing smoke mails the Mayor from there. A\n" +
+			"set-aside story is mailed to the Mayor (Set aside) with its conflict.\n\n" +
 			"A red run, a batch of which nothing merged, or a push the origin refuses pushes nothing: the\n" +
 			"batch is held, every story in it stays queued, the Mayor is mailed (Held) each story and why,\n" +
 			"and land exits non-zero.\n\n" +
@@ -184,7 +186,14 @@ func newLandCmd() *cobra.Command {
 				Units:        hostUnits(),
 				Stamps:       stamps,
 			}
-			_, err = batchLandFor(next, files, dryRun, one, cmd.ErrOrStderr()).Run(cmd.Context(), args[0])
+			landing := batchLandFor(next, files, dryRun, one, cmd.ErrOrStderr())
+			if self, err := os.Executable(); err == nil {
+				if home, err := os.UserHomeDir(); err == nil {
+					// The grist smoke goes on apart from this landing (mw-apvyg8j).
+					landing.Apart = landSmokeApart{self: self, logDir: landSmokeLogDir(home)}
+				}
+			}
+			_, err = landing.Run(cmd.Context(), args[0])
 			return err
 		},
 	}

@@ -124,6 +124,22 @@ Feature: mw land lands a batch rig's queue under one gate run
     And mw land had printed a line for each step before the smoke began: "mw land: landed", "mw land: closed mw-gq6.2", "mw land: mailed Landed: mw-gq6.2"
     And mw land prints the smoke's result after the mails
 
+  Scenario: The rig's next landing begins while the last one's grist smoke still runs (mw-apvyg8j)
+    Given the batch's landing changes the rig's grist, and its smoke fails, begun apart and not ended until the scenario ends it
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the smoke of batch 1 was begun apart and had not run when mw land ended
+    And mw land said the smoke was begun apart
+    Given these stories are queued for batch landing:
+      | mw-gq6.2 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the smoke of batch 2 was begun apart and had not run when mw land ended
+    When the smokes begun apart end
+    Then the smoke of each batch was made and the Mayor was mailed that the smoke of batch 2 failed
+
   Scenario: A grist smoke that fails after a batch lands mails the Mayor, naming the batch (mw-gq6.626)
     Given the batch's landing changes the rig's grist, and its smoke fails
     And these stories are queued for batch landing:

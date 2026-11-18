@@ -63,6 +63,9 @@ type nextContext struct {
 	// smokeWatch, when set, is the grist smoke a batch landing makes in place of
 	// the real one, looking at the world as it runs (mw-gq6.626).
 	smokeWatch *smokeWatch
+	// apartSmokes, when set, is where mw land hands the smoke of a batch to be
+	// made in a process of its own (mw-apvyg8j).
+	apartSmokes *apartSmokes
 	// smokeUnhosted, when set, is a landing that changes the rig's grist on a
 	// host that names no [grist-apps]; home is the vault's home file it reads.
 	smokeUnhosted bool

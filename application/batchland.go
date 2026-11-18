@@ -128,6 +128,15 @@ type BatchLand struct {
 	// rig flipped back to landing = each lands what was left in its queue, one
 	// story at a time (the follower's batch-land job, Land Rush 4).
 	One bool
+	// Apart, when set, is where the grist smoke of a landed batch is handed
+	// to be made in a process of its own, so that mw land ends without it
+	// (mw-apvyg8j). Nil makes the smoke in mw land, as the process that is
+	// handed one (SmokeLanded) does.
+	Apart SmokeApart
+	// SmokeHere says the smoke is made by this BatchLand, whatever Apart is:
+	// set by SmokeLanded, so that the process handed a smoke does not hand it
+	// on.
+	SmokeHere bool
 
 	// slot is the merge slot Run holds, once it does.
 	slot *batchSlot
@@ -846,25 +855,96 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 	t.walkBatch()
 }
 
+// LandedSmoke is what the grist smoke of a landed batch needs of the landing
+// that asked for it, when it is made in a process apart from mw land
+// (SmokeApart): the batch, the commit it landed at, the apps whose grist it
+// changed, and the id of its newest story, which a failure is written on.
+type LandedSmoke struct {
+	Rig    string
+	Number int
+	Target string
+	Commit string
+	Story  string
+	Apps   []string
+}
+
+// SmokeApart is the port mw land hands the grist smoke of a landed batch to:
+// the smoke is made in a process of its own, apart from mw land (`mw
+// land-smoke`), which then ends, so that the follower, which begins no landing
+// of a rig while its last mw land runs, lands the rig's next batch while the
+// smoke goes on (mw-apvyg8j). Begin returns once the process is started, not
+// when it ends. The real adapter is infrastructure/apartproc (Smokes).
+type SmokeApart interface {
+	Begin(ctx context.Context, smoke LandedSmoke) error
+}
+
 // smoke makes the grist smoke of the apps a landed batch changed the grist of,
 // after the rig's merge slot is let go, and says each step of it in the log. Its
 // lines are notes of the report. A smoke that fails mails the Mayor, naming the
 // batch, besides what it always does: the comment on the story, the alarm event
 // and the hold on the rig's open stories (GristSmokeBook). It undoes nothing.
+//
+// With an Apart, the smoke is begun in a process of its own and mw land goes
+// on without it: what it finds is said in that process's log, and a failure
+// mails the Mayor from there. A process that cannot be begun leaves the smoke
+// to be made here, as it was.
 func (b BatchLand) smoke(ctx context.Context, last *closeOut, once *NextReport, report *BatchReport, nr *NextReport) {
 	n := b.Next
-	if len(last.smokeApps) > 0 {
-		b.say("the merge slot of %s is let go; starting the grist smoke of %s", report.Rig, strings.Join(last.smokeApps, ", "))
-	}
 	noted := len(once.Notes)
-	failed := n.smoke(ctx, last, once)
+	if !n.smokeWanted(ctx, last, once) {
+		b.sayNotes(once, noted, nr)
+		return
+	}
+	if b.Apart != nil && !b.SmokeHere {
+		handed := b.handApart(ctx, last, report, once)
+		b.sayNotes(once, noted, nr)
+		if handed {
+			return
+		}
+		noted = len(once.Notes)
+	}
+	b.makeSmoke(ctx, last, once, report, nr, noted)
+}
+
+// makeSmoke makes the grist smoke here, which smokeWanted already said is to
+// be made, when it could not be handed apart.
+func (b BatchLand) makeSmoke(ctx context.Context, last *closeOut, once *NextReport, report *BatchReport, nr *NextReport, noted int) {
+	b.say("the merge slot of %s is let go; starting the grist smoke of %s", report.Rig, strings.Join(last.smokeApps, ", "))
+	failed := b.Next.smokeMade(ctx, last, once)
+	b.sayNotes(once, noted, nr)
+	b.mailSmokeFailed(ctx, last, once, report, nr, failed)
+}
+
+// sayNotes prints the notes the report got since noted and gives them to nr.
+func (b BatchLand) sayNotes(once *NextReport, noted int, nr *NextReport) {
 	for _, note := range once.Notes[noted:] {
 		b.say("%s", note)
 	}
 	nr.Notes = append(nr.Notes, once.Notes[noted:]...)
+}
+
+// handApart begins the grist smoke of the batch in a process of its own and
+// says so; false, with a note, when it could not be begun.
+func (b BatchLand) handApart(ctx context.Context, last *closeOut, report *BatchReport, once *NextReport) bool {
+	err := b.Apart.Begin(ctx, LandedSmoke{
+		Rig: report.Rig, Number: report.Number, Target: report.Target, Commit: report.Commit,
+		Story: last.id, Apps: last.smokeApps,
+	})
+	if err != nil {
+		once.Notes = append(once.Notes, fmt.Sprintf("the grist smoke of %s could not be begun apart, so it is made here: %v", report.Label(), err))
+		return false
+	}
+	once.Notes = append(once.Notes, fmt.Sprintf("grist smoke: begun apart for %s, which goes on without mw land; its result is in the log of mw land-smoke and, if it fails, in the mail %q", strings.Join(last.smokeApps, ", "), MailSmokeFailed))
+	return true
+}
+
+// mailSmokeFailed mails the Mayor that the grist smoke of the batch failed, in
+// the lines of the apps that did; nothing when none did.
+func (b BatchLand) mailSmokeFailed(ctx context.Context, last *closeOut, once *NextReport, report *BatchReport, nr *NextReport, failed []string) {
 	if len(failed) == 0 {
 		return
 	}
+	n := b.Next
 	mail := NewMessage{
 		From:    SeatIdentity(MwSeat, n.Host),
 		To:      MayorMailbox,
@@ -878,6 +958,28 @@ func (b BatchLand) smoke(ctx context.Context, last *closeOut, once *NextReport, 
 		return
 	}
 	b.say("mailed %s: %s", MailSmokeFailed, report.Label())
+}
+
+// SmokeLanded is the process BatchLand.smoke hands the smoke to (`mw
+// land-smoke`): the grist smoke of a batch that landed, made as mw land would
+// have made it, with the mail to the Mayor when it fails. The smokes of one rig
+// follow each other (SmokeSlot), as they did while each held its landing.
+func (b BatchLand) SmokeLanded(ctx context.Context, s LandedSmoke) error {
+	n := b.Next
+	if n.SmokeSlot != nil {
+		holding, err := n.SmokeSlot.Take(ctx, n.Rigs[s.Rig], fmt.Sprintf("the grist smoke of %s on %s", BatchLabel(s.Rig, s.Number), n.Host))
+		if err != nil {
+			b.say("the grist smoke of %s waited for the one before it and gave up: %v; it goes on", BatchLabel(s.Rig, s.Number), err)
+		} else {
+			defer holding.Release(context.WithoutCancel(ctx))
+		}
+	}
+	last := &closeOut{id: s.Story, path: domain.Path{Rig: s.Rig}, target: s.Target, smokeApps: s.Apps}
+	once := &NextReport{StoryID: BatchLabel(s.Rig, s.Number), Host: n.Host, Target: s.Target, Rig: Advanced{Level: true}, How: Landed{Commit: s.Commit}}
+	report := &BatchReport{Rig: s.Rig, Number: s.Number, Target: s.Target, Commit: s.Commit}
+	b.SmokeHere = true
+	b.smoke(ctx, last, once, report, &NextReport{})
+	return nil
 }
 
 // appendNew adds to list what it does not hold yet.

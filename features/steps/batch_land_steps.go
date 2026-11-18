@@ -315,13 +315,17 @@ func (c *nextContext) land(dryRun bool) error {
 		defer cancel()
 		watch.attach(&next, c.vault, cancel)
 	}
-	c.batch.report, c.batch.err = application.BatchLand{
+	landing := application.BatchLand{
 		Next:    next,
 		Records: vault.New(c.vault),
 		Metrics: vault.New(c.vault),
 		Fix:     c.batch.fixer != nil,
 		DryRun:  dryRun,
-	}.Run(ctx, c.rigKey())
+	}
+	if c.apartSmokes != nil {
+		landing.Apart = c.apartSmokes
+	}
+	c.batch.report, c.batch.err = landing.Run(ctx, c.rigKey())
 	return nil
 }
 
