@@ -226,6 +226,9 @@ func newCheckCmd() *cobra.Command {
 			if !logIsStdout {
 				k.Logs = mwVault(dir, host)
 			}
+			// A whole check's waits do not count what this host gave way, read from its
+			// own give-way record (mw-gq6.1458).
+			k.GaveWay = hostGiveWaySpans()
 			// A --part that takes no merge slot is run by a process of its own, so a
 			// part that outruns this call goes on (mw-gq6.1029).
 			k.PartWorker = partWorker
