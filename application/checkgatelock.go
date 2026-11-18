@@ -504,7 +504,18 @@ const clockPoll = 5 * time.Millisecond
 // way: it reads the host's give-way record and is not kept to a Builder's call,
 // whose own clock counts the give-way (Check.GaveWay, mw-gq6.1458).
 func (k Check) takesGiveWayOff() bool {
-	return k.GaveWay != nil && k.CallBudget <= 0
+	return k.GaveWay != nil && !k.keptToCall()
+}
+
+// keptToCall is whether the check runs inside a Builder's foreground call, whose
+// harness cuts it off: it is given the call's budget (CallBudget) and is not one
+// of the processes a call starts to outlive it. A part worker is started by every
+// --part call that cannot hold the slot past it, and waits for the merge slot on
+// its own for the 40 minutes a check not kept to a call waits (mw-gq6.1289), so
+// no call's clock runs through its give-way (mw-gq6.1479). The specs and gate
+// workers are given no budget.
+func (k Check) keptToCall() bool {
+	return k.CallBudget > 0 && !k.PartWorker && !k.SpecsWorker && !k.GateWorker
 }
 
 // gaveWay is how long the host gave way between from and to, as far as the

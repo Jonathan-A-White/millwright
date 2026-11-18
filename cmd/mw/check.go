@@ -191,13 +191,7 @@ func newCheckCmd() *cobra.Command {
 			// one the Builder's rig gave it (BASH_MAX_TIMEOUT_MS, mw-t5shinh.14).
 			call := checkCallLimits()
 			waitLimit, handBackAtOnce, keepPlace := checkWaitLimit(cmd, part, call)
-			// Only a foreground check is cut off with its call: a whole check given
-			// --wait and --background are the long wait of a call that is not
-			// (mw-gq6.940); a --part is always a foreground call (mw-gq6.944).
-			var callBudget time.Duration
-			if keepPlace > 0 {
-				callBudget = call.Budget
-			}
+			callBudget := checkCallBudget(cmd, keepPlace, call)
 			k := application.Check{
 				Tracker:        mwGateway(dir, host),
 				Landing:        worktrees,
@@ -299,6 +293,31 @@ func checkWaitLimit(cmd *cobra.Command, part int, call application.CheckCallLimi
 	return limit, false, call.Keep
 }
 
+// checkWorkerFlags are the flags of the processes a check kept to a call starts
+// to outlive it: partProcess, specsProcess and gateProcess.
+var checkWorkerFlags = []string{"part-worker", "specs-worker", "gate-worker"}
+
+// checkCallBudget is how much of a Builder's foreground call the check keeps to:
+// the call's budget for a check run in the call, which is one whose place in the
+// queue is kept (keep, from checkWaitLimit), and none for any other. Only a
+// foreground check is cut off with its call: a whole check given --wait and
+// --background are the long wait of a call that is not (mw-gq6.940), and a
+// --part is a foreground call (mw-gq6.944) but for the worker it starts. A
+// worker process, of a part, the specs or the whole gate, outlives the call that
+// started it, so no call's clock cuts it off, and its waits do not count what the
+// host gave way (mw-gq6.1479).
+func checkCallBudget(cmd *cobra.Command, keep time.Duration, call application.CheckCallLimits) time.Duration {
+	for _, flag := range checkWorkerFlags {
+		if worker, _ := cmd.Flags().GetBool(flag); worker {
+			return 0
+		}
+	}
+	if keep <= 0 {
+		return 0
+	}
+	return call.Budget
+}
+
 // checkCallLimits are the times a foreground check keeps to, from the
 // BASH_MAX_TIMEOUT_MS of its own environment: today's when it says nothing, the
 // longer call's less 50 seconds when a rig gave its Builders one (builder_call).
@@ -368,10 +387,7 @@ func (s specsProcess) Start(_ context.Context, storyID, logPath string) (int, er
 		return 0, fmt.Errorf("opening %s: %w", logPath, err)
 	}
 	defer log.Close()
-	args := []string{"check", storyID, "--specs-worker", "--wait", CheckWait.String()}
-	if s.noSlot {
-		args = append(args, "--no-slot")
-	}
+	args := s.args(storyID)
 	// Not exec.CommandContext: the specs are meant to outlive the context they were
 	// started in.
 	cmd := exec.Command(self, args...)
@@ -382,6 +398,15 @@ func (s specsProcess) Start(_ context.Context, storyID, logPath string) (int, er
 	}
 	go func() { _ = cmd.Wait() }()
 	return cmd.Process.Pid, nil
+}
+
+// args are what the specs process is run with, after mw.
+func (s specsProcess) args(storyID string) []string {
+	args := []string{"check", storyID, "--specs-worker", "--wait", CheckWait.String()}
+	if s.noSlot {
+		args = append(args, "--no-slot")
+	}
+	return args
 }
 
 // Alive says whether the process Start returned is still running: not ended, and
@@ -403,10 +428,7 @@ func (s gateProcess) Start(_ context.Context, storyID, logPath string) (int, err
 		return 0, fmt.Errorf("opening %s: %w", logPath, err)
 	}
 	defer log.Close()
-	args := []string{"check", storyID, "--gate-worker", "--wait", CheckWait.String()}
-	if s.noSlot {
-		args = append(args, "--no-slot")
-	}
+	args := s.args(storyID)
 	// Not exec.CommandContext: the check is meant to outlive the context it was
 	// started in.
 	cmd := exec.Command(self, args...)
@@ -417,6 +439,15 @@ func (s gateProcess) Start(_ context.Context, storyID, logPath string) (int, err
 	}
 	go func() { _ = cmd.Wait() }()
 	return cmd.Process.Pid, nil
+}
+
+// args are what the gate process is run with, after mw.
+func (s gateProcess) args(storyID string) []string {
+	args := []string{"check", storyID, "--gate-worker", "--wait", CheckWait.String()}
+	if s.noSlot {
+		args = append(args, "--no-slot")
+	}
+	return args
 }
 
 // Alive says whether the process Start returned is still running: not ended, and
@@ -440,15 +471,7 @@ func (partProcess) Start(_ context.Context, storyID string, part int, logPath st
 	defer log.Close()
 	// Not exec.CommandContext: the part is meant to outlive the context it was
 	// started in.
-	args := []string{"check", storyID, "--part", strconv.Itoa(part), "--part-worker"}
-	if takesSlot {
-		// A part that takes the merge slot waits for it itself, for as long as a
-		// check not kept to a call does (mw-gq6.1289).
-		args = append(args, "--wait", CheckWait.String())
-	} else {
-		args = append(args, "--no-slot")
-	}
-	cmd := exec.Command(self, args...)
+	cmd := exec.Command(self, partProcess{}.args(storyID, part, takesSlot)...)
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
@@ -458,6 +481,19 @@ func (partProcess) Start(_ context.Context, storyID string, part int, logPath st
 	// zombie that still looks alive; once this call is gone init does.
 	go func() { _ = cmd.Wait() }()
 	return cmd.Process.Pid, nil
+}
+
+// args are what the part's process is run with, after mw.
+func (partProcess) args(storyID string, part int, takesSlot bool) []string {
+	args := []string{"check", storyID, "--part", strconv.Itoa(part), "--part-worker"}
+	if takesSlot {
+		// A part that takes the merge slot waits for it itself, for as long as a
+		// check not kept to a call does (mw-gq6.1289).
+		args = append(args, "--wait", CheckWait.String())
+	} else {
+		args = append(args, "--no-slot")
+	}
+	return args
 }
 
 // Kill stops the part's process and everything in its group (Start made it the

@@ -130,3 +130,45 @@ func TestCheckReadsItsCallFromBashMaxTimeout(t *testing.T) {
 		}
 	}
 }
+
+// Every worker a check kept to a call starts (a part's, the changed specs', the
+// whole gate's) outlives that call, so it is given no call budget, run with the
+// arguments its starter gives it; a foreground check, whole or a --part, keeps to
+// the call's (mw-gq6.1479).
+func TestEveryWorkerACheckStartsIsKeptToNoCall(t *testing.T) {
+	call := application.CheckCallLimitsFor("")
+	budgetOf := func(args []string) time.Duration {
+		t.Helper()
+		cmd := newCheckCmd()
+		if err := cmd.ParseFlags(args); err != nil {
+			t.Fatal(err)
+		}
+		part, _ := cmd.Flags().GetInt("part")
+		_, _, keep := checkWaitLimit(cmd, part, call)
+		return checkCallBudget(cmd, keep, call)
+	}
+	for _, c := range []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{"a whole check in the foreground", []string{"check", "mw-x.1"}, call.Budget},
+		{"a part in the foreground", []string{"check", "mw-x.1", "--part", "2"}, call.Budget},
+		{"a whole check given a limit", []string{"check", "mw-x.1", "--wait", "15m"}, 0},
+		{"a part's worker that takes the slot", partProcess{}.args("mw-x.1", 2, true), 0},
+		{"a part's worker that takes no slot", partProcess{}.args("mw-x.1", 2, false), 0},
+		{"the specs' worker", specsProcess{}.args("mw-x.1"), 0},
+		{"the specs' worker with no slot", specsProcess{noSlot: true}.args("mw-x.1"), 0},
+		{"the gate's worker", gateProcess{}.args("mw-x.1"), 0},
+		{"the gate's worker with no slot", gateProcess{noSlot: true}.args("mw-x.1"), 0},
+	} {
+		if got := budgetOf(c.args); got != c.want {
+			t.Errorf("%s (%v): expected a call budget of %s, got %s", c.name, c.args, c.want, got)
+		}
+	}
+	for _, flag := range checkWorkerFlags {
+		if newCheckCmd().Flags().Lookup(flag) == nil {
+			t.Errorf("expected mw check to take --%s", flag)
+		}
+	}
+}

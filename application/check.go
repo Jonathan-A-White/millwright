@@ -207,7 +207,9 @@ type Check struct {
 	// wait it bounds, does not count, for the host's give-way stopped the check and
 	// it waited for nobody then (mw-gq6.1458). A check kept to a Builder's call
 	// (CallBudget) counts it all the same: the harness's own clock, which cuts the
-	// call off, went on through the give-way. Nil counts every span.
+	// call off, went on through the give-way. A worker a call started (PartWorker,
+	// SpecsWorker, GateWorker) outlives the call and is not kept to it, budget or
+	// none (keptToCall, mw-gq6.1479). Nil counts every span.
 	GaveWay GiveWaySpans
 
 	// Modes is the harness's record of the permission mode the story's session
