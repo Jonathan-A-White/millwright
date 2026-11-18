@@ -69,9 +69,9 @@ func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
 				http.Error(w, `{"error":{"message":"wrong export type"}}`, http.StatusBadRequest)
 				return
 			}
-			_, _ = w.Write([]byte("Grace's 40th\nDay 1: arrive\n"))
+			_, _ = w.Write([]byte("The summer trip\nDay 1: arrive\n"))
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc1":
-			_, _ = w.Write([]byte(`{"id":"doc1","name":"Grace trip","mimeType":"application/vnd.google-apps.document"}`))
+			_, _ = w.Write([]byte(`{"id":"doc1","name":"Summer trip","mimeType":"application/vnd.google-apps.document"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/pdf1":
 			_, _ = w.Write([]byte(`{"id":"pdf1","name":"Lease","mimeType":"application/pdf"}`))
 		case strings.HasPrefix(r.URL.Path, "/v4/spreadsheets/doc1") || strings.HasPrefix(r.URL.Path, "/v4/spreadsheets/pdf1"):
@@ -90,7 +90,7 @@ func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
 			}
 			_, _ = w.Write([]byte(`{"documentId":"doc1"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/documents/doc1":
-			_, _ = w.Write([]byte(`{"title":"Grace trip","body":{"content":[{"endIndex":1},{"endIndex":` + strconv.Itoa(g.docEnd) + `}]}}`))
+			_, _ = w.Write([]byte(`{"title":"Summer trip","body":{"content":[{"endIndex":1},{"endIndex":` + strconv.Itoa(g.docEnd) + `}]}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v4/spreadsheets":
 			_, _ = w.Write([]byte(`{"spreadsheetId":"made-1"}`))
 		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/drive/v3/files/"):
@@ -433,7 +433,7 @@ func TestGdriveDocReadPrintsTheDocsPlainText(t *testing.T) {
 	signedIn(t, home)
 
 	said, err := runGdrive(t, "", "gdrive", "doc", "read", "doc1")
-	if err != nil || said != "Grace's 40th\nDay 1: arrive\n" {
+	if err != nil || said != "The summer trip\nDay 1: arrive\n" {
 		t.Fatalf("expected the Doc's text, got %q %v", said, err)
 	}
 }
@@ -446,7 +446,7 @@ func TestGdriveDocAppendInsertsOneParagraphAtTheEndAndDeletesNothing(t *testing.
 	if err != nil {
 		t.Fatalf("doc append: %v %s", err, said)
 	}
-	for _, want := range []string{"Grace trip", "138"} {
+	for _, want := range []string{"Summer trip", "138"} {
 		if !strings.Contains(said, want) {
 			t.Fatalf("doc append lacks %q: %s", want, said)
 		}
