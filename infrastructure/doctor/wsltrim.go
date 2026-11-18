@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -328,6 +329,15 @@ type WSLDriveFree struct {
 	// Path is the report file. Empty reads WSLDriveFreeDir/WSLDriveFreeFile
 	// under the home directory.
 	Path string
+	// Mount is where this host sees the Windows drive holding its vhdx (the
+	// Laptop's /mnt/c), and MountDrive the name the report gives it ("C:"). With
+	// a Mount that is there, the probe writes the report itself from Statfs of it
+	// before reading it (mw-gq6.1490); empty, or absent, it reads the Windows
+	// task's report as before. Statfs is the free bytes of a path; nil reads the
+	// real one.
+	Mount      string
+	MountDrive string
+	Statfs     func(path string) (int64, error)
 	// DetectVirt says what systemd-detect-virt prints. Nil runs the real one.
 	DetectVirt func(ctx context.Context) (string, error)
 	// Now is the clock. Nil reads the wall clock.
@@ -366,6 +376,9 @@ func (w *WSLDriveFree) Probe(ctx context.Context) (application.Verdict, string) 
 		return application.DoctorCannotTell, err.Error()
 	}
 	w.last = driveFine
+	// Best effort: a mount that cannot be read leaves the Windows task's report
+	// (or none) to be read below, as on a host with no mount.
+	_ = RefreshWSLDriveFree(path, w.Mount, w.MountDrive, w.Statfs, w.now())
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		w.last = driveNoReport
@@ -493,6 +506,72 @@ func (w *WSLDriveFree) path() (string, error) {
 		return "", fmt.Errorf("there is no home directory to read the Windows drive's free-space report in: %w", err)
 	}
 	return filepath.Join(home, WSLDriveFreeDir, WSLDriveFreeFile), nil
+}
+
+// RefreshWSLDriveFree writes the Windows drive's report itself from statfs of
+// mount, in the format the Windows task writes: "<drive> <free bytes> <unix
+// seconds>", for a WSL host that sees its drive there (the Laptop's /mnt/c). It
+// writes nothing, and returns nil, when mount is empty or is not there, so that
+// a host whose drive is sealed from WSL (the desktop) keeps reading the task's
+// report. statfs nil reads the real one. The file is replaced whole, so a
+// reader never sees half a line.
+func RefreshWSLDriveFree(path, mount, drive string, statfs func(string) (int64, error), now time.Time) error {
+	if mount == "" {
+		return nil
+	}
+	if info, err := os.Stat(mount); err != nil || !info.IsDir() {
+		return nil
+	}
+	if statfs == nil {
+		statfs = freeBytesOf
+	}
+	free, err := statfs(mount)
+	if err != nil {
+		return fmt.Errorf("reading the free space of %s: %w", mount, err)
+	}
+	if drive == "" {
+		drive = "?:"
+	}
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("there is no home directory to write the Windows drive's free-space report in: %w", err)
+		}
+		path = filepath.Join(home, WSLDriveFreeDir, WSLDriveFreeFile)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), WSLDriveFreeFile+".tmp*")
+	if err != nil {
+		return err
+	}
+	_, werr := fmt.Fprintf(tmp, "%s %d %d\n", drive, free, now.Unix())
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		_ = os.Remove(tmp.Name())
+		return werr
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return nil
+}
+
+// freeBytesOf is the bytes free to an ordinary user on the filesystem at path.
+func freeBytesOf(path string) (int64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, err
+	}
+	return int64(st.Bavail) * int64(st.Bsize), nil
 }
 
 // ReadWSLDriveFree reads the Windows task's report at path, or under the home

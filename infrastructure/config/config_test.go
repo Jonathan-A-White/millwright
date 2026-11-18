@@ -3270,3 +3270,26 @@ func TestDriveFloorKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsDriveMountKey(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	mount, drive, err := config.DoctorWindowsDrive()
+	if err != nil || mount != "" || drive != "" {
+		t.Fatalf("expected no mount by default, got %q %q: %v", mount, drive, err)
+	}
+
+	writeConfig(t, "[doctor]\nwindows_drive_mount = \"/mnt/c\"\n")
+	if mount, drive, err = config.DoctorWindowsDrive(); err != nil || mount != "/mnt/c" || drive != "C:" {
+		t.Fatalf("expected /mnt/c reporting as C:, got %q %q: %v", mount, drive, err)
+	}
+
+	writeConfig(t, "[doctor]\nwindows_drive_mount = \"/mnt/d\"\nwindows_drive_name = \"X:\"\n")
+	if mount, drive, err = config.DoctorWindowsDrive(); err != nil || mount != "/mnt/d" || drive != "X:" {
+		t.Fatalf("expected /mnt/d reporting as X:, got %q %q: %v", mount, drive, err)
+	}
+
+	writeConfig(t, "[doctor]\nwindows_drive_mount = \"mnt/c\"\n")
+	if _, _, err = config.DoctorWindowsDrive(); err == nil {
+		t.Errorf("a mount that is not a full path was no error")
+	}
+}

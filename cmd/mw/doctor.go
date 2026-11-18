@@ -434,6 +434,11 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if mount, mountDrive, err := config.DoctorWindowsDrive(); err != nil {
+				return err
+			} else {
+				wslDriveFree.Mount, wslDriveFree.MountDrive = mount, mountDrive
+			}
 			wslDriveFree.WarnGB, wslDriveFree.DispatchFloorGB = room.DriveWarnGB, room.MinDriveFreeGB
 			if room.DriveWarnGB == 0 {
 				wslDriveFree.WarnGB = -1

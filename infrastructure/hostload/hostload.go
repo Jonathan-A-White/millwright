@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -36,6 +37,15 @@ type Proc struct {
 	// directory. Now is the clock that report's age is read on; nil is time.Now.
 	DriveFile string
 	Now       func() time.Time
+	// Mount, MountDrive and Statfs are the Windows drive as this host sees it
+	// (the Laptop's /mnt/c, reported as "C:"): with a Mount that is there, the
+	// reading writes the report itself from the mount first, so no Windows task
+	// is needed (mw-gq6.1490). Empty Mount and DriveFile read the config's
+	// [doctor] windows_drive_mount; a test that names its DriveFile reads none.
+	// Statfs nil reads the real free bytes.
+	Mount      string
+	MountDrive string
+	Statfs     func(path string) (int64, error)
 	// ProcDir is where the kernel lists the host's processes, read for the part
 	// workers running their part (LoadReading.PartWorkers); empty is /proc.
 	ProcDir string
@@ -163,13 +173,19 @@ func (p Proc) memAvailableMB() (int64, bool) {
 // stopped) leaves it unknown rather than failing the whole reading
 // (mw-gq6.1381).
 func (p Proc) driveFree() (name string, free int64, known bool) {
-	drive, free, at, ok := doctor.ReadWSLDriveFree(p.DriveFile)
-	if !ok {
-		return "", 0, false
-	}
 	now := time.Now
 	if p.Now != nil {
 		now = p.Now
+	}
+	mount, mountDrive := p.Mount, p.MountDrive
+	if mount == "" && p.DriveFile == "" {
+		// A config that cannot be read leaves the Windows task's report to read.
+		mount, mountDrive, _ = config.DoctorWindowsDrive()
+	}
+	_ = doctor.RefreshWSLDriveFree(p.DriveFile, mount, mountDrive, p.Statfs, now())
+	drive, free, at, ok := doctor.ReadWSLDriveFree(p.DriveFile)
+	if !ok {
+		return "", 0, false
 	}
 	if now().Sub(at) > doctor.WSLDriveFreeMaxAge {
 		return "", 0, false

@@ -363,3 +363,78 @@ func TestWSLDriveFreeWarnsUnderTheHigherFloor(t *testing.T) {
 		t.Errorf("expected a warning at 40 GB free under a 50 GB warning floor, got %v", verdict)
 	}
 }
+
+// mw-gq6.1490: a WSL host whose config names the mount of its Windows drive
+// (the Laptop's /mnt/c) writes the drive's report itself from statfs, in the
+// format the Windows task writes, before reading it.
+func TestWSLDriveFreeWritesItsOwnReportFromTheMount(t *testing.T) {
+	mount := t.TempDir()
+	const freeBytes = int64(48) << 30
+	statfs := func(path string) (int64, error) {
+		if path != mount {
+			t.Errorf("statfs read %q, want the mount %q", path, mount)
+		}
+		return freeBytes, nil
+	}
+	check := driveFreeCheck(t, "wsl", "", true)
+	check.Mount, check.MountDrive, check.Statfs = mount, "C:", statfs
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.Contains(reason, "C: has 48 GB free") {
+		t.Fatalf("expected ok saying C: has 48 GB free, got %v %q", verdict, reason)
+	}
+	raw, err := os.ReadFile(check.Path)
+	if err != nil {
+		t.Fatalf("expected the probe to write the report: %v", err)
+	}
+	if want := fmt.Sprintf("C: %d %d\n", freeBytes, trimNow.Unix()); string(raw) != want {
+		t.Errorf("report = %q, want %q", raw, want)
+	}
+
+	// A report the Windows task wrote is overwritten by the fresher reading.
+	if err := os.WriteFile(check.Path, []byte(report("C:", 1, time.Hour)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if verdict, reason = check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected the self-written reading over the old report, got %v %q", verdict, reason)
+	}
+
+	// The key unset: nothing is written, and the task's report is read as before.
+	check = driveFreeCheck(t, "wsl", "", true)
+	check.Statfs = statfs
+	if verdict, _ = check.Probe(context.Background()); verdict != application.DoctorFaulty {
+		t.Errorf("expected faulty with no key and no report, got %v", verdict)
+	}
+	if _, err := os.Stat(check.Path); err == nil {
+		t.Errorf("a report was written with the key unset")
+	}
+	check = driveFreeCheck(t, "wsl", report("D:", 42, time.Minute), false)
+	check.Statfs = statfs
+	if verdict, reason = check.Probe(context.Background()); verdict != application.DoctorOK || !strings.Contains(reason, "D: has 42 GB free") {
+		t.Errorf("expected the task's report read with the key unset, got %v %q", verdict, reason)
+	}
+
+	// The mount named but absent: nothing is written, and the task's report is read.
+	check = driveFreeCheck(t, "wsl", report("D:", 42, time.Minute), false)
+	check.Mount, check.MountDrive, check.Statfs = filepath.Join(t.TempDir(), "no-such-mount"), "C:", statfs
+	if verdict, reason = check.Probe(context.Background()); verdict != application.DoctorOK || !strings.Contains(reason, "D: has 42 GB free") {
+		t.Errorf("expected the task's report read with the mount absent, got %v %q", verdict, reason)
+	}
+	check = driveFreeCheck(t, "wsl", "", true)
+	check.Mount, check.MountDrive, check.Statfs = filepath.Join(t.TempDir(), "no-such-mount"), "C:", statfs
+	check.Probe(context.Background())
+	if _, err := os.Stat(check.Path); err == nil {
+		t.Errorf("a report was written for a mount that is absent")
+	}
+}
+
+// A host that is not WSL writes nothing, mount or no mount.
+func TestWSLDriveFreeWritesNoReportOffWSL(t *testing.T) {
+	check := driveFreeCheck(t, "none", "", true)
+	check.Mount, check.MountDrive = t.TempDir(), "C:"
+	check.Statfs = func(string) (int64, error) { return 1 << 40, nil }
+	check.Probe(context.Background())
+	if _, err := os.Stat(check.Path); err == nil {
+		t.Errorf("a report was written on a host that is not WSL")
+	}
+}
