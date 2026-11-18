@@ -84,6 +84,11 @@ func (s PathSet) releaseOnPathSet(ctx context.Context, id string, story StoryDet
 		}
 		return nil
 	}
+	// A story over its size's test callers, with no callers_ok, is not released:
+	// the Mayor sizes it up or says why the callers are fine, and runs it again.
+	if held, err := s.holdForCallers(ctx, id, written); err != nil || held {
+		return err
+	}
 	// The release of `mw release <id>`, which reads the story as the write left
 	// it and looks once more for a hold on the Governor's word.
 	if _, err := (Release{Tracker: s.Tracker, Rules: s.Rules, Rigs: s.Rigs, RigFiles: s.RigFiles}).story(ctx, id); err != nil {
@@ -96,6 +101,43 @@ func (s PathSet) releaseOnPathSet(ctx context.Context, id string, story StoryDet
 		fmt.Fprintf(s.Out, "%s: %s\n", ReleasedOnPathSet, id)
 	}
 	return nil
+}
+
+// callersHeldWord opens the reason (after HELD:) a story is kept held for its
+// test callers; whyStayHeld does not count such a comment as a hold of its own,
+// or a story sized up could never be released by the next mw path set.
+const callersHeldWord = "test callers"
+
+// isCallersHold is whether a comment is the one holdForCallers writes.
+func isCallersHold(text string) bool {
+	rest := strings.TrimSpace(text)
+	return IsHoldComment(rest) && strings.HasPrefix(strings.TrimSpace(rest[len(HeldCommentPrefix):]), callersHeldWord+" ")
+}
+
+// holdForCallers keeps the story just pathed held, with a HELD: comment naming
+// the count and the limit and one line on stdout, when its test callers are more
+// than its size allows and it carries no callers_ok. It reports whether it did.
+// A story whose count cannot be taken is not held for it.
+func (s PathSet) holdForCallers(ctx context.Context, id string, written StoryDetail) (bool, error) {
+	callers, ok := testCallersOf(s.Rigs, s.RigFiles, id, written.Merged())
+	if !ok || !callers.Unwaived() {
+		return false, nil
+	}
+	why := fmt.Sprintf("%s %d for size %s (allows %d)", callersHeldWord, callers.Count, callers.Size, callers.Allows())
+	text := fmt.Sprintf("%s %s: size it up or give callers_ok=\"<why>\", then run mw path set again", HeldCommentPrefix, why)
+	comments, err := s.Tracker.StoryComments(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("reading the comments of %s to write why it stays held: %w", id, err)
+	}
+	if !slices.ContainsFunc(comments, func(c Comment) bool { return strings.TrimSpace(c.Text) == text }) {
+		if err := s.Tracker.CommentOnStory(ctx, id, text); err != nil {
+			return false, fmt.Errorf("writing the reason %s is held: %w", id, err)
+		}
+	}
+	if s.Out != nil {
+		fmt.Fprintf(s.Out, "held: %s: NOT released: %s; size it up or give callers_ok=\"<why>\", then run mw path set again\n", id, why)
+	}
+	return true, nil
 }
 
 // holdOnPathSet writes the reason --hold gives as a HELD: comment on the held
@@ -133,7 +175,7 @@ func (s PathSet) whyStayHeld(ctx context.Context, id string, story, written Stor
 		return fmt.Sprintf("it is held on the Governor's word, by this comment on %s: %s", on, heldLine(hold.Text)), nil
 	}
 	for _, c := range comments[id] {
-		if holdsAReason([]Comment{c}) {
+		if holdsAReason([]Comment{c}) && !isCallersHold(c.Text) {
 			return fmt.Sprintf("it has a HELD: comment: %s", heldLine(c.Text)), nil
 		}
 	}
