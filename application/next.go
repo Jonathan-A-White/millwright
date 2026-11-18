@@ -2423,6 +2423,13 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 	case err != nil:
 		return Refusal{ReasonTrackerFailed, fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), ""}, true
 	case len(open) > 0:
+		// The Mayor's word and a closing comment on the story close every open step
+		// (mw-gq6.1436).
+		if done, refusal, refused := n.closeStepsMetByTheClosingComment(ctx, c, report, closing, root, open, base); refused {
+			return refusal, true
+		} else if done {
+			return Refusal{}, false
+		}
 		written := false
 		if closing != leaveClosingStep && len(open) == 1 {
 			var readErr error
@@ -2444,8 +2451,12 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 				return Refusal{}, false
 			}
 		}
-		return Refusal{ReasonOpenSteps, fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
-			"Still open:\n" + stepList(open) + n.unrunPartsSaid(ctx, c)}, true
+		why, wayOut := fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root), ""
+		if closing != leaveClosingStep {
+			why += " (" + openStepsFlagsSaid + ")"
+			wayOut = "\n\nIf the story's closing comment is on the bead, written after the branch's newest commit, " + OpenStepsWayOut(c.id) + "."
+		}
+		return Refusal{ReasonOpenSteps, why, "Still open:\n" + stepList(open) + wayOut + n.unrunPartsSaid(ctx, c)}, true
 	}
 	return Refusal{}, false
 }
