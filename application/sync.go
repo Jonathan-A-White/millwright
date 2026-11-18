@@ -349,6 +349,9 @@ type VaultFiles interface {
 	// It is how the one thing mw writes in the vault during a story, and the one
 	// thing the session may write beside it, stop standing in the way of the
 	// next sync. Anything else uncommitted is still somebody's to commit.
+	//
+	// A vault whose HEAD is on no branch (a rebase stopped there) gets no
+	// commit: the error says so and the files stay written (mw-gq6.1447).
 	Commit(ctx context.Context, message string, paths []string) ([]string, error)
 
 	// Pull brings the other host's commits in and replays this host's on top,
