@@ -1696,9 +1696,10 @@ func slugQuestion(slug string) string {
 }
 
 // roomTier is the tier a fact falls in, false when make-room may not take it.
-// landed says which story ids are closed and landed.
+// landed says which story ids are closed and landed. A fact placed within
+// MakeRoomKeepDays days is in no tier, whatever its since (roomFresh).
 func (m Memory) roomTier(fact RigFact, landed map[string]bool) (int, bool) {
-	if !m.roomBase(fact) {
+	if !m.roomBase(fact) || m.roomFresh(fact) {
 		return 0, false
 	}
 	switch {
@@ -1761,7 +1762,7 @@ func (m Memory) landedStories(ctx context.Context, all []RigFact) map[string]boo
 // roomDecisionTooNew reports whether a fact is a decision make-room would take
 // but for its age.
 func (m Memory) roomDecisionTooNew(fact RigFact) bool {
-	return m.roomBase(fact) && fact.Kind == FactDecision && !m.sinceBefore(fact, MakeRoomDecisionDays)
+	return m.roomBase(fact) && fact.Kind == FactDecision && (!m.sinceBefore(fact, MakeRoomDecisionDays) || m.roomFresh(fact))
 }
 
 // roomBase is what any fact make-room takes must be: current, in the boot
