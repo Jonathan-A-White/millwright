@@ -62,3 +62,14 @@ The line's shape is fixed, so a later count can read it as the event beads were 
 for example `2026-11-10T14:41:05Z run=landed mw@laptop landed at 3f2a9c1`. The actor is the
 Gateway's (`mw@<host>`), `unknown` if it has none. The reason is kept whole and as it was
 given, so a reason with a newline runs over more lines, none of which begins with a time.
+
+## mw tester file writes its waits after the story, not with it
+
+`bd create --deps` runs the same cycle check inside the create, and a create whose check times out
+is undone: nothing is filed. Until mw-gq6.1467 `mw tester file` made its waits (on the open stories
+naming the same file and the held findings of the landing) that way, so a busy server filed
+nothing, 4 tries of 4 on mw-rl10piw.48. It now files the finding held with no waits, then adds each
+with one `bd dep add`, trying a wait again after 3 s, 6 s and 12 s when the failure is a passing
+fault (`i/o timeout`, `invalid connection`); a wait that still fails is named in the error, which
+exits non-zero, and the finding stays filed and held. `mw file` still creates a plan's stories with
+`--deps` (a plan's waits are on its own stories, filed a moment before).

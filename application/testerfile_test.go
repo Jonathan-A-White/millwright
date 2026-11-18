@@ -3,9 +3,11 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -738,5 +740,121 @@ func TestTesterFilerWarnsOfACriterionThatNeedsTheLiveSite(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "WARN:") {
 		t.Errorf("expected no warning for a runnable criterion, got %q", out.String())
+	}
+}
+
+// slowDepsTracker is a tracker whose dependency cycle check times out as bd's
+// does on a busy server (mw-gq6.1467): a bd create with --deps runs the check
+// inside the create and, when it fails, makes nothing, and a bd dep add that
+// fails leaves the dependency unwritten. failures is how many times a dep add
+// fails before it works again; negative fails it every time.
+type slowDepsTracker struct {
+	*apptest.FakeTracker
+	failures int
+	err      error
+	adds     map[string]int
+}
+
+func newSlowDepsTracker(base *apptest.FakeTracker, failures int) *slowDepsTracker {
+	return &slowDepsTracker{
+		FakeTracker: base,
+		failures:    failures,
+		err:         errors.New("invalid dependency mw-e.10 -> mw-e.4: failed to check for dependency cycle: read tcp 10.0.0.2:3307: i/o timeout"),
+		adds:        map[string]int{},
+	}
+}
+
+func (s *slowDepsTracker) CreateStory(ctx context.Context, story application.NewStory) (string, error) {
+	if len(story.Needs) > 0 && s.failures != 0 {
+		return "", s.err
+	}
+	return s.FakeTracker.CreateStory(ctx, story)
+}
+
+func (s *slowDepsTracker) AddBlocker(ctx context.Context, blocked, blocker string) error {
+	if strings.HasPrefix(blocked, "mw-e.1") && blocked != "mw-e.1" { // the filed finding, not the epic's demo
+		s.adds[blocker]++
+		if s.failures < 0 || s.adds[blocker] <= s.failures {
+			return s.err
+		}
+	}
+	return s.FakeTracker.AddBlocker(ctx, blocked, blocker)
+}
+
+func TestAFindingWhoseWaitsTimeOutIsStillFiledHeldAndTheFailedWaitsAreNamed(t *testing.T) {
+	base, rules := testerFileEpic(t)
+	tracker := newSlowDepsTracker(base, -1)
+	var out bytes.Buffer
+	var pauses []time.Duration
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules, Out: &out,
+		Pause: func(_ context.Context, d time.Duration) error { pauses = append(pauses, d); return nil }}
+
+	filed, err := filer.File(context.Background(), "mw-e.2", testerFinding())
+	if err == nil {
+		t.Fatal("expected a non-zero exit (an error) when the waits could not be written")
+	}
+	for _, want := range []string{"mw-e.4", "mw-e.5", "i/o timeout"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the error to say %q, got %q", want, err)
+		}
+	}
+	if filed.ID == "" {
+		t.Fatalf("expected the finding created and its id returned, got %+v", filed)
+	}
+	story, serr := tracker.ShowStory(context.Background(), filed.ID)
+	if serr != nil {
+		t.Fatalf("expected the finding to exist: %v", serr)
+	}
+	if story.Status != apptest.StatusDeferred {
+		t.Errorf("expected the finding held, got %q", story.Status)
+	}
+	if !strings.Contains(err.Error(), filed.ID) {
+		t.Errorf("expected the error to name the filed story %s, got %q", filed.ID, err)
+	}
+	if len(pauses) == 0 {
+		t.Error("expected the dep add to be tried again after a pause")
+	}
+	if !strings.Contains(out.String(), "held") {
+		t.Errorf("expected the output to say it was filed held, got %q", out.String())
+	}
+}
+
+func TestAFindingsWaitThatTimesOutOnceIsTriedAgainAndFiledClean(t *testing.T) {
+	base, rules := testerFileEpic(t)
+	tracker := newSlowDepsTracker(base, 2)
+	var pauses []time.Duration
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules,
+		Pause: func(_ context.Context, d time.Duration) error { pauses = append(pauses, d); return nil }}
+
+	filed, err := filer.File(context.Background(), "mw-e.2", testerFinding())
+	if err != nil {
+		t.Fatalf("expected the waits to be written on the third try, got %v", err)
+	}
+	needs := needsOf(t, base, filed.ID)
+	slices.Sort(needs)
+	if !slices.Equal(needs, []string{"mw-e.4", "mw-e.5"}) {
+		t.Errorf("expected the finding to wait on mw-e.4 and mw-e.5, got %q", needs)
+	}
+	if len(pauses) < 2 || pauses[1] <= pauses[0] {
+		t.Errorf("expected the pauses to grow, got %v", pauses)
+	}
+}
+
+func TestAFindingsWaitThatWouldMakeACycleIsNotTriedAgain(t *testing.T) {
+	base, rules := testerFileEpic(t)
+	tracker := newSlowDepsTracker(base, -1)
+	tracker.err = errors.New("adding mw-e.4 as a blocker of mw-e.10 would create a cycle")
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules,
+		Pause: func(context.Context, time.Duration) error {
+			t.Error("a refused cycle must not be waited on")
+			return nil
+		}}
+
+	filed, err := filer.File(context.Background(), "mw-e.2", testerFinding())
+	if err == nil || filed.ID == "" {
+		t.Fatalf("expected the finding created and an error, got %+v, %v", filed, err)
+	}
+	if tracker.adds["mw-e.4"] != 1 {
+		t.Errorf("expected one try at mw-e.4, got %d", tracker.adds["mw-e.4"])
 	}
 }

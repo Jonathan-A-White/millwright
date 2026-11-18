@@ -85,6 +85,10 @@ type TesterFiled struct {
 	Chained []string
 	// Notes are what could not be done, one line each; they never undo the filing.
 	Notes []string
+	// Unwritten are the waits (Waits and Chained) the tracker would not write
+	// after the story was filed, with why, one line each (mw-gq6.1467): the story
+	// is filed and held all the same, and the filing fails naming them.
+	Unwritten []string
 }
 
 // TesterFiler files a Tester's finding: a story held under the landed story's
@@ -120,6 +124,9 @@ type TesterFiler struct {
 	Host     string
 	// Out is where it says what it did; nil prints nothing.
 	Out io.Writer
+	// Pause waits between the tries of a wait the tracker could not write; nil
+	// waits for real.
+	Pause func(context.Context, time.Duration) error
 }
 
 // File files finding for the Tester story testerID, which names the landed
@@ -260,7 +267,6 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		Acceptance:  strings.TrimSpace(finding.Acceptance),
 		Priority:    testerFindingPriority(finding.Kind),
 		Overrides:   path,
-		Needs:       append(slices.Clone(shared), filed.Chained...),
 	}
 	if finding.Kind == TesterKindBug {
 		story.Labels = []string{LabelBug}
@@ -268,12 +274,22 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	if finding.Class != "" {
 		story.Labels = append(story.Labels, ClassLabelPrefix+finding.Class)
 	}
+	// The story is created with no waits and each wait is added after: bd create
+	// --deps checks every dependency for a cycle inside the create, and when that
+	// read times out on a busy server the create is undone and nothing is filed
+	// (mw-gq6.1467). A wait that still fails is named, not fatal to the filing.
 	id, err := f.Tracker.CreateStory(ctx, story)
 	if err != nil {
 		return filed, fmt.Errorf("filing the finding: %w", err)
 	}
 	filed.ID = id
 	f.say("filed %s, held, under %s: %s\n", id, orStandalone(landed.EpicID), title)
+	waits := append(slices.Clone(shared), filed.Chained...)
+	written, unwritten := f.writeWaits(ctx, id, waits)
+	filed.Unwritten = unwritten
+	shared = slices.DeleteFunc(slices.Clone(shared), func(need string) bool { return !slices.Contains(written, need) })
+	filed.Chained = slices.DeleteFunc(slices.Clone(filed.Chained), func(need string) bool { return !slices.Contains(written, need) })
+	filed.Waits = shared
 	// A criterion no Builder can run before landing is warned of as mw file and
 	// mw path set warn of it (PathSet.notRunnableWarning, mw-gq6.1411).
 	if line := (PathSet{Rules: f.Rules}).notRunnableWarning(ctx, id, path.Rig, story.Acceptance); line != "" {
@@ -293,7 +309,66 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		f.say("  note: %s\n", note)
 	}
 	f.say("  put 'held: %s' under the finding in FINDINGS\n", id)
+	if len(unwritten) > 0 {
+		return filed, fmt.Errorf("filed %s, held, but %d of its waits could not be written, so it does not yet wait on them: %s; "+
+			"make each with bd dep add %s <id> when the server is calmer", id, len(unwritten), strings.Join(unwritten, "; "), id)
+	}
 	return filed, nil
+}
+
+// WaitTries is how many times a wait the tracker could not write for a passing
+// fault (a cycle check that timed out) is tried, and waitFirstPause the first
+// pause between tries, doubled for each one after it.
+const (
+	WaitTries      = 4
+	waitFirstPause = 3 * time.Second
+)
+
+// writeWaits makes story id wait on each need, one at a time, trying a need
+// again after a growing pause when the tracker failed on a passing fault. It
+// returns the needs written and, for each that was not, a line 'need: why'.
+func (f TesterFiler) writeWaits(ctx context.Context, id string, needs []string) (written, unwritten []string) {
+	pause := f.Pause
+	if pause == nil {
+		pause = waitFor
+	}
+	for _, need := range needs {
+		var err error
+		delay := waitFirstPause
+		for try := 1; try <= WaitTries; try++ {
+			if err = f.Tracker.AddBlocker(ctx, id, need); err == nil || !passingDepFault(err) || try == WaitTries {
+				break
+			}
+			f.say("  note: %s could not be made to wait on %s (%s), trying again in %s\n", id, need, firstLine(err.Error()), delay)
+			if waitErr := pause(ctx, delay); waitErr != nil {
+				err = fmt.Errorf("%w (and waiting to try again: %v)", err, waitErr)
+				break
+			}
+			delay *= 2
+		}
+		if err != nil {
+			unwritten = append(unwritten, fmt.Sprintf("%s: %s", need, firstLine(err.Error())))
+			continue
+		}
+		written = append(written, need)
+	}
+	return written, unwritten
+}
+
+// passingDepFault says err is a dependency write that failed on the server and
+// not on a refusal: a cycle check whose read timed out. A cycle bd found is a
+// refusal and is not tried again.
+func passingDepFault(err error) bool {
+	said := strings.ToLower(err.Error())
+	if strings.Contains(said, "would create a cycle") {
+		return false
+	}
+	for _, fault := range append([]string{"invalid connection", "failed to check for dependency cycle", "timeout"}, bdPassingFaults...) {
+		if strings.Contains(said, fault) {
+			return true
+		}
+	}
+	return false
 }
 
 // fixedOnMain is how the acceptance of a bug finding passes on main as merged
