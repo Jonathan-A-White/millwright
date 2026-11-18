@@ -387,3 +387,92 @@ func TestBeadsSizeProbeReadsTheSizerWhenOneIsGiven(t *testing.T) {
 		t.Fatalf("expected faulty at 9000 bytes, got %v: %s", verdict, reason)
 	}
 }
+
+// The collection of a 5 GB store can outrun the run mw doctor gives a cure (it
+// is cut at doctorRunBudget+doctorStepBudget from the run's start, and the unit
+// is stopped soon after): a cure that waited for it would be killed partway, and
+// last_gc would never be recorded (mw-gq6.1448). With Apart set the cure begins
+// the collection as a process of its own and leaves.
+
+func TestBeadsSizeCureWithApartBeginsTheCollectionAndDoesNotWaitForIt(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000, shrinkTo: 1_000}
+	f.last = f.now.Add(-9 * time.Hour)
+	check := f.check()
+	begun := 0
+	check.Apart = func(context.Context) error { begun++; return nil }
+
+	err := check.Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "began apart") {
+		t.Fatalf("expected the cure to say the collection began apart, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "9000") || !strings.Contains(err.Error(), "2026-11-17T10:00:00Z") {
+		t.Fatalf("expected the size and the time to be named, got %q", err.Error())
+	}
+	if begun != 1 || f.calls != 0 {
+		t.Fatalf("expected one collection begun apart and none run inside the cure, got %d begun, %d run", begun, f.calls)
+	}
+}
+
+func TestBeadsSizeCureWithApartRunsNoneInsideTheInterval(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000}
+	f.last = f.now.Add(-time.Hour)
+	check := f.check()
+	check.Apart = func(context.Context) error { t.Fatal("began a collection inside the interval"); return nil }
+	if err := check.Cure(context.Background()); err == nil || !strings.Contains(err.Error(), "no cure") {
+		t.Fatalf("expected the no-cure word, got %v", err)
+	}
+}
+
+func TestBeadsSizeCureWithApartSaysWhenTheCollectionCannotBegin(t *testing.T) {
+	t.Parallel()
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000}
+	check := f.check()
+	check.Apart = func(context.Context) error { return errors.New("no systemd") }
+	err := check.Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no systemd") || strings.Contains(err.Error(), "began apart") {
+		t.Fatalf("expected the failure to begin, in its own words, got %v", err)
+	}
+}
+
+// A collection slower than the step budget, begun by the real starter, is not
+// stopped by the cure's context ending: it completes and writes what the daily
+// job writes on finish (here a file standing for host.<host>.last_gc).
+func TestACollectionSlowerThanTheStepBudgetCompletesAndRecordsLastGC(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	lastGC := filepath.Join(dir, "last_gc")
+	f := &bsFake{now: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC), size: 9_000}
+	check := f.check()
+	// The fake GC: 600 ms, over the 100 ms step budget below, then it records.
+	check.Apart = doctor.ApartProcess{
+		Self:    "/bin/sh",
+		Args:    []string{"-c", "sleep 0.6; date > " + lastGC},
+		NoScope: true,
+	}.Start
+
+	step, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	began := time.Now()
+	err := check.Cure(step)
+	cancel() // the run's end: the step is cut here
+	if err == nil || !strings.Contains(err.Error(), "began apart") {
+		t.Fatalf("expected the collection to have begun apart, got %v", err)
+	}
+	if took := time.Since(began); took > 400*time.Millisecond {
+		t.Fatalf("the cure waited %s for a collection that takes 600ms", took)
+	}
+	if _, err := os.Stat(lastGC); err == nil {
+		t.Fatal("the fake collection should still be running")
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(lastGC); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the collection never finished: last_gc was not recorded")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
