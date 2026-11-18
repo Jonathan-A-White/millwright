@@ -328,6 +328,11 @@ type Next struct {
 	DeploySlot     MergeSlot
 	AfterRetryWait time.Duration
 
+	// SmokeSlot is the lock the grist smokes of one rig that mw land hands
+	// apart (BatchLand.SmokeLanded) take, so that a smoke begun while the one
+	// before it still runs follows it. Nil takes none (mw-apvyg8j).
+	SmokeSlot MergeSlot
+
 	// Deployed is where this host remembers the commit a passing after-landing
 	// run last deployed, per rig, so that the home's tick does not deploy it
 	// again (mw-gq6.564). A nil Deployed remembers nothing.

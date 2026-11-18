@@ -81,7 +81,72 @@ func (c *nextContext) homeReader() application.HomeFile {
 	return c.home
 }
 
+// apartSmokes stands in for the process mw land hands the grist smoke of a
+// landed batch to: it is begun and goes on, not ended, until the scenario ends
+// it (mw-apvyg8j).
+type apartSmokes struct {
+	begun []application.LandedSmoke
+	ended int
+}
+
+func (a *apartSmokes) Begin(_ context.Context, smoke application.LandedSmoke) error {
+	a.begun = append(a.begun, smoke)
+	return nil
+}
+
 func registerBatchLandSmokeSteps(ctx *godog.ScenarioContext, c *nextContext) {
+	ctx.Given(`^the batch's landing changes the rig's grist, and its smoke fails, begun apart and not ended until the scenario ends it$`, func() error {
+		c.smokeWatch = &smokeWatch{failing: true}
+		c.apartSmokes = &apartSmokes{}
+		return nil
+	})
+	ctx.Then(`^the smoke of batch (\d+) was begun apart and had not run when mw land ended$`, func(number int) error {
+		a, w := c.apartSmokes, c.smokeWatch
+		if a == nil || len(a.begun) < number || a.begun[number-1].Number != number {
+			return fmt.Errorf("expected the smoke of batch %d begun apart, got %+v\n%s", number, c.apartSmokes, c.said())
+		}
+		if w.ran {
+			return fmt.Errorf("expected the smoke to be going on apart, not made by mw land\n%s", c.said())
+		}
+		return nil
+	})
+	ctx.Then(`^mw land said the smoke was begun apart$`, func() error {
+		printed := c.printed.String()[c.batch.printedFrom:]
+		if !strings.Contains(printed, "grist smoke: begun apart") {
+			return fmt.Errorf("expected mw land to say the smoke was begun apart, it said:\n%s", printed)
+		}
+		return nil
+	})
+	ctx.When(`^the smokes begun apart end$`, func() error {
+		a := c.apartSmokes
+		if a == nil {
+			return fmt.Errorf("the scenario begun no smoke apart")
+		}
+		for ; a.ended < len(a.begun); a.ended++ {
+			err := application.BatchLand{Next: c.nextUseCase()}.SmokeLanded(context.Background(), a.begun[a.ended])
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	ctx.Then(`^the smoke of each batch was made and the Mayor was mailed that the smoke of batch (\d+) failed$`, func(number int) error {
+		w := c.smokeWatch
+		if w == nil || !w.ran {
+			return fmt.Errorf("the grist smoke never ran\n%s", c.said())
+		}
+		sent, err := c.mailSent()
+		if err != nil {
+			return err
+		}
+		want := application.MailSmokeFailed + ": " + application.BatchLabel(c.rigKey(), number)
+		for _, m := range sent {
+			if m.Subject == want {
+				return nil
+			}
+		}
+		return fmt.Errorf("expected a %q mail, got %+v", want, sent)
+	})
 	ctx.Given(`^the batch's landing changes the rig's grist, and this host names no \[grist-apps\]$`, func() error {
 		c.smokeUnhosted = true
 		return nil

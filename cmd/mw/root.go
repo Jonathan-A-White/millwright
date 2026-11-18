@@ -47,6 +47,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newIdeasOnlyCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newLandCmd())
+	root.AddCommand(newLandSmokeCmd())
 	root.AddCommand(newMailCmd())
 	root.AddCommand(newMemberCmd())
 	root.AddCommand(newMemoryCmd())

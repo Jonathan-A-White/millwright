@@ -676,16 +676,33 @@ func (n Next) keepAfterLandingLog(ctx context.Context, c *closeOut, report *Next
 // stories (GristSmokeBook); the landing is not undone. It returns the lines of
 // the apps that failed, none when the smoke passed or was not made.
 func (n Next) smoke(ctx context.Context, c *closeOut, report *NextReport) (failed []string) {
+	if !n.smokeWanted(ctx, c, report) {
+		return nil
+	}
+	return n.smokeMade(ctx, c, report)
+}
+
+// smokeWanted says whether a grist smoke is to be made for the landing, and
+// puts in the report the notes of one that is not (the apps are smoked by the
+// home, or the checkout is not the landed commit's), as Next.smoke has always
+// said them.
+func (n Next) smokeWanted(ctx context.Context, c *closeOut, report *NextReport) bool {
 	if c.smokeUnhosted {
 		report.Notes = append(report.Notes, n.noSmokeLine(ctx, c.path.Rig))
 	}
 	if len(c.smokeApps) == 0 {
-		return nil
+		return false
 	}
 	if !report.Rig.Current() {
 		report.Notes = append(report.Notes, fmt.Sprintf("grist smoke: not run for %s, %s", strings.Join(c.smokeApps, ", "), report.Rig.NotCurrent(c.target)))
-		return nil
+		return false
 	}
+	return true
+}
+
+// smokeMade makes the grist smoke Next.smokeWanted said is to be made, and
+// records a failure of it as Next.smoke does.
+func (n Next) smokeMade(ctx context.Context, c *closeOut, report *NextReport) (failed []string) {
 	lines, failed := n.Smoke.Run(ctx, c.path.Rig, c.smokeApps)
 	report.Notes = append(report.Notes, lines...)
 	if len(failed) == 0 {
