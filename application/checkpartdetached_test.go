@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -483,6 +484,10 @@ func TestAfterAHungPartTheNextCallStartsItAgain(t *testing.T) {
 	}
 
 	d.starter.run = worker
+	// The part started again runs at once; the 100 ms ceiling is for the silent
+	// process of the first call, and a loaded host could pass it before the
+	// part wrote its result (mw-gq6.1464).
+	d.tune = func(k *application.Check) { k.PartHungAfter = time.Hour }
 	close(d.parts.release)
 	err := d.check(30 * time.Second)
 	if err != nil {
@@ -500,10 +505,26 @@ func TestAfterAHungPartTheNextCallStartsItAgain(t *testing.T) {
 }
 
 // A slow part that still writes is not killed: the ceiling counts from its last
-// write, not from its start.
+// write, not from its start. The check's clock is moved by hand and the part's
+// writes are stamped by it, so no wall-clock margin decides the test: the clock
+// passes the ceiling since the part's start (two hours against one) and the
+// call's whole budget, while no write is more than forty minutes old when the
+// check looks (mw-gq6.1464).
 func TestADetachedPartThatKeepsWritingIsNotKilled(t *testing.T) {
 	d := aDetachedPartRig(t, true)
-	d.tune = func(k *application.Check) { k.PartHungAfter = 300 * time.Millisecond }
+	clock := &skewedClock{}
+	// looks counts the times the check has looked at the part's silence: it asks
+	// for the part's usual run each time, and has none to give.
+	var looks atomic.Int64
+	d.tune = func(k *application.Check) {
+		k.PartHungAfter = time.Hour
+		k.CallNow = clock.Now
+		k.PartExpected = func(context.Context, string, int) time.Duration {
+			looks.Add(1)
+			return 0
+		}
+	}
+	const step = 40 * time.Minute
 	d.starter.run = func() {
 		stop := d.starter.stopped()
 		d.starter.mu.Lock()
@@ -513,24 +534,54 @@ func TestADetachedPartThatKeepsWritingIsNotKilled(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		for i := 0; i < 100; i++ {
-			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
-			if err != nil {
-				t.Error(err)
-				return
+		// Wait for the call to have kept the run, so that its start is on the
+		// clock before the clock moves.
+		for {
+			if _, err := d.records.ReadRunFile(context.Background(), "mw-x.1", application.CheckPartRunFileName(1, 1)); err == nil {
+				break
 			}
-			_, _ = f.WriteString("still going\n")
-			f.Close()
 			select {
 			case <-stop:
 				return
-			case <-time.After(30 * time.Millisecond):
+			case <-time.After(time.Millisecond):
 			}
 		}
+		for i := 0; i < 3; i++ {
+			clock.jump(step)
+			// The write is stamped by the check's clock, as a process on it would
+			// be, and put in place whole, so that no look sees it with the
+			// host's time on it.
+			tmp := path + ".tmp"
+			if err := os.WriteFile(tmp, []byte(strings.Repeat("still going\n", i+1)), 0o644); err != nil {
+				t.Error(err)
+				return
+			}
+			now := clock.Now()
+			if err := os.Chtimes(tmp, now, now); err != nil {
+				t.Error(err)
+				return
+			}
+			if err := os.Rename(tmp, path); err != nil {
+				t.Error(err)
+				return
+			}
+			// The clock moves on only when the check has looked at the write: a
+			// look that began before it may have read an older one, so wait for
+			// a second, which began after it.
+			for seen := looks.Load(); looks.Load() < seen+2; {
+				select {
+				case <-stop:
+					return
+				case <-time.After(time.Millisecond):
+				}
+			}
+		}
+		<-stop
 	}
 	t.Cleanup(func() { _ = d.starter.Kill(0) })
 
-	err := d.check(1200 * time.Millisecond)
+	// The call's budget is passed by the clock at the third jump, 120 minutes in.
+	err := d.check(100 * time.Minute)
 	if err == nil || !strings.Contains(err.Error(), "is still running") {
 		t.Fatalf("expected the part to be said to be still running, got %v", err)
 	}
