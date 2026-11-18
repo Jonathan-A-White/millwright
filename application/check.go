@@ -202,6 +202,14 @@ type Check struct {
 	GateStarter GateStarter
 	GateWorker  bool
 
+	// GaveWay is how long this host gave way between two times, read from its
+	// give-way record: the span a whole check's one deadline for its waits, and each
+	// wait it bounds, does not count, for the host's give-way stopped the check and
+	// it waited for nobody then (mw-gq6.1458). A check kept to a Builder's call
+	// (CallBudget) counts it all the same: the harness's own clock, which cuts the
+	// call off, went on through the give-way. Nil counts every span.
+	GaveWay GiveWaySpans
+
 	// Modes is the harness's record of the permission mode the story's session
 	// ran in (mw-gq6.545); Next's own. Nil reads none.
 	Modes TranscriptModes
@@ -477,8 +485,9 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	// It starts with the call, not here: the story was read, and each tracker call
 	// of a loaded host waited for it to be quiet (mw-gq6.1251).
 	began := k.began
+	// What the host gave way since is not spent (mw-gq6.1458).
 	left := func() time.Duration {
-		return max((k.partSlotWait() - k.callNow().Sub(began)).Round(time.Millisecond), 0)
+		return max((k.partSlotWait() - k.spentSince(ctx, began)).Round(time.Millisecond), 0)
 	}
 	// The commit the checks are run at, when the worktree holds nothing else.
 	tip := k.cleanTip(ctx, c)

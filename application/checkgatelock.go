@@ -97,7 +97,7 @@ func (k Check) takeForTests(ctx context.Context, c *closeOut, try slotTry, withi
 		return GateTurn{Holding: bothHoldings{slot: slot}}, nil
 	}
 
-	waitFor := max(within-k.callNow().Sub(began), 0)
+	waitFor := max(within-k.spentSince(ctx, began), 0)
 	waitCtx, cancel := k.boundByClock(ctx, waitFor)
 	defer cancel()
 	waitCtx, ask := k.askToKeep(waitCtx, c)
@@ -500,14 +500,44 @@ func (k Check) limitReached(label string, waited time.Duration, still, holder st
 // clockPoll is how often a wait bounded by the check's clock reads it.
 const clockPoll = 5 * time.Millisecond
 
+// takesGiveWayOff is whether the check's waits do not count what the host gave
+// way: it reads the host's give-way record and is not kept to a Builder's call,
+// whose own clock counts the give-way (Check.GaveWay, mw-gq6.1458).
+func (k Check) takesGiveWayOff() bool {
+	return k.GaveWay != nil && k.CallBudget <= 0
+}
+
+// gaveWay is how long the host gave way between from and to, as far as the
+// check's waits are concerned: none when it takes none off.
+func (k Check) gaveWay(ctx context.Context, from, to time.Time) time.Duration {
+	if !k.takesGiveWayOff() || !to.After(from) {
+		return 0
+	}
+	return min(k.GaveWay.GaveWayBetween(ctx, from, to), to.Sub(from))
+}
+
+// spentSince is how much of a wait begun at began is spent by the check's clock:
+// the time since, less what the host gave way since (mw-gq6.1458).
+func (k Check) spentSince(ctx context.Context, began time.Time) time.Duration {
+	now := k.callNow()
+	return now.Sub(began) - k.gaveWay(ctx, began, now)
+}
+
 // boundByClock is the context a wait of at most within is made under. A check
 // with no clock of its own (CallNow nil) waits the real time, as a context
 // timeout counts it. A check with one (a test, which moves it by hand) gives up
 // when that clock has passed within, read by polling, and also when the real time
 // has, so a wait is never longer than it was; the context then ends with
 // context.DeadlineExceeded, as a timeout's does (mw-gq6.1142).
+//
+// A check that takes what the host gave way off its waits (takesGiveWayOff) does
+// not end the wait when within has passed with a give-way in it: the span the host
+// gave way is read from its record once the clock has passed within, and the wait
+// goes on for what it had left at the freeze (mw-gq6.1458). The real-time bound of
+// a check with a clock of its own is not lengthened: that clock is the one the
+// give-way record is read by.
 func (k Check) boundByClock(ctx context.Context, within time.Duration) (context.Context, context.CancelFunc) {
-	if k.CallNow == nil {
+	if k.CallNow == nil && !k.takesGiveWayOff() {
 		return context.WithTimeout(ctx, within)
 	}
 	b := &clockBound{Context: ctx, done: make(chan struct{})}
@@ -515,14 +545,27 @@ func (k Check) boundByClock(ctx context.Context, within time.Duration) (context.
 		b.end(context.DeadlineExceeded)
 		return b, func() {}
 	}
-	began := k.CallNow()
+	began := k.callNow()
+	// left is what the wait has left by the check's clock, with what the host gave
+	// way not counted; the record is read only once within has passed by the clock.
+	left := func() time.Duration {
+		now := k.callNow()
+		if now.Sub(began) < within {
+			return within - now.Sub(began)
+		}
+		return within - (now.Sub(began) - k.gaveWay(ctx, began, now))
+	}
 	quit := make(chan struct{})
 	var once sync.Once
 	go func() {
 		real := time.NewTimer(within)
 		defer real.Stop()
-		tick := time.NewTicker(clockPoll)
-		defer tick.Stop()
+		var tick <-chan time.Time
+		if k.CallNow != nil {
+			ticker := time.NewTicker(clockPoll)
+			defer ticker.Stop()
+			tick = ticker.C
+		}
 		for {
 			select {
 			case <-quit:
@@ -532,10 +575,18 @@ func (k Check) boundByClock(ctx context.Context, within time.Duration) (context.
 				b.end(ctx.Err())
 				return
 			case <-real.C:
+				if k.CallNow == nil {
+					// The real clock is the check's own: a give-way in the wait gives it
+					// back what the host gave way.
+					if more := left(); more > 0 {
+						real.Reset(more)
+						continue
+					}
+				}
 				b.end(context.DeadlineExceeded)
 				return
-			case <-tick.C:
-				if k.CallNow().Sub(began) >= within {
+			case <-tick:
+				if left() <= 0 {
 					b.end(context.DeadlineExceeded)
 					return
 				}
