@@ -623,6 +623,7 @@ func newDoctorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&envFile, "env-file", "", "for licences: the postern backend's environment file (default ~/.config/postern/env)")
 	cmd.Flags().StringVar(&posternBin, "postern", "postern", "for licences: the postern binary the backend runs, asked for `rights --json`")
 	cmd.AddCommand(newDoctorUnitFailedCmd())
+	cmd.AddCommand(newDoctorCollectBeadsCmd())
 	return cmd
 }
 
@@ -846,7 +847,7 @@ func (b brokenFlushLog) Record(context.Context, application.BeadsFlushRecord) er
 // that the next sync's own due-check and this check's both see it (mw-gq6.1403).
 func beadsSizeCheck(vault, host string, budget int64, squash bool, errs io.Writer) *doctor.BeadsSize {
 	gateway := mwGateway(vault, host)
-	return &doctor.BeadsSize{
+	check := &doctor.BeadsSize{
 		Dir: vault, Budget: budget, Home: beadsServedHere(), Squash: squash,
 		LastCollected: func(ctx context.Context) (time.Time, error) {
 			text, err := gateway.Note(ctx, application.LastGCKey(host))
@@ -855,21 +856,68 @@ func beadsSizeCheck(vault, host string, budget int64, squash bool, errs io.Write
 			}
 			return time.Parse(application.LastSyncFormat, text)
 		},
-		Collect: func(ctx context.Context) error {
-			release, err := application.BdRetry{
-				Turn:  bdTurn([]string{"doctor", "beads-size"}),
-				Quiet: newBdQuiet(),
-				Dir:   vault,
-				Err:   errs,
-			}.WaitQuiet(ctx)
+		Collect: beadsCollector(vault, host, errs),
+	}
+	// The collection of a 5 GB store can outrun the run, which a cure is cut at
+	// the end of, so the cure begins `mw doctor collect-beads` apart from it and
+	// does not wait (mw-gq6.1448).
+	if self, err := os.Executable(); err == nil {
+		apart := doctor.ApartProcess{Self: self, Args: []string{"doctor", "collect-beads"}, Unit: "mw-beads-collect"}
+		if stateDir, err := config.DoctorStateDir(); err == nil {
+			apart.Log = filepath.Join(stateDir, "beads-collect.log")
+		}
+		check.Apart = apart.Start
+	}
+	return check
+}
+
+// beadsCollector is the collection itself: the tracker's GC after the quiet wait
+// every bd writer takes, then the note of when it ran, under the key the daily
+// job writes.
+func beadsCollector(vault, host string, errs io.Writer) func(context.Context) error {
+	gateway := mwGateway(vault, host)
+	return func(ctx context.Context) error {
+		release, err := application.BdRetry{
+			Turn:  bdTurn([]string{"doctor", "beads-size"}),
+			Quiet: newBdQuiet(),
+			Dir:   vault,
+			Err:   errs,
+		}.WaitQuiet(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+		if err := gateway.GC(ctx); err != nil {
+			return err
+		}
+		return gateway.SetNote(ctx, application.LastGCKey(host), time.Now().UTC().Format(application.LastSyncFormat)) //mw:realclock the wall-clock stamp the daily job writes the same way
+	}
+}
+
+// newDoctorCollectBeadsCmd builds `mw doctor collect-beads`, the process the
+// beads-size cure begins apart from the doctor's run: the collection with no end
+// of its own but the one a person gives it, which records when it finished.
+func newDoctorCollectBeadsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "collect-beads",
+		Short:  "Collect the beads database's disk space, as the beads-size cure does, and record when",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			vault, err := config.Vault()
 			if err != nil {
 				return err
 			}
-			defer release()
-			if err := gateway.GC(ctx); err != nil {
+			host, err := config.Host()
+			if err != nil {
 				return err
 			}
-			return gateway.SetNote(ctx, application.LastGCKey(host), time.Now().UTC().Format(application.LastSyncFormat)) //mw:realclock the wall-clock stamp the daily job writes the same way
+			began := time.Now() //mw:realclock timing the collection for the log
+			if err := beadsCollector(vault, host, cmd.ErrOrStderr())(cmd.Context()); err != nil {
+				return fmt.Errorf("the beads collection failed after %s: %w", time.Since(began).Round(time.Second), err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "the beads collection finished in %s\n", time.Since(began).Round(time.Second))
+			return nil
 		},
 	}
 }

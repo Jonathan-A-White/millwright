@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -124,6 +126,13 @@ type BeadsSize struct {
 	// LastCollected is when this host's last collection ran (the daily job's
 	// own note); the zero time says never, or not readable, and reads as stale.
 	LastCollected func(context.Context) (time.Time, error)
+	// Apart, when set, begins the collection as a process of its own and returns
+	// as soon as it has begun, so that the cure does not wait for it: a collection
+	// of a 5 GB store can outrun the run mw doctor gives a cure, which is cut at
+	// its end, and the unit is stopped soon after (mw-gq6.1448). The process is
+	// the one that records when it ran, as Collect does. With it nil the cure runs
+	// Collect itself and waits for it.
+	Apart func(context.Context) error
 	// CollectEvery is how old the last collection must be before the cure runs
 	// another; zero reads DefaultBeadsCollectEvery.
 	CollectEvery time.Duration
@@ -212,6 +221,13 @@ func (b *BeadsSize) Cure(ctx context.Context) error {
 		return err
 	}
 	at := now.Format(time.RFC3339)
+	if b.Apart != nil {
+		if err := b.Apart(ctx); err != nil {
+			return fmt.Errorf("the collection at %s could not begin apart with .beads at %d bytes: %w", at, before, err)
+		}
+		b.outcome = fmt.Sprintf("the collection began apart at %s with .beads at %d bytes", at, before)
+		return fmt.Errorf("%s, and goes on after this run; it records when it ran when it finishes, and the next probe reads .beads again; %w", b.outcome, b.beadsSizeNoCure())
+	}
 	if err := b.Collect(ctx); err != nil {
 		return fmt.Errorf("the collection at %s failed with .beads at %d bytes: %w", at, before, err)
 	}
@@ -224,6 +240,75 @@ func (b *BeadsSize) Cure(ctx context.Context) error {
 		return fmt.Errorf("%s, still past the %d byte budget; %w", b.outcome, b.budget(), b.beadsSizeNoCure())
 	}
 	return nil
+}
+
+// ApartProcess begins a command as a process of its own, in a session of its
+// own and, where there is a user manager, a systemd scope, so that neither the
+// end of the context it was begun in nor the stop of the unit that began it
+// takes it with it. It is how the beads-size cure leaves a collection to run
+// past the doctor's run (mw-gq6.1448).
+type ApartProcess struct {
+	// Self is the program, Args its arguments.
+	Self string
+	Args []string
+	// Unit names the scope, so that a second collection begun while the first
+	// runs is refused by systemd and not run beside it; empty leaves it unnamed.
+	Unit string
+	// Log is the file the process appends its output to; empty drops it.
+	Log string
+	// NoScope keeps it out of a systemd scope.
+	NoScope bool
+}
+
+// Start begins the process and lets go of it, not waiting for it to end.
+func (a ApartProcess) Start(context.Context) error {
+	if a.Self == "" {
+		return fmt.Errorf("no program to begin")
+	}
+	argv := append([]string{a.Self}, a.Args...)
+	if scope := a.scope(); scope != "" {
+		front := []string{scope, "--user", "--scope", "--collect", "--quiet"}
+		if a.Unit != "" {
+			front = append(front, "--unit="+a.Unit)
+		}
+		argv = append(front, argv...)
+	}
+	// Not CommandContext: the process is meant to outlive the context it was
+	// begun in.
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if a.Log != "" {
+		if err := os.MkdirAll(filepath.Dir(a.Log), 0o755); err != nil {
+			return fmt.Errorf("making the directory of the log %s: %w", a.Log, err)
+		}
+		log, err := os.OpenFile(a.Log, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+		if err != nil {
+			return fmt.Errorf("opening the log %s: %w", a.Log, err)
+		}
+		defer log.Close()
+		cmd.Stdout, cmd.Stderr = log, log
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("beginning %s: %w", a.Self, err)
+	}
+	// Nobody waits for it: let go rather than leave a zombie of this process.
+	return cmd.Process.Release()
+}
+
+// scope is the systemd-run to put the process in a scope with, or "".
+func (a ApartProcess) scope() string {
+	if a.NoScope {
+		return ""
+	}
+	path, err := exec.LookPath("systemd-run")
+	if err != nil {
+		return ""
+	}
+	// A host without a user manager has systemd-run and nothing for it to ask.
+	if out, err := exec.Command("systemctl", "--user", "is-system-running").Output(); err != nil && len(out) == 0 {
+		return ""
+	}
+	return path
 }
 
 // Damper implements application.DoctorCheck.
