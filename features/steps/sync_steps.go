@@ -236,7 +236,7 @@ func (c *syncContext) thisHostIs(host string) error {
 }
 
 func (c *syncContext) theVaultMarksLedgers() error {
-	if err := writeFile(c.here, vault.AttributesFile, application.LedgerMark+"\n"); err != nil {
+	if err := writeFile(c.here, vault.AttributesFile, application.LedgerMark+"\n"+application.MetricsMark+"\n"); err != nil {
 		return err
 	}
 	for _, args := range [][]string{
