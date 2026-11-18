@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	pathpkg "path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -1475,7 +1476,8 @@ type roomMove struct {
 // ago (a Builder whose story names that file still reads it at boot), the one
 // placed longest ago first; never a fact placed within MakeRoomKeepDays days,
 // whichever the tier, so lines placed in one sitting stay together; never a sentence beginning 'His ' or holding 'the
-// Governor', "Governor's" or 'his words'; never an aged one with
+// Governor', "Governor's" or 'his words' (a phrase that only asks his
+// confirmation, 'the Governor to confirm', is not his word); never an aged one with
 // a since within MakeRoomKeepDays days, except by that last rule; the oldest since first, then, of one day, the
 // one placed first (the moment it was added), then the subject least queried (as
 // stats counts), then by slug. Each goes through Demote with
@@ -1776,18 +1778,26 @@ func (m Memory) roomBase(fact RigFact) bool {
 
 // namesTheGovernor reports whether a fact's sentence is the Governor's own
 // word, by any of its phrases anywhere in it, as written: 'the Governor',
-// "Governor's" or 'his words', or an opening 'His ' (mw-gq6.1000).
+// "Governor's" or 'his words', or an opening 'His ' (mw-gq6.1000). A phrase that
+// only asks for his confirmation ('the Governor to confirm', "the Governor's to
+// choose": a Builder's decision placed PROVISIONAL) does not make it his
+// (mw-gq6.1468).
 func namesTheGovernor(fact RigFact) bool {
 	if strings.HasPrefix(fact.Sentence, "His ") {
 		return true
 	}
+	sentence := askForConfirmation.ReplaceAllString(fact.Sentence, "")
 	for _, phrase := range []string{"the Governor", "Governor's", "his words"} {
-		if strings.Contains(fact.Sentence, phrase) {
+		if strings.Contains(sentence, phrase) {
 			return true
 		}
 	}
 	return false
 }
+
+// askForConfirmation matches the words of a Builder's decision that ask the
+// Governor to confirm or choose, which are not his word.
+var askForConfirmation = regexp.MustCompile(`(?:the )?Governor(?:'s)? to (?:confirm|choose)`)
 
 // sinceBefore reports whether a fact's since is more than days days ago.
 func (m Memory) sinceBefore(fact RigFact, days int) bool {

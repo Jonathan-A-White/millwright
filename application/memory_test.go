@@ -1238,6 +1238,33 @@ func TestMakeRoomNeverTakesASentenceThatNamesTheGovernorAnywhere(t *testing.T) {
 	}
 }
 
+// A Builder's decision placed with the tail 'PROVISIONAL, the Governor to
+// confirm' is not the Governor's word: make-room takes it. One that says
+// 'Decided by the Governor' is still skipped (mw-gq6.1468).
+func TestMakeRoomTakesAProvisionalDecisionButNotOneDecidedByTheGovernor(t *testing.T) {
+	files, m, out := aDecisionRig()
+	files.files["prov.md"] = roomFact("prov", "decision", "2026-05-01", "The prov rows are one file each; PROVISIONAL, the Governor to confirm.")
+	files.files["decided.md"] = roomFact("decided", "decision", "2026-05-02", "Decided by the Governor 2026-05-01: the decided rows are one file each.")
+	list, _ := application.LoadRigFacts(files.files)
+	m.Budget = len(application.RenderRigMemory("About.", list))
+	want := roomLine("prov", "The prov rows are one file each; PROVISIONAL, the Governor to confirm.")
+	if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: want}); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !demoted(files, "prov") {
+		t.Errorf("the provisional decision was not demoted:\n%s", out)
+	}
+	if demoted(files, "decided") {
+		t.Errorf("a decision decided by the Governor was demoted:\n%s", out)
+	}
+	if !strings.Contains(out.String(), "skipped decided (the Governor's)") {
+		t.Errorf("no 'skipped decided (the Governor's)' line:\n%s", out)
+	}
+	if strings.Contains(out.String(), "skipped prov (the Governor's)") {
+		t.Errorf("the provisional decision was called the Governor's:\n%s", out)
+	}
+}
+
 func TestMakeRoomTakesGotchasBeforeDecisionsOfAnyAge(t *testing.T) {
 	files, m, out, _ := aFullRig()
 	// dec.md is a decision of 2026-07-01, older than every gotcha: it still waits.
