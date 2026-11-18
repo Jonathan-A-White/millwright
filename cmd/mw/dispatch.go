@@ -99,13 +99,14 @@ func hostBenchFlags() application.BenchFlagMemory {
 
 // hostGateLock is this host's gate lock, kept under SyncHaltStateDir: one rig
 // gate at a time on the host, whatever the rig (mw-gq6.388). A host with no
-// home directory keeps none.
+// home directory keeps none. What the host gave way in a wait for it is not
+// counted against its cap (mw-gq6.1478).
 func hostGateLock() application.GateLock {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return nil
 	}
-	return hostlock.NewGate(filepath.Join(home, SyncHaltStateDir))
+	return hostlock.NewGate(filepath.Join(home, SyncHaltStateDir), hostlock.WithGateGaveWay(hostGiveWaySpans()))
 }
 
 // TestRunsDir is where this host's test-runner slots live, inside the state
