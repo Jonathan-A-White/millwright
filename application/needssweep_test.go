@@ -451,3 +451,49 @@ func TestNeedsSweepClassesALandingWithItsHowToInACommentNotNoCheck(t *testing.T)
 		}
 	}
 }
+
+func TestNeedsSweepWriteModeSaysCommentedAndDryRunSaysWouldComment(t *testing.T) {
+	r := newSweepRig(t)
+	r.landed("x-internal", 48*time.Hour, "1111111", internalTxt)
+	r.landed("x-his", 48*time.Hour, "2222222", hisLineTxt)
+	r.run(t, application.NeedsSweepOptions{})
+	dry := r.out.String()
+	if !strings.Contains(dry, "would comment VERIFIED") || strings.Contains(dry, "commented VERIFIED") {
+		t.Errorf("the dry run must say 'would comment VERIFIED' only:\n%s", dry)
+	}
+	r.out.Reset()
+	r.run(t, application.NeedsSweepOptions{Write: true})
+	got := r.out.String()
+	if strings.Contains(got, "would comment") {
+		t.Errorf("the write run says it would comment on what it did:\n%s", got)
+	}
+	lines := 0
+	for _, l := range strings.Split(got, "\n") {
+		if strings.HasPrefix(l, "x-internal") {
+			lines++
+			if !strings.Contains(l, "commented VERIFIED") {
+				t.Errorf("the line for x-internal does not say commented VERIFIED: %q", l)
+			}
+		}
+	}
+	if lines != 1 {
+		t.Errorf("want one line for x-internal, got %d:\n%s", lines, got)
+	}
+	if !strings.Contains(got, "1 commented") {
+		t.Errorf("the closing count does not match the lines:\n%s", got)
+	}
+}
+
+func TestNeedsSweepStoppedRunDoesNotSayItCommentedOnTheRest(t *testing.T) {
+	r := newSweepRig(t)
+	r.landed("a", 72*time.Hour, "1111111", internalTxt)
+	r.landed("b", 60*time.Hour, "2222222", internalTxt)
+	r.landed("c", 48*time.Hour, "3333333", internalTxt)
+	r.beads.FailOn = "b"
+	r.sweep.Run(context.Background(), application.NeedsSweepOptions{Write: true})
+	for _, l := range strings.Split(r.out.String(), "\n") {
+		if (strings.HasPrefix(l, "b ") || strings.HasPrefix(l, "c ")) && (strings.Contains(l, "commented VERIFIED") || strings.Contains(l, "would comment")) {
+			t.Errorf("a line claims a comment that was not written: %q", l)
+		}
+	}
+}
