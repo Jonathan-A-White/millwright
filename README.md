@@ -4432,7 +4432,7 @@ also writes one line, `<drive> <free bytes> <unix seconds>`, to
 hours), and faulty, not cannot-tell, when there is no report or it is over a day old
 (mw-gq6.1429: the task is not installed or has stopped; naming `mw host wsl-flag
 --install-line`, which installs the task again with the new script), inert off WSL.
-A task installed before this change writes no report until its line is run again. Test: `go test ./infrastructure/doctor -run WSLDriveFree`.
+A task installed before this change writes no report until its line is run again. A WSL host that does see its drive (the Laptop's `/mnt/c`) needs no task: set `[doctor] windows_drive_mount = "/mnt/c"` (and `windows_drive_name`, default the mount's last name upper-cased, `C:`) in `~/.config/mw/config.toml` and the doctor and dispatch's reading write that report themselves from statfs of the mount before reading it (mw-gq6.1490); with the key unset or the mount absent (the desktop) the task's report is read as before. Test: `go test ./infrastructure/doctor -run WSLDriveFree`.
 
 **Restart or compact WSL with no visit to the desk (mw-gq6.1039).** WSL on the
 desktop is sealed from Windows, so nothing inside it can start a Windows program;
