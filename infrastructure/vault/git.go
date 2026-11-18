@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -204,6 +205,11 @@ func changedPaths(out string) []string {
 // -a, and a path nobody touched is not committed at all. When the Vault has an
 // author (WithAuthor) the commit alone carries it, as -c user.name and -c
 // user.email.
+//
+// Nothing is committed onto a detached HEAD: a rebase that stopped with
+// nothing left to do is finished first, so that the commit lands on the
+// branch, and any other detached HEAD is refused by name (onABranch,
+// mw-gq6.1447).
 func (v *Vault) Commit(ctx context.Context, message string, paths []string) ([]string, error) {
 	if strings.TrimSpace(message) == "" {
 		return nil, fmt.Errorf("committing in %s: a commit needs a message", v.dir)
@@ -224,6 +230,18 @@ func (v *Vault) Commit(ctx context.Context, message string, paths []string) ([]s
 	changed := changedPaths(out)
 	if len(changed) == 0 {
 		return nil, nil
+	}
+
+	// A pull's rebase holds the checkout while HEAD is on no branch: the commit
+	// waits for it to end, and is not made onto a HEAD that a rebase which
+	// stopped left detached (mw-gq6.1447).
+	release, err := v.holdCheckout(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("committing in %s: %w", v.dir, err)
+	}
+	defer release()
+	if err := v.onABranch(ctx); err != nil {
+		return nil, fmt.Errorf("committing in %s: %w", v.dir, err)
 	}
 
 	if _, err := v.gitWaitingForLock(ctx, append([]string{"add", "--"}, changed...)...); err != nil {
@@ -268,10 +286,19 @@ func insideTheVault(path string) error {
 // exactly as it was found and a person can look at it without first undoing a
 // half-finished merge.
 //
+// The rebase is not cut off when ctx ends, and a rebase found stopped (an
+// earlier pull's, killed with its mw) is ended before this one begins: see
+// settleStopped (mw-gq6.1447).
+//
 // Every pull defines mw's trim-safe merge driver, for the files the vault's
 // .gitattributes names merge=trimsafe (its rig memories): a prune synced while
 // the other host appended keeps the prune and the appended line (mw-gq6.499).
 func (v *Vault) Pull(ctx context.Context) (int, error) {
+	// A rebase an earlier pull left stopped is ended first: with HEAD on no
+	// branch there is no upstream to read, let alone to rebase onto.
+	if err := v.endStoppedRebase(ctx); err != nil {
+		return 0, err
+	}
 	before, err := v.git(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		return 0, err
@@ -302,6 +329,8 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("writing the ledger mark for the pull: %w", err)
 	}
 	config := append(driver.Config(), "-c", "core.attributesFile="+attributes.Name())
+	// undone is what the last try's rebase or merge was left as when it failed.
+	undone := nothingStopped
 	pull := func() error {
 		// A fetch, then a rebase onto what it fetched, rather than `git pull
 		// --rebase`: a pull that finds HEAD moved while it fetched (a Clerk's
@@ -315,18 +344,67 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 		// re-makes the merge from its parents, losing that resolution too
 		// (mw-gq6.1444). A vault holding such a merge takes upstream in by a
 		// merge, which keeps every commit and the merge's own content.
+		//
+		// Only the fetch ends with ctx. The rebase or merge, and the undoing of
+		// one that failed, run to their end under a bound of their own: git
+		// killed after the rebase's checkout leaves its state in the git
+		// directory and HEAD on no branch, and an undo on the ended ctx never
+		// ran (mw-gq6.1447). They hold the checkout, so that a sibling's commit
+		// waits for HEAD to be back on its branch.
 		if _, err := v.git(ctx, "fetch"); err != nil {
 			return err
 		}
-		merges, err := v.git(ctx, "log", "--merges", "--format=%h", "@{upstream}..HEAD")
+		release, err := v.holdCheckout(ctx)
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(merges) != "" {
-			_, err = v.git(ctx, append(append([]string(nil), config...), "merge", "--no-edit", "@{upstream}")...)
+		defer release()
+		if ctx.Err() != nil {
+			// mw was told to stop while it fetched or waited: nothing is begun.
+			return fmt.Errorf("pulling in %s: stopped before the rebase: %w", v.dir, ctx.Err())
+		}
+		whole, cancel := context.WithTimeout(context.WithoutCancel(ctx), rebaseBound)
+		defer cancel()
+		// What a try before this one could not undo (the index was locked).
+		undone = nothingStopped
+		if _, err = v.settleStopped(whole, true); err != nil {
 			return err
 		}
-		_, err = v.git(ctx, append(append([]string(nil), config...), "rebase", "@{upstream}")...)
+		merges, err := v.git(whole, "log", "--merges", "--format=%h", "@{upstream}..HEAD")
+		if err != nil {
+			return err
+		}
+		verb := "rebase"
+		if strings.TrimSpace(merges) != "" {
+			verb = "merge"
+			_, err = v.git(whole, append(append([]string(nil), config...), "merge", "--no-edit", "@{upstream}")...)
+		} else {
+			_, err = v.git(whole, append(append([]string(nil), config...), "rebase", "@{upstream}")...)
+		}
+		if err == nil {
+			return nil
+		}
+		// The undoing has a bound of its own: the rebase may have spent its.
+		undoing, cancelUndoing := context.WithTimeout(context.WithoutCancel(ctx), rebaseBound)
+		defer cancelUndoing()
+		err = v.namingTheDriver(undoing, err)
+		if verb == "merge" {
+			if _, aborted := v.gitWaitingForLock(undoing, "merge", "--abort"); aborted == nil {
+				undone = mergeUndone
+			}
+			return err
+		}
+		var settling error
+		if undone, settling = v.settleStopped(undoing, true); settling != nil {
+			return fmt.Errorf("%w (and %v)", err, settling)
+		}
+		if undone == rebaseFinished {
+			// The rebase had nothing of this host's to replay and stopped after
+			// its checkout, on a file a sibling mw command had just written or
+			// committed. Ending it leaves the vault pulled and the sibling's
+			// work where it was; undoing it would have reset that away.
+			return nil
+		}
 		return err
 	}
 
@@ -347,27 +425,283 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 		if waited := v.pause(ctx, busyWait, "the other git in the vault to let go"); waited != nil {
 			return 0, waited
 		}
-		_, _ = v.git(ctx, "rebase", "--abort") // nothing to undo when the rebase never began
-		_, _ = v.git(ctx, "merge", "--abort")  // nor when the merge never began
-		err = pull()
+		err = pull() // which first undoes what the try before could not
 	}
 	if err != nil {
-		err = v.namingTheDriver(ctx, err)
 		if siblingIsWriting(err) {
 			// A sibling mw command on this host wrote tracked vault files and has
 			// not committed them yet. Nothing was changed: the sync, which holds
 			// the wait and the retry, is told which refusal this is.
 			err = fmt.Errorf("%w: %w", application.ErrVaultBeingWritten, err)
 		}
-		_, mergeAborted := v.git(ctx, "merge", "--abort")
-		if _, aborted := v.git(ctx, "rebase", "--abort"); aborted == nil {
+		switch undone {
+		case rebaseUndone:
 			return 0, fmt.Errorf("%w (the rebase was undone: the vault is as it was)", err)
-		} else if mergeAborted == nil {
+		case mergeUndone:
 			return 0, fmt.Errorf("%w (the merge was undone: the vault is as it was)", err)
 		}
 		return 0, err
 	}
 	return v.commitsBetween(ctx, strings.TrimSpace(before), "@{upstream}")
+}
+
+// rebaseBound is how long a pull's rebase or merge, and the undoing of one,
+// may take: they are this clone's own work on files it holds, and are not cut
+// off when mw is told to stop.
+const rebaseBound = 2 * time.Minute
+
+// What became of a rebase or merge that stopped in the vault.
+type stoppedEnd int
+
+const (
+	nothingStopped     stoppedEnd = iota // no rebase's state was there
+	rebaseFinished                       // it had nothing left to do: its branch was moved to HEAD, and HEAD put back on it
+	rebaseStateRemoved                   // HEAD was on its branch already: only the state was left, and was removed
+	rebaseUndone                         // git rebase --abort: the branch is where it was before the rebase
+	rebaseLeft                           // it is still stopped: only a person can say which way it goes
+	mergeUndone                          // git merge --abort
+)
+
+// stoppedRebase is a rebase whose state is in the git directory and which no
+// mw on this host is running (the caller holds the checkout).
+type stoppedRebase struct {
+	// state is rebase-merge, or rebase-apply for a rebase or an am mw never starts.
+	state string
+	// attached says HEAD is on a branch: the rebase stopped before it left the
+	// branch or after it came back to it.
+	attached bool
+	// headName is the branch it rebases (refs/heads/main), origHead where that
+	// branch was when it began, onto the commit it rebases onto.
+	headName, origHead, onto string
+	// nothingToReplay says every command it had was a noop (the branch was
+	// only behind) and no file is in conflict: all that is left of it is to
+	// move the branch to HEAD.
+	nothingToReplay bool
+	// left is how many commands it has not run.
+	left int
+}
+
+// readStopped reads the rebase stopped in the vault, nil when there is none.
+func (v *Vault) readStopped(ctx context.Context) (*stoppedRebase, error) {
+	gitDir, err := v.gitDir(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stopped := &stoppedRebase{}
+	for _, state := range []string{"rebase-merge", "rebase-apply"} {
+		if _, err := os.Stat(filepath.Join(gitDir, state)); err == nil {
+			stopped.state = state
+			break
+		}
+	}
+	if stopped.state == "" {
+		return nil, nil
+	}
+	_, detached := v.git(ctx, "symbolic-ref", "-q", "HEAD")
+	if detached != nil && ctx.Err() != nil {
+		return nil, detached
+	}
+	stopped.attached = detached == nil
+	if stopped.state != "rebase-merge" {
+		return stopped, nil
+	}
+	line := func(name string) string {
+		data, _ := os.ReadFile(filepath.Join(gitDir, stopped.state, name))
+		return strings.TrimSpace(string(data))
+	}
+	stopped.headName, stopped.origHead, stopped.onto = line("head-name"), line("orig-head"), line("onto")
+	todo, done := rebaseCommands(line("git-rebase-todo")), rebaseCommands(line("done"))
+	stopped.left = len(todo)
+	onlyNoops := len(todo)+len(done) > 0
+	for _, command := range append(todo, done...) {
+		if command != "noop" {
+			onlyNoops = false
+		}
+	}
+	if !onlyNoops || !strings.HasPrefix(stopped.headName, "refs/heads/") || stopped.origHead == "" {
+		return stopped, nil
+	}
+	unmerged, err := v.git(ctx, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	stopped.nothingToReplay = strings.TrimSpace(unmerged) == ""
+	return stopped, nil
+}
+
+// rebaseCommands is the commands of a rebase's todo or done file, each by its
+// first word: pick, noop and the rest. Comments and blank lines are not commands.
+func rebaseCommands(file string) []string {
+	var commands []string
+	for _, line := range strings.Split(file, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		commands = append(commands, fields[0])
+	}
+	return commands
+}
+
+// settleStopped ends a rebase that stopped in the vault and was never ended,
+// by the way that loses nothing; the caller holds the checkout, so no pull of
+// mw's is in the middle of it.
+//
+//   - HEAD is on its branch: only the state is left, and git rebase --quit
+//     removes it. No commit and no file is touched.
+//   - HEAD is detached and the rebase had nothing to replay (its commands were
+//     noop, as when the branch was only behind): it is finished by the three
+//     steps git's own sequencer ends with (the branch moved from where it was
+//     to HEAD, HEAD put back on the branch, the state removed), so a commit a
+//     sibling made on the detached HEAD comes with it. Not by git rebase
+//     --continue: that refuses when a tracked file is changed, which is how
+//     the vault is when a commit is about to be made.
+//   - Anything else (it stopped among this host's commits, or on a conflict):
+//     git rebase --abort when mayAbort, which puts the branch back where it
+//     was with every commit this host made, and resets the working tree. A
+//     commit, whose files are written and not yet committed, does not abort:
+//     the rebase is left, and rebaseLeft says so.
+func (v *Vault) settleStopped(ctx context.Context, mayAbort bool) (stoppedEnd, error) {
+	stopped, err := v.readStopped(ctx)
+	if err != nil || stopped == nil {
+		return nothingStopped, err
+	}
+	switch {
+	case stopped.attached:
+		if _, err := v.git(ctx, "rebase", "--quit"); err != nil {
+			return rebaseLeft, err
+		}
+		return rebaseStateRemoved, nil
+	case stopped.nothingToReplay:
+		if _, err := v.git(ctx, "update-ref", "-m", "rebase (finish): "+stopped.headName+" onto "+stopped.onto,
+			stopped.headName, "HEAD", stopped.origHead); err != nil {
+			return rebaseLeft, err
+		}
+		if _, err := v.git(ctx, "symbolic-ref", "-m", "rebase (finish): returning to "+stopped.headName,
+			"HEAD", stopped.headName); err != nil {
+			return rebaseLeft, err
+		}
+		if _, err := v.git(ctx, "rebase", "--quit"); err != nil {
+			return rebaseLeft, err
+		}
+		return rebaseFinished, nil
+	case mayAbort:
+		// Another git in the clone may hold the index for a moment (a commit
+		// made by hand, a status): the abort waits for it rather than leave
+		// the rebase stopped.
+		if _, err := v.gitWaitingForLock(ctx, "rebase", "--abort"); err != nil {
+			return rebaseLeft, nil
+		}
+		return rebaseUndone, nil
+	}
+	return rebaseLeft, nil
+}
+
+// endStoppedRebase is settleStopped for a pull about to begin: it takes the
+// checkout, ends what an earlier pull left stopped, and gives the checkout back.
+func (v *Vault) endStoppedRebase(ctx context.Context) error {
+	if stopped, err := v.StoppedRebase(ctx); err != nil || !stopped {
+		return err
+	}
+	release, err := v.holdCheckout(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	whole, cancel := context.WithTimeout(context.WithoutCancel(ctx), rebaseBound)
+	defer cancel()
+	_, err = v.settleStopped(whole, true)
+	return err
+}
+
+// onABranch refuses a commit when HEAD is on no branch: the commit would be
+// reachable from nothing and its push would fail ("HEAD does not point to a
+// branch"). A stopped rebase that can be ended without touching a file is
+// ended first; one that cannot is named. The caller holds the checkout.
+func (v *Vault) onABranch(ctx context.Context) error {
+	end, err := v.settleStopped(ctx, false)
+	if err != nil {
+		return fmt.Errorf("a rebase stopped in the vault and could not be finished (%w): nothing was committed", err)
+	}
+	if _, detached := v.git(ctx, "symbolic-ref", "-q", "HEAD"); detached == nil {
+		return nil
+	} else if ctx.Err() != nil {
+		return detached
+	}
+	if end != rebaseLeft {
+		return fmt.Errorf("HEAD is detached, on no branch, and no rebase is stopped there: nothing was committed " +
+			"(check the vault's branch out again, then commit the files)")
+	}
+	stopped, err := v.readStopped(ctx)
+	if err != nil || stopped == nil {
+		return fmt.Errorf("HEAD is detached, on no branch, by a rebase that stopped: nothing was committed")
+	}
+	return fmt.Errorf("HEAD is detached, on no branch, by a rebase that stopped (.git/%s, onto %.9s, %d of its commands left): "+
+		"nothing was committed (finish it with git rebase --continue or undo it with git rebase --abort, then commit the files)",
+		stopped.state, stopped.onto, stopped.left)
+}
+
+// checkoutLock is the file in the git directory whose lock (flock) says an mw
+// on this host is moving the checkout's HEAD: a pull in its rebase or merge, or
+// a commit. The kernel drops the lock when its holder ends, however it ends,
+// so a rebase's state found while nobody holds it is a rebase that stopped.
+const checkoutLock = "mw-checkout.flock"
+
+// checkoutWait is how long a pull or a commit waits for the checkout: as long
+// as the rebase that may hold it is given.
+const checkoutWait = rebaseBound
+
+// gitDir is the clone's git directory.
+func (v *Vault) gitDir(ctx context.Context) (string, error) {
+	out, err := v.git(ctx, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// holdCheckout takes the checkout's lock, waiting for the mw that holds it,
+// and returns what gives it back.
+func (v *Vault) holdCheckout(ctx context.Context) (func(), error) {
+	gitDir, err := v.gitDir(ctx)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(gitDir, checkoutLock)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("opening %s: %w", path, err)
+	}
+	poll := v.lockPoll
+	if poll <= 0 {
+		poll = lockPoll
+	}
+	deadline := time.Now().Add(checkoutWait)
+	for {
+		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+				_ = file.Close()
+			}, nil
+		}
+		if err != syscall.EWOULDBLOCK && err != syscall.EINTR {
+			_ = file.Close()
+			return nil, fmt.Errorf("locking %s: %w", path, err)
+		}
+		if !time.Now().Add(poll).Before(deadline) {
+			_ = file.Close()
+			return nil, fmt.Errorf("waited %s for another mw's pull or commit in %s to end (%s is held)", checkoutWait, v.dir, path)
+		}
+		timer := time.NewTimer(poll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			_ = file.Close()
+			return nil, fmt.Errorf("waiting for another mw's pull or commit in %s to end: %w", v.dir, ctx.Err())
+		case <-timer.C:
+		}
+	}
 }
 
 // namingTheDriver is a stopped pull's err, saying so when a file it stopped in
