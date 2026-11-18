@@ -721,8 +721,8 @@ type SyncReport struct {
 	// does, the file's own lines being committed with it (mw-gq6.1492).
 	Unignored bool
 	Pulled    int
-	Pushed int
-	At     time.Time
+	Pushed    int
+	At        time.Time
 
 	// ConfigAppended names what this sync appended to the Boost's config.toml
 	// from the vault's hosts/boost-config.toml ("[test_parts.postern]"),
