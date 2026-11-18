@@ -214,3 +214,25 @@ func TestPasteRulesHelpNamesEveryRowOfTheTable(t *testing.T) {
 		}
 	}
 }
+
+// A many-line Windows paste is refused whatever its source: every `mw host`
+// paste is one line (mw-gq6.1437), so the table has no exemption for them.
+func TestPasteRulesHoldMwHostPastesToOneLine(t *testing.T) {
+	multi := newPowerShell + fenced(
+		"mw host giveway install --print",
+		"$c = 'x'",
+		"Register-ScheduledTask -TaskName giveway -Trigger $t",
+	)
+	oneLine := newPowerShell + fenced("mw host giveway install --print; Get-ScheduledTask giveway")
+	for _, surface := range []application.PasteSurface{application.PasteSurfaceSend, application.PasteSurfaceSay, application.PasteSurfaceHands} {
+		t.Run(string(surface), func(t *testing.T) {
+			_, err := application.PasteCheck{Surface: surface, Text: multi}.Run()
+			if err == nil || !strings.Contains(err.Error(), "windows-paste-one-line") {
+				t.Fatalf("expected windows-paste-one-line to refuse a many-line paste naming mw host, got: %v", err)
+			}
+			if _, err := (application.PasteCheck{Surface: surface, Text: oneLine}).Run(); err != nil {
+				t.Fatalf("a one-line paste naming mw host should pass, got: %v", err)
+			}
+		})
+	}
+}
