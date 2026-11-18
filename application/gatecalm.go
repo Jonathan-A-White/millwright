@@ -22,12 +22,27 @@ import (
 
 // calmedWithoutTheLock is calmedThen's wait, begun at reading with the host busy,
 // made with the gate lock c holds given back.
-func (n Next) calmedWithoutTheLock(ctx context.Context, report *NextReport, c *closeOut, what, then string, handBack, again bool, reading LoadReading) (LoadReading, bool, error) {
+//
+// A close-out that holds its rig's merge slot across hosts, as one does from its
+// merge to its push, gives that back for the wait too, and takes it again after
+// the gate lock (mw-gq6.1423), as waitOffTheSlot does: the other host lands
+// meanwhile, and a push from a merged result it left behind is refused and tried
+// again from a fresh fetch.
+func (n Next) calmedWithoutTheLock(ctx context.Context, report *NextReport, c *closeOut, what, then string, handBack, again bool, reading LoadReading) (_ LoadReading, gaveUp bool, err error) {
+	if c.cross != nil {
+		report.CrossSlot = append(report.CrossSlot, fmt.Sprintf("gave the cross-host merge slot of %s back while it waited for %s to calm before %s",
+			c.path.Rig, n.Host, what))
+		report.Notes = append(report.Notes, c.cross.Release(ctx)...)
+		c.cross = nil
+		defer func() {
+			if err == nil {
+				n.takeCrossSlot(ctx, c, report)
+			}
+		}()
+	}
 	var spent time.Duration
 	for {
 		gaveBack := n.giveTheLockBackForTheCalm(ctx, c, report, what)
-		var gaveUp bool
-		var err error
 		reading, gaveUp, spent, err = n.calmWait(ctx, report, c, what, then, handBack, again, reading, spent)
 		if !gaveBack || err != nil {
 			// A wait that ends the gate takes no lock again: nothing is run.

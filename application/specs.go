@@ -65,6 +65,21 @@ func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport,
 	return Refusal{fail, why, detail}, true
 }
 
+// mergedSpecsRefusal is specsRefusal on the merged result in dir, merged from
+// base. The gate lock the gate on the merged result took (closeOut.merged) is
+// held as a whole gate's turns while the specs run, so that their wait for a
+// calm host before they run again is made with it given back, as the merge
+// slot across hosts is (calmedWithoutTheLock, mw-gq6.1423); the lock held at
+// the end, taken again or not, is the merged gate's once more, which the
+// landing gives back.
+func (n Next) mergedSpecsRefusal(ctx context.Context, c *closeOut, report *NextReport, dir, base string) (Refusal, bool) {
+	if c.turns == nil && c.merged.lock != nil {
+		c.turns = &gateTurns{lock: c.merged.lock, whole: true}
+		defer func() { c.merged.lock, c.turns = c.turns.lock, nil }()
+	}
+	return n.specsRefusal(ctx, c, report, dir, base, "on the merged result", ReasonMergedTestsFail, false)
+}
+
 // LeftOutTimingSpecs says which changed specs the changed-specs command was not
 // given, and why: the rig's timing_tests name them (mw-gq6.682).
 func LeftOutTimingSpecs(specs []string) string {
