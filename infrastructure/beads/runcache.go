@@ -192,6 +192,54 @@ func (g *Gateway) listFromBd(ctx context.Context, leave []string) ([]bead, error
 	return all, nil
 }
 
+// unfinishedStatuses are the statuses of the beads that are not closed, as
+// withChildren counts a story's children.
+var unfinishedStatuses = []string{StatusOpen, StatusInProgress, "blocked", StatusDeferred}
+
+// unfinishedInRun is the beads of the cache's list that are not closed, mail and
+// events left out; ok is false when the Gateway keeps no cache or the list could
+// not be read, and the caller asks bd. A command that reads by bd (no kept
+// connection, or it failed) gets what its several lists of unfinished beads
+// would each have asked one bd for from the one list it already holds
+// (mw-gq6.1442).
+func (g *Gateway) unfinishedInRun(ctx context.Context) ([]bead, bool) {
+	if g.cache == nil {
+		return nil, false
+	}
+	all, err := g.listing(ctx)
+	if err != nil {
+		return nil, false
+	}
+	var live []bead
+	for _, b := range all {
+		if slices.Contains(unfinishedStatuses, b.Status) {
+			live = append(live, b)
+		}
+	}
+	return live, true
+}
+
+// inProgressStories is the beads in progress, epics left out: `bd list --status
+// in_progress`, or the cache's list narrowed to them when the Gateway keeps one.
+func (g *Gateway) inProgressStories(ctx context.Context) ([]bead, error) {
+	if g.cache != nil {
+		if all, err := g.listing(ctx, TypeEpic); err == nil {
+			var running []bead
+			for _, b := range all {
+				if b.Status == StatusInProgress {
+					running = append(running, b)
+				}
+			}
+			return running, nil
+		}
+	}
+	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	return decodeBeads(out)
+}
+
 // withoutTypes is a new slice of the beads that are none of the types.
 func withoutTypes(all []bead, types []string) []bead {
 	kept := make([]bead, 0, len(all))
