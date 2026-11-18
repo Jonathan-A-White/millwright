@@ -62,14 +62,16 @@ func (g *Gateway) withChildren(ctx context.Context, details []application.StoryD
 	if len(details) == 0 {
 		return details, nil
 	}
-	out, err := g.call(ctx, "list", "--status", strings.Join([]string{StatusOpen, StatusInProgress, "blocked", StatusDeferred}, ","),
-		"--exclude-type", "mail,event", "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	live, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading which beads have children: %w", err)
+	live, ok := g.unfinishedInRun(ctx)
+	if !ok {
+		out, err := g.call(ctx, "list", "--status", strings.Join(unfinishedStatuses, ","),
+			"--exclude-type", "mail,event", "--limit", "0", "--json")
+		if err != nil {
+			return nil, err
+		}
+		if live, err = decodeBeads(out); err != nil {
+			return nil, fmt.Errorf("reading which beads have children: %w", err)
+		}
 	}
 	counts := map[string]int{}
 	for _, b := range live {
@@ -284,11 +286,7 @@ func (g *Gateway) RunningStories(ctx context.Context, host string) ([]applicatio
 	if live, ok := g.liveOverConnection(ctx); ok {
 		return onHost(live.details(live.withStatus(StatusInProgress)), host, false), nil
 	}
-	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	stories, err := decodeBeads(out)
+	stories, err := g.inProgressStories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading what is running on %s: %w", host, err)
 	}
@@ -305,11 +303,7 @@ func (g *Gateway) RunningElsewhere(ctx context.Context, host string) ([]applicat
 	if live, ok := g.liveOverConnection(ctx); ok {
 		return elsewhere(live.details(live.withStatus(StatusInProgress)), host), nil
 	}
-	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	stories, err := decodeBeads(out)
+	stories, err := g.inProgressStories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading what is running beside %s: %w", host, err)
 	}
@@ -332,11 +326,7 @@ func (g *Gateway) RunningEverywhere(ctx context.Context, host string) (here, awa
 		running := live.details(live.withStatus(StatusInProgress))
 		return onHost(running, host, false), elsewhere(running, host), nil
 	}
-	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return nil, nil, err
-	}
-	stories, err := decodeBeads(out)
+	stories, err := g.inProgressStories(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading what is running on %s and beside it: %w", host, err)
 	}

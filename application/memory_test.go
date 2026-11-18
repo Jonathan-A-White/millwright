@@ -1969,3 +1969,38 @@ func TestMakeRoomTakesAGotchaOverTheKeepWindowBeforeTheFilesFactsOfToday(t *test
 		t.Errorf("want the old gotcha taken and today's file facts left:\n%s", out)
 	}
 }
+
+// a hand-edited file may hold an old since and a placed time of today: every tier
+// judges it by the placed time too, as roomFresh does for the file-fact tier.
+func TestMakeRoomLeavesAFactPlacedWithinKeepDaysWhateverItsSince(t *testing.T) {
+	fact := func(subject, kind, source string) string {
+		return "---\nsubject: " + subject + "\nkind: " + kind + "\nstatus: current\nsource: " + source + "\nsince: 2026-09-01\nplaced: 2026-10-18T09:00:00Z\n---\n\nThe zulu probe answers only on its own port.\n"
+	}
+	cases := map[string]string{
+		"old gotcha":    fact("general", "gotcha", "mw-1"),
+		"old decision":  fact("general", "decision", "mw-1"),
+		"file decision": fact("application/zulu.go", "decision", "mw-1"),
+		"landed story":  fact("general", "decision", "mw-5"),
+	}
+	for name, text := range cases {
+		t.Run(name, func(t *testing.T) {
+			files := &editableFiles{files: map[string]string{"zulu.md": text}}
+			var out bytes.Buffer
+			m := anEditableMemory(files, &recordingVault{}, &out)
+			m.Landed = func(_ context.Context, ids []string) (map[string]bool, error) {
+				landed := map[string]bool{}
+				for _, id := range ids {
+					landed[id] = true
+				}
+				return landed, nil
+			}
+			m.Budget = renderSize(files)
+			if err := m.MakeRoom(context.Background(), application.MemoryMakeRoom{Rig: "kiln", Bytes: 10}); err == nil {
+				t.Fatalf("want a refusal: the fact was placed today\n%s", &out)
+			}
+			if len(files.wrote) != 0 || demoted(files, "zulu") {
+				t.Errorf("a fact placed today was taken: wrote %v\n%s", files.wrote, &out)
+			}
+		})
+	}
+}
