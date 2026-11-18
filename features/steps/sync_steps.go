@@ -81,6 +81,9 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^this host is "([^"]*)"$`, c.thisHostIs)
 	ctx.Given(`^the vault marks ledgers as append-only$`, c.theVaultMarksLedgers)
 	ctx.Given(`^the vault does not mark ledgers as append-only$`, c.theVaultDoesNotMarkLedgers)
+	ctx.Given(`^the vault still ignores metrics/$`, c.theVaultStillIgnoresMetrics)
+	ctx.Given(`^the other host pushed metrics/factory.jsonl holding the first batch line$`, c.theOtherHostPushedMetrics)
+	ctx.Given(`^this host holds its own metric lines in the ignored metrics/factory.jsonl$`, c.thisHostHoldsIgnoredMetrics)
 	ctx.Given(`^the other host appended a line to the Mayor's ledger and pushed it$`, c.theOtherHostAppendedAndPushed)
 	ctx.Given(`^this host appended its own line to the Mayor's ledger$`, c.thisHostAppended)
 	ctx.Given(`^this host has an uncommitted change to the Mayor's ledger$`, c.thisHostHasAnUncommittedChange)
@@ -118,6 +121,9 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the uncommitted change is still there, and nothing was pulled over it$`, c.theUncommittedChangeIsStillThere)
 	ctx.Then(`^the failure says, in plain words:$`, c.theFailureSays)
 	ctx.Then(`^the Mayor's ledger on this host holds, in this order:$`, c.theLedgerHoldsInThisOrder)
+	ctx.Then(`^git no longer ignores metrics/factory.jsonl in the vault$`, c.gitNoLongerIgnoresMetrics)
+	ctx.Then(`^the vault's metrics/factory.jsonl on this host holds the first batch line and both of this host's lines$`, c.thisHostsMetricsHoldEveryLine)
+	ctx.Then(`^the other host sees this host's metric lines once it pulls$`, c.theOtherHostSeesThisHostsMetrics)
 	ctx.Then(`^no conflict is left in the vault$`, c.noConflictIsLeft)
 	ctx.Then(`^the remote holds this host's line$`, c.theRemoteHoldsThisHostsLine)
 	ctx.Then(`^the other host sees both lines once it pulls$`, c.theOtherHostSeesBothLines)
@@ -908,6 +914,95 @@ func (c *syncContext) theRunRecordIsCommittedAsLeft(story string) error {
 		return err
 	} else if left != "" {
 		return fmt.Errorf("expected the run record to be committed, git says %q", left)
+	}
+	return nil
+}
+
+// The metric lines of the scenario that un-ignores metrics/: the batch the
+// other host landed, and the two this host landed while the file was ignored.
+const (
+	metricsIgnoreLine = "/metrics/"
+	firstBatchLine    = `{"kind":"batch","host":"there","ids":["mw-gq6.1"]}`
+	thisHostsBatchOne = `{"kind":"batch","host":"here","ids":["mw-gq6.2"]}`
+	thisHostsBatchTwo = `{"kind":"batch","host":"here","ids":["mw-gq6.3"]}`
+)
+
+// theVaultStillIgnoresMetrics gives both hosts the .gitignore mw init once
+// copied from the template, naming metrics/.
+func (c *syncContext) theVaultStillIgnoresMetrics() error {
+	if err := writeFile(c.here, ".gitignore", ".dolt/\n"+metricsIgnoreLine+"\n"); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-qm", "The vault ignores metrics/"},
+		{"push", "-q"},
+	} {
+		if _, err := runGit(c.here, args...); err != nil {
+			return err
+		}
+	}
+	_, err := runGit(c.there, "pull", "-q", "--rebase")
+	return err
+}
+
+// theOtherHostPushedMetrics commits the file the other host's vault tracks,
+// by force because its .gitignore names it too.
+func (c *syncContext) theOtherHostPushedMetrics() error {
+	if err := writeFile(c.there, application.MetricsFile, firstBatchLine+"\n"); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"add", "-f", application.MetricsFile},
+		{"commit", "-qm", "The other host lands a batch"},
+		{"push", "-q"},
+	} {
+		if _, err := runGit(c.there, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// thisHostHoldsIgnoredMetrics writes the file git ignores and does not track,
+// the way a host that landed batches while metrics/ was ignored has it.
+func (c *syncContext) thisHostHoldsIgnoredMetrics() error {
+	return writeFile(c.here, application.MetricsFile, thisHostsBatchOne+"\n"+thisHostsBatchTwo+"\n")
+}
+
+func (c *syncContext) gitNoLongerIgnoresMetrics() error {
+	out, err := runGit(c.here, "check-ignore", "--no-index", application.MetricsFile)
+	if err == nil {
+		return fmt.Errorf("git still ignores %s on this host: %s", application.MetricsFile, out)
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		return fmt.Errorf("git check-ignore did not exit 1: %w", err)
+	}
+	return nil
+}
+
+func (c *syncContext) thisHostsMetricsHoldEveryLine() error {
+	return c.metricsHold(c.here, firstBatchLine, thisHostsBatchOne, thisHostsBatchTwo)
+}
+
+func (c *syncContext) theOtherHostSeesThisHostsMetrics() error {
+	if _, err := runGit(c.there, "pull", "-q", "--rebase"); err != nil {
+		return err
+	}
+	return c.metricsHold(c.there, firstBatchLine, thisHostsBatchOne, thisHostsBatchTwo)
+}
+
+// metricsHold fails unless the clone's metrics file holds each line.
+func (c *syncContext) metricsHold(dir string, lines ...string) error {
+	got, err := os.ReadFile(filepath.Join(dir, application.MetricsFile))
+	if err != nil {
+		return fmt.Errorf("reading %s in %s: %w", application.MetricsFile, dir, err)
+	}
+	for _, want := range lines {
+		if !strings.Contains(string(got), want) {
+			return fmt.Errorf("%s in %s does not hold %q, it holds %q", application.MetricsFile, dir, want, got)
+		}
 	}
 	return nil
 }

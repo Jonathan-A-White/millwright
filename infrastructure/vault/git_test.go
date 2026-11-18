@@ -1178,3 +1178,36 @@ func TestPullKeepsTheContentOfALocalMergeCommit(t *testing.T) {
 		t.Fatalf("expected the merge commit to be kept ahead of upstream")
 	}
 }
+
+func TestUnignoreMetricsDropsTheLineAndItsCommentOnceAndKeepsTheRest(t *testing.T) {
+	here, _ := twoHosts(t)
+	write(t, here, ".gitignore", ".dolt/\n\n# The key metrics: kept per host\n/metrics/\n\n__pycache__/\n")
+
+	dropped, err := vault.New(here).UnignoreMetrics(context.Background())
+	if err != nil {
+		t.Fatalf("unignoring the metrics: %v", err)
+	}
+	if !dropped {
+		t.Fatal("expected a vault that ignores metrics/ to be rewritten")
+	}
+	got, err := os.ReadFile(filepath.Join(here, ".gitignore"))
+	if err != nil {
+		t.Fatalf("reading the .gitignore: %v", err)
+	}
+	if want := ".dolt/\n\n\n__pycache__/\n"; string(got) != want {
+		t.Fatalf("expected the .gitignore to hold %q, got %q", want, got)
+	}
+
+	dropped, err = vault.New(here).UnignoreMetrics(context.Background())
+	if err != nil || dropped {
+		t.Fatalf("expected a second call to leave the vault alone, got %v, %v", dropped, err)
+	}
+}
+
+func TestUnignoreMetricsLeavesAVaultWithNoIgnoreFileAlone(t *testing.T) {
+	here, _ := twoHosts(t)
+	dropped, err := vault.New(here).UnignoreMetrics(context.Background())
+	if err != nil || dropped {
+		t.Fatalf("expected nothing to do, got %v, %v", dropped, err)
+	}
+}
