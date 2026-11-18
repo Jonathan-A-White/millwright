@@ -808,7 +808,7 @@ func (w HostWork) DoctorAlarms() []DamperAlarm {
 			alarms = append(alarms, DamperAlarm{Principle: DamperDoctor, Text: fmt.Sprintf("%s: %s faulty: %s", w.Host, f.Check, f.Reason)})
 		case slices.Contains(DoctorInstallChecks, f.Check):
 			alarms = append(alarms, DamperAlarm{Principle: DamperDoctor,
-				Text: fmt.Sprintf("%s: %s faulty, its doctor report is %s old: stale, so not yet installed as it last said: %s", w.Host, f.Check, gcAge(w.Now.Sub(w.Doctor.At)), f.Reason)})
+				Text: fmt.Sprintf("%s: %s faulty, its doctor report is %s old: stale, and it last said: %s", w.Host, f.Check, gcAge(w.Now.Sub(w.Doctor.At)), f.Reason)})
 		}
 	}
 	return alarms
