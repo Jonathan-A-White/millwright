@@ -561,6 +561,26 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" is not closed
     And the report says it stopped for "open-steps"
 
+  # mw-gq6.1436: a story the Mayor closed out by comment, whose claim was given
+  # back and whose fresh formula is all open, lands on his word with no session.
+  Scenario: A story with open steps and a closing comment lands on the Mayor's word, --met-by-mayor
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And a closing comment with "HOW TO CHECK IT" and "For the rig memory:" was written on "mw-gq6.1" after its newest commit
+    And mw next is run with --met-by-mayor "read the closing comment and ran the tests"
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+
+  Scenario: A story with open steps and no closing comment is still refused with the Mayor's word, and the refusal names his flags
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And mw next is run with --met-by-mayor "read the closing comment and ran the tests"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the report says it stopped for "open-steps"
+    And the story "mw-gq6.1" carries a comment quoting: --rescoped-by-mayor
+
   # mw-gq6.341: a session that wrote its work and left a step open is not waiting
   # for a person. The claim is given back with the stop, so the next dispatch
   # tick takes the story as attempt 2 and keeps the first attempt's branch.
