@@ -177,6 +177,15 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 	}, nil
 }
 
+// Queued says whose wait each live ticket in the gate queue stands for, oldest
+// first, read without taking the lock or a place in the queue (mw-gq6.1510). It
+// is what tells a gate that can wait, the nightly suite, whether a close-out is
+// waiting for the lock.
+func (g *Gate) Queued() []string {
+	tickets := &ticketq.Queue{Dir: filepath.Join(g.Dir, GateQueueDir), Cap: g.cap, Now: g.now}
+	return tickets.Holders()
+}
+
 // Holder says whose gate holds the lock now, read without taking it: empty when
 // nobody holds it, even if a holder that died left its name in the file, and
 // "somebody" when it is held and the file names no one (mw-gq6.858).

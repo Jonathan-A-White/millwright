@@ -85,11 +85,17 @@ type Suite struct {
 	// behind one command line of it, not the whole suite (mw-gq6.917). nil takes
 	// none. Only Run takes it: Recheck is run by callers that hold it already
 	// (rerunUnderGate), which lend it to RecheckBetween for the wait for a calm
-	// host.
+	// host. It gives way to the close-outs queued for it: it takes the lock for a
+	// line only when none is (a lock that can say who is queued, gateLockQueue), and
+	// never takes it from one that holds it for a line (mw-gq6.1510).
 	GateLock GateLock
 	// GateNoticeEvery is how often a suite that waits for the gate lock says
 	// again that it is waiting; zero reads CheckGateNoticeEvery.
 	GateNoticeEvery time.Duration
+	// GateYieldPoll is how often the suite looks again at the close-outs queued for
+	// the gate lock, which it waits for before it takes the lock (mw-gq6.1510); zero
+	// reads SuiteYieldPoll.
+	GateYieldPoll time.Duration
 	// Parts, when it is set, says how a rig's gate is named as parts on this host
 	// ([test_parts.<rig>]): the suite of a rig of more than one part runs the parts
 	// one by one in place of its [tests] line, taking the gate lock for each and
@@ -344,6 +350,59 @@ func (s Suite) calmed(ctx context.Context, before string) (reading LoadReading, 
 	return reading, read, waited, false, nil
 }
 
+// closeOutsQueued says how many tickets in the gate queue are a close-out's or a
+// check's, not another suite's: the waiters the suite gives way to (mw-gq6.1510).
+// A lock that cannot say who is queued has none.
+func (s Suite) closeOutsQueued() int {
+	queue, ok := s.GateLock.(gateLockQueue)
+	if !ok {
+		return 0
+	}
+	n := 0
+	for _, holder := range queue.Queued() {
+		if !strings.HasPrefix(holder, "suite ") {
+			n++
+		}
+	}
+	return n
+}
+
+// SuiteYieldPoll is how often a suite that gives way to the close-outs queued for
+// the gate lock looks at the queue again.
+const SuiteYieldPoll = time.Second
+
+// givenWayTo waits, with the gate lock not held, for the close-outs queued for it
+// to have taken it and given it back, before the suite takes it for the command
+// line before names. The suite is the one user of the gate that no Builder waits
+// on, so it runs late and does not queue as an equal of them (mw-gq6.1510). It says
+// so once, and again every GateNoticeEvery. A wait that ctx ends is not an error
+// here: the suite goes on to take the lock, which fails as it does without a queue.
+func (s Suite) givenWayTo(ctx context.Context, before string) {
+	if s.closeOutsQueued() == 0 {
+		return
+	}
+	every := s.GateNoticeEvery
+	if every <= 0 {
+		every = CheckGateNoticeEvery
+	}
+	poll := s.GateYieldPoll
+	if poll <= 0 {
+		poll = SuiteYieldPoll
+	}
+	began := s.now()
+	s.say("  wait    waiting: close-outs queued for the gate on %s: the suite gives way to them before %s\n", s.Host, before)
+	noticed := began
+	for s.closeOutsQueued() > 0 {
+		if err := waitFor(ctx, poll); err != nil {
+			return
+		}
+		if now := s.now(); now.Sub(noticed) >= every {
+			noticed = now
+			s.say("  wait    still waiting: close-outs queued for the gate on %s (waited %s so far)\n", s.Host, gateWaited(now.Sub(began)))
+		}
+	}
+}
+
 // takeGateLock takes the host's gate lock for the suite of rig before the command
 // line it names, waiting for the gate that holds it and saying so every
 // GateNoticeEvery, and returns what gives it back (safe to call twice). A lock
@@ -353,6 +412,7 @@ func (s Suite) takeGateLock(ctx context.Context, rig, before string, ran []strin
 	if s.GateLock == nil {
 		return func() {}, nil
 	}
+	s.givenWayTo(ctx, before)
 	every := s.GateNoticeEvery
 	if every <= 0 {
 		every = CheckGateNoticeEvery

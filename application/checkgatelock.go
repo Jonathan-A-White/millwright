@@ -39,6 +39,12 @@ type gateLockReader interface {
 	HeldSince() time.Time
 }
 
+// gateLockQueue is what a GateLock may also say, read without taking it: whose
+// wait each ticket queued for the lock stands for, oldest first (mw-gq6.1510).
+type gateLockQueue interface {
+	Queued() []string
+}
+
 func (k Check) gateNoticeEvery() time.Duration {
 	if k.GateNoticeEvery > 0 {
 		return k.GateNoticeEvery

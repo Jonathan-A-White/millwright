@@ -502,3 +502,31 @@ func TestABatchsWaitForTheGateLockGoesAheadOfStoriesThatQueuedBeforeIt(t *testin
 		}
 	}
 }
+
+func TestAGateLockSaysWhoIsQueuedForItWithoutTakingAPlace(t *testing.T) {
+	dir := t.TempDir()
+	gate := hostlock.NewGate(dir, hostlock.WithGatePoll(5*time.Millisecond))
+	if got := gate.Queued(); len(got) != 0 {
+		t.Fatalf("expected nobody queued for a free lock, got %v", got)
+	}
+	first, err := gate.Take(context.Background(), "mw-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gate.Take(ctx, "mw-b", nil)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for len(gate.Queued()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := gate.Queued(); len(got) != 1 || got[0] != "mw-b" {
+		t.Errorf("expected only the waiter mw-b queued, got %v", got)
+	}
+	cancel()
+	<-done
+	first.Holding.Release(context.Background())
+}
