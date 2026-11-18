@@ -82,8 +82,9 @@ On the desktop, in a NEW admin Windows PowerShell as the account that owns WSL (
 mw host giveway --install-line
 ```
 
-It prints one block of text that begins with a comment saying what it does and its way back. Paste the whole
-block. It refuses to run under any account but that one (`--account <name>` changes it) and on a Windows
+It prints ONE physical line (a long paste of many lines came out garbled in a console, mw-gq6.1437) that begins with a
+block comment saying what it does and its way back; its variables all start `$mwgw_`, so one left in the window by an
+earlier line is never read. Paste the whole line. It refuses to run under any account but that one (`--account <name>` changes it) and on a Windows
 older than build 19041; it makes the folder `C:\ProgramData\millwright\giveway`; downloads the script from the
 public repo pinned at the commit this mw was built from and refuses it unless its SHA-256 is the embedded
 copy's (no form carries the script in the paste: it would have to be base64, which an antivirus took for a threat, mw-gq6.1431);

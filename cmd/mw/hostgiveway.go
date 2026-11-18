@@ -33,6 +33,22 @@ const (
 	giveWayMw      = "/home/jwhite/.local/bin/mw"
 )
 
+// giveWayVars names the variables of the install paste: each starts $mwgw_, so a
+// $c, $d or $t that an earlier line left in the window is never read, and the
+// paste's own do not overwrite the Governor's (mw-gq6.1437).
+const (
+	giveWayVarDir  = "$mwgw_d"  // the folder
+	giveWayVarGot  = "$mwgw_dl" // the download, before its hash is checked
+	giveWayVarCls  = "$mwgw_c"  // the session-state trigger's CIM class
+	giveWayVarLog  = "$mwgw_lo" // the logoff event trigger
+	giveWayVarPrin = "$mwgw_p"  // the principal
+	giveWayVarSet  = "$mwgw_s"  // the settings
+	giveWayVarInfo = "$mwgw_i"  // a task's info, for the printout
+)
+
+// giveWayVarState is the variable of the session-state trigger for StateChange n.
+func giveWayVarState(n int) string { return fmt.Sprintf("$mwgw_t%d", n) }
+
 // giveWayTaskNames are the four tasks, by event.
 var giveWayTaskNames = []string{"millwright give way (unlock)", "millwright give way (lock)", "millwright give way (logoff)", "millwright give way (tick)"}
 
@@ -60,38 +76,48 @@ var giveWayModes = []string{"freeze", "shutdown"}
 // conhost.exe --headless, which creates no console window at all (a -WindowStyle
 // Hidden flag still flashes one). It needs Windows 10 build 19041 or later.
 func giveWayAction(event string) string {
-	return "(New-ScheduledTaskAction -Execute conhost.exe -Argument \"--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `\"$d\\giveway.ps1`\" -Event " + event + "\")"
+	return "(New-ScheduledTaskAction -Execute conhost.exe -Argument \"--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `\"" + giveWayVarDir + "\\giveway.ps1`\" -Event " + event + "\")"
 }
 
 // giveWayRegister is one Register-ScheduledTask statement.
 func giveWayRegister(name, event string, triggers ...string) string {
 	return "Register-ScheduledTask -TaskName '" + name + "' -Action " + giveWayAction(event) +
-		" -Trigger @(" + strings.Join(triggers, ",") + ") -Principal $p -Settings $s -Force | Out-Null"
+		" -Trigger @(" + strings.Join(triggers, ",") + ") -Principal " + giveWayVarPrin + " -Settings " + giveWayVarSet + " -Force | Out-Null"
 }
 
 // giveWayRegisterAll is the statements that register the four tasks with the
-// script already under $d. Unlock and lock fire for ANY user's session (no UserId
-// on a trigger): StateChange 8 is workstation unlock, 7 lock, 1 console connect,
-// 2 console disconnect, 3 remote connect (remote desktop), 4 remote disconnect.
-// The logoff task fires on the event-log trigger $lo.
-func giveWayRegisterAll() string {
+// script already under giveWayVarDir. Unlock and lock fire for ANY user's session
+// (no UserId on a trigger): StateChange 8 is workstation unlock, 7 lock, 1 console
+// connect, 2 console disconnect, 3 remote connect (remote desktop), 4 remote
+// disconnect. The logoff task fires on the event-log trigger giveWayVarLog.
+func giveWayRegisterAll() []string {
 	state := func(n int) string {
-		return fmt.Sprintf("$t%d=New-CimInstance -CimClass $c -Property @{StateChange=%d; Enabled=$true} -ClientOnly", n, n)
+		return fmt.Sprintf("%s=New-CimInstance -CimClass %s -Property @{StateChange=%d; Enabled=$true} -ClientOnly", giveWayVarState(n), giveWayVarCls, n)
 	}
+	st := giveWayVarState
 	logon := "(New-ScheduledTaskTrigger -AtLogOn)"
 	tick := "(New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5))"
-	return strings.Join([]string{
-		`$c=Get-CimClass -ClassName MSFT_TaskSessionStateChangeTrigger -Namespace Root/Microsoft/Windows/TaskScheduler`,
+	return []string{
+		giveWayVarCls + `=Get-CimClass -ClassName MSFT_TaskSessionStateChangeTrigger -Namespace Root/Microsoft/Windows/TaskScheduler`,
 		state(8), state(7), state(1), state(2), state(3), state(4),
-		`$lo=New-CimInstance -CimClass (Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler) -Property @{Subscription='` + giveWayLogoffQuery + `'; Enabled=$true} -ClientOnly`,
-		`$p=New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited`,
-		`$s=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries`,
-		giveWayRegister(giveWayTaskNames[0], "unlock", "$t8", "$t1", "$t3", logon),
-		giveWayRegister(giveWayTaskNames[1], "lock", "$t7", "$t2", "$t4"),
-		giveWayRegister(giveWayTaskNames[2], "logoff", "$lo"),
+		giveWayVarLog + `=New-CimInstance -CimClass (Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler) -Property @{Subscription='` + giveWayLogoffQuery + `'; Enabled=$true} -ClientOnly`,
+		giveWayVarPrin + `=New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited`,
+		giveWayVarSet + `=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries`,
+		giveWayRegister(giveWayTaskNames[0], "unlock", st(8), st(1), st(3), logon),
+		giveWayRegister(giveWayTaskNames[1], "lock", st(7), st(2), st(4)),
+		giveWayRegister(giveWayTaskNames[2], "logoff", giveWayVarLog),
 		giveWayRegister(giveWayTaskNames[3], "tick", tick),
-		`Get-ScheduledTask -TaskName 'millwright give way*' | ForEach-Object { $i=Get-ScheduledTaskInfo -InputObject $_; "$($_.TaskName): $($_.State), next run $(if ($i.NextRunTime) { $i.NextRunTime } else { 'on its events' })" }`,
-	}, "\n")
+		`Get-ScheduledTask -TaskName 'millwright give way*' | ForEach-Object { ` + giveWayVarInfo + `=Get-ScheduledTaskInfo -InputObject $_; "$($_.TaskName): $($_.State), next run $(if (` + giveWayVarInfo + `.NextRunTime) { ` + giveWayVarInfo + `.NextRunTime } else { 'on its events' })" }`,
+	}
+}
+
+// windowsPasteOneLine joins a paste's statements into the one physical line it is
+// printed as. A paste of many lines typed into a console came out garbled and
+// left earlier lines' variables in use (mw-gq6.1437). The what-and-way-back
+// note is a block comment at the head, so the elevation check is the first
+// statement.
+func windowsPasteOneLine(note string, statements ...string) string {
+	return "<# " + note + " #> " + strings.Join(statements, "; ") + "\n"
 }
 
 // GiveWayInstallLine is the paste, for a NEW admin Windows PowerShell of the
@@ -106,24 +132,30 @@ func GiveWayInstallLine(account string) (string, error) {
 	if !giveWayAccountRe.MatchString(account) {
 		return "", fmt.Errorf("%q is not a Windows account name mw will put in a paste", account)
 	}
-	head := "# millwright give way (mw host giveway --install-line): copies giveway.ps1 to " + giveWayDir +
-		", writes its mode file (freeze) and registers the tasks '" + strings.Join(giveWayTaskNames, "', '") +
-		"' under this account. Way back: mw host giveway --uninstall-line.\n" +
-		windowsElevationCheck + "\n" +
-		"if ($env:USERNAME -ne '" + account + "') { throw 'run this as " + account + ", the account that owns WSL: nothing installed' }\n" +
-		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { throw 'needs Windows 10 build %d or later (a task without a window): nothing installed' }\n", giveWayMinBuild, giveWayMinBuild) +
-		`$d="` + giveWayDir + `"; New-Item -ItemType Directory -Force $d | Out-Null` + "\n"
 	commit := wslFlagCommit()
 	if len(commit) != 40 {
 		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build)")
 	}
 	sum := sha256.Sum256([]byte(millwright.GiveWayScript))
-	get := `[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $t="$d\giveway.ps1.new"` + "\n" +
-		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + giveWayScriptPath + `' -OutFile $t` + "\n" +
-		`if ((Get-FileHash -Algorithm SHA256 $t).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) +
-		`') { Remove-Item $t; throw 'giveway.ps1 does not match its expected SHA-256: nothing installed' }` + "\n" +
-		`Move-Item -Force $t "$d\giveway.ps1"` + "\n"
-	return head + get + `Set-Content -Path "$d\mode" -Value freeze -Encoding ASCII` + "\n" + giveWayRegisterAll() + "\n", nil
+	d, got := giveWayVarDir, giveWayVarGot
+	statements := []string{
+		windowsElevationCheck,
+		"if ($env:USERNAME -ne '" + account + "') { throw 'run this as " + account + ", the account that owns WSL: nothing installed' }",
+		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { throw 'needs Windows 10 build %d or later (a task without a window): nothing installed' }", giveWayMinBuild, giveWayMinBuild),
+		d + `="` + giveWayDir + `"`,
+		"New-Item -ItemType Directory -Force " + d + " | Out-Null",
+		`[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12`,
+		got + `="` + d + `\giveway.ps1.new"`,
+		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + giveWayScriptPath + `' -OutFile ` + got,
+		`if ((Get-FileHash -Algorithm SHA256 ` + got + `).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) +
+			`') { Remove-Item ` + got + `; throw 'giveway.ps1 does not match its expected SHA-256: nothing installed' }`,
+		`Move-Item -Force ` + got + ` "` + d + `\giveway.ps1"`,
+		`Set-Content -Path "` + d + `\mode" -Value freeze -Encoding ASCII`,
+	}
+	statements = append(statements, giveWayRegisterAll()...)
+	return windowsPasteOneLine("millwright give way (mw host giveway --install-line): copies giveway.ps1 to "+giveWayDir+
+		", writes its mode file (freeze) and registers the tasks '"+strings.Join(giveWayTaskNames, "', '")+
+		"' under this account. Way back: mw host giveway --uninstall-line.", statements...), nil
 }
 
 // GiveWayUninstallLine is the way back: the four tasks and the folder removed,
@@ -137,12 +169,13 @@ func GiveWayUninstallLine() string {
 	for _, n := range giveWayTaskNames {
 		names = append(names, "'"+n+"'")
 	}
-	return "# millwright give way, taken away (mw host giveway --uninstall-line): removes the four tasks and the folder " + giveWayDir +
-		", then tells the host to go on (mw giveway off). Way back: mw host giveway --install-line.\n" +
-		windowsElevationCheck + "\n" +
-		strings.Join(names, ",") + " | ForEach-Object { Unregister-ScheduledTask -TaskName $_ -Confirm:$false -ErrorAction SilentlyContinue }\n" +
-		`Remove-Item -Recurse -Force "` + giveWayDir + `" -ErrorAction SilentlyContinue` + "\n" +
-		"$env:WSL_UTF8='1'; wsl.exe -d " + giveWayDistro + " -u " + giveWayWSLUser + " --exec " + giveWayMw + " giveway off --by windows-uninstall\n"
+	return windowsPasteOneLine("millwright give way, taken away (mw host giveway --uninstall-line): removes the four tasks and the folder "+giveWayDir+
+		", then tells the host to go on (mw giveway off). Way back: mw host giveway --install-line.",
+		windowsElevationCheck,
+		strings.Join(names, ",")+" | ForEach-Object { Unregister-ScheduledTask -TaskName $_ -Confirm:$false -ErrorAction SilentlyContinue }",
+		`Remove-Item -Recurse -Force "`+giveWayDir+`" -ErrorAction SilentlyContinue`,
+		"$env:WSL_UTF8='1'",
+		"wsl.exe -d "+giveWayDistro+" -u "+giveWayWSLUser+" --exec "+giveWayMw+" giveway off --by windows-uninstall")
 }
 
 // GiveWayModeLine is the paste that flips the mode file to mode.
@@ -158,8 +191,10 @@ func GiveWayModeLine(mode string) (string, error) {
 		return "", fmt.Errorf("%q is not a mode: one of %s", mode, strings.Join(giveWayModes, ", "))
 	}
 	file := `"` + giveWayDir + `\mode"`
-	return "# millwright give way, mode " + mode + " (mw host giveway --mode-line " + mode + "): " + what + ". Way back: mw host giveway --mode-line " + other + ".\n" +
-		"Set-Content -Path " + file + " -Value " + mode + " -Encoding ASCII; Get-Content " + file + "\n", nil
+	return windowsPasteOneLine("millwright give way, mode "+mode+" (mw host giveway --mode-line "+mode+"): "+what+". Way back: mw host giveway --mode-line "+other+".",
+		windowsElevationCheck,
+		"Set-Content -Path "+file+" -Value "+mode+" -Encoding ASCII",
+		"Get-Content "+file), nil
 }
 
 // newHostGiveWayCmd builds `mw host giveway`.
@@ -179,7 +214,7 @@ func newHostGiveWayCmd() *cobra.Command {
 			"  --uninstall-line  the way back: the tasks and the folder removed, the host told to go on.\n" +
 			"  --mode-line M     the paste that flips the fallback mode: freeze (the default) or shutdown (WSL is shut down at\n" +
 			"                    unlock and started at lock).\n\n" +
-			"Each paste begins with a comment saying what it does and its way back. Nothing here runs on Windows by itself.",
+			"Each paste is ONE physical line, which begins with a block comment saying what it does and its way back. Nothing here runs on Windows by itself.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			n := 0
