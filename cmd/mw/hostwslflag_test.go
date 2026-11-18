@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -332,7 +333,7 @@ func TestWSLFlagInstallLineDownloadsPinnedChecksAHashAndIsShort(t *testing.T) {
 	}
 	sum := sha256.Sum256([]byte(millwright.WSLFlagWatch))
 	want := strings.ToUpper(hex.EncodeToString(sum[:]))
-	check := "(Get-FileHash -Algorithm SHA256 $t).Hash -ne '" + want + "'"
+	check := "(Get-FileHash -Algorithm SHA256 $mwwf_t).Hash -ne '" + want + "'"
 	if !strings.Contains(line, check) {
 		t.Errorf("expected the SHA-256 of the embedded script checked (%s):\n%s", check, line)
 	}
@@ -441,5 +442,37 @@ func TestWSLFlagTaskLaunchesHeadless(t *testing.T) {
 	// older builds keep the hidden window
 	if !strings.Contains(reg, "-Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden") {
 		t.Errorf("an older build keeps powershell.exe -WindowStyle Hidden:\n%s", reg)
+	}
+}
+
+// Every variable the install paste makes starts $mwwf_, so that none can
+// collide with one already set in the window it is pasted into (as the give way
+// paste's do, $mwgw_). The automatic ones ($env:..., $true, $false, $null, $_)
+// are PowerShell's own and are left alone. The way-back line makes no variable.
+func TestWSLFlagInstallLineVariablesCarryThePrefix(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	line, err := WSLFlagInstallLine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	automatic := map[string]bool{"env": true, "true": true, "false": true, "null": true, "_": true}
+	varRe := regexp.MustCompile(`\$([A-Za-z_][A-Za-z0-9_]*)`)
+	found := 0
+	for _, m := range varRe.FindAllStringSubmatch(line, -1) {
+		if automatic[m[1]] {
+			continue
+		}
+		found++
+		if !strings.HasPrefix(m[1], "mwwf_") {
+			t.Errorf("variable $%s of the install line must start $mwwf_", m[1])
+		}
+	}
+	if found == 0 {
+		t.Errorf("expected the install line to make variables of its own")
+	}
+	for _, m := range varRe.FindAllStringSubmatch(WSLFlagWayBack(), -1) {
+		if !automatic[m[1]] {
+			t.Errorf("the way-back line makes no variable, but has $%s", m[1])
+		}
 	}
 }

@@ -101,7 +101,7 @@ var wslFlagCommit = func() string {
 }
 
 // wslFlagRegister is the part of the install line that registers the task
-// with the script already under $d. The task runs powershell.exe under
+// with the script already under $mwwf_d. The task runs powershell.exe under
 // conhost.exe --headless, as give way's tasks do, so that no console shows every
 // 2 minutes and at logon. On a Windows build older than giveWayMinBuild, whose
 // conhost.exe does not take --headless, the action is then replaced by
@@ -109,14 +109,14 @@ var wslFlagCommit = func() string {
 // line goes to a phone: the second action is a short Set-ScheduledTask, not a
 // second Register-ScheduledTask.)
 func wslFlagRegister() string {
-	return "$f=\"-ExecutionPolicy Bypass -File `\"$d\\wsl-flag-watch.ps1`\"\"; " +
+	return "$mwwf_f=\"-ExecutionPolicy Bypass -File `\"$mwwf_d\\wsl-flag-watch.ps1`\"\"; " +
 		`Register-ScheduledTask -TaskName '` + wslFlagTask + `' ` +
-		"-Action (New-ScheduledTaskAction -Execute conhost.exe -Argument \"--headless powershell.exe -NoProfile $f\") " +
+		"-Action (New-ScheduledTaskAction -Execute conhost.exe -Argument \"--headless powershell.exe -NoProfile $mwwf_f\") " +
 		`-Trigger @((New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)),(New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)) ` +
 		`-Principal (New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest) ` +
 		`-Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force; ` +
 		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { ", giveWayMinBuild) +
-		"Set-ScheduledTask -TaskName '" + wslFlagTask + "' -Action (New-ScheduledTaskAction -Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden $f\") | Out-Null }"
+		"Set-ScheduledTask -TaskName '" + wslFlagTask + "' -Action (New-ScheduledTaskAction -Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden $mwwf_f\") | Out-Null }"
 }
 
 // WSLFlagInstallLine is the one line of admin PowerShell that downloads the
@@ -131,11 +131,11 @@ func WSLFlagInstallLine() (string, error) {
 		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build)")
 	}
 	sum := sha256.Sum256([]byte(millwright.WSLFlagWatch))
-	return windowsElevationCheck + `; $d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $d | Out-Null; ` +
-		`[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $t="$d\wsl-flag-watch.ps1.new"; ` +
-		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + wslFlagScriptPath + `' -OutFile $t; ` +
-		`if ((Get-FileHash -Algorithm SHA256 $t).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) + `') { Remove-Item $t; throw 'wsl-flag-watch.ps1 does not match its expected SHA-256: nothing installed' }; ` +
-		`Move-Item -Force $t "$d\wsl-flag-watch.ps1"; ` + wslFlagRegister(), nil
+	return windowsElevationCheck + `; $mwwf_d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $mwwf_d | Out-Null; ` +
+		`[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $mwwf_t="$mwwf_d\wsl-flag-watch.ps1.new"; ` +
+		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + wslFlagScriptPath + `' -OutFile $mwwf_t; ` +
+		`if ((Get-FileHash -Algorithm SHA256 $mwwf_t).Hash -ne '` + strings.ToUpper(hex.EncodeToString(sum[:])) + `') { Remove-Item $mwwf_t; throw 'wsl-flag-watch.ps1 does not match its expected SHA-256: nothing installed' }; ` +
+		`Move-Item -Force $mwwf_t "$mwwf_d\wsl-flag-watch.ps1"; ` + wslFlagRegister(), nil
 }
 
 // WSLFlagWayBack is the one line that takes the task and its script away. It
