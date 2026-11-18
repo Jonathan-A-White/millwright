@@ -189,3 +189,50 @@ func TestAYieldedWaitWithACheckSharingTheSlotGivesTheLockBack(t *testing.T) {
 		}
 	})
 }
+
+// mw-gq6.1457: a batch whose yielded wait for the gate lock ended while somebody
+// was queued for the lock gave it back and asked again, whoever was queued, a check
+// of another rig included, which cannot wait on the batch's merge slot. A batch
+// (WithQueuePrecedence) that no other holder shares the slot with keeps the lock.
+
+func TestABatchsSlotYieldKeepsTheGateLockFromAnotherRigsCheck(t *testing.T) {
+	l := newALandingAndACheckOfOneRig(t)
+	defer l.holding.Release(context.Background())
+	gate := &countedGate{inner: l.gate}
+	other, err := l.gate.Take(context.Background(), "mw-gq6.894", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	land := l.land()
+	land.Next.GateLock = gate
+	// Nobody shares the batch's slot: SlotShared says false, as batchSlot's does.
+	land.Next.SlotShared = func() bool { return false }
+	gated := make(chan application.Checked, 1)
+	go func() {
+		gated <- land.GateTheBatch(application.WithQueuePrecedence(context.Background()), l.rigDir, l.report())
+	}()
+	l.waitQueued(1)
+	// A check of another rig queues for the gate lock behind the batch.
+	go func() {
+		turn, err := l.gate.Take(context.Background(), "mw check lampas-x.1", nil)
+		if err == nil && turn.Holding != nil {
+			turn.Holding.Release(context.Background())
+		}
+	}()
+	l.waitQueued(2)
+	if err := other.Holding.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-gated:
+		if !got.Passed {
+			t.Fatalf("expected the batch's gate to pass, got %+v\n%s", got, l.said.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("expected the batch's gate to end\n%s", l.said.String())
+	}
+	if asked := gate.asked(); asked != 1 {
+		t.Errorf("expected the batch to keep the gate lock when only another rig's check was queued for it, it asked for the lock %d times\n%s", asked, l.said.String())
+	}
+}

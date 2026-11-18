@@ -21,8 +21,11 @@ import (
 // a check not yet queued for the lock (mw-gq6.1351): with neither the lock keeps
 // its place and no gate queued meanwhile is let in ahead of it (mw-gq6.1319). A
 // batch asks for the lock again ahead of single stories' checks and close-outs
-// (WithQueuePrecedence, mw-gq6.1450), but the give-back itself is made for any
-// waiter, as it cannot tell a check sharing its slot from one of another rig.
+// (WithQueuePrecedence, mw-gq6.1450). A batch, which knows who shares its slot
+// (SlotShared), gives the lock back only when somebody does: a check that waits for
+// the lock beside its slot is one that took the slot shared, so a waiter that is
+// not sharing it, a check of another rig, cannot be waiting on the batch's slot and
+// does not take the lock from it (mw-gq6.1457).
 
 // slotAndLockTries is how many times a close-out that gives its merge slot up for
 // a wait for the gate lock gives the lock back to take the slot alone again, and
@@ -62,7 +65,7 @@ func (n Next) takeGateLockUnderTheSlot(ctx context.Context, c *closeOut, report 
 		if resume == nil {
 			break
 		}
-		if err == nil && turn.Holding != nil && n.othersNeedTheLockBack(turn.Holding) {
+		if err == nil && turn.Holding != nil && n.othersNeedTheLockBack(ctx, turn.Holding) {
 			n.giveBackBeforeTheSlot(report, turn.Holding)
 			resume()
 			continue
@@ -84,8 +87,14 @@ func othersWaitFor(lock Holding) bool {
 // othersNeedTheLockBack says whether the gate lock is to be given back before the
 // slot is taken alone again: somebody is queued for it, or another holder shares
 // the slot (Next.SlotShared), a check that took the slot and has not yet queued
-// for the lock, which Waiting does not count (mw-gq6.1351).
-func (n Next) othersNeedTheLockBack(lock Holding) bool {
+// for the lock, which Waiting does not count (mw-gq6.1351). A batch (ctx takes
+// precedence) that can say whether its slot is shared and finds it is not keeps the
+// lock whoever is queued: no check of this rig is waiting beside the slot, and one
+// of another rig does not wait on it (mw-gq6.1457).
+func (n Next) othersNeedTheLockBack(ctx context.Context, lock Holding) bool {
+	if HasQueuePrecedence(ctx) && n.SlotShared != nil && !n.SlotShared() {
+		return false
+	}
 	return othersWaitFor(lock) || (n.SlotShared != nil && n.SlotShared())
 }
 
@@ -151,7 +160,7 @@ func (n Next) resumeSlot(ctx context.Context, c *closeOut, report *NextReport, r
 		resume()
 		return
 	}
-	if !n.othersNeedTheLockBack(held.inner) {
+	if !n.othersNeedTheLockBack(ctx, held.inner) {
 		// Nobody is queued for the lock and nobody shares the slot, so no check can
 		// wait for the lock beside the slot: the lock is kept and keeps its place
 		// (mw-gq6.1319).
