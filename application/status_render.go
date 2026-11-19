@@ -795,9 +795,21 @@ func (w HostWork) writeDoctor(b *strings.Builder) {
 // no alarm about a fault it may no longer have, except for a fix the Governor
 // installs by hand (DoctorInstallChecks): the host's doctor that stopped
 // reporting is the host nobody has been to, and the install is still missing
-// until a report says it is not (mw-gq6.1429).
+// until a report says it is not (mw-gq6.1429). A host that has left no report
+// at all is one alarm too: its doctor never ran, and nothing else says so
+// (mw-gq6.1496). A retired host is gone, and a host that has never synced is
+// already said to be asleep: neither is named by this alarm.
 func (w HostWork) DoctorAlarms() []DamperAlarm {
-	if w.DoctorSaid == "" || w.DoctorUnreadable {
+	if w.Retired {
+		return nil
+	}
+	if w.DoctorSaid == "" {
+		if w.NeverSynced() {
+			return nil
+		}
+		return []DamperAlarm{{Principle: DamperDoctor, Text: w.Host + ": no doctor report"}}
+	}
+	if w.DoctorUnreadable {
 		return nil
 	}
 	stale := w.DoctorStale()
