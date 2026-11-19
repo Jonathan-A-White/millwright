@@ -82,7 +82,9 @@ Feature: mw ideas-only
     And the story "mw-act.1" stands "open"
     And the last comment on "mw-act.1" starts "RELEASED by the Governor via postern, txid direct:102"
     And Ideas only is holding nothing, and the held ideas were kept in the released folder
-    And the postern inbox counts 3 unread
+    # The released tap is applied: the read prints it as one 'already applied
+    # earlier' line, not a message, so it is not counted (mw-gq6.1500).
+    And the postern inbox counts 2 unread
     When a plain mw postern inbox is run
     Then the postern inbox printed "Buy flour for the bread"
     And the postern inbox printed "Ask the roofer about the quote"
