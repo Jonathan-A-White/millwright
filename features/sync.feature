@@ -157,6 +157,17 @@ Feature: Keeping the vault and beads in step between hosts
     And the sync reports that the mark was added
     And no conflict is left in the vault
 
+  Scenario: A vault that still ignores its metrics file stops ignoring it, and this host keeps the lines only it had
+    Given the vault still ignores metrics/
+    And the other host pushed metrics/factory.jsonl holding the first batch line
+    And this host holds its own metric lines in the ignored metrics/factory.jsonl
+    When this host syncs
+    Then the sync succeeds
+    And git no longer ignores metrics/factory.jsonl in the vault
+    And the vault's metrics/factory.jsonl on this host holds the first batch line and both of this host's lines
+    And no conflict is left in the vault
+    And the other host sees this host's metric lines once it pulls
+
   Scenario: Uncommitted vault work leaves the vault alone, and beads sync anyway
     Given the other host appended a line to the Mayor's ledger and pushed it
     And this host has an uncommitted change to the Mayor's ledger

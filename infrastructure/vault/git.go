@@ -81,6 +81,58 @@ func (v *Vault) MarkLedgers(_ context.Context) (bool, error) {
 	return true, nil
 }
 
+var _ application.VaultUnignorer = (*Vault)(nil)
+
+// UnignoreMetrics implements application.VaultUnignorer: it takes the line that
+// hides metrics/ out of the vault's .gitignore, with the comment right above it,
+// and reports whether it had to. A vault made before mw-gq6.1462 carries it, and
+// git then treats metrics/factory.jsonl as expendable and overwrites it with the
+// tracked one a pull brings. A vault with no .gitignore, or none of the line, is
+// left alone.
+func (v *Vault) UnignoreMetrics(_ context.Context) (bool, error) {
+	path := filepath.Join(v.dir, application.VaultIgnoreFile)
+	ignore, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("reading %s: %w", path, err)
+	}
+	lines := strings.Split(string(ignore), "\n")
+	kept := make([]string, 0, len(lines))
+	dropped := false
+	for _, line := range lines {
+		if !hidesMetrics(line) {
+			kept = append(kept, line)
+			continue
+		}
+		dropped = true
+		if n := len(kept); n > 0 && strings.HasPrefix(kept[n-1], metricsIgnoreComment) {
+			kept = kept[:n-1]
+		}
+	}
+	if !dropped {
+		return false, nil
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		return false, fmt.Errorf("writing %s: %w", path, err)
+	}
+	return true, nil
+}
+
+// metricsIgnoreComment starts the comment the template once put above the line.
+const metricsIgnoreComment = "# The key metrics"
+
+// hidesMetrics reports whether a .gitignore line hides the whole metrics
+// directory, however it is spelled.
+func hidesMetrics(line string) bool {
+	switch strings.TrimSpace(line) {
+	case "/metrics/", "/metrics", "metrics/", "metrics":
+		return true
+	}
+	return false
+}
+
 // marked reports whether a .gitattributes already merges the files of pattern
 // by keeping every line. Comments and the order of the attributes after the
 // pattern are none of this adapter's business: what matters is that the

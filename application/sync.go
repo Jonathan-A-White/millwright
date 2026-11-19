@@ -25,6 +25,11 @@ const (
 
 	// LedgerAttributesFile is the vault file that carries LedgerMark.
 	LedgerAttributesFile = ".gitattributes"
+
+	// VaultIgnoreFile is the vault file that lists what git leaves alone; mw
+	// init copies it from the template, so a line the template later drops
+	// stays in every vault already made (mw-gq6.1492).
+	VaultIgnoreFile = ".gitignore"
 )
 
 // LastSyncKey is where a host records when it was last level with the other
@@ -323,6 +328,17 @@ type HostLock interface {
 	// Take waits for this host's sync lock, or for ctx to end, whichever comes
 	// first.
 	Take(ctx context.Context) (release func(), err error)
+}
+
+// VaultUnignorer is what a VaultFiles adapter may also do: take the line out of
+// the vault's .gitignore that still hides metrics/ from git, as the template
+// did before mw-gq6.1462 made metrics/factory.jsonl a committed file. An
+// ignored file is expendable to git, and the pull that brings the tracked one
+// would overwrite it with the other host's lines, so the sync lets go of the
+// line, and commits it with the file, before it pulls (mw-gq6.1492).
+type VaultUnignorer interface {
+	// UnignoreMetrics reports whether it had to write the .gitignore.
+	UnignoreMetrics(ctx context.Context) (bool, error)
 }
 
 // VaultFiles is the port mw keeps the vault's files in step with the other
@@ -701,9 +717,12 @@ func ExitStatus(err error) int {
 type SyncReport struct {
 	Host   string
 	Marked bool
-	Pulled int
-	Pushed int
-	At     time.Time
+	// Unignored says the vault's .gitignore still hid metrics/ and no longer
+	// does, the file's own lines being committed with it (mw-gq6.1492).
+	Unignored bool
+	Pulled    int
+	Pushed    int
+	At        time.Time
 
 	// ConfigAppended names what this sync appended to the Boost's config.toml
 	// from the vault's hosts/boost-config.toml ("[test_parts.postern]"),
@@ -795,7 +814,7 @@ type SyncReport struct {
 // to pull and nothing to push. A sync the vault blocked is not quiet — it has
 // something to say, even though nothing moved.
 func (r SyncReport) Quiet() bool {
-	return !r.Marked && r.Pulled == 0 && r.Pushed == 0 && len(r.Blocked) == 0 && !r.Damage.Any()
+	return !r.Marked && !r.Unignored && r.Pulled == 0 && r.Pushed == 0 && len(r.Blocked) == 0 && !r.Damage.Any()
 }
 
 // String is the one line mw prints when a sync finishes.
@@ -818,6 +837,9 @@ func (r SyncReport) String() string {
 		fmt.Fprintf(&b, "pulled %d, pushed %d", r.Pulled, r.Pushed)
 		if r.Marked {
 			fmt.Fprintf(&b, "; marked %s as %s (commit it, so the other host is covered too)", LedgerPattern, MergeUnion)
+		}
+		if r.Unignored {
+			fmt.Fprintf(&b, "; %s no longer ignores metrics/, and metrics/factory.jsonl is committed", VaultIgnoreFile)
 		}
 	}
 	b.WriteString(r.beadsPhrase())
@@ -1114,6 +1136,19 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 			// (mw-gq6.530).
 			if _, err = commitWritten(ctx, s.Vault, "mw sync: mark the ledgers as merged by union", []string{LedgerAttributesFile}); err != nil {
 				return report, fmt.Errorf("syncing the vault on %s: the ledger mark is written but not committed: %w", s.Host, err)
+			}
+		}
+		if unignorer, ok := s.Vault.(VaultUnignorer); ok {
+			if report.Unignored, err = unignorer.UnignoreMetrics(ctx); err != nil {
+				return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
+			}
+			if report.Unignored {
+				// Committed with the file it hid, before the pull: the lines this
+				// host kept while git ignored the file are in a commit by then, and
+				// merge by union with the other host's (mw-gq6.1492).
+				if _, err = commitWritten(ctx, s.Vault, "mw sync: stop ignoring metrics/, keep metrics/factory.jsonl", []string{VaultIgnoreFile, MetricsFile}); err != nil {
+					return report, fmt.Errorf("syncing the vault on %s: the .gitignore is written but not committed: %w", s.Host, err)
+				}
 			}
 		}
 		if report.Pulled, err = s.pastASiblingsWrite(ctx, &report, s.Vault.Pull); err != nil {
