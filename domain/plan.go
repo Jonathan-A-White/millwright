@@ -206,6 +206,11 @@ func FitTitleToSteps(title, storyID string, stepTitles []string) string {
 	return title[:cut] + Ellipsis
 }
 
+// FitTitle is title as bd will take it: unchanged within MaxTitleLength, and
+// otherwise cut short, at a character, with an Ellipsis at the end
+// (mw-gq6.1521).
+func FitTitle(title string) string { return FitTitleToSteps(title, "", nil) }
+
 // Validate reports every reason this plan cannot be filed: an epic with no
 // title or a priority outside 0..4, a story with no key, no title, a priority outside 0..4, a title over MaxTitleLength, no acceptance criteria or no Path, a
 // bug (a [bug] title or the bug label) whose acceptance has no Sweep line SweepOf passes, a

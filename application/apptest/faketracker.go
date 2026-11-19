@@ -440,8 +440,8 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 		return "", f.Err
 	}
 	switch {
-	case story.Title == "":
-		return "", fmt.Errorf("a story needs a title")
+	case story.Title == "" || len(story.Title) > domain.MaxTitleLength:
+		return "", titleRefused(story.Title)
 	case story.EpicID == "" && !story.Standalone:
 		return "", fmt.Errorf("a story needs an epic to be filed under")
 	}

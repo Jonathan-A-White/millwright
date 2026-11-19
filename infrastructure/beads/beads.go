@@ -223,12 +223,12 @@ func (g *Gateway) CreateEpic(ctx context.Context, epic application.NewEpic) (str
 	if strings.TrimSpace(epic.Title) == "" {
 		return "", fmt.Errorf("an epic needs a title")
 	}
-	args := []string{"create", epic.Title, "--type", "epic"}
-
 	description := strings.TrimSpace(epic.Description)
 	if criteria := strings.TrimSpace(epic.SuccessCriteria); criteria != "" {
 		description = strings.TrimSpace(description + "\n\n## Success Criteria\n\n" + criteria)
 	}
+	title, description := fitTitle(epic.Title, description)
+	args := []string{"create", title, "--type", "epic"}
 	if description != "" {
 		args = append(args, "--description", description)
 	}
@@ -258,7 +258,8 @@ func (g *Gateway) CreateStory(ctx context.Context, story application.NewStory) (
 	case strings.TrimSpace(story.EpicID) == "" && !story.Standalone:
 		return "", fmt.Errorf("the story %q needs an epic to be filed under", story.Title)
 	}
-	args := []string{"create", story.Title, "--status", StatusDeferred}
+	title, description := fitTitle(story.Title, strings.TrimSpace(story.Description))
+	args := []string{"create", title, "--status", StatusDeferred}
 	if epic := strings.TrimSpace(story.EpicID); epic != "" {
 		// bd copies the parent's labels onto a child unless told not to, which
 		// put the Governor's his-priority on stories he never prioritised
@@ -266,7 +267,7 @@ func (g *Gateway) CreateStory(ctx context.Context, story application.NewStory) (
 		args = append(args, "--parent", epic, "--no-inherit-labels")
 	}
 
-	if description := strings.TrimSpace(story.Description); description != "" {
+	if description != "" {
 		args = append(args, "--description", description)
 	}
 	if acceptance := strings.TrimSpace(story.Acceptance); acceptance != "" {
@@ -294,6 +295,19 @@ func (g *Gateway) CreateStory(ctx context.Context, story application.NewStory) (
 		args = append(args, "--labels", strings.Join(story.Labels, ","))
 	}
 	return g.created(ctx, "the story "+story.Title, args)
+}
+
+// fitTitle is title as bd takes it, cut short with an ellipsis when it is over
+// domain.MaxTitleLength, and description with the whole title at its head when
+// it was cut. bd refuses a longer title outright, and the bug that carried
+// lampas main's red was lost for one (mw-gq6.1521): every create goes through
+// here, so no title a use case builds loses its write this way.
+func fitTitle(title, description string) (string, string) {
+	fit := domain.FitTitle(title)
+	if fit == title {
+		return title, description
+	}
+	return fit, strings.TrimSpace("Title in full: " + strings.TrimSpace(title) + "\n\n" + description)
 }
 
 // ReleaseStory implements application.WorkTracker: a held story becomes an open

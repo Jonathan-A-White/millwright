@@ -280,6 +280,64 @@ func isHeldOnMainsFailure(r Reason) bool { return r == ReasonMainRed || r == Rea
 
 func (m MainRed) tests() string { return strings.Join(m.Tests, ", ") }
 
+// Title is prefix and then the failing tests, each named once (DistinctTests),
+// as many as fit the title bd takes, and then how many more there are: bd
+// refuses a title over domain.MaxTitleLength, and lampas main's red, whose
+// tests together were 665 characters, went unfiled (mw-gq6.1521). The whole
+// list stays in the bug's description and acceptance, where carriedBy looks.
+func (m MainRed) Title(prefix string) string {
+	names := DistinctTests(m.Tests)
+	if len(names) == 0 {
+		return domain.FitTitle(strings.TrimSpace(prefix))
+	}
+	more := func(shown int) string {
+		if rest := len(names) - shown; rest > 0 {
+			return fmt.Sprintf(" (+%d more)", rest)
+		}
+		return ""
+	}
+	for shown := len(names); shown > 0; shown-- {
+		if title := prefix + strings.Join(names[:shown], ", ") + more(shown); len(title) <= domain.MaxTitleLength {
+			return title
+		}
+	}
+	// The first name alone is over the limit: it is cut short to fit.
+	return domain.FitTitleToSteps(prefix+names[0], "", []string{"{{title}}" + more(1)}) + more(1)
+}
+
+// DistinctTests is tests with each failing test once, in their order: a bare
+// step line (`× Then it works`) and the path that ends in it (`a.feature >
+// Feature > Scenario > Then it works`, or Playwright's ` › `) name one test,
+// and the bare line, the shorter, is kept.
+func DistinctTests(tests []string) []string {
+	bare := map[string]bool{}
+	for _, test := range tests {
+		if _, isPath := lastStepOf(test); !isPath {
+			bare[strings.TrimSpace(strings.TrimLeft(test, "×✘✗ "))] = true
+		}
+	}
+	var names []string
+	seen := map[string]bool{}
+	for _, test := range tests {
+		if step, isPath := lastStepOf(test); (isPath && bare[step]) || seen[test] {
+			continue
+		}
+		seen[test] = true
+		names = append(names, test)
+	}
+	return names
+}
+
+// lastStepOf is the last step of a test's path, and whether it is a path.
+func lastStepOf(test string) (string, bool) {
+	for _, sep := range []string{" > ", " › "} {
+		if i := strings.LastIndex(test, sep); i >= 0 {
+			return strings.TrimSpace(test[i+len(sep):]), true
+		}
+	}
+	return "", false
+}
+
 // DefaultMainAloneBound is how long the run of the failing tests on the target
 // branch may take (mw-gq6.929): the Clerk it stands in for took 27 minutes, and
 // a close-out that waits as long has told the Mayor nothing sooner.
@@ -831,7 +889,7 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 	story := NewStory{
 		EpicID:     c.detail.EpicID,
 		Standalone: c.detail.EpicID == "",
-		Title:      "[bug] main is red: " + red.tests(),
+		Title:      red.Title("[bug] main is red: "),
 		Description: fmt.Sprintf("%s fails on %s by itself, with no story merged in: %s.\n\nFound by mw next on %s while closing out %s, whose merged result failed the same tests; "+
 			"`%s` fails them too in a clean worktree of %s. Until it is fixed every landing of %s that runs the rig's tests meets the same failure, and the story is held on this bug (mw-gq6.645).\n",
 			red.tests(), c.target, red.tests(), n.Host, c.id, red.Command, c.target, c.path.Rig),
@@ -846,7 +904,7 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 		story = NewStory{
 			EpicID:     c.detail.EpicID,
 			Standalone: c.detail.EpicID == "",
-			Title:      fmt.Sprintf("[bug] host gap: %s: %s fails %s", gap.Host, gap.Line, red.tests()),
+			Title:      red.Title(fmt.Sprintf("[bug] host gap: %s: %s fails ", gap.Host, gap.Line)),
 			Description: fmt.Sprintf("%s fails on %s on %s, and passes on %s (the home): this is %s's gap, not main's red.\n\nThe error line: %s\n\nFound by mw next on %s while closing out %s, whose merged result failed the same tests; "+
 				"`%s` fails them in a clean worktree of %s on %s, and %s passes them by name. The story is held on this bug until it is fixed, and then its close-out runs again (mw-gq6.1395).\n",
 				red.tests(), c.target, gap.Host, gap.Home, gap.Host, gap.Line, n.Host, c.id, red.Command, c.target, gap.Host, gap.Home),
