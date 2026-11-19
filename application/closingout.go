@@ -129,7 +129,9 @@ func (n Next) markClosingOut(ctx context.Context, storyID string) (context.Conte
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for n.wait(renew, HeartbeatInterval) == nil {
+		// waitFor, not n.wait: HeartbeatWait stands in for the claim's own clock,
+		// and a second caller of it would run that clock twice as fast.
+		for waitFor(renew, HeartbeatInterval) == nil {
 			if renew.Err() != nil {
 				return
 			}
