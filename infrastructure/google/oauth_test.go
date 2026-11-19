@@ -485,3 +485,28 @@ func TestAPastedAddressNobodyIsWaitingAtSaysSo(t *testing.T) {
 		t.Fatalf("expected ErrNobodyWaiting, got %v", err)
 	}
 }
+
+// The waiting sign-in finishes once it has the code, but the browser's (or mw
+// google finish's) trip to the loopback is still answered: it is not cut off
+// while the answer is being written, however slowly (mw-gq6.1519).
+func TestAPastedAddressIsAnsweredEvenWhenTheSignInFinishesFirst(t *testing.T) {
+	google.SlowAnswers(t, 200*time.Millisecond)
+	g := &fakeGoogle{}
+	ended := make(chan url.Values, 1)
+	oauth := google.OAuth{ClientFile: clientFile(t, "installed"), Endpoints: g.serve(t), Wait: 10 * time.Second}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := oauth.SignIn(context.Background(), application.GoogleContactsScope, g.pastedBrowser(t, ended))
+		done <- err
+	}()
+
+	query := <-ended
+	right := query.Get("redirect_uri") + "?state=" + url.QueryEscape(query.Get("state")) + "&code=" + url.QueryEscape(fakeCode)
+	if err := google.Finish(context.Background(), right); err != nil {
+		t.Fatalf("expected the pasted address answered as taken, got %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

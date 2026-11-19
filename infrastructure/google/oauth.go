@@ -108,6 +108,26 @@ func randomWord(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// answered runs in the loopback redirect's handler after the code is handed
+// over and before the answer is written out; a test slows it.
+var answered = func() {}
+
+// answerWait is how long a finished sign-in waits for the loopback redirect to
+// write out the answers it is still giving before it closes them.
+const answerWait = 5 * time.Second
+
+// closeLoopback stops the loopback redirect once the sign-in is done with it.
+// The code is handed over before the handler's answer is written out, so a
+// plain Close could cut the browser, or mw google finish, off without one: it
+// is shut down instead, letting answers under way finish for up to answerWait.
+func closeLoopback(server *http.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), answerWait)
+	defer cancel()
+	if server.Shutdown(ctx) != nil {
+		_ = server.Close()
+	}
+}
+
 // callback is what the browser brought back to the loopback redirect.
 type callback struct {
 	code string
@@ -159,10 +179,11 @@ func (o OAuth) SignIn(ctx context.Context, scope string, show func(authURL strin
 			case came <- back:
 			default:
 			}
+			answered()
 		}),
 	}
 	go func() { _ = server.Serve(listener) }()
-	defer server.Close()
+	defer closeLoopback(server)
 
 	auth := url.Values{
 		"client_id":             {client.ID},
