@@ -1906,6 +1906,9 @@ type PosternSendRequest struct {
 	// PosternSend adds it by itself when the post Re names came by chain, or
 	// the Governor's newest record did (Notes' TalkWaitChannelKey).
 	Chain bool
+
+	// Receipt (--receipt): this post only receipts the post Re names (posternowed.go).
+	Receipt bool
 }
 
 // PosternRoleTranscript is the role of a message whose text is what the
@@ -2015,7 +2018,7 @@ func (r PosternSendRequest) ValidateReplyFlags() error {
 	if strings.TrimSpace(r.Re) != "" && strings.TrimSpace(r.Bead) != "" {
 		return fmt.Errorf("mw postern send: --re and --bead cannot both be set: --re answers inside a post's thread, --bead asks a question of its own")
 	}
-	return r.validateFactoryFlag()
+	return r.validateReplyExtras()
 }
 
 // posternFile is one file read for sending: its path, its bytes and the mime
@@ -2099,6 +2102,8 @@ type PosternSend struct {
 	// remembered. Nil, a send is exactly as it was: Factory when no flag
 	// names a channel.
 	Threads PosternThreadIndex
+
+	Receipts PosternNotes // where receipts are kept (posternowed.go); Notes when nil
 }
 
 // Run sends req, and reports the txid of the message carrying its text: the
@@ -2232,6 +2237,9 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		}
 	}
 	s.printf("%s\n", txid)
+	if err := s.trackOwed(ctx, req, txid); err != nil && rememberErr == nil {
+		rememberErr = err
+	}
 	if req.commentsThread() {
 		if err := s.recordThreadMessage(ctx, req, txid, files); err != nil {
 			return txid, fmt.Errorf("mw postern send: sent as %s, but %w", txid, err)

@@ -69,6 +69,9 @@ type DamperFacts struct {
 	// make past the plan's limit, a box locked at Vultr past CloudLockedLimit
 	// (mw-gq6.1113, mw-gq6.1127).
 	SlowMakes []CloudMakeAlarm
+	// Receipts are the receipts of ours that no real answer has followed
+	// (PosternReceiptKey's notes).
+	Receipts []PosternReceipt
 }
 
 // DamperProposal is one bead holding a proposal of mw verify match that nobody
@@ -150,6 +153,8 @@ type DamperCounts struct {
 	StuckRoots int
 	// Inversions are the beads below the priority of what waits on them.
 	Inversions int
+	// OwedReceipts are his posts that have only a receipt past OwedGrace.
+	OwedReceipts int
 	// OpenRefused are the open stories a run state has kept from dispatch for over
 	// OpenRefusedAge (mw-gq6.1026).
 	OpenRefused int
@@ -201,6 +206,9 @@ const (
 	// free than the floor: dispatch starts no new Builder there while it lasts
 	// (mw-gq6.1428).
 	DamperDriveFloor = "drive floor"
+	// DamperOwed is the alarm for his posts that have only a receipt of ours
+	// past OwedGrace: mw postern owed lists them (mw-gq6.1539).
+	DamperOwed = "owed"
 )
 
 // DoctorInstallChecks are the checks of mw doctor that say a fix the Governor
@@ -490,6 +498,10 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	if alarm, ring := proposalsAlarm(facts.Proposals, facts.Now); ring {
 		report.Alarms = append(report.Alarms, alarm)
 	}
+	if alarm, owed, ring := owedAlarm(facts.Receipts, facts.Now); ring {
+		report.Counts.OwedReceipts = owed
+		report.Alarms = append(report.Alarms, alarm)
+	}
 	for _, alarm := range facts.SlowMakes {
 		report.Alarms = append(report.Alarms, alarm.damper())
 	}
@@ -705,7 +717,7 @@ type NeedsCountsReader interface {
 func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Time) (DampersReport, error) {
 	facts := DamperFacts{Now: now, Work: work, Notes: map[string]string{}}
 	if s.Notes != nil {
-		for _, prefix := range []string{PosternQuestionKey(""), HandsStepsKey(""), LoopSittingKey} {
+		for _, prefix := range []string{PosternQuestionKey(""), HandsStepsKey(""), LoopSittingKey, PosternReceiptPrefix} {
 			kept, err := s.Notes.NotesWithPrefix(ctx, prefix)
 			if err != nil {
 				return DampersReport{}, fmt.Errorf("reading the notes under %s: %w", prefix, err)
@@ -716,6 +728,7 @@ func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Tim
 		}
 		facts.LoopSitting = ParseLoopSitting(facts.Notes[LoopSittingKey])
 		delete(facts.Notes, LoopSittingKey)
+		facts.Receipts = receiptsOf(facts.Notes)
 	}
 	starved, err := s.readStarved(ctx, now)
 	if err != nil {
