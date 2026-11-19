@@ -45,13 +45,16 @@ func (g *Gateway) Send(ctx context.Context, message application.NewMessage) (str
 	if err != nil {
 		return "", err
 	}
+	// A subject over bd's title limit is cut, the whole kept at the head of the
+	// body, as a story's title is (mw-gq6.1521).
+	subject, body := fitTitle(message.Subject, message.Body)
 	args := []string{
-		"create", message.Subject,
+		"create", subject,
 		"--type", TypeMail,
 		"--priority", strconv.Itoa(mailPriority),
 		"--assignee", message.To,
 		"--label", LabelMail,
-		"--description", message.Body,
+		"--description", body,
 		"--storage-class", "versioned",
 		"--metadata", metadata,
 	}
