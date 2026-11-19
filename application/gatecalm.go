@@ -19,6 +19,16 @@ import (
 // batch's gate takes the lock again ahead of single stories' checks and close-outs
 // (WithQueuePrecedence, mw-gq6.1450): one of them may have it meanwhile, but none
 // that queued while the batch waited goes before it.
+//
+// A gate whose lock can keep its holder's place (PlaceKeeper: a check's, taken
+// under its story's key) keeps it while it waits, and takes the lock again in the
+// place it had, ahead of everyone who asked after it (mw-gq6.1534). On the Laptop
+// a millwright story's check that won the lock at load 53 of 20 gave it back, and
+// took it again behind the checks and close-outs that had asked after it, until
+// its 40m wait ran out having run nothing (mw-gq6.1521, six attempts). A batch
+// still goes ahead of the kept place. The place is kept for what is left of the
+// wait for calm and calmPlaceSlack more, so a gate that dies in the wait holds
+// the queue no longer than that.
 
 // calmedWithoutTheLock is calmedThen's wait, begun at reading with the host busy,
 // made with the gate lock c holds given back.
@@ -42,7 +52,7 @@ func (n Next) calmedWithoutTheLock(ctx context.Context, report *NextReport, c *c
 	}
 	var spent time.Duration
 	for {
-		gaveBack := n.giveTheLockBackForTheCalm(ctx, c, report, what)
+		gaveBack := n.giveTheLockBackForTheCalm(ctx, c, report, what, n.calmBoundLeft(handBack, spent)+calmPlaceSlack)
 		reading, gaveUp, spent, err = n.calmWait(ctx, report, c, what, then, handBack, again, reading, spent)
 		if !gaveBack || err != nil {
 			// A wait that ends the gate takes no lock again: nothing is run.
@@ -63,16 +73,36 @@ func (n Next) calmedWithoutTheLock(ctx context.Context, report *NextReport, c *c
 	}
 }
 
+// calmPlaceSlack is how long past the bound of a wait for calm the place of a gate
+// that gave its lock back for the wait is kept: the steps of the wait are counted,
+// and the sleeps that overshoot at a high load are not (calmWait).
+const calmPlaceSlack = 2 * time.Minute
+
+// calmBoundLeft is what is left of the bound of a wait for calm that has spent
+// spent, as calmWait reckons it.
+func (n Next) calmBoundLeft(handBack bool, spent time.Duration) time.Duration {
+	if handBack && n.CalmHandBack != nil && n.LoadBoundLeft != nil {
+		return max(n.LoadBoundLeft(), 0)
+	}
+	return max(n.loadBound()-spent, 0)
+}
+
 // giveTheLockBackForTheCalm gives back the gate lock c holds, when it holds one,
-// for a wait for the host to calm before what, and says so. It reports whether it
-// gave one back.
-func (n Next) giveTheLockBackForTheCalm(ctx context.Context, c *closeOut, report *NextReport, what string) bool {
+// for a wait for the host to calm before what, and says so. A lock that can keep
+// its holder's place in the queue keeps it for kept, before it is given back, so
+// that nobody who asked after the holder takes the lock ahead of it again
+// (mw-gq6.1534). It reports whether it gave one back.
+func (n Next) giveTheLockBackForTheCalm(ctx context.Context, c *closeOut, report *NextReport, what string, kept time.Duration) bool {
 	if c.turns == nil || c.turns.lock == nil {
 		return false
 	}
 	again := "behind whoever waits for it"
 	if HasQueuePrecedence(ctx) {
 		again = "ahead of single stories' checks and close-outs"
+	} else if keeper, ok := c.turns.lock.(PlaceKeeper); ok {
+		if _, _, ok := keeper.KeepPlace(kept); ok {
+			again = "in the place it had in the queue, ahead of whoever asked after it"
+		}
 	}
 	n.print(fmt.Sprintf("  wait    %s gives %s's gate lock back while it waits for the host to calm before %s, and takes it again %s\n",
 		c.id, n.Host, what, again))

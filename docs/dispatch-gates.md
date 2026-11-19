@@ -315,8 +315,12 @@ it stands in front of the tickets taken after it and a close-out behind it waits
 for up to 10 minutes. The same story's next call (key `check <story>`) takes it up again:
 the same ticket, so the same place, not the back of the queue. A place not taken up is
 dropped when its keep time passes. The calm host is not queued for: the lock a check
-waited for is held while it waits for a calm host, and given back when that wait runs
-out, so the next call queues for the lock again at the back.
+won is given back while it waits for a calm host (mw-gq6.1420), and its ticket is put
+back under its key, kept for what is left of that wait and two minutes more, so it
+takes the lock again in the place it had, ahead of everyone who asked after it, not
+behind them (mw-gq6.1534: mw-gq6.1521's check won the lock at load 53 of 20 and was
+passed by the checks and close-outs that asked after it until its 40m wait ran out). A
+close-out's gate, which waits under no key, still takes the lock again at the back.
 
 While it waits it says every minute who holds the lock now and since when. It is a wait
 inside one call, not a loop that spends the Builder's turns. The wait for a calm host
