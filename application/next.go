@@ -152,8 +152,9 @@ const (
 	ReasonMergeSlot     Reason = "merge-slot"
 	// ReasonHostBusy is a close-out handed back because its host was far over
 	// its cores (HostBusyError, mw-gq6.903): the rig's tests were not run, or a
-	// failure was the host's. Handed back as ReasonMergeSlot is, and no attempt
-	// is spent.
+	// failure was the host's; or a host with no room (Next.Room) that starts no
+	// send-back's Builder session (mw-gq6.1512). Handed back as ReasonMergeSlot
+	// is, and no attempt is spent.
 	ReasonHostBusy Reason = "host-busy"
 	// ReasonGivesWay is a close-out handed back because its host gives way to the
 	// person at its screen (mw giveway): no Builder session is started on a host
@@ -458,6 +459,7 @@ type Next struct {
 	// GateLoadBound. LoadWait is how it waits, the real clock unless a test
 	// replaces it.
 	Load      HostLoad
+	Room      RoomLimits // what a send-back's Builder session needs of the host (mw-gq6.1512)
 	LoadPoll  time.Duration
 	LoadBound time.Duration
 	LoadWait  func(ctx context.Context, d time.Duration) error
@@ -830,6 +832,7 @@ type closeOut struct {
 	// it would have started a Builder session (givesWayBeforeASendBack); nil when
 	// it did not.
 	gaveWay *GiveWayStanding
+	noRoom  string // why the host had none, when it was that (nextroom.go)
 	target  string
 	result  SessionResult
 
@@ -1533,7 +1536,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 				kept = line + "\n\n" + kept
 			}
 			whyNot := n.sendBack(ctx, c, report, landErr, kept)
-			if c.gaveWay != nil {
+			if c.gaveWay != nil || c.noRoom != "" {
 				return n.handBackForGivingWay(ctx, c, report, "rebase it")
 			}
 			if whyNot == "" {
@@ -1549,7 +1552,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 				}
 			}
 			whyNot := n.sendBackForFailingTests(ctx, c, report, landErr, kept)
-			if c.gaveWay != nil {
+			if c.gaveWay != nil || c.noRoom != "" {
 				return n.handBackForGivingWay(ctx, c, report, "fix the merged tests")
 			}
 			if whyNot == "" {
@@ -1711,20 +1714,11 @@ func paneUnreadable(err error) string {
 func (n Next) givesWayBeforeASendBack(ctx context.Context, c *closeOut) bool {
 	standing, giving := GivesWayNow(ctx, n.GiveWay, false)
 	if !giving {
-		return false
+		c.noRoom = n.noRoomForASession(ctx) // a host with no room starts none either (mw-gq6.1512)
+		return c.noRoom != ""
 	}
 	c.gaveWay = &standing
 	return true
-}
-
-// handBackForGivingWay hands a story back that was to be sent to a fresh Builder
-// session (to do what) on a host that gives way: nothing is started, recorded as
-// sent back or merged, the claim, the worktree and the branch are kept, and the
-// story says why. The next dispatch tick, once the host is free, runs its
-// close-out again, which sends it back then if it is still to be (mw-2891blf.19).
-func (n Next) handBackForGivingWay(ctx context.Context, c *closeOut, report *NextReport, what string) (NextReport, error) {
-	why := fmt.Sprintf("the host %s, so no Builder session is started to %s now; its close-out is run again once the host is free", c.gaveWay, what)
-	return n.handBack(ctx, c, report, ReasonGivesWay, why)
 }
 
 // asideSuffix is added to the name of the session a close-out ran in when a
@@ -1775,7 +1769,7 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	// give way on since. A host that gives way starts no session, and nothing is
 	// recorded as sent back (mw-2891blf.19).
 	if n.givesWayBeforeASendBack(ctx, c) {
-		return c.gaveWay.String() + ", so no Builder session is started to rebase it"
+		return c.heldWhy() + ", so no Builder session is started to rebase it"
 	}
 	spec, err := n.Boot.Rebase(ctx, c.detail, c.worktree, onto)
 	if err != nil {
@@ -1951,7 +1945,7 @@ func (n Next) sendBackForFailingTests(ctx context.Context, c *closeOut, report *
 	// The last look at the marker, before the worktree is touched or anything is
 	// recorded (mw-2891blf.19): see sendBack.
 	if n.givesWayBeforeASendBack(ctx, c) {
-		return c.gaveWay.String() + ", so no Builder session is started to fix the merged tests"
+		return c.heldWhy() + ", so no Builder session is started to fix the merged tests"
 	}
 	if _, err := n.Landing.Merge(ctx, c.worktree, onto); err != nil {
 		return fmt.Sprintf("%s could not be merged into the worktree to send it back: %v%s", onto, err, conflictedSuffix(err))

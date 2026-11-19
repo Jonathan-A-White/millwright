@@ -90,3 +90,22 @@ func TestNextsDispatchTakesTheDispatchTablesRoomKeys(t *testing.T) {
 		}
 	}
 }
+
+// mw-gq6.1512: the Next that mw next and mw land build starts a Builder session
+// (a send-back, a batch's fixer), so it is given the host's room as the timer's
+// dispatch is: wrapped in withHostNextRoom. landsmoke.go's Next starts none.
+func TestEveryNextCmdMwRunsAfterALandingIsGivenTheHostRoom(t *testing.T) {
+	for file, want := range map[string]string{"next.go": "withHostNextRoom(application.Next{\n\t\t\t\tTracker:    gateway,", "land.go": "withHostNextRoom(application.Next{\n\t\t\t\tTracker:   gateway,"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("%s builds the Next of a landing with no room: wrap it in withHostNextRoom(..., room)", file)
+		}
+	}
+	got := withHostNextRoom(application.Next{Host: "laptop"}, config.RoomSettings{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12})
+	if want := (application.RoomLimits{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12}); got.Room != want {
+		t.Errorf("Room = %+v, want %+v", got.Room, want)
+	}
+}

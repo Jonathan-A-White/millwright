@@ -81,3 +81,9 @@ func (b BatchLand) GateTheBatchRun(ctx context.Context, dir string, report *Batc
 	gate := b.runGate(ctx, dir, dir, report, &nr)
 	return gate.Checked, gate.Err, nr.Notes
 }
+
+// FixTheBatch lets the tests of package application_test run the batch's fixer
+// step (BatchLand.fix), and say whether the batch may go on to be tested.
+func (b BatchLand) FixTheBatch(ctx context.Context, dir string, report *BatchReport) bool {
+	return b.fix(ctx, dir, dir, domain.EpicRequirements{}, report, "the gate failed", &NextReport{})
+}

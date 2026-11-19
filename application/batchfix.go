@@ -270,6 +270,13 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, rules domain.Epi
 		report.Held = fmt.Sprintf("the host %s, so its fixer %s was not started; the stories stay queued", standing, f.Name)
 		return false
 	}
+	// Nor does a host with no room (load, memory or the Windows drive's floor): a
+	// fixer is a Builder session, and dispatch starts none there (mw-gq6.1512).
+	if why := n.noRoomForASession(ctx); why != "" {
+		f.Trouble = fmt.Sprintf("was not started: the host has no room: %s", why)
+		report.Held = fmt.Sprintf("the host has no room (%s), so its fixer %s was not started; the stories stay queued", why, f.Name)
+		return false
+	}
 	if err := n.Runner.Start(ctx, spec); err != nil {
 		return notStarted(fmt.Sprintf("%s could not be started: %v", spec.Name, err))
 	}

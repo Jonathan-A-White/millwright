@@ -207,6 +207,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			room, err := config.Room()
+			if err != nil {
+				return err
+			}
 			files := mwVault(dir, host)
 			worktrees := rig.New()
 			runner := tmux.New()
@@ -231,10 +235,6 @@ func newNextCmd() *cobra.Command {
 				// The room the timer's dispatch reads, through the same constructor
 				// (mw-gq6.1469): a Builder started straight after a close-out meets
 				// the load, memory and WSL drive floors and the grist room too.
-				room, err := config.Room()
-				if err != nil {
-					return err
-				}
 				dispatcher = withHostDispatchLocks(withHostRoom(withHostRechecks(application.Dispatch{
 					Tracker:       gateway,
 					Worktrees:     worktrees,
@@ -282,7 +282,7 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = application.Next{
+			_, err = withHostNextRoom(application.Next{
 				Tracker:    gateway,
 				BdLocks:    hostBdLockNotes(),
 				Worktrees:  worktrees,
@@ -364,7 +364,7 @@ func newNextCmd() *cobra.Command {
 				RescopedByMayor: rescoped,
 				MetByMayor:      metBy,
 				MetByMayorGiven: cmd.Flags().Changed("met-by-mayor"),
-			}.Run(cmd.Context(), args[0])
+			}, room).Run(cmd.Context(), args[0])
 			return err
 		},
 	}

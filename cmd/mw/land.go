@@ -131,6 +131,10 @@ func newLandCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			room, err := config.Room()
+			if err != nil {
+				return err
+			}
 			worktrees := rig.New()
 			// The gate commands are read when the gate runs, not now (mw-gq6.1006);
 			// what the builder's boot, the turn cap, the after-landing limits and
@@ -139,7 +143,7 @@ func newLandCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			next := application.Next{
+			next := withHostNextRoom(application.Next{
 				Tracker:   gateway,
 				Worktrees: worktrees,
 				Landing:   worktrees,
@@ -185,7 +189,7 @@ func newLandCmd() *cobra.Command {
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()), // staged as after a single landing (mw-gq6.963)
 				Units:        hostUnits(),
 				Stamps:       stamps,
-			}
+			}, room)
 			landing := batchLandFor(next, files, dryRun, one, cmd.ErrOrStderr())
 			if self, err := os.Executable(); err == nil {
 				if home, err := os.UserHomeDir(); err == nil {
