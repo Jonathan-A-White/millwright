@@ -105,6 +105,8 @@
 //	state_dir      = "/root/.local/state/mw-doctor"
 //	reach          = ["api.anthropic.com:443", "github.com:443"]
 //	powershell     = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+//	windows_drive_mount = "/mnt/c"      # a WSL host that sees the drive holding its vhdx: mw writes that drive's free-space report itself (mw-gq6.1490)
+//	windows_drive_name  = "C:"          # what the report calls it; the mount's last name, upper-cased, when unset
 //	tunnel_unit    = "reverse-tunnel.service"
 //	tunnel_host    = "vps"
 //	tunnel_probe   = "ss -ltn sport = :2222"
