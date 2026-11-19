@@ -617,6 +617,10 @@ func newPosternSendCmd() *cobra.Command {
 			"has no answer of ours after it, naming his txid and the --re line to use; --new posts\n" +
 			"top-level anyway. A card (--class decision-needed) and a send into a channel are not stopped.\n" +
 			"--channel general is a named channel, not Factory, and says so.\n\n" +
+			"--receipt marks the post as a receipt for the post --re names (\"Got it, reading...\"): mw keeps it\n" +
+			"until a later post of ours with --re into the same thread (that post, or its root) is not a\n" +
+			"receipt. A post under 25 words that begins \"Got it\" counts as a receipt with no flag. mw postern\n" +
+			"owed lists what is still owed, and mw status DAMPERS counts it.\n\n" +
 			"--chain also broadcasts the message on chain, beside the direct delivery, for a phone that\n" +
 			"cannot reach the backend: the record has no summary, and the postern_float_sats cap applies.\n" +
 			"It is added without the flag when the post --re names came by chain (a bare txid, not\n" +
