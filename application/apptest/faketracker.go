@@ -444,6 +444,11 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 		return "", fmt.Errorf("a story needs a title")
 	case story.EpicID == "" && !story.Standalone:
 		return "", fmt.Errorf("a story needs an epic to be filed under")
+	case len(story.Title) > domain.MaxTitleLength:
+		// bd's own refusal, so that a use case is held to the limit as bd held
+		// lampas main's red (mw-gq6.1521); the beads adapter cuts a longer
+		// title before bd sees it, but a title built to fit says more.
+		return "", fmt.Errorf("title must be %d characters or less (got %d)", domain.MaxTitleLength, len(story.Title))
 	}
 	for _, need := range story.Needs {
 		if _, filed := f.stories[need]; !filed {
