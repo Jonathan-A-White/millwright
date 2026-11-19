@@ -16,6 +16,15 @@ on 2026-11-07.
 | Dolt server idle (`wait_timeout`) | 30 s | the server's | bd retires its idle connections at 20 s |
 | mw units' `TimeoutStartSec` | dispatch 45 min, millhand-tick 45 min, postern-mirror 30 min, report 5 min, mail-notify 4 min, usage-read 20 min, doctor 2 min, unit-failed 2 min | the unit files | the `beads.conf` drop-ins only add `EnvironmentFile=beads.env` |
 
+<!-- toc -->
+
+- [Why `bd dep add` fails at high load, and why no beads.env line fixes it](#why-bd-dep-add-fails-at-high-load-and-why-no-beadsenv-line-fixes-it)
+- [mw no longer runs `bd set-state`](#mw-no-longer-runs-bd-set-state)
+- [mw tester file writes its waits after the story, not with it](#mw-tester-file-writes-its-waits-after-the-story-not-with-it)
+- [An unbounded `bd list --parent` of a big parent (mw-gq6.1504)](#an-unbounded-bd-list---parent-of-a-big-parent-mw-gq61504)
+
+<!-- /toc -->
+
 ## Why `bd dep add` fails at high load, and why no beads.env line fixes it
 
 The `bd` command opens its store in `cmd/bd/main.go` from a hand-built `dolt.Config` and
