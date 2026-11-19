@@ -100,9 +100,21 @@ Feature: The mill keeps one Claude session per talk, within the hour
       | change                                                                       | reason        |
       | the grist asks for the model "opus" and the effort "low"                     | spec          |
       | the app's grind instructions change                                          | spec          |
-      | api_credits is on, and the key file holds the key "sk-ant-test-key" at mode 0600 | billing   |
       | the talk's transcript is deleted                                             | transcript    |
       | every resume exits 1                                                         | resume-failed |
+
+  Scenario: A talk of the factory's own starts fresh, with its history, when its billing changes
+    Given the phone is the key of the grist smoke
+    And the phone sends a talk grist in "rom.8@1" asking "q1"
+    And the mill grinds
+    And the key was found spent 2 hours ago
+    And the phone sends a talk grist in "rom.8@1" asking "q2"
+    When the mill grinds again
+    Then the last session started a new session from cairn's own directory, with CLAUDE_CODE_PROMPT_CACHE_TTL=1h
+    And the last session's id is not session 1's
+    And the last session's message holds the request with its history
+    And the answer to "q2" says the talk's session is "fresh" because "billing", at turn 1
+    And the talk's record names session 1's as ended
 
   Scenario: A resume that fails is tried once, then the turn runs fresh
     Given the phone sends a talk grist in "rom.8@1" asking "q1"

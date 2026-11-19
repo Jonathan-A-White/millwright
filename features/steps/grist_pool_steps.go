@@ -49,6 +49,10 @@ func (p *poolContext) port() *application.GristPool {
 			Warmer: p.warmer, Slots: 1 + len(p.c.slots.extra),
 			Quiet: quiet, MaxAge: application.DefaultGristPoolMaxAge,
 			TempDir: p.c.home, Now: p.now,
+			// The pool warms on what the mill bills the phone's grists to: its
+			// usable fake key (mw-gq6.1517), as the follower's pool shares the
+			// mill's credits.
+			Credits: apptest.UsableCredits(),
 		}
 	}
 	return p.pool

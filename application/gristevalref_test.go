@@ -159,7 +159,8 @@ func overrideMill(t *testing.T, from, talk string) (application.GristGrind, *app
 		State: apptest.NewFakeGristState(), Grinds: grinds, Grinder: grinder,
 		Pass: &apptest.FakeGristLock{}, Grinding: &apptest.FakeGristLock{}, Host: "laptop",
 		Apps: map[string]string{"lampas": "/rigs/lampas"}, TempDir: t.TempDir(),
-		Now: func() time.Time { return time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC) },
+		Credits: apptest.UsableCredits(),
+		Now:     func() time.Time { return time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC) },
 	}, backend, grinder
 }
 

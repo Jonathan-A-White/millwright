@@ -135,11 +135,15 @@ func newGristCreditsAdmin(out io.Writer) (application.GristCreditsAdmin, error) 
 	if err != nil {
 		return application.GristCreditsAdmin{}, err
 	}
+	governorKey, err := config.PosternGovernorKey()
+	if err != nil {
+		return application.GristCreditsAdmin{}, err
+	}
 	return application.GristCreditsAdmin{
 		On: settings.APICredits, KeyPath: settings.APIKeyFile,
 		Keys: grist.CreditKeyFile{Path: settings.APIKeyFile}, State: &grist.CreditState{Dir: stateDir},
 		Record: grist.New(stateDir), Config: configfile.New(path),
-		Home: mwVault(dir, host), Host: host, Out: out,
+		Home: mwVault(dir, host), Host: host, GovernorKey: governorKey, Out: out,
 	}, nil
 }
 

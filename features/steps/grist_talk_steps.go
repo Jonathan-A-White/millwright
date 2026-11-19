@@ -178,7 +178,10 @@ func (t *talkContext) standIn() error {
 	cc.state = filepath.Join(c.home, "credits-state")
 	cc.keyFile = filepath.Join(c.home, "anthropic-api.key")
 	cc.events = &apptest.FakeEventLog{}
-	return nil
+	// The phone's licence is not the Governor's, so its talks are billed to the
+	// API key alone (mw-gq6.1517): api_credits is on, with a usable key file,
+	// unless a scenario says otherwise.
+	return cc.keyFileHolds("on", "sk-ant-talk-key", "0600")
 }
 
 func (t *talkContext) sendInTalk(talk, q string) error {

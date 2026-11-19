@@ -264,7 +264,8 @@ func aSmallMill(t *testing.T) (application.GristGrind, *apptest.FakePostern, *ap
 		State: apptest.NewFakeGristState(), Grinds: grinds, Grinder: grinder,
 		Pass: &apptest.FakeGristLock{}, Grinding: &apptest.FakeGristLock{}, Host: "laptop",
 		Apps: map[string]string{"cairn": "/rigs/cairn"}, TempDir: t.TempDir(),
-		Now: func() time.Time { return time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC) },
+		Credits: apptest.UsableCredits(),
+		Now:     func() time.Time { return time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC) },
 	}, backend, grinder
 }
 
@@ -677,7 +678,8 @@ func aReadingMill(t *testing.T, langs, lang string) (application.GristGrind, *ap
 		Pass: &apptest.FakeGristLock{}, Grinding: &apptest.FakeGristLock{}, Host: "laptop",
 		Scorers: application.NewScorerRegistry(map[string]application.Scorer{"local": local}),
 		Apps:    map[string]string{"cairn": "/rigs/cairn"}, TempDir: t.TempDir(),
-		Now: func() time.Time { return time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC) },
+		Credits: apptest.UsableCredits(),
+		Now:     func() time.Time { return time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC) },
 	}, backend, grinder, local
 }
 
