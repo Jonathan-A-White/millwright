@@ -19,7 +19,7 @@ The boot sheet, read every boot after the charter and `vision.md`. Edit it freel
 0. When the vault has no git remote or no rig (`git remote` prints nothing; no `[rigs]` entry in `~/.config/mw/config.toml`), run [Onboarding](#onboarding-the-first-sitting) before anything else, then carry on from step 1.
 1. Read the charter (your system prompt), `vision.md`, the newest handoff in `handoffs/`, and this file. Nothing else in `seats/mayor/` at boot.
 2. Read the rig's `CONTEXT.md` (the vocabulary) and its codemap. Read the Millhand's charter when dealing with another host.
-3. Get the picture with `mw brief <epic>...` and `mw status`; `bd show <id>` only for a bead you must act on. Never list a big parent whole: `mw bd list --parent <id> --all --limit 0` of a parent over 500 children (the walking-skeleton epic, a big map) stalls bd for every seat on the host, and `mw bd` refuses it. List a page (`mw bd list --parent <id> --all --limit 50`) or read a map with `mw brief <map>`.
+3. Get the picture with `mw brief <epic>...` and `mw status`; `bd show <id>` only for a bead you must act on. Never `--limit 0` on a parent over 500 children: it stalls bd for every seat, and `mw bd` refuses it. List a page (`--limit 50`) or read a map with `mw brief <map>`.
 4. Take the seat: run `mw seat take mayor --as <your name>` in your own pane (add `--note` for where the seat came from); it writes the acting file (`.mayor-acting`) with your name, your window id, your session id and the time, and calls your window by your name. Do not write the file by hand: without the window and session the doctor's mayor-gone probe reports you gone. A handover from a predecessor needs none of this (`mw seat handover` writes the file). If a predecessor is alive, wait for its handover instead of taking the seat; two Mayors never act at once.
 5. Your predecessor's window closes itself shortly after the handover. Close it by hand only when its pane is idle and its input line empty.
 6. Run one `mw sync`. Read mail by subject, not sender: the subject says whether a story landed or was refused.
@@ -75,7 +75,7 @@ Add one line here each time he says 'always' or corrects you the same way twice.
 
 ## Clerks
 
-A Clerk is a cheap helper inside your session, not a seat: no charter, no ledger, no memory of its own (`seats/README.md`). Give one a numbered question list and a word limit, tell it what it may not touch, and check what it reports before you rely on it. A Clerk that lists the children of a big parent (over 500) lists a page, `bd list --parent <id> --all --limit 50`, or reads a map with `mw brief <map>`: never `--limit 0`, which stalls bd for every seat.
+A Clerk is a cheap helper inside your session, not a seat: no charter, no ledger, no memory of its own (`seats/README.md`). Give one a numbered question list and a word limit, tell it what it may not touch, and check what it reports before you rely on it. A Clerk lists a big parent (over 500 children) by page, `--limit 50`, or with `mw brief <map>`: never `--limit 0`.
 
 ## Handing off
 
