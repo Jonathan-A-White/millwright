@@ -1868,46 +1868,34 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.SmokeExamplesField {
 				s.detail.SmokeExamples = application.ParseSmokeExamples(v)
 			}
-			if k == application.CauseField {
+			switch k {
+			case application.CauseField:
 				s.detail.Cause = v
-			}
-			if k == application.CauseWhyField {
+			case application.CauseWhyField:
 				s.detail.CauseWhy = v
-			}
-			if k == application.CauseFixField {
+			case application.CauseFixField:
 				s.detail.CauseFix = v
-			}
-			if k == application.AttemptCausesField {
+			case application.AttemptCausesField:
 				s.detail.AttemptCauses = application.ParseAttemptCauses(v)
-			}
-			if k == application.TodoRankField {
+			case application.TodoRankField:
 				s.detail.TodoRank = v
-			}
-			if k == application.TodoDueField {
+			case application.TodoDueField:
 				s.detail.TodoDue = v
-			}
-			if k == application.TodoImportantField {
+			case application.TodoImportantField:
 				s.detail.TodoImportant = v == "true"
-			}
-			if k == application.TodoSizeField {
+			case application.TodoSizeField:
 				s.detail.TodoSize = v
-			}
-			if k == application.TodoThenField {
+			case application.TodoThenField:
 				s.detail.TodoThen = v
-			}
-			if k == application.TodoRowField {
+			case application.TodoRowField:
 				s.detail.TodoRow = v
-			}
-			if k == application.TodoRowWhyField {
+			case application.TodoRowWhyField:
 				s.detail.TodoRowWhy = v
-			}
-			if k == application.TodoSlippedField {
+			case application.TodoSlippedField:
 				s.detail.TodoSlipped = v
-			}
-			if k == application.TodoSlippedToldField {
+			case application.TodoSlippedToldField:
 				s.detail.TodoSlippedTold = v
-			}
-			if k == application.TodoRemindedField {
+			case application.TodoRemindedField:
 				s.detail.TodoReminded = v
 			}
 			if k == application.AcceptanceAtClaimField {
@@ -1921,6 +1909,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			}
 			if k == application.QueuedAtField {
 				s.detail.QueuedAt, _ = time.Parse(time.RFC3339, v)
+			}
+			if k == application.ClosingOutField {
+				s.detail.ClosingOut, _ = application.ParseClosingOut(v)
 			}
 			if k == application.AttemptsExhaustedField {
 				s.detail.Exhausted = v != ""

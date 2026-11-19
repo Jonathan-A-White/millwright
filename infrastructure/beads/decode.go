@@ -268,6 +268,13 @@ func (b bead) sentBackAt() time.Time {
 	return at
 }
 
+// closingOut is the mark a running close-out left on this bead, or the zero
+// mark when there is none or what is there cannot be read.
+func (b bead) closingOut() application.ClosingOut {
+	mark, _ := application.ParseClosingOut(b.text(application.ClosingOutField))
+	return mark
+}
+
 // queuedAt is when mw next recorded queueing this bead for batch landing, or
 // the zero time when it never did or what is there is not a time.
 func (b bead) queuedAt() time.Time {
@@ -333,6 +340,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		ClaimedAt:         b.claimedAt(),
 		SentBackAt:        b.sentBackAt(),
 		QueuedAt:          b.queuedAt(),
+		ClosingOut:        b.closingOut(),
 		Updated:           b.updated(),
 		ClosedAt:          b.closedAt(),
 		CloseReason:       b.CloseReason,

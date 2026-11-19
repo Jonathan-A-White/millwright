@@ -151,6 +151,9 @@ type StoryDetail struct {
 	// QueuedAt is when mw next queued the story for batch landing, as
 	// QueuedAtField says; zero when it never did.
 	QueuedAt time.Time
+	// ClosingOut is the mark a running close-out left on the story
+	// (ClosingOutField); the zero mark when none did (mw-gq6.1498).
+	ClosingOut ClosingOut
 	// Updated is when the tracker last recorded a change to the story; zero
 	// when the tracker did not say.
 	Updated time.Time

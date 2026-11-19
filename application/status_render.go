@@ -260,6 +260,9 @@ func (r StatusReport) String() string {
 		if line := r.NoPath[d.Story.ID]; line != "" {
 			wrapInto(&b, "    ", line)
 		}
+		if line := r.ClosingOut[d.Story.ID]; line != "" {
+			wrapInto(&b, "    ", line)
+		}
 		if share, sharing := r.Sharing[d.Story.ID]; sharing {
 			wrapInto(&b, "    ", share.String())
 		}

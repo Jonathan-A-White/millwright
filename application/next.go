@@ -989,7 +989,7 @@ func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
 	// The session that held the claim's lease alive has ended by now; the merge
 	// queue and the rig's tests that follow can outlast bd's five-minute TTL, and
 	// a lapsed lease is what mw sweep marks run=stuck (mw-gq6.138).
-	release := n.holdLease(ctx, storyID)
+	ctx, release := n.holdLeaseMarked(ctx, storyID)
 	// Say the close-out is running, so that mw status and the quiet alarm do not
 	// take the story for quiet while it waits its turn or for the host to calm.
 	began := n.now()

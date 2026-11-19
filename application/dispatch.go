@@ -1031,9 +1031,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
 			}
 			if reclaimed {
-				// Given back below, so it is read fresh among what is ready rather
-				// than counted here: a claim this dispatch just returned is not one
-				// still holding a session.
+				// Given back below, so it is read fresh among what is ready, not counted
+				// here: a claim this dispatch just returned holds no session.
 				continue
 			}
 			shares.add(detail)
@@ -1067,8 +1066,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			}
 		}
 	}
-	// A claim no host's Path names is on neither list above: its lapsed lease
-	// is all that says nothing is working it (mw-gq6.877).
+	// A claim no host's Path names is on neither list above: only its lapsed
+	// lease says nothing works it (mw-gq6.877).
 	d.reclaimNoSessionClaims(ctx, reads, &report)
 	// A harness stop holds every new claim here until the time it names: a
 	// session started before then stops on its first turn (mw-gq6.434).
@@ -1090,13 +1089,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 	}
 
-	// A held story keeps its branch for the next attempt to be cut from, and
-	// with work on it keeps its files from the stories ready here too
-	// (mw-gq6.881). A tracker that cannot say holds nothing back.
+	// A held story keeps its branch for the next attempt, and with work on it
+	// its files from the stories ready here (mw-gq6.881); a tracker that cannot
+	// say holds nothing back.
 	d.addKeptStories(ctx, &shares, &report)
 
-	// The room is read once a pass. A pass that is only looking leaves no word of
-	// it in the log.
+	// The room is read once a pass; a pass only looking leaves no word of it in the log.
 	noRoom, roomRead := ReadRoom(ctx, d.Load, d.Room)
 	// Grist comes first (mw-t0z3fu.4): slow tutor answers are a want of room,
 	// and a tutor in use lowers the cap.
@@ -1140,8 +1138,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	for _, detail := range ready {
 		id := detail.Story.ID
 		// gate: hitl
-		// First, so that a story that is not a session's to take is never passed
-		// over for the cap instead: the cap is not what stops it.
+		// First, so a story not a session's to take is never passed over for the cap.
 		if detail.Hitl() {
 			label := LabelHitl
 			if !hasHitlLabel(detail.Labels) {
@@ -1197,9 +1194,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 		// gate: harness-hold
-		// A story this host would take waits, unclaimed, until the time a harness
-		// stop names: its usage limit's reset, or a quarter hour after a rate
-		// limit or an overloaded API (mw-gq6.434).
+		// A story this host would take waits, unclaimed, until the time a harness stop
+		// names: a usage limit's reset, or a quarter hour after a rate limit (mw-gq6.434).
 		if hold := report.HarnessHold; hold != nil {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "harness-hold", Why: hold.harnessHeld(d.Host), Waiting: hold.waits()})
 			continue
@@ -1212,11 +1208,17 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: closing-out
+		// A close-out is running on it, here or on another host: not taken, no attempt spent (mw-gq6.1498).
+		if why := d.closingOutWhy(ctx, detail); why != "" {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "closing-out", Why: why, Waiting: true})
+			continue
+		}
+
 		// gate: queued
-		// A story queued for its batch has its work done and its gate passed.
-		// A hold and un-hold while it ran, or an open-steps give-back, left it
-		// open, and so ready or open and claimed: claiming it would start a
-		// second attempt at work that is done. mw land takes it (mw-bo813m2).
+		// A story queued for its batch has its work done and its gate passed. A hold
+		// and un-hold, or an open-steps give-back, left it open: claiming it would
+		// start a second attempt at work that is done. mw land takes it (mw-bo813m2).
 		if QueuedForBatch(detail) {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "queued", Why: fmt.Sprintf(
 				"its work is done and it waits for its rig's batch (%s=%s): `mw land %s` takes it, and it is not claimed again",
@@ -1225,9 +1227,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 
 		// gate: landed
-		// A story whose last run landed it is finished but for its close, which
-		// was lost: claiming it would work it again on top of its own landed
-		// commits (mw-gq6.191). The run state is read off the listing.
+		// A story whose last run landed it is finished but for its close, which was
+		// lost: claiming it would work it again on its own landed commits (mw-gq6.191).
 		if hasLabel(detail.Labels, RunState+":"+RunLanded) {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "landed", Why: fmt.Sprintf(
 				"its last run landed it (%s=%s) and only its close was lost, so it is not claimed again: `mw next %s` closes it, and more work on it is a new story",
@@ -1277,8 +1278,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 
 		// gate: metered-network
-		// A story on a rig that installs dependencies waits for a network that is
-		// not metered. It stays open and unclaimed, so no attempt is spent on it.
+		// A story on a rig that installs dependencies waits, open and unclaimed,
+		// for a network that is not metered: no attempt is spent.
 		if network != nil && network.Metered && d.HeavyNet[path.Rig] {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "metered-network", Why: fmt.Sprintf(
 				"the rig %s installs dependencies and the network is metered %s: it waits for one that is not", path.Rig, network.Why())})
@@ -1286,11 +1287,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 
 		// gate: no-grist-key
-		// A story whose checks run mw grist eval or mw grist smoke cannot be
-		// checked on a host without the factory's grist test key: it stays open,
-		// unclaimed, for a host that has one, whether it names this host or auto
-		// (mw-gq6.741). A files key naming grinds/ counts: the close-out demands a
-		// live line for every grind example the branch changes (mw-gq6.779).
+		// A story whose checks run mw grist eval or mw grist smoke stays open,
+		// unclaimed, for a host with the factory's grist test key, whether it names
+		// this host or auto (mw-gq6.741). A files key naming grinds/ counts: the
+		// close-out demands a live line for every grind example changed (mw-gq6.779).
 		if d.HasGristTestKey != nil && needsGristTestKey(detail) && !d.HasGristTestKey() {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "no-grist-key", Why: fmt.Sprintf(
 				"its checks run mw grist eval or mw grist smoke, or its files key names grinds/, and %s has no grist test key (grist_test_key_file in the config file): it waits for a host that has one", d.Host)})
@@ -2576,7 +2576,7 @@ func (d Dispatch) refusePour(ctx context.Context, id string, started Started, ri
 	return Started{}, false, &pourRefusal{err: result}
 }
 
-// reclaimDeadPane looks at one story this host already has claimed, and gives
+// reclaimDeadPaneNow looks at one story this host already has claimed, and gives
 // the claim back when its tmux window is still there but its pane has died,
 // or the window is gone outright (the session never started, mw-gq6.576), and
 // ReclaimStory says the tracker's own lease on the claim has run out:
@@ -2603,7 +2603,7 @@ func (d Dispatch) refusePour(ctx context.Context, id string, started Started, ri
 // dead, is closed, and the claim given back. What the story's worktree and
 // branch still hold from the attempt that died is left for the next attempt
 // to run into, or for a person to settle by hand with mw retry.
-func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, reads *candidateReads, report *DispatchReport) (reclaimed, held bool, err error) {
+func (d Dispatch) reclaimDeadPaneNow(ctx context.Context, detail StoryDetail, reads *candidateReads, report *DispatchReport) (reclaimed, held bool, err error) {
 	id := detail.Story.ID
 	name := SessionName(id)
 	status, err := d.Runner.Status(ctx, name)

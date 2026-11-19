@@ -74,6 +74,7 @@ var StarvedHolds = map[string]string{
 	"other-host":             "another host (asleep?)",
 	"harness-hold":           "harness stop",
 	"no-room":                "no room",
+	"closing-out":            "being landed by the Mayor",
 	"queued":                 "waits for its batch",
 	"landed":                 "lost close",
 	"blocked":                "blocked",

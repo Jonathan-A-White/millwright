@@ -572,6 +572,31 @@ Feature: Closing out a finished story and carrying on
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
     And the story "mw-gq6.1" is closed
 
+  # mw-gq6.1498: the story was given back open by its refusal, and the Mayor's
+  # close-out waits (for the gate lock). A dispatch that runs meanwhile, here or
+  # on another host, must not take it again as a fresh attempt.
+  Scenario: A story under a waiting --no-dispatch landing on the Mayor's word is not dispatched again, and no attempt is spent
+    Given the story "mw-gq6.1" was started once
+    And the claim on "mw-gq6.1" was given back by its refused close-out
+    And the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And a closing comment with "HOW TO CHECK IT" and "For the rig memory:" was written on "mw-gq6.1" after its newest commit
+    And mw next is run with --met-by-mayor "read the closing comment and ran the tests"
+    And a dispatch tick runs once the close-out of "mw-gq6.1" has left its mark
+    When mw closes out "mw-gq6.1"
+    Then that dispatch started nothing and named "mw-gq6.1" as being landed by the Mayor
+    And the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+
+  Scenario: A story whose Mayor's landing ended is not held by it, and its attempts are as they were
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And mw next is run with --met-by-mayor "read the closing comment and ran the tests"
+    When mw closes out "mw-gq6.1"
+    Then the report says it stopped for "open-steps"
+    And the story "mw-gq6.1" still records attempt 1 and carries no closing-out mark
+
   Scenario: A story with open steps and no closing comment is still refused with the Mayor's word, and the refusal names his flags
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and one of its steps is still open

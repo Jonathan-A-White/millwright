@@ -18,6 +18,7 @@ three.
 | `other-host` | the path names another host |
 | `harness-hold` | the harness stopped a session here (usage limit, rate limit, overloaded or failing API) and the time it named has not come, or the cloud is drained and this box held (below) |
 | `no-room` | the host has no room: load, or a grist tutor in use |
+| `closing-out` | a close-out (`mw next`, run by hand with `--no-dispatch` or by `contrib/mw-closeout`) is running on it, on any host: its `closing_out` mark in the tracker (host, since, until; renewed every 2 minutes, lapsing in 5) has not lapsed, so no attempt is spent while it waits for the gate lock (mw-gq6.1498) |
 | `queued` | its work is done and it is labelled `run:queued` for its rig's batch, yet it is open (a hold and un-hold, or an open-steps give-back, left it so): `mw land` takes it, a new attempt would redo done work (mw-bo813m2) |
 | `landed` | its last run landed it and only the close was lost |
 | `blocked` | it waits on a story that is not closed |
@@ -182,6 +183,7 @@ under DAMPERS. These never make the check faulty (mw-gq6.1166).
 | `other-host` | another host (asleep?) |
 | `harness-hold` | harness stop |
 | `no-room` | no room |
+| `closing-out` | being landed by the Mayor |
 | `queued` | waits for its batch |
 | `landed` | lost close |
 | `blocked` | blocked |

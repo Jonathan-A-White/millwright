@@ -633,6 +633,10 @@ type StatusReport struct {
 	// Grist is what the mill is doing, zero (Known false) when this host has none.
 	Grist GristPulse
 	Ready []StoryDetail
+	// ClosingOut is the words for each ready story a close-out holds (its mark
+	// in the tracker, as mw dispatch's closing-out gate reads it), by story id
+	// (mw-gq6.1498).
+	ClosingOut map[string]string
 	// NoPath is the line for each ready story mw dispatch passes over at its
 	// no-path gate, by story id: a key of its path is missing or unknown
 	// (mw-jmvq22o). It is said before any wait, because no wait ends it.
@@ -987,7 +991,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		if err != nil {
 			return report, err
 		}
-		if mark, ok := closing[detail.Story.ID]; ok {
+		if mark, ok := closingMark(closing, detail, s.now()); ok {
 			rs.CloseOut, rs.Now = &mark, s.now()
 		}
 		if wait, ok := waits[detail.Story.ID]; ok && rs.Queued() {
@@ -1045,6 +1049,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	awayRuns, _ := awayRunsRead()
 	report.NoPath = s.noPath(report.Ready)
+	report.ClosingOut = s.closingOutWords(report.Ready)
 	report.Sharing = s.sharing(ctx, report.Running, report.Ready, away, work.Held, awayRuns)
 	report.TesterHolds = s.testerHolds(work, report.Ready, s.now())
 	report.HeldByFiles = s.heldByFiles(ctx, report.Ready)

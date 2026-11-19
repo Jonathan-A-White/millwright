@@ -88,6 +88,10 @@ type nextContext struct {
 	// dispatchReport is what the last standalone dispatch (mw-gq6.87's own
 	// scenarios, re-dispatching a story before it is closed out) reported.
 	dispatchReport application.DispatchReport
+	dispatchErr    error
+	// duringCloseOut, when set, runs once the close-out has marked its story in
+	// the tracker (mw-gq6.1498): a dispatch tick meanwhile.
+	duringCloseOut func()
 
 	gitProgram   string // a wrapper that logs what git was asked to do
 	gitLog       string
@@ -258,6 +262,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextSpecsSteps(ctx, c)
 	registerRelatedTestsSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
+	registerNextClosingOutSteps(ctx, c)
 	registerRetryFromBranchSteps(ctx, c)
 	registerNextGristExampleSteps(ctx, c)
 	registerNextGiveBackSteps(ctx, c)
@@ -1112,6 +1117,9 @@ func (c *nextContext) nextUseCase() application.Next {
 	var heartbeatWait func(context.Context, time.Duration) error
 	if c.lease != nil {
 		tracker, heartbeatWait = c.lease.watch(c.tracker), c.lease.wait
+	}
+	if c.duringCloseOut != nil {
+		tracker = &markedThenTick{WorkTracker: tracker, hook: c.duringCloseOut}
 	}
 
 	// Only mw next and mw land are given the related-tests line: mw check is
