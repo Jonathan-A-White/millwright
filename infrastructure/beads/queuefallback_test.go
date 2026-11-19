@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 )
 
@@ -30,7 +31,7 @@ func TestQueueReadsByAtMostThreeBdsWhenThereIsNoKeptConnection(t *testing.T) {
 	parent := json("mw-gq6.2", "open", "task", "mw-e1", "")
 	child := json("mw-gq6.3", "open", "task", "mw-gq6.2", "")
 	waiting := json("mw-gq6.4", "open", "task", "mw-e1", "")
-	running := json("mw-gq6.5", "in_progress", "task", "mw-e1", "builder@desktop")
+	running := json("mw-gq6.5", "in_progress", "task", "mw-e1", "mw@desktop")
 	gone := json("mw-gq6.6", "closed", "task", "mw-gq6.2", "")
 	all := strings.Join([]string{epic, ready, parent, child, waiting, running, gone}, ",")
 
@@ -81,5 +82,77 @@ esac
 	calls := asked(t, log)
 	if len(calls) > 3 {
 		t.Errorf("expected at most 3 bd calls (ready, blocked, one list of every bead), got %d: %v", len(calls), calls)
+	}
+}
+
+// WorkInHand on a host with no kept connection read the ready stories and four
+// lists of one status each, then the epics and the children's counts: about 5 bd
+// calls, each opening its own connections, with the run cache's one list of every
+// bead held by the Gateway all the while (mw-gq6.1466). The ready ones are the
+// one bd that cannot be answered from that list; the claimed, the open claimed,
+// the held, the epics and the children come from it.
+func TestWorkInHandReadsByAtMostThreeBdsWithARunCache(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	json := func(id, status, kind, parent, assignee string) string {
+		return fmt.Sprintf(`{"id":"%s","title":"t","status":"%s","issue_type":"%s","parent":"%s","assignee":"%s"}`,
+			id, status, kind, parent, assignee)
+	}
+	epic := epic("mw-e1", "desktop")
+	ready := json("mw-gq6.1", "open", "task", "mw-e1", "")
+	parent := json("mw-gq6.2", "open", "task", "mw-e1", "")
+	child := json("mw-gq6.3", "open", "task", "mw-gq6.2", "")
+	stale := json("mw-gq6.4", "open", "task", "mw-e1", "mw@desktop")
+	running := json("mw-gq6.5", "in_progress", "task", "mw-e1", "mw@desktop")
+	held := json("mw-gq6.6", "deferred", "task", "mw-e1", "")
+	gone := json("mw-gq6.7", "closed", "task", "mw-gq6.2", "")
+	all := strings.Join([]string{epic, ready, parent, child, stale, running, held, gone}, ",")
+
+	dir := t.TempDir()
+	log := filepath.Join(dir, "asked.log")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case " $* " in
+  *" ready "*) printf '%%s' '[%s,%s]' ;;
+  *" --all "*) printf '%%s' '[%s]' ;;
+  *" list "*" in_progress "*) printf '%%s' '[%s]' ;;
+  *" list "*" deferred "*) printf '%%s' '[%s]' ;;
+  *" list "*" open "*) printf '%%s' '[%s,%s,%s,%s]' ;;
+  *) exit 1 ;;
+esac
+`, log, ready, parent, all, running, held, ready, parent, child, stale)
+	path := filepath.Join(dir, "bd-work")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	gateway := beads.New(t.TempDir(), beads.WithProgram(path), beads.WithRunCache())
+
+	work, err := gateway.WorkInHand(context.Background())
+	if err != nil {
+		t.Fatalf("reading the work in hand: %v", err)
+	}
+	ids := func(details []application.StoryDetail) string {
+		var out []string
+		for _, d := range details {
+			out = append(out, fmt.Sprintf("%s/%d", d.Story.ID, d.Children))
+		}
+		return strings.Join(out, ",")
+	}
+	if got := ids(work.Ready); got != "mw-gq6.1/0,mw-gq6.2/1" {
+		t.Errorf("ready: got %s", got)
+	}
+	if got := ids(work.Running); got != "mw-gq6.5/0" {
+		t.Errorf("running: got %s", got)
+	}
+	if got := ids(work.OpenClaimed); got != "mw-gq6.4/0" {
+		t.Errorf("open and claimed: got %s", got)
+	}
+	if got := ids(work.Held); got != "mw-gq6.6/0" {
+		t.Errorf("held: got %s", got)
+	}
+	if calls := asked(t, log); len(calls) > 3 {
+		t.Errorf("expected at most 3 bd calls (ready, one list of every bead), got %d: %v", len(calls), calls)
 	}
 }

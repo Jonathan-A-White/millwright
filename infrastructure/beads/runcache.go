@@ -222,18 +222,31 @@ func (g *Gateway) unfinishedInRun(ctx context.Context) ([]bead, bool) {
 // inProgressStories is the beads in progress, epics left out: `bd list --status
 // in_progress`, or the cache's list narrowed to them when the Gateway keeps one.
 func (g *Gateway) inProgressStories(ctx context.Context) ([]bead, error) {
+	return g.storiesWithStatus(ctx, StatusInProgress, "")
+}
+
+// storiesWithStatus is the beads of one status, epics left out and, when label is
+// not empty, carrying it: the cache's list narrowed to them when the Gateway keeps
+// one, and `bd list --status` otherwise. A command that reads by bd and keeps a
+// run cache asks for the cache's one list the first of these it makes, and the
+// epics and children's counts come from it as well (mw-gq6.1466).
+func (g *Gateway) storiesWithStatus(ctx context.Context, status, label string) ([]bead, error) {
 	if g.cache != nil {
 		if all, err := g.listing(ctx, TypeEpic); err == nil {
-			var running []bead
+			var found []bead
 			for _, b := range all {
-				if b.Status == StatusInProgress {
-					running = append(running, b)
+				if b.Status == status && (label == "" || slices.Contains(b.Labels, label)) {
+					found = append(found, b)
 				}
 			}
-			return running, nil
+			return found, nil
 		}
 	}
-	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
+	args := []string{"list", "--status", status}
+	if label != "" {
+		args = append(args, "--label", label)
+	}
+	out, err := g.call(ctx, append(args, "--exclude-type", "epic", "--limit", "0", "--json")...)
 	if err != nil {
 		return nil, err
 	}

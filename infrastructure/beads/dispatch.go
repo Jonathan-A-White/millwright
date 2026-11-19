@@ -228,12 +228,7 @@ func (g *Gateway) readClosedStoriesOfRig(ctx context.Context, rig string, since 
 // IcedBeads implements application.IcedBeads: `bd list` of the held beads
 // carrying the icebox label, epics left out.
 func (g *Gateway) IcedBeads(ctx context.Context) ([]application.StoryDetail, error) {
-	out, err := g.call(ctx, "list", "--status", StatusDeferred, "--label", application.LabelIcebox,
-		"--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	beads, err := decodeBeads(out)
+	beads, err := g.storiesWithStatus(ctx, StatusDeferred, application.LabelIcebox)
 	if err != nil {
 		return nil, fmt.Errorf("reading the iced beads: %w", err)
 	}
@@ -262,11 +257,7 @@ func (g *Gateway) HeldWithLabel(ctx context.Context, label string) ([]applicatio
 		}
 		return found, nil
 	}
-	out, err := g.call(ctx, "list", "--status", StatusDeferred, "--label", label, "--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	beads, err := decodeBeads(out)
+	beads, err := g.storiesWithStatus(ctx, StatusDeferred, label)
 	if err != nil {
 		return nil, fmt.Errorf("reading the held beads under the label %s: %w", label, err)
 	}
@@ -358,11 +349,7 @@ func (g *Gateway) LiveClaims(ctx context.Context, host string, now time.Time) ([
 	if live, ok := g.liveOverConnection(ctx); ok {
 		return application.LiveOpenClaims(now, onHost(live.details(append(live.withStatus(StatusOpen), live.withStatus(StatusDeferred)...)), host, false)), nil
 	}
-	out, err := g.call(ctx, "list", "--status", StatusOpen, "--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	open, err := decodeBeads(out)
+	open, err := g.storiesWithStatus(ctx, StatusOpen, "")
 	if err != nil {
 		return nil, fmt.Errorf("reading what is open on %s: %w", host, err)
 	}
@@ -387,11 +374,7 @@ func (g *Gateway) HeldStories(ctx context.Context) ([]application.StoryDetail, e
 	if live, ok := g.liveOverConnection(ctx); ok {
 		details = live.details(live.withStatus(StatusDeferred))
 	} else {
-		out, err := g.call(ctx, "list", "--status", StatusDeferred, "--exclude-type", "epic", "--limit", "0", "--json")
-		if err != nil {
-			return nil, err
-		}
-		beads, err := decodeBeads(out)
+		beads, err := g.storiesWithStatus(ctx, StatusDeferred, "")
 		if err != nil {
 			return nil, fmt.Errorf("reading the held stories: %w", err)
 		}
@@ -429,11 +412,7 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 		return application.WorkInHand{}, fmt.Errorf("reading what is ready: %w", err)
 	}
 
-	out, err = g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return application.WorkInHand{}, err
-	}
-	claimed, err := decodeBeads(out)
+	claimed, err := g.inProgressStories(ctx)
 	if err != nil {
 		return application.WorkInHand{}, fmt.Errorf("reading what is claimed: %w", err)
 	}
@@ -441,11 +420,7 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 	// An open story that still names a host as its assignee is in neither
 	// listing above: `bd ready --unassigned` skips it for the claim and the
 	// in-progress listing for the status (mw-gq6.417).
-	out, err = g.call(ctx, "list", "--status", StatusOpen, "--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return application.WorkInHand{}, err
-	}
-	open, err := decodeBeads(out)
+	open, err := g.storiesWithStatus(ctx, StatusOpen, "")
 	if err != nil {
 		return application.WorkInHand{}, fmt.Errorf("reading what is open: %w", err)
 	}
@@ -457,11 +432,7 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 	}
 
 	// What is held, as the kept connection's listing has it (mw-gq6.1090).
-	out, err = g.call(ctx, "list", "--status", StatusDeferred, "--exclude-type", "epic", "--limit", "0", "--json")
-	if err != nil {
-		return application.WorkInHand{}, err
-	}
-	held, err := decodeBeads(out)
+	held, err := g.storiesWithStatus(ctx, StatusDeferred, "")
 	if err != nil {
 		return application.WorkInHand{}, fmt.Errorf("reading what is held: %w", err)
 	}
