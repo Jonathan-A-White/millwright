@@ -74,7 +74,7 @@ func TestAKindKeepsNoMoreWarmSessionsThanSlots(t *testing.T) {
 		dirs[call.Dir] = true
 	}
 	var idle []string
-	for _, w := range pool.kinds[gristPoolKey{"lampas", "bible-talk"}].idle {
+	for _, w := range pool.kinds[gristPoolKey{"lampas", "bible-talk", BillingSubscription}].idle {
 		idle = append(idle, w.dir)
 	}
 	pool.Close()
@@ -92,7 +92,7 @@ func TestThePoolSavesItsBoardOnChangeAndHeartbeat(t *testing.T) {
 	board := &poolBoard{}
 	pool := &GristPool{Warmer: &poolWarmer{}, Slots: 2, TempDir: t.TempDir(), Board: board, Now: func() time.Time { return now }}
 	pool.take(ctx, poolSpec, BillingSubscription)
-	pool.ended(ctx, poolSpec)
+	pool.ended(ctx, poolSpec, BillingSubscription)
 	if len(board.saved) != 2 {
 		t.Fatalf("expected the board saved at the take and at the end, got %d", len(board.saved))
 	}
@@ -163,3 +163,77 @@ func (w *failingWarmer) Warm(GrindCall) (WarmSession, error) {
 }
 
 func roomNowFor(*testing.T) time.Time { return time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC) }
+
+// poolKey is a GristCreditKey that always reads key.
+type poolKey struct{ key string }
+
+func (k poolKey) Read(context.Context) (string, string) { return k.key, "" }
+
+// poolKeys is the API key each warm session was started with, in order.
+func poolKeys(w *poolWarmer) []string {
+	keys := make([]string, 0, len(w.calls))
+	for _, call := range w.calls {
+		keys = append(keys, call.APIKey)
+	}
+	return keys
+}
+
+// poolCredits is api credits on, with a usable key and no spent mark.
+func poolCredits() *GristCredits {
+	return &GristCredits{On: true, Key: poolKey{key: "sk-ant-api03-pool-test"}}
+}
+
+// With api credits on and a usable key, the Governor's grist (billed to his
+// subscription, mw-gq6.1517) still finds a warm session started on the
+// subscription, one that carries no key: the pool warms each kind on the
+// billing its grists are ground on, not on the factory's own choice, and a
+// tick keeps it (mw-gq6.1519).
+func TestTheGovernorsGristTakesAWarmSessionWithCreditsOn(t *testing.T) {
+	ctx, now := context.Background(), roomNowFor(t)
+	warmer := &poolWarmer{}
+	pool := &GristPool{Warmer: warmer, Slots: 2, TempDir: t.TempDir(), Credits: poolCredits(), Now: func() time.Time { return now }}
+	defer pool.Close()
+	if warm := pool.take(ctx, poolSpec, BillingSubscription); warm != nil {
+		t.Fatalf("expected the kind's first grist to start cold, got %+v", warm)
+	}
+	pool.ended(ctx, poolSpec, BillingSubscription)
+	if len(warmer.calls) != 1 || warmer.calls[0].APIKey != "" {
+		t.Fatalf("expected one warm session started with no key for the Governor's grists, got keys %q", poolKeys(warmer))
+	}
+	now = now.Add(time.Minute)
+	pool.Tick(ctx)
+	warm := pool.take(ctx, poolSpec, BillingSubscription)
+	if warm == nil {
+		t.Fatalf("expected the Governor's second grist to take the warm session, but it started cold (%d sessions started)", len(warmer.calls))
+	}
+	if warm.billing != BillingSubscription || warm.session.Exited() {
+		t.Fatalf("expected a live warm session on the subscription, got billing %q exited %v", warm.billing, warm.session.Exited())
+	}
+}
+
+// A kind ground on both billings keeps warm sessions on each: another
+// licence's grist on the key neither takes nor retires the warm session the
+// Governor's grists wait on, and finds one started on the key itself.
+func TestAKindKeepsWarmSessionsOnEachBillingItIsGroundOn(t *testing.T) {
+	ctx, now := context.Background(), roomNowFor(t)
+	warmer := &poolWarmer{}
+	pool := &GristPool{Warmer: warmer, Slots: 2, TempDir: t.TempDir(), Credits: poolCredits(), Now: func() time.Time { return now }}
+	defer pool.Close()
+	pool.take(ctx, poolSpec, BillingSubscription)
+	pool.ended(ctx, poolSpec, BillingSubscription)
+	pool.take(ctx, poolSpec, BillingAPI)
+	pool.ended(ctx, poolSpec, BillingAPI)
+	if len(warmer.calls) != 2 || warmer.calls[0].APIKey != "" || warmer.calls[1].APIKey == "" {
+		t.Fatalf("expected one warm session with no key and one on the key, got keys %q", poolKeys(warmer))
+	}
+	pool.Tick(ctx)
+	if view := pool.View(); len(view.Kinds) != 1 || view.Kinds[0].Warm != 2 || view.Kinds[0].Busy != 0 {
+		t.Fatalf("expected the kind said once, 2 warm and none busy, got %+v", view)
+	}
+	if warm := pool.take(ctx, poolSpec, BillingAPI); warm == nil || warm.billing != BillingAPI {
+		t.Fatalf("expected another licence's grist to take the warm session on the key, got %+v", warm)
+	}
+	if warm := pool.take(ctx, poolSpec, BillingSubscription); warm == nil || warm.billing != BillingSubscription {
+		t.Fatalf("expected the Governor's grist to take the warm session on the subscription, got %+v", warm)
+	}
+}

@@ -91,9 +91,12 @@ func (v GristPoolView) Line() string {
 // with the grind's system prompt, model, effort and schema before its grist
 // comes, each in a private directory of its own, so a grist does not wait for
 // one to start. A session is taken by one grist, answers it and ends: it is
-// never given another, and the pool starts its replacement. A kind keeps as
-// many warm sessions as it has lately had grists in flight at once, at most
-// Slots, and none once it has had no grist for Quiet. A warm session older
+// never given another, and the pool starts its replacement. A kind's warm
+// sessions are started on the billing its grists are ground on, each billing
+// apart: the Governor's grists on his subscription, another licence's on the
+// API key (mw-gq6.1519). On each, a kind keeps as many warm sessions as it has
+// lately had grists on it in flight at once, at most Slots in all, and none
+// once it has had no grist for Quiet. A warm session older
 // than MaxAge, or started for a grind that has since changed, is retired
 // unused. It is safe for the grinds of a pass to use at once.
 type GristPool struct {
@@ -107,9 +110,9 @@ type GristPool struct {
 	// TempDir is where each warm session's private directory is made; empty
 	// is the system's.
 	TempDir string
-	// Credits, when set, decides what each warm session is started on, and the
-	// pool retires the ones started on the key when the key is spent. Nil
-	// starts every session on the subscription.
+	// Credits, when set, gives the key that warm sessions for grists billed to
+	// the key are started with; the pool retires those once the credits no
+	// longer let the key be used. Nil starts none on the key.
 	Credits *GristCredits
 	// Board, when set, is told what the pool holds whenever that changes, and
 	// at least every GristPoolHeartbeat while the pool is ticked.
@@ -128,10 +131,14 @@ type GristPool struct {
 	said    string
 }
 
-// gristPoolKey is an app and kind.
-type gristPoolKey struct{ app, kind string }
+// gristPoolKey is an app and kind, and the billing its warm sessions there
+// are started on: BillingSubscription or BillingAPI.
+type gristPoolKey struct{ app, kind, billing string }
 
-// gristPoolKind is what the pool holds for one app and kind.
+// poolBillings is every billing the pool keeps warm sessions on.
+var poolBillings = [...]string{BillingSubscription, BillingAPI}
+
+// gristPoolKind is what the pool holds for one app and kind on one billing.
 type gristPoolKind struct {
 	// spec is the grind the kind's last grist was ground with: what its warm
 	// sessions are started for.
@@ -196,21 +203,22 @@ func (p *GristPool) Configure(slots int, quiet, maxAge time.Duration) {
 	p.Slots, p.Quiet, p.MaxAge = slots, quiet, maxAge
 }
 
-// UseCredits sets what the pool starts its sessions on, as config [grist] says
-// it now; warm sessions started on another billing are retired by the next
-// grist or tick.
+// UseCredits sets the credits the pool starts sessions on the key with, as
+// config [grist] says them now; warm sessions on the key are retired by the
+// next tick once these credits no longer let the key be used.
 func (p *GristPool) UseCredits(c *GristCredits) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.Credits = c
 }
 
-// take is a warm session for a grist ground with spec, or nil when the pool
-// has none: the grist then starts its own, cold. Either way the grist counts
-// as the kind's demand and as busy until ended, and the pool starts what the
-// kind now wants. Warm sessions of the kind started for another spec (its
-// grind changed), or on another billing than billing (the key was spent since),
-// are retired unused. A nil pool takes nothing.
+// take is a warm session for a grist ground with spec and billed to billing,
+// or nil when the pool has none: the grist then starts its own, cold. Either
+// way the grist counts as the kind's demand on that billing and as busy until
+// ended, and the pool starts what the kind now wants on it. Warm sessions of
+// the kind on that billing started for another spec (its grind changed) are
+// retired unused; those on the other billing are left for its grists. A nil
+// pool takes nothing.
 func (p *GristPool) take(ctx context.Context, spec gristWarmSpec, billing string) *gristWarm {
 	if p == nil || p.Warmer == nil {
 		return nil
@@ -218,15 +226,8 @@ func (p *GristPool) take(ctx context.Context, spec gristWarmSpec, billing string
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
-	key := gristPoolKey{spec.app, spec.kind}
-	if p.kinds == nil {
-		p.kinds = map[gristPoolKey]*gristPoolKind{}
-	}
-	k := p.kinds[key]
-	if k == nil {
-		k = &gristPoolKind{}
-		p.kinds[key] = k
-	}
+	key := gristPoolKey{spec.app, spec.kind, billing}
+	k := p.kindOf(key)
 	k.spec, k.failed = spec, false
 	k.busy++
 	k.demand = append(k.demand, gristDemand{at: now, inFlight: k.busy})
@@ -234,7 +235,7 @@ func (p *GristPool) take(ctx context.Context, spec gristWarmSpec, billing string
 	kept := k.idle[:0]
 	for _, w := range k.idle {
 		switch {
-		case w.spec != spec || w.billing != billing || w.session.Exited() || p.aged(w, now):
+		case w.spec != spec || w.session.Exited() || p.aged(w, now):
 			p.retire(w)
 		case taken == nil:
 			taken = w
@@ -244,19 +245,34 @@ func (p *GristPool) take(ctx context.Context, spec gristWarmSpec, billing string
 	}
 	clear(k.idle[len(kept):])
 	k.idle = kept
-	p.fill(ctx, k, now)
+	p.fill(ctx, key, k, now)
 	p.save(ctx, now, false)
 	return taken
 }
 
-// ended is a grist taken with spec no longer busy. A nil pool does nothing.
-func (p *GristPool) ended(ctx context.Context, spec gristWarmSpec) {
+// kindOf is what the pool holds for key, made empty when it holds nothing.
+// p.mu is held.
+func (p *GristPool) kindOf(key gristPoolKey) *gristPoolKind {
+	if p.kinds == nil {
+		p.kinds = map[gristPoolKey]*gristPoolKind{}
+	}
+	k := p.kinds[key]
+	if k == nil {
+		k = &gristPoolKind{}
+		p.kinds[key] = k
+	}
+	return k
+}
+
+// ended is a grist taken with spec and billing no longer busy. A nil pool
+// does nothing.
+func (p *GristPool) ended(ctx context.Context, spec gristWarmSpec, billing string) {
 	if p == nil || p.Warmer == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if k := p.kinds[gristPoolKey{spec.app, spec.kind}]; k != nil && k.busy > 0 {
+	if k := p.kinds[gristPoolKey{spec.app, spec.kind, billing}]; k != nil && k.busy > 0 {
 		k.busy--
 	}
 	p.save(ctx, p.now(), false)
@@ -264,7 +280,8 @@ func (p *GristPool) ended(ctx context.Context, spec gristWarmSpec) {
 
 // Tick retires what the pool should no longer hold: every warm session of a
 // kind quiet for the spell, any past its age, any beyond what its kind now
-// wants, and any that ended on its own. It starts the replacements a kind
+// wants, any that ended on its own, and every one on the key once the credits
+// no longer let the key be used (unkey). It starts the replacements a kind
 // still wants, and saves the board when it is due.
 func (p *GristPool) Tick(ctx context.Context) {
 	if p == nil {
@@ -273,9 +290,10 @@ func (p *GristPool) Tick(ctx context.Context) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
-	billing := BillingSubscription
-	if len(p.kinds) > 0 {
-		billing = p.Credits.Choose(ctx).Billing
+	if p.keyed() {
+		if _, ok, _ := p.Credits.KeyOnly(ctx); !ok {
+			p.unkey(ctx, now)
+		}
 	}
 	for key, k := range p.kinds {
 		want := p.want(k, now)
@@ -285,7 +303,7 @@ func (p *GristPool) Tick(ctx context.Context) {
 			case w.session.Exited():
 				k.failed = true
 				p.retire(w)
-			case p.aged(w, now) || len(kept) >= want || w.billing != billing:
+			case p.aged(w, now) || len(kept) >= want:
 				p.retire(w)
 			default:
 				kept = append(kept, w)
@@ -293,7 +311,7 @@ func (p *GristPool) Tick(ctx context.Context) {
 		}
 		clear(k.idle[len(kept):])
 		k.idle = kept
-		p.fill(ctx, k, now)
+		p.fill(ctx, key, k, now)
 		if len(k.idle) == 0 && k.busy == 0 && len(k.demand) == 0 {
 			delete(p.kinds, key)
 		}
@@ -302,8 +320,8 @@ func (p *GristPool) Tick(ctx context.Context) {
 }
 
 // RetireKeyed retires every warm session started on the API key, as when the
-// key is found spent, and starts their replacements on what the credits now
-// choose. A nil pool does nothing.
+// key is found spent, and starts their replacements on the subscription
+// (unkey). A nil pool does nothing.
 func (p *GristPool) RetireKeyed(ctx context.Context) {
 	if p == nil || p.Warmer == nil {
 		return
@@ -311,20 +329,43 @@ func (p *GristPool) RetireKeyed(ctx context.Context) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
-	for _, k := range p.kinds {
-		kept := k.idle[:0]
-		for _, w := range k.idle {
-			if w.billing == BillingAPI {
-				p.retire(w)
-				continue
-			}
-			kept = append(kept, w)
-		}
-		clear(k.idle[len(kept):])
-		k.idle = kept
-		p.fill(ctx, k, now)
-	}
+	p.unkey(ctx, now)
 	p.save(ctx, now, false)
+}
+
+// keyed says the pool holds a kind on the API key. p.mu is held.
+func (p *GristPool) keyed() bool {
+	for key := range p.kinds {
+		if key.billing == BillingAPI {
+			return true
+		}
+	}
+	return false
+}
+
+// unkey retires every warm session on the API key, the key being no longer
+// usable, and hands each kind's demand on the key to the same kind on the
+// subscription, which starts their replacements: what is ground of it next
+// is the factory's own grist fallen back to the subscription, another
+// licence's being answered resting until the key may be used again. p.mu is
+// held.
+func (p *GristPool) unkey(ctx context.Context, now time.Time) {
+	for key, k := range p.kinds {
+		if key.billing != BillingAPI {
+			continue
+		}
+		for _, w := range k.idle {
+			p.retire(w)
+		}
+		subKey := gristPoolKey{key.app, key.kind, BillingSubscription}
+		sub := p.kindOf(subKey)
+		if sub.spec == (gristWarmSpec{}) {
+			sub.spec = k.spec
+		}
+		sub.demand = append(sub.demand, k.demand...)
+		k.idle, k.demand = nil, nil
+		p.fill(ctx, subKey, sub, now)
+	}
 }
 
 // Close retires every warm session, as when the follower stops or this host
@@ -357,11 +398,20 @@ func (p *GristPool) View() GristPoolView {
 	return GristPoolView{At: p.now(), Kinds: p.view()}
 }
 
-// view is what the pool holds, sorted. p.mu is held.
+// view is what the pool holds, by app and kind on every billing, sorted.
+// p.mu is held.
 func (p *GristPool) view() []GristPoolKind {
+	at := map[gristPoolKey]int{}
 	kinds := make([]GristPoolKind, 0, len(p.kinds))
 	for key, k := range p.kinds {
-		kinds = append(kinds, GristPoolKind{App: key.app, Kind: key.kind, Warm: len(k.idle), Busy: k.busy})
+		both := gristPoolKey{app: key.app, kind: key.kind}
+		i, seen := at[both]
+		if !seen {
+			i, at[both] = len(kinds), len(kinds)
+			kinds = append(kinds, GristPoolKind{App: key.app, Kind: key.kind})
+		}
+		kinds[i].Warm += len(k.idle)
+		kinds[i].Busy += k.busy
 	}
 	slices.SortFunc(kinds, func(a, b GristPoolKind) int {
 		return strings.Compare(a.App+"/"+a.Kind, b.App+"/"+b.Kind)
@@ -389,11 +439,24 @@ func (p *GristPool) want(k *gristPoolKind, now time.Time) int {
 	return max(0, min(most, p.Slots))
 }
 
-// fill starts warm sessions for k until it holds what it wants, stopping at
-// the first that cannot start. p.mu is held.
-func (p *GristPool) fill(ctx context.Context, k *gristPoolKind, now time.Time) {
-	for !k.failed && len(k.idle) < p.want(k, now) {
-		w, err := p.start(ctx, k.spec, now)
+// fill starts warm sessions for k, which the pool holds as key, until it
+// holds what it wants or its app and kind hold Slots on every billing,
+// stopping at the first that cannot start. A kind on the key starts none
+// while the credits do not let the key be used. p.mu is held.
+func (p *GristPool) fill(ctx context.Context, key gristPoolKey, k *gristPoolKind, now time.Time) {
+	room := func() bool { return !k.failed && len(k.idle) < p.want(k, now) && p.warm(key) < p.Slots }
+	if !room() {
+		return
+	}
+	billing := GristBilling{Billing: BillingSubscription}
+	if key.billing == BillingAPI {
+		var ok bool
+		if billing, ok, _ = p.Credits.KeyOnly(ctx); !ok {
+			return
+		}
+	}
+	for room() {
+		w, err := p.start(k.spec, billing, now)
 		if err != nil {
 			k.failed = true
 			p.say(fmt.Sprintf("mw grist pool: a warm session for %s %s could not start, so its grist starts cold: %v", k.spec.app, k.spec.kind, err))
@@ -403,9 +466,21 @@ func (p *GristPool) fill(ctx context.Context, k *gristPoolKind, now time.Time) {
 	}
 }
 
+// warm is how many warm sessions key's app and kind hold on every billing.
+// p.mu is held.
+func (p *GristPool) warm(key gristPoolKey) int {
+	n := 0
+	for _, billing := range poolBillings {
+		if k := p.kinds[gristPoolKey{key.app, key.kind, billing}]; k != nil {
+			n += len(k.idle)
+		}
+	}
+	return n
+}
+
 // start starts one warm session for spec in a private directory of its own,
-// on the API key when the credits choose it.
-func (p *GristPool) start(ctx context.Context, spec gristWarmSpec, now time.Time) (*gristWarm, error) {
+// on billing: with its key when it is the API key's.
+func (p *GristPool) start(spec gristWarmSpec, billing GristBilling, now time.Time) (*gristWarm, error) {
 	dir, err := os.MkdirTemp(p.TempDir, "mw-grist-")
 	if err != nil {
 		return nil, err
@@ -413,7 +488,6 @@ func (p *GristPool) start(ctx context.Context, spec gristWarmSpec, now time.Time
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	billing := p.Credits.Choose(ctx)
 	call := spec.call(dir)
 	call.APIKey = billing.Key()
 	session, err := p.Warmer.Warm(call)

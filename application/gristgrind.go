@@ -1235,7 +1235,7 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 		return
 	}
 	warm := g.Pool.take(ctx, spec, billing.Billing)
-	defer g.Pool.ended(ctx, spec)
+	defer g.Pool.ended(ctx, spec, billing.Billing)
 	dir := ""
 	if warm != nil {
 		dir = warm.dir
