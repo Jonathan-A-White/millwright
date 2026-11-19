@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,6 +103,10 @@ func newBdCmd() *cobra.Command {
 			"indeterminate) it waits and runs it again, for up to two minutes. A close or a comment that bd\n" +
 			"said was indeterminate is checked on the bead first, so that it is never written twice; a create is\n" +
 			"never run again. A command that still fails leaves with bd's status and says which fault it met.\n\n" +
+			"A bd list --parent <id> with --limit 0 (or -n 0, unbounded) of a parent with more than " + strconv.Itoa(application.BdBigParentChildren) + " children is refused,\n" +
+			"naming the bounded forms, and nothing is run: one such list stalled bd for every seat on the host for\n" +
+			"25 minutes (mw-gq6.1504, mw-gq6.994). List a page (--limit 50; bd's own default is 50) or read a map with\n" +
+			"mw brief <map>. A parent that cannot be counted is listed as before.\n\n" +
 			"A hold (bd update <id> --status deferred or blocked) of a story a Builder has claimed (in progress, or\n" +
 			"holding a live claim lease) is refused, naming the claimer, and nothing is written: it would leave that run\n" +
 			"held mid-work. " + application.BdOverClaimFlag + " \"<why>\" lets it land and writes the why on the bead as an " + application.OverClaimPrefix + "\n" +

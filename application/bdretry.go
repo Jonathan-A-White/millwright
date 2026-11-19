@@ -214,7 +214,7 @@ func (r BdRetry) Run(ctx context.Context, args []string) (int, error) {
 	}
 	defer release()
 	run, comments, refused := r.guardHold(ctx, args)
-	if refused {
+	if refused || r.guardBigParentList(ctx, args) {
 		return 1, nil
 	}
 	exit, err := r.attempt(ctx, run)

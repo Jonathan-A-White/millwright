@@ -73,3 +73,16 @@ with one `bd dep add`, trying a wait again after 3 s, 6 s and 12 s when the fail
 fault (`i/o timeout`, `invalid connection`); a wait that still fails is named in the error, which
 exits non-zero, and the finding stays filed and held. `mw file` still creates a plan's stories with
 `--deps` (a plan's waits are on its own stories, filed a moment before).
+
+## An unbounded `bd list --parent` of a big parent (mw-gq6.1504)
+
+`bd list --parent <epic> --all --limit 0` of a parent with over a thousand children hung one
+seat's bd for about 25 minutes on the Laptop (2026-11-18, pid 4091466, parent mw-5r3p30) and,
+with it, every `mw bd` and Builder step close behind the host's bd turn: the same class as
+mw-gq6.994, where `bd ready --parent` of that epic ran past the 10 s read deadline. `mw bd` now
+refuses the call when the parent has more than 500 children (`application.BdBigParentChildren`,
+under half of the 1070 of the evidence): it counts them with one `bd list --parent <id> --all
+--limit 501 --json`, runs nothing else, and prints the bounded forms: `mw bd list --parent <id>
+--all --limit 50`, or `mw brief <map>`. bd's own default limit is 50, so a list with no limit
+named is already bounded and runs as before; so does a small `--limit` and a small parent. A
+parent that cannot be counted (the server does not answer) is listed as before.

@@ -13,7 +13,7 @@ A seat is a role the factory fills with a fresh session each time. It has a **ch
 
 ## Clerks are not a seat
 
-A Clerk is a cheap helper (Sonnet at high effort) that a seat starts inside its own session for clerical work: many lookups, a bulk of comments, a long output reduced to an answer. It has no charter, no ledger and no memory of its own; it exists for one errand and its report. The seat that sent it owns the result: give the Clerk a numbered question list and a word limit, say what it may not touch, and check its report before relying on it. Anything deterministic is not a Clerk's work either: it belongs to `mw`, at no cost in tokens.
+A Clerk is a cheap helper (Sonnet at high effort) that a seat starts inside its own session for clerical work: many lookups, a bulk of comments, a long output reduced to an answer. It has no charter, no ledger and no memory of its own; it exists for one errand and its report. The seat that sent it owns the result: give the Clerk a numbered question list and a word limit, say what it may not touch, and check its report before relying on it. A Clerk that lists the children of a big parent (over 500) lists a page (`bd list --parent <id> --all --limit 50`) or reads a map with `mw brief <map>`, never `--limit 0`: an unbounded list stalls bd for every seat on the host, and `mw bd` refuses it. Anything deterministic is not a Clerk's work either: it belongs to `mw`, at no cost in tokens.
 
 ## Adapting these
 

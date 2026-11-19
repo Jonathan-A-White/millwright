@@ -180,3 +180,79 @@ func TestMwBdRefusesAHoldOfAClaimedStoryUnlessOverClaimWithAFakeBd(t *testing.T)
 		t.Errorf("the why should be written on the bead, ran %q", ran)
 	}
 }
+
+// mw-gq6.1504: an unbounded bd list of a big parent stalled bd for every seat on
+// the host, so mw bd refuses it and names the bounded form.
+
+// bdListWorld puts a fake bd behind mw bd that logs its arguments and, for a
+// list with --json, prints as many beads as the parent has children (up to the
+// limit it is given): "big" has 700, any other parent 3.
+func bdListWorld(t *testing.T) (log string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	log = filepath.Join(dir, "log")
+	script := filepath.Join(dir, "realbd")
+	body := "#!/bin/sh\n" +
+		"echo \"$*\" >> " + log + "\n" +
+		"case \"$*\" in *\" --json\"*)\n" +
+		"  n=3; case \"$*\" in *\"--parent big\"*) n=700;; esac\n" +
+		"  lim=0; prev=\"\"; for a in \"$@\"; do if [ \"$prev\" = \"--limit\" ]; then lim=$a; fi; prev=$a; done\n" +
+		"  if [ \"$lim\" -gt 0 ] && [ \"$lim\" -lt \"$n\" ]; then n=$lim; fi\n" +
+		"  printf '['; i=0; while [ $i -lt $n ]; do [ $i -gt 0 ] && printf ','; printf '{\"id\":\"b-%s\"}' $i; i=$((i+1)); done; printf ']\\n';;\n" +
+		"*) echo listed;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(bdRealEnv, script)
+	procs := apptest.NewFakeUserProcesses()
+	real := newBdQuiet
+	newBdQuiet = func() application.UserProcesses { return procs }
+	t.Cleanup(func() { newBdQuiet = real })
+	return log
+}
+
+func TestBdListOfABigParentWithNoLimitIsRefusedNamingTheBoundedForm(t *testing.T) {
+	for _, args := range [][]string{
+		{"bd", "list", "--parent", "big", "--all", "--limit", "0"},
+		{"bd", "list", "--parent=big", "--all", "-n", "0"},
+		{"bd", "-C", "/x", "list", "--all", "--parent", "big", "--limit=0"},
+	} {
+		log := bdListWorld(t)
+		out, err := runMw(t, args...)
+		if exit, ok := err.(*handedOffExit); !ok || exit.code != 1 {
+			t.Fatalf("%v: want exit 1, got %v\n%s", args, err, out)
+		}
+		for _, said := range []string{"big", "--limit", "mw brief"} {
+			if !strings.Contains(out, said) {
+				t.Errorf("%v: the refusal should say %q, it said %q", args, said, out)
+			}
+		}
+		ran, _ := os.ReadFile(log)
+		for _, line := range strings.Split(strings.TrimSpace(string(ran)), "\n") {
+			if strings.Contains(line, "list") && !strings.Contains(line, "--json") {
+				t.Errorf("%v: the unbounded list was run: %q", args, line)
+			}
+		}
+	}
+}
+
+func TestBdListWithASmallLimitOrOnASmallParentRunsAsBefore(t *testing.T) {
+	for _, args := range [][]string{
+		{"bd", "list", "--parent", "big", "--all", "--limit", "20"},
+		{"bd", "list", "--parent", "big", "--all"},
+		{"bd", "list", "--parent", "small", "--all", "--limit", "0"},
+		{"bd", "list", "--all", "--limit", "0"},
+	} {
+		log := bdListWorld(t)
+		out, err := runMw(t, args...)
+		if err != nil || !strings.Contains(out, "listed") {
+			t.Errorf("%v: want it run, got %v %q", args, err, out)
+		}
+		ran, _ := os.ReadFile(log)
+		if !strings.Contains(string(ran), strings.Join(args[1:], " ")+"\n") {
+			t.Errorf("%v: bd should have been given the list unchanged, ran %q", args, ran)
+		}
+	}
+}
