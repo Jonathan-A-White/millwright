@@ -481,3 +481,44 @@ func TestAPriorityOutsideZeroToFourIsRefusedByCheckAndByFilingAndNothingIsFiled(
 		}
 	}
 }
+
+// TestFileWarnsWhenABranchCannotBeJudged: a rig checked out here whose origin
+// cannot be read is warned of once, by rig and branch, on Err, for Run and for
+// Check; a rig not checked out here and one whose origin is read say nothing.
+func TestFileWarnsWhenABranchCannotBeJudged(t *testing.T) {
+	const warnLine = "WARN: branch=main was not checked against the origin of millwright: /rigs/millwright has no origin that can be read\n"
+	cases := []struct {
+		name string
+		rigs map[string]string
+		set  func(*apptest.FakeRigFiles)
+		want string
+	}{
+		{"an origin that cannot be read", map[string]string{"millwright": "/rigs/millwright"}, func(*apptest.FakeRigFiles) {}, warnLine},
+		{"an origin that is read", map[string]string{"millwright": "/rigs/millwright"}, func(r *apptest.FakeRigFiles) { r.AddOrigin("/rigs/millwright", "main", "main") }, ""},
+		{"a rig not checked out here", map[string]string{}, func(*apptest.FakeRigFiles) {}, ""},
+	}
+	for _, c := range cases {
+		for _, how := range []string{"Run", "Check"} {
+			t.Run(c.name+"/"+how, func(t *testing.T) {
+				tracker := apptest.NewFakeTracker()
+				tracker.AddFormula("tdd-feature")
+				rigFiles := apptest.NewFakeRigFiles()
+				c.set(rigFiles)
+				var errOut strings.Builder
+				f := application.File{Tracker: tracker, Rigs: c.rigs, RigFiles: rigFiles, Out: &strings.Builder{}, Err: &errOut}
+				var err error
+				if how == "Run" {
+					_, err = f.Run(context.Background(), twoStoryPlan())
+				} else {
+					err = f.Check(context.Background(), twoStoryPlan())
+				}
+				if err != nil {
+					t.Fatalf("%s: %v", how, err)
+				}
+				if got := errOut.String(); got != c.want {
+					t.Errorf("expected on Err %q, got %q", c.want, got)
+				}
+			})
+		}
+	}
+}
