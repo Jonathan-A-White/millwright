@@ -6,7 +6,8 @@ Feature: The mill bills the Governor's grists to his subscription, and every oth
   ANTHROPIC_API_KEY in its environment, cold or warm: in the environment alone,
   never in an argument, a log, an event or a line of the record, and with no
   subscription token beside it. Every line of the record says what its grind
-  was billed to: "api" or "subscription". Another licence's grist is never
+  was billed to: "api" or "subscription", or "none" for a grist that ran no
+  grind (mw-gq6.1520). Another licence's grist is never
   billed to the subscription (mw-gq6.1517): with api_credits off, no usable key
   file or a standing spent mark it is not ground, but refused, "The tutor is
   resting until the factory's credit is topped up; send it again later.", and
@@ -65,6 +66,7 @@ Feature: The mill bills the Governor's grists to his subscription, and every oth
     Then the mill answered 0, refused 1, failed 0, and left 0 waiting
     And no session was given a key
     And the answer says "refused" because "The tutor is resting until the factory's credit is topped up; send it again later."
+    And the mill's record holds one line, billed to "none"
 
   Scenario: A key file others can read is refused with a plain note, and another licence's grist rests
     Given api_credits is on, and the key file holds the key "sk-ant-test-key" at mode 0644
