@@ -17,11 +17,11 @@
 #   h. at 8 GB exactly, with no readable meminfo, or with MW_HEAVY_MEMORY_MAX
 #      set, it is 512M or the setting
 #
-# Then two checks that are not about the script's own behaviour: exactly three
+# Then two checks that are not about the script's own behaviour: exactly four
 # of contrib/systemd/*.service carry OOMScoreAdjust, and none of them is
 # mw-dispatch, mw-millhand-tick or mw-millhand-review (they can start a tmux
 # server); and systemd-analyze (or, where it is not installed, a stand-in that
-# checks the file parses as a unit file) accepts the three that do.
+# checks the file parses as a unit file) accepts the four that do.
 
 set -eu
 
@@ -218,25 +218,25 @@ OUT=$(PATH="$WITH_SR" MW_HEAVY_MEMINFO="$(meminfo 16777216)" MW_HEAVY_MEMORY_MAX
 printf '%s\n' "$OUT" | grep -Fq -- '-p MemoryMax=300M ' || fail "$NAME: the setting did not beat the half-of-MemTotal default: $OUT"
 echo "ok: $NAME"
 
-# --- f. exactly three units carry OOMScoreAdjust, and not the tmux-starting three
-NAME="OOMScoreAdjust is on exactly three units, none of them tmux-starting"
+# --- f. exactly four units carry OOMScoreAdjust, and not the tmux-starting three
+NAME="OOMScoreAdjust is on exactly four units, none of them tmux-starting"
 counts=$(grep -c 'OOMScoreAdjust' "$UNITDIR"/*.service || true)
 total=$(echo "$counts" | awk -F: '{sum += $2} END {print sum + 0}')
-[ "$total" = 3 ] || fail "$NAME: grep -c OOMScoreAdjust $UNITDIR/*.service totals $total, wanted 3:
+[ "$total" = 4 ] || fail "$NAME: grep -c OOMScoreAdjust $UNITDIR/*.service totals $total, wanted 4:
 $counts"
 for forbidden in mw-dispatch mw-millhand-tick mw-millhand-review; do
 	grep -q 'OOMScoreAdjust' "$UNITDIR/$forbidden.service" &&
 		fail "$NAME: $forbidden.service carries OOMScoreAdjust; it can start a tmux server"
 done
-for wanted in mw-mail-notify mw-health mw-doctor; do
+for wanted in mw-mail-notify mw-health mw-doctor mw-host-sweep; do
 	grep -q '^OOMScoreAdjust=500$' "$UNITDIR/$wanted.service" || fail "$NAME: $wanted.service lacks OOMScoreAdjust=500"
 	grep -q '^MemoryMax=' "$UNITDIR/$wanted.service" || fail "$NAME: $wanted.service lacks MemoryMax"
 done
 echo "ok: $NAME"
 
-# --- g. systemd accepts the three edited units --------------------------------
-NAME="systemd accepts the three edited units"
-EDITED="$UNITDIR/mw-mail-notify.service $UNITDIR/mw-health.service $UNITDIR/mw-doctor.service"
+# --- g. systemd accepts the four edited units --------------------------------
+NAME="systemd accepts the four edited units"
+EDITED="$UNITDIR/mw-mail-notify.service $UNITDIR/mw-health.service $UNITDIR/mw-doctor.service $UNITDIR/mw-host-sweep.service"
 if command -v systemd-analyze >/dev/null 2>&1; then
 	# shellcheck disable=SC2086
 	out=$(systemd-analyze --user verify $EDITED 2>&1) || true
@@ -266,4 +266,4 @@ $bad"
 fi
 echo "ok: $NAME"
 
-echo "OK: contrib/mw-heavy locks, caps, falls back and dry-runs as documented; the three edited units carry OOMScoreAdjust and MemoryMax and pass systemd's own check"
+echo "OK: contrib/mw-heavy locks, caps, falls back and dry-runs as documented; the four edited units carry OOMScoreAdjust and MemoryMax and pass systemd's own check"

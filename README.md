@@ -6480,15 +6480,16 @@ batch for calm (mw-gq6.483). `contrib/underload_test.go` proves the cap, the
 zero-loop case on a busy host, and each way the loops end.
 
 `OOMScoreAdjust=500` and `MemoryMax=384M` are also set directly on
-`mw-mail-notify.service`, `mw-health.service` and `mw-doctor.service`, so a
-memory squeeze on the host picks one of these ticks over the seat or the
-blog, and none of the three can itself run the host out of memory.
+`mw-mail-notify.service`, `mw-health.service`, `mw-doctor.service` and
+`mw-host-sweep.service`, so a memory squeeze on the host picks one of these
+ticks over the seat or the blog, and none of the four can itself run the host
+out of memory.
 `mw-dispatch.service`, `mw-millhand-tick.service` and
 `mw-millhand-review.service` carry neither: each can start the tmux server
 that holds Builder or Millhand sessions, and those sessions would inherit
 whatever cap and score the unit carried. `scripts/check-heavy.sh` (in `make
 lint`) proves the script's locking, capping, fallback and dry run against a
-stand-in `systemd-run` and a real `flock`, and that exactly these three units
+stand-in `systemd-run` and a real `flock`, and that exactly these four units
 carry `OOMScoreAdjust`.
 
 ## The Path
