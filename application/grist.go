@@ -476,8 +476,10 @@ type GrindLine struct {
 	ModelID string `json:"model_id,omitempty"`
 	Effort  string `json:"effort,omitempty"`
 	// Billing is what the grind was billed to: "api" (the key of [grist]
-	// api_credits) or "subscription". A line written before it was kept says
-	// nothing; a grist that ran no grind says "subscription".
+	// api_credits) or "subscription". A grist that ran no grind, a resting
+	// refusal among them, billed nothing and says "none" (BillingNone); a line
+	// written before it was kept says nothing, and one written before
+	// mw-gq6.1520 says "subscription" for a grist that ran no grind.
 	Billing string `json:"billing"`
 	// ModelFrom and EffortFrom say where Model and Effort came from: "grist"
 	// when the sender asked for them, "grind file" otherwise.

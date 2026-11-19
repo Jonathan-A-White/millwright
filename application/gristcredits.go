@@ -14,10 +14,13 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
-// What a grind is billed to, as GrindLine's billing says it.
+// What a grind is billed to, as GrindLine's billing says it. BillingNone is
+// a grist that ran no grind, so nothing was billed: a refusal before any
+// grind, a resting refusal among them (mw-gq6.1520).
 const (
 	BillingAPI          = "api"
 	BillingSubscription = "subscription"
+	BillingNone         = "none"
 )
 
 // GristCreditsRetry is how long after the spent mark was written the mill

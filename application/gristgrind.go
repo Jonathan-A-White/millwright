@@ -1640,7 +1640,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	line := GrindLine{
 		Time: now.UTC(), Txid: w.record.Txid, App: name.App, Kind: name.Kind, V: name.V,
 		Sender: w.sender, Model: w.model, ModelID: w.result.ModelID, Effort: w.effort, ModelFrom: w.modelFrom, EffortFrom: w.effortFrom,
-		Billing: cmp.Or(w.billing, BillingSubscription),
+		Billing: cmp.Or(w.billing, BillingNone),
 		Status:  w.status, Reason: w.reason, Photos: len(w.plain.Attachments),
 		Tokens: w.result.Fuel.Total(), CostUSD: w.result.CostUSD, Turns: w.result.Turns,
 		Denials: w.result.Denials, Seconds: now.Sub(w.started).Seconds(), Commit: w.commit,

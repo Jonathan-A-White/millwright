@@ -253,8 +253,9 @@ func TestAGristOnTheSubscriptionSaysSoAndCarriesNoKey(t *testing.T) {
 	}
 }
 
-// A grist refused before any grind ran still says what it was billed to.
-func TestARefusedGristSaysSubscription(t *testing.T) {
+// A grist refused before any grind ran still says what it was billed to:
+// nothing, "none" (mw-gq6.1520; before it, "subscription").
+func TestARefusedGristSaysNone(t *testing.T) {
 	mill, _, grinder, _, _, _ := creditMill(t, application.SessionResult{})
 	mill.Ceilings.Models = []string{"opus"}
 	if _, err := mill.Run(context.Background()); err != nil {
@@ -263,8 +264,8 @@ func TestARefusedGristSaysSubscription(t *testing.T) {
 	if len(grinder.keys()) != 0 {
 		t.Fatalf("expected no grind, got %q", grinder.keys())
 	}
-	if line := lineOf(t, mill); line.Status != application.GristRefused || line.Billing != application.BillingSubscription {
-		t.Fatalf("expected a refused line billed to subscription, got %+v", line)
+	if line := lineOf(t, mill); line.Status != application.GristRefused || line.Billing != application.BillingNone {
+		t.Fatalf("expected a refused line billed to none, got %+v", line)
 	}
 }
 
@@ -793,4 +794,37 @@ func TestCreditsReportSplitsTheMonthByTheGovernorAndOthers(t *testing.T) {
 			t.Errorf("expected the report to say %q, got:\n%s", want, text)
 		}
 	}
+}
+
+// A grist that ran no grind billed nothing, so its line says "none", not
+// "subscription": a resting refusal of another licence's grist, whether its
+// grist names a talk or not, and the key it was never ground on is not named
+// either (mw-gq6.1520).
+func TestARestingRefusalIsRecordedAsNotBilled(t *testing.T) {
+	t.Run("a grist", func(t *testing.T) {
+		mill, _, grinder, credits, _, _ := creditMill(t, application.SessionResult{})
+		credits.On = false
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(grinder.calls) != 0 {
+			t.Fatalf("expected no grind, got %q", grinder.keys())
+		}
+		if line := lineOf(t, mill); line.Reason != application.GristReasonResting || line.Billing != application.BillingNone {
+			t.Fatalf("expected a resting line billed to none, got billing %q in %+v", line.Billing, line)
+		}
+	})
+	t.Run("a talk's grist", func(t *testing.T) {
+		mill, _, grinder, state := talkCreditMill(t, application.SessionResult{})
+		state.Set(application.GristCreditMark{SpentAt: creditsNow.Add(-time.Hour)})
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(grinder.calls) != 0 {
+			t.Fatalf("expected no grind, got %q", grinder.keys())
+		}
+		if line := lineOf(t, mill); line.Reason != application.GristReasonResting || line.Billing != application.BillingNone {
+			t.Fatalf("expected a resting line billed to none, got billing %q in %+v", line.Billing, line)
+		}
+	})
 }
