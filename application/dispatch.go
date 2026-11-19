@@ -2696,7 +2696,7 @@ func (d Dispatch) reclaimDeadPaneNow(ctx context.Context, detail StoryDetail, re
 		}
 	}
 
-	reclaimed, err = d.Tracker.ReclaimStory(ctx, id)
+	reclaimed, err = d.reclaimRead(ctx, id)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: its session %s has a dead pane or none, but whether its lease had run out could not be read: %v", id, name, err))
@@ -3085,7 +3085,7 @@ func (d Dispatch) releaseHeld(ctx context.Context, id string, why error) (bool, 
 	if status.Running() {
 		return d.release(ctx, id, why)
 	}
-	if err := d.Tracker.HoldClaimHeldBy(giveBack, id, ""); err != nil {
+	if err := d.giveBackRead(giveBack, id, StatusHeld, func(ctx context.Context) error { return d.Tracker.HoldClaimHeldBy(ctx, id, "") }); err != nil {
 		return false, fmt.Errorf("%w (and the claim could not be given back either: %v — %s is claimed, held, with no session, and needs releasing by hand)", why, err, id)
 	}
 	d.print(fmt.Sprintf("  gave back %s, held: %v\n", id, why))

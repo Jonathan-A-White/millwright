@@ -4078,17 +4078,7 @@ func (n Next) giveBackIfNeverStarted(ctx context.Context, detail StoryDetail, re
 // can, and counts as given back rather than as a second failure.
 func (n Next) releaseOnStop(ctx context.Context, id string, report *NextReport) error {
 	return writeRetrying(ctx, n, report, "the give-back of the claim on "+id, func() error {
-		err := n.Tracker.ReleaseClaim(ctx, id)
-		if err == nil {
-			return nil
-		}
-		if _, passing := Faulted(err); passing {
-			return err
-		}
-		if detail, readErr := n.Tracker.ShowStory(ctx, id); readErr == nil && detail.Status == StatusOpen && detail.Assignee == "" {
-			return nil
-		}
-		return err
+		return givenBackAs(ctx, n.Tracker, id, StatusOpen, n.Tracker.ReleaseClaim(ctx, id))
 	})
 }
 
@@ -4097,17 +4087,7 @@ func (n Next) releaseOnStop(ctx context.Context, id string, report *NextReport) 
 // left held and unclaimed is held all the same.
 func (n Next) holdOnStop(ctx context.Context, id, holder string, report *NextReport) error {
 	return writeRetrying(ctx, n, report, "the hold of "+id, func() error {
-		err := n.Tracker.HoldClaimHeldBy(ctx, id, holder)
-		if err == nil {
-			return nil
-		}
-		if _, passing := Faulted(err); passing {
-			return err
-		}
-		if detail, readErr := n.Tracker.ShowStory(ctx, id); readErr == nil && detail.Status == StatusHeld && detail.Assignee == "" {
-			return nil
-		}
-		return err
+		return givenBackAs(ctx, n.Tracker, id, StatusHeld, n.Tracker.HoldClaimHeldBy(ctx, id, holder))
 	})
 }
 

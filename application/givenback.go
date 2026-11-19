@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,16 @@ const (
 // made, pause its length.
 func giveBackClaim(ctx context.Context, tracker WorkTracker, id string, release func(context.Context) error,
 	wait func(context.Context, time.Duration) error, pause time.Duration) error {
+	return giveBackClaimTo(ctx, tracker, id, StatusOpen, release, wait, pause)
+}
+
+// giveBackClaimTo is giveBackClaim for a give-back that leaves the story in the
+// status named: StatusHeld for one that keeps the Mayor's hold, StatusOpen
+// otherwise. A write that bd reported done and that did not take is a failed
+// give-back, and what is said of the claim on the story waits for it to read
+// as it should (mw-gq6.1493, as mw retry's giveBackTo, mw-gq6.1465).
+func giveBackClaimTo(ctx context.Context, tracker WorkTracker, id, status string, release func(context.Context) error,
+	wait func(context.Context, time.Duration) error, pause time.Duration) error {
 	var last error
 	for try := 1; try <= GiveBackTries; try++ {
 		if try > 1 {
@@ -37,11 +48,35 @@ func giveBackClaim(ctx context.Context, tracker WorkTracker, id string, release 
 		switch {
 		case err != nil:
 			last = fmt.Errorf("the give-back was accepted, but reading %s back failed: %w", id, err)
-		case detail.Status != StatusOpen || detail.Assignee != "":
+		case !strings.EqualFold(strings.TrimSpace(detail.Status), status) || detail.Assignee != "":
 			last = fmt.Errorf("the give-back was accepted, but %s still reads %s, held by %q", id, detail.Status, detail.Assignee)
 		default:
 			return nil
 		}
 	}
 	return fmt.Errorf("%w (after %d tries)", last, GiveBackTries)
+}
+
+// givenBackAs is the outcome of one give-back write, err its error, judged by
+// the story: nil when the story reads status and unclaimed, whatever err said (a
+// try that failed and left it so did land, as a write on a connection that
+// dropped can); a passing fault of the beads server is err as it was, to be
+// tried again; and a write that returned nil with the story unchanged is an
+// error, since only the story's own state says a claim was given back
+// (mw-gq6.1493).
+func givenBackAs(ctx context.Context, tracker WorkTracker, id, status string, err error) error {
+	if _, passing := Faulted(err); passing {
+		return err
+	}
+	detail, readErr := tracker.ShowStory(ctx, id)
+	switch {
+	case readErr == nil && strings.EqualFold(strings.TrimSpace(detail.Status), status) && detail.Assignee == "":
+		return nil
+	case err != nil:
+		return err
+	case readErr != nil:
+		return fmt.Errorf("the give-back was accepted, but reading %s back failed: %w", id, readErr)
+	default:
+		return fmt.Errorf("the give-back was accepted, but %s still reads %s, held by %q", id, detail.Status, detail.Assignee)
+	}
 }

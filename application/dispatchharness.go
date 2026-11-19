@@ -39,7 +39,8 @@ func (d Dispatch) retryHarnessStop(ctx context.Context, detail StoryDetail, name
 		return false
 	}
 	d.clearHarnessStopLabels(ctx, detail, report)
-	if err := d.Tracker.ReleaseClaimHeldBy(ctx, id, detail.Assignee); err != nil {
+	holder := detail.Assignee
+	if err := d.giveBackRead(ctx, id, StatusOpen, func(ctx context.Context) error { return d.Tracker.ReleaseClaimHeldBy(ctx, id, holder) }); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: the harness stopped it (%s) and the time it named has come, but its claim could not be given back, so it is held: %v", id, stop.Reason, err))
 		return false
