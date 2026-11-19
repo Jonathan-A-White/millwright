@@ -470,6 +470,8 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		branch:   StoryBranch(storyID),
 		target:   path.Branch,
 	}
+	// Every test-runner ticket the check takes names the story (mw-gq6.1491).
+	ctx = WithTestRunFor(ctx, storyID)
 	// A part prints its own report: none of the whole check's verdict.
 	if k.Part != 0 {
 		return k.checkPart(ctx, report, c)
