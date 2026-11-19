@@ -76,3 +76,45 @@ func TestDampersNamesAWSLHostMissingAnInstall(t *testing.T) {
 		}
 	})
 }
+
+// mw-gq6.1496: a WSL host whose doctor never left a verdict was named by no
+// alarm, so a host whose doctor never ran was as silent as before. A host with
+// no doctor note is one standing alarm, by host, until a report is left.
+func TestDampersNamesAWSLHostWithNoDoctorReport(t *testing.T) {
+	t.Run("a host that never left a verdict is named", func(t *testing.T) {
+		tracker := aTrackerPathedToVPS(t)
+		storyOn(t, tracker, "mw-gq6.9", "A story", "desktop")
+		syncedAt(t, tracker, "desktop", time.Minute)
+		var found []application.DamperAlarm
+		for _, alarm := range otherHostStatus(t, tracker).Dampers.Alarms {
+			if strings.Contains(alarm.Text, "desktop:") {
+				found = append(found, alarm)
+			}
+		}
+		if len(found) != 1 || !strings.Contains(found[0].Text, "no doctor report") || found[0].Principle != application.DamperDoctor {
+			t.Fatalf("expected one doctor alarm saying desktop has no doctor report, got %+v", found)
+		}
+	})
+
+	t.Run("a host that has left a verdict, ok, is not named", func(t *testing.T) {
+		if alarms := installAlarmsOf(t, "desktop", application.DoctorVerdict{At: statusNow.Add(-time.Hour)}); len(alarms) != 0 {
+			t.Fatalf("expected nothing from an ok report, got %+v", alarms)
+		}
+	})
+
+	t.Run("a retired host is not named", func(t *testing.T) {
+		w := application.HostWork{Host: "desktop", Retired: true}
+		if alarms := w.DoctorAlarms(); len(alarms) != 0 {
+			t.Fatalf("expected nothing for a retired host, got %+v", alarms)
+		}
+	})
+}
+
+// A host that has never synced is already said to be asleep, never synced:
+// its missing doctor report is no second alarm.
+func TestDampersNamesNoDoctorReportOfAHostThatNeverSynced(t *testing.T) {
+	w := application.HostWork{Host: "desktop"}
+	if alarms := w.DoctorAlarms(); len(alarms) != 0 {
+		t.Fatalf("expected nothing for a host that never synced, got %+v", alarms)
+	}
+}
