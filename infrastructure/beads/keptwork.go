@@ -429,7 +429,8 @@ func (g *Gateway) moleculesOverConnection(ctx context.Context, rootIDs []string)
 }
 
 // graphWhere is the beads BeadGraph reads, as its bd list leaves out mail,
-// events and molecules.
+// events and molecules. Its edges are read from the dependencies alone and
+// readGraph keeps those of the beads it holds (mw-gq6.1445).
 const graphWhere = "i.issue_type not in ('mail', 'event', 'molecule')"
 
 const (
@@ -437,7 +438,7 @@ const (
 	graphLabelsQuery = "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + graphWhere +
 		" order by l.issue_id, l.label"
 	graphEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id, d.type" +
-		" from dependencies d join issues i on i.id = d.issue_id where " + graphWhere + " order by d.issue_id, d.created_at"
+		" from dependencies d"
 )
 
 // graphOverConnection is BeadGraph over the kept connection, in three narrow

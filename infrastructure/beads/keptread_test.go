@@ -128,9 +128,12 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 			{"t-9", "Landed", "task", "2026-10-02 09:00:00", "Done", `{"rig":"millwright","host":"laptop"}`},
 			{"t-8", "Replaced", "bug", "2026-10-02 08:00:00", nil, nil},
 		}}, nil
-	case strings.Contains(q, "i.status = 'closed'") && strings.Contains(q, "from dependencies d"):
+	case strings.Contains(q, "'supersedes'") && strings.Contains(q, "from dependencies d"):
+		// Every parent-child and supersedes edge there is, as the server answers
+		// a read with no join: the edge of a bead that is not closed is read and
+		// left out by the caller.
 		return &keptRows{cols: []string{"issue_id", "depends_on_id", "type"}, rows: [][]driver.Value{
-			{"t-9", "t-1", "parent-child"}, {"t-8", "t-9", "supersedes"},
+			{"t-1.1", "t-1", "parent-child"}, {"t-9", "t-1", "parent-child"}, {"t-8", "t-9", "supersedes"},
 		}}, nil
 	case strings.Contains(q, "hitl:todo"):
 		return &keptRows{cols: []string{"id", "metadata"}, rows: [][]driver.Value{
@@ -481,6 +484,9 @@ func TestAListingOverTheKeptConnectionLeavesMailAndEventsOutOfItsThreeQueries(t 
 			t.Fatalf("expected one %s query, got %d", name, len(sent))
 		}
 		lowered := strings.ToLower(sent[0])
+		if name == "edges" {
+			continue // read whole and kept to the listed beads in Go: see TestTheEdgesOfAListingAreReadWithNoJoinOnTheBeads
+		}
 		where := lowered[strings.Index(lowered, " where ")+1:]
 		if !strings.Contains(where, "'mail'") || !strings.Contains(where, "'event'") {
 			t.Errorf("expected the %s query to name mail and event in its where, got %q", name, sent[0])
@@ -677,5 +683,69 @@ func TestClosedStoriesAreReadByBdWhenTheKeptConnectionFails(t *testing.T) {
 	}
 	if got := bdsStarted(t, asked); got != 1 {
 		t.Errorf("expected one bd, got %d", got)
+	}
+}
+
+// mw-gq6.1445: a join of the dependencies with the beads on the listing's
+// condition took 0.8 to 1.1 s of the server's time at load 12 and over, in the
+// listing of every bead and in the bead graph, and so did sorting them (the
+// plain read takes 0.15 s). The edges are read from the dependencies alone,
+// unsorted, and the beads the listing holds pick theirs out in Go, so an edge of
+// a mail or an event bead is dropped there.
+func TestTheEdgesOfAListingAreReadWithNoJoinOnTheBeads(t *testing.T) {
+	s := &keptServer{}
+	s.mailed.Store(true)
+	program, _ := standInSnapshotProgram(t, bdListing, bdTable)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
+
+	tracker, err := g.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.BeadGraph(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, _, edges := s.listingQueries()
+	if len(edges) == 0 {
+		t.Fatal("expected the edges to be read")
+	}
+	for _, q := range edges {
+		if l := strings.ToLower(q); strings.Contains(l, "join") || strings.Contains(l, "order by") {
+			t.Errorf("expected the edges to be read from the dependencies alone, unsorted, got %q", q)
+		}
+	}
+	if tracker == nil {
+		t.Fatal("expected a snapshot")
+	}
+}
+
+// mw-gq6.1445: the closed stories' edges were a join of the dependencies with
+// the closed beads, 0.9 to 1.0 s of the server at load 12 and over. They are read
+// from the dependencies alone, and the closed stories held pick theirs out in Go.
+func TestTheEdgesOfTheClosedStoriesAreReadWithNoJoinOnTheBeads(t *testing.T) {
+	s := &keptServer{}
+	program, _ := standInSnapshotProgram(t, bdListing, bdTable)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(s.open(t)))
+
+	closed, err := g.ClosedStories(context.Background(), time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(closed) != 2 || closed[0].EpicID != "t-1" || !closed[1].Superseded {
+		t.Errorf("expected the two closed stories with their edges, got %+v", closed)
+	}
+	read := 0
+	for _, q := range s.asked() {
+		l := strings.ToLower(q)
+		if !strings.Contains(l, "from dependencies") {
+			continue
+		}
+		read++
+		if strings.Contains(l, "join") {
+			t.Errorf("expected the edges to be read from the dependencies alone, got %q", q)
+		}
+	}
+	if read != 1 {
+		t.Errorf("expected one read of the edges, got %d", read)
 	}
 }

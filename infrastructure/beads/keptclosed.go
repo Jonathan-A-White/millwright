@@ -15,15 +15,16 @@ import (
 // two edges a ClosedStory reads, the epic a bead hangs from and the bead it
 // supersedes. A bd list of the fortnight's closed beads was 3 to 8 s on a loaded
 // laptop, nearly all of it bd starting and printing 20,000 beads whole
-// (mw-gq6.1286).
+// (mw-gq6.1286). The edges are read from the dependencies alone and readClosed
+// keeps those of the closed stories it holds: a join with the closed condition
+// took 0.9 to 1.0 s of the server at load 12 and over (mw-gq6.1445).
 const (
 	closedWhere = "i.status = 'closed' and i.issue_type not in ('epic', 'mail', 'event') and i.closed_at >= ?"
 
 	closedStoriesQuery = "select i.id as id, i.title as title, i.issue_type as issue_type, i.closed_at as closed_at," +
 		" i.close_reason as close_reason, i.metadata as metadata from issues i where " + closedWhere
 	closedEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external), d.type" +
-		" from dependencies d join issues i on i.id = d.issue_id where " + closedWhere +
-		" and d.type in ('parent-child', 'supersedes')"
+		" from dependencies d where d.type in ('parent-child', 'supersedes')"
 )
 
 // closedOverConnection is ClosedStories read over the kept connection in two
@@ -72,7 +73,7 @@ func readClosed(ctx context.Context, db *sql.DB, since time.Time) ([]application
 	}
 	rows.Close()
 
-	edges, err := db.QueryContext(bounded, closedEdgesQuery, from)
+	edges, err := db.QueryContext(bounded, closedEdgesQuery)
 	if err != nil {
 		return nil, err
 	}
