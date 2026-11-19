@@ -172,3 +172,38 @@ func TestEveryWorkerACheckStartsIsKeptToNoCall(t *testing.T) {
 		}
 	}
 }
+
+// A part's worker outlives the call that started it, so the queue's place that
+// a foreground check keeps for the Builder's next call is no use to it: a worker
+// whose slot wait runs out keeps no place, as a whole check given --wait does,
+// and ends with the wait limit reached, not a line telling a Builder to run the
+// same command again (mw-gq6.1508). Every worker's own arguments are run, a
+// whole check's workers having no place kept already.
+func TestAPartWorkerKeepsNoPlaceInTheQueue(t *testing.T) {
+	call := application.CheckCallLimitsFor("")
+	keepOf := func(args []string) time.Duration {
+		t.Helper()
+		cmd := newCheckCmd()
+		if err := cmd.ParseFlags(args); err != nil {
+			t.Fatal(err)
+		}
+		part, _ := cmd.Flags().GetInt("part")
+		_, _, keep := checkWaitLimit(cmd, part, call)
+		return keep
+	}
+	for _, c := range []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{"a part in the foreground", []string{"check", "mw-x.1", "--part", "2"}, application.CheckKeepPlace},
+		{"a part's worker that takes the slot", partProcess{}.args("mw-x.1", 2, true), 0},
+		{"a part's worker that takes no slot", partProcess{}.args("mw-x.1", 2, false), 0},
+		{"the specs' worker", specsProcess{}.args("mw-x.1"), 0},
+		{"the gate's worker", gateProcess{}.args("mw-x.1"), 0},
+	} {
+		if got := keepOf(c.args); got != c.want {
+			t.Errorf("%s (%v): expected a place kept %s, got %s", c.name, c.args, c.want, got)
+		}
+	}
+}

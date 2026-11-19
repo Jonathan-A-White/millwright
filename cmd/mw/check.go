@@ -291,6 +291,11 @@ func checkWaitLimit(cmd *cobra.Command, part int, call application.CheckCallLimi
 	if part == 0 && given {
 		return limit, true, 0
 	}
+	// A part's worker outlives the call, so no Builder's next call is there to
+	// take a place kept for it up: it keeps none (mw-gq6.1508).
+	if worker, _ := cmd.Flags().GetBool("part-worker"); worker {
+		return limit, false, 0
+	}
 	return limit, false, call.Keep
 }
 
