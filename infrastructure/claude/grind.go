@@ -130,6 +130,11 @@ func NewGrinder(opts ...GrinderOption) *Grinder {
 // it is set the session is billed to that key, else to the login.
 const APIKeyEnv = "ANTHROPIC_API_KEY"
 
+// OAuthTokenEnv is the variable Claude Code reads the subscription's
+// long-lived token from (claude setup-token), which a host's claude env file
+// sets.
+const OAuthTokenEnv = "CLAUDE_CODE_OAUTH_TOKEN"
+
 // CacheTTLEnv is the variable Claude Code reads its prompt cache's life from:
 // a talk's session sets it to application.GristTalkCacheTTL.
 const CacheTTLEnv = "CLAUDE_CODE_PROMPT_CACHE_TTL"
@@ -137,13 +142,16 @@ const CacheTTLEnv = "CLAUDE_CODE_PROMPT_CACHE_TTL"
 // GrindEnv is the environment a grind's session runs in: environ without any
 // ANTHROPIC_API_KEY, so the subscription login is used, and with the call's
 // key when it carries one. The key travels here and nowhere else: never in the
-// argument list. A talk's session (a call with a SessionID or a Resume) runs
+// argument list. A call that carries a key runs without the subscription's
+// token (OAuthTokenEnv) too, so a grind billed to the key can never be billed
+// to the subscription instead (mw-gq6.1517). A talk's session (a call with a SessionID or a Resume) runs
 // with the one-hour prompt cache, CacheTTLEnv in place of any environ had.
 func GrindEnv(environ []string, call application.GrindCall) []string {
 	talk := call.SessionID != "" || call.Resume != ""
 	env := make([]string, 0, len(environ)+2)
 	for _, entry := range environ {
-		if strings.HasPrefix(entry, APIKeyEnv+"=") || talk && strings.HasPrefix(entry, CacheTTLEnv+"=") {
+		if strings.HasPrefix(entry, APIKeyEnv+"=") || talk && strings.HasPrefix(entry, CacheTTLEnv+"=") ||
+			call.APIKey != "" && strings.HasPrefix(entry, OAuthTokenEnv+"=") {
 			continue
 		}
 		env = append(env, entry)
