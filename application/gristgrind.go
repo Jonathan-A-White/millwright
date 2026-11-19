@@ -46,6 +46,11 @@ const (
 	// the blob announced or not sealed by the grist's sender.
 	GristReasonOverrideForged = "The grind text this grist brings is not the blob the grist announced."
 	GristReasonOverrideLost   = "The grind text this grist brings could not be fetched; send it again."
+	// GristReasonResting is for a grist of a licence not the Governor's while
+	// the factory's API credit cannot be used: such a grist is billed to the
+	// credit alone, never to the Governor's subscription (mw-gq6.1517). It is
+	// no use of the key's day.
+	GristReasonResting = "The tutor is resting until the factory's credit is topped up; send it again later."
 
 	// gristReasonDailyStart and gristReasonDailyEnd are the words round the
 	// limit in GristReasonDaily's reason.
@@ -267,6 +272,10 @@ type gristWork struct {
 	// testKey is set when the grist was sealed by the mill's test key alone; the
 	// daily limit is lifted for it and for no one who merely names a smoke talk.
 	testKey bool
+	// governor is set when the grist was sealed by the Governor's key: his
+	// grists are billed to his subscription, everyone else's to the API
+	// credit alone (gristBilling).
+	governor bool
 	// model and effort are what the grind runs on: the grist's own when it
 	// asks, else the grind file's; modelFrom and effortFrom say which.
 	model, effort         string
@@ -313,6 +322,10 @@ type gristWork struct {
 	// billing is what the grind was billed to ("api" or "subscription"); empty
 	// when no grind ran.
 	billing string
+	// resting is set when a grind of another licence's grist on the key found
+	// the credit spent or the key refused: it is answered resting, not run
+	// again on the subscription.
+	resting bool
 	// talkWait is closed when the grist's turn in its talk has come, and
 	// talkLeave gives the turn to the talk's next grist; talk is the turn as it
 	// ran, nil for a grist with no talk or a session that gave no result.
@@ -684,6 +697,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	// The answer goes to whoever sealed the grist: only they can read it.
 	w.to, w.sender = envelopeFrom, KeyFingerprint(envelopeFrom)
 	w.testKey = g.TestKey != "" && envelopeFrom == g.TestKey
+	w.governor = g.GovernorKey != "" && envelopeFrom == g.GovernorKey
 	w.factory = w.testKey
 	_, w.verified, _ = posternVerifySender(envelopeFrom, r.From, r.Signer)
 	if !w.verified {
@@ -720,7 +734,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 			return
 		}
 	}
-	if !slices.Contains(r.SignerApps, name.App) && !(g.GovernorKey != "" && envelopeFrom == g.GovernorKey) {
+	if !slices.Contains(r.SignerApps, name.App) && !w.governor {
 		w.settle(GristRefused, GristReasonLicence)
 		return
 	}
@@ -731,7 +745,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		// A self-registered person's device keys share one day at the person's
 		// own cap; the Governor's keys keep the home's setting (mw-cvwm1u.6).
 		limit, senders := ceilings.DailyLimit, []string{w.sender}
-		if g.Persons != nil && !(g.GovernorKey != "" && envelopeFrom == g.GovernorKey) {
+		if g.Persons != nil && !w.governor {
 			limit, senders = g.dailyCap(ctx, envelopeFrom, w.sender, limit)
 		}
 		if sentToday(lines, senders, g.now()) >= limit {
@@ -1144,7 +1158,8 @@ func sentToday(lines []GrindLine, senders []string, now time.Time) int {
 	y, m, d := now.UTC().Date()
 	sent := 0
 	for _, line := range lines {
-		if !slices.Contains(senders, line.Sender) || IsGristReasonLimited(line.Reason) || isGristReasonMillFault(line.Reason) {
+		if !slices.Contains(senders, line.Sender) || IsGristReasonLimited(line.Reason) || isGristReasonMillFault(line.Reason) ||
+			line.Reason == GristReasonResting {
 			continue
 		}
 		if ly, lm, ld := line.Time.UTC().Date(); ly == y && lm == m && ld == d {
@@ -1215,9 +1230,9 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 		return
 	}
 	spec := w.warmSpec(g.Ceilings.filled().Timeout)
-	billing := g.Credits.Choose(ctx)
-	if billing.Note != "" {
-		w.notes = append(w.notes, billing.Note)
+	billing, ok := g.gristBilling(ctx, w)
+	if !ok {
+		return
 	}
 	warm := g.Pool.take(ctx, spec, billing.Billing)
 	defer g.Pool.ended(ctx, spec)
@@ -1255,6 +1270,10 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	if w.billing == BillingAPI {
 		result, err = g.billed(ctx, w, call, billing, result, err)
 	}
+	if w.resting {
+		g.rest(ctx, w, result)
+		return
+	}
 	w.answered = g.now()
 	w.result = result
 	w.harnessOK = err == nil
@@ -1267,12 +1286,55 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	g.keepRun(ctx, w)
 }
 
+// gristBilling is what w's grind is billed to (mw-gq6.1517): the Governor's
+// own grist to his subscription, whatever the credits say; the factory's test
+// key's as the factory's own (GristCredits.Choose: the key while it has
+// credit, else the subscription); and any other licence's to the API credit
+// alone (GristCredits.KeyOnly). Another licence's grist the credit cannot pay
+// for is settled refused, GristReasonResting, and ok is false: it is not
+// ground, and nothing of it reaches the subscription.
+func (g GristGrind) gristBilling(ctx context.Context, w *gristWork) (billing GristBilling, ok bool) {
+	switch {
+	case w.governor:
+		return GristBilling{Billing: BillingSubscription}, true
+	case w.testKey:
+		billing = g.Credits.Choose(ctx)
+		if billing.Note != "" {
+			w.notes = append(w.notes, billing.Note)
+		}
+		return billing, true
+	}
+	billing, ok, why := g.Credits.KeyOnly(ctx)
+	if !ok {
+		w.notes = append(w.notes, fmt.Sprintf("%s was not ground: it is not the Governor's, so it is billed to the API credit alone, and %s", shortTxid(w.record.Txid), why))
+		w.settle(GristRefused, GristReasonResting)
+	}
+	return billing, ok
+}
+
+// fallsBack says a grind of w's billed to the key may run again on the
+// subscription when the key fails: only the factory's own, the test key's.
+func (w *gristWork) fallsBack() bool {
+	return w.testKey && !w.governor
+}
+
+// rest settles w, whose grind on the key found the credit spent or the key
+// refused, as refused resting, with what that grind said kept in its record.
+func (g GristGrind) rest(ctx context.Context, w *gristWork, result SessionResult) {
+	w.answered = g.now()
+	w.result = result
+	w.settle(GristRefused, GristReasonResting)
+	g.keepRun(ctx, w)
+}
+
 // billed settles a grind that was billed to the API key. A grind the key's
-// credit or the key itself failed (CreditFailureOf) writes the spent mark,
-// retires the warm sessions started on the key and runs the same grist again at
-// once on the subscription: the grist is one line of the record, so it counts
-// once against the day. A grind that got through on a key tried again after the
-// mark clears the mark.
+// credit or the key itself failed (CreditFailureOf) writes the spent mark and
+// retires the warm sessions started on the key. The factory's own grist
+// (fallsBack) then runs again at once on the subscription: the grist is one
+// line of the record, so it counts once against the day. Any other licence's
+// is not run again: w.resting is set, and its caller answers it resting
+// (mw-gq6.1517). A grind that got through on a key tried again after the mark
+// clears the mark.
 func (g GristGrind) billed(ctx context.Context, w *gristWork, call GrindCall, billing GristBilling, result SessionResult, err error) (SessionResult, error) {
 	why := CreditFailureOf(result, err)
 	if why == "" {
@@ -1291,6 +1353,11 @@ func (g GristGrind) billed(ctx context.Context, w *gristWork, call GrindCall, bi
 		w.notes = append(w.notes, spendErr.Error())
 	}
 	g.Pool.RetireKeyed(ctx)
+	if !w.fallsBack() {
+		w.resting = true
+		w.notes = append(w.notes, fmt.Sprintf("the API key was not used for %s (%s), and it is not the Governor's, so it is answered resting, not run again on the subscription", shortTxid(w.record.Txid), why))
+		return result, err
+	}
 	w.notes = append(w.notes, fmt.Sprintf("the API key was not used for %s (%s), so it ran again on the subscription", shortTxid(w.record.Txid), why))
 	call.APIKey, w.billing = "", BillingSubscription
 	w.harnessStarted = g.now()

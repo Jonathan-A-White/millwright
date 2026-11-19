@@ -593,7 +593,11 @@ func (c *gristContext) plainMill() application.GristGrind {
 		Notices:     c.timing.notices,
 		Pool:        c.pool.port(),
 		Talks:       c.talk.talks(),
-		Out:         &c.out,
+		// A grist of a licence not the Governor's is billed to the API credit
+		// alone (mw-gq6.1517): the mill of a scenario that does not wire credits
+		// of its own (grist_credits.feature) has a usable fake key.
+		Credits: apptest.UsableCredits(),
+		Out:     &c.out,
 	}
 }
 

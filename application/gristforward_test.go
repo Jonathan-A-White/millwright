@@ -76,7 +76,7 @@ func aCSVMill(t *testing.T, kind, forward, mime string, content []byte, ceilings
 		State: apptest.NewFakeGristState(), Grinds: grinds, Grinder: &apptest.FakeGrinder{},
 		Pass: &apptest.FakeGristLock{}, Grinding: &apptest.FakeGristLock{}, Host: "laptop",
 		Apps: map[string]string{"cairn": "/rigs/cairn"}, TempDir: t.TempDir(), Ceilings: ceilings,
-		Mailbox: mailbox, Forwards: store,
+		Mailbox: mailbox, Forwards: store, Credits: apptest.UsableCredits(),
 		Now: func() time.Time { return time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC) },
 	}, backend, mailbox, store
 }

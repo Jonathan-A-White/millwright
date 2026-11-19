@@ -3295,30 +3295,39 @@ deleted 24 hours after its end, and a live talk unused for 30 days is ended and
 its transcript deleted. `mw grist talks --end <app> <talk>` ends a talk now,
 writing no key points. See `features/grist_talk_cap.feature`.
 
-With `[grist]` `api_credits = true` and an Anthropic API key in `api_key_file`
-(default `~/.config/mw/anthropic-api.key`; it must be mode 0600, else the mill
-says in its report that the file is not used), the mill bills a grist to that key:
-the claude session of a grind, cold or warm, gets `ANTHROPIC_API_KEY` in its
-environment and nowhere else (never an argument, a log, an event or a line of
-the record). Otherwise the session has no `ANTHROPIC_API_KEY` and uses the
-subscription login. Builders and seats never get the key. Every line of
-`grinds.jsonl` says `billing`: `"api"` or `"subscription"`. A grind billed to
-the key that ends with "Credit balance is too low", a spend limit, or an error
-that the key is invalid, writes `credits.json` in `grist_state_dir`
-(`{"spent_at": ...}`), retires the warm sessions started on the key, and
-runs the same grist again at once on the subscription: one answer, one line in
-the record, one count against `daily_limit`. One `grist-credits-spent` job
-event (it says `credits spent` or `key refused`) is left in the normal lane for
-the Mayor; nothing pages the Governor. While the mark stands every grist uses
-the subscription; the first grist 24 hours after it tries the key again, and
+The Governor's own grists (sealed by `postern_governor_key`) are billed to his
+subscription, whatever the credits say. Every other licence's grist is billed to
+the Anthropic API key alone and never to his subscription (mw-gq6.1517). With
+`[grist]` `api_credits = true` and a key in `api_key_file` (default
+`~/.config/mw/anthropic-api.key`; it must be mode 0600, else the mill says in
+its report that the file is not used), the claude session of such a grind, cold
+or warm, gets `ANTHROPIC_API_KEY` in its environment and nowhere else (never an
+argument, a log, an event or a line of the record), and no
+`CLAUDE_CODE_OAUTH_TOKEN` beside it. With `api_credits` off, no usable key file
+or a standing spent mark, another licence's grist is not ground: it is refused,
+"The tutor is resting until the factory's credit is topped up; send it again
+later.", which is no use of the key's day. Builders and seats never get the key.
+Every line of `grinds.jsonl` says `billing`: `"api"` or `"subscription"`. A
+grind billed to the key that ends with "Credit balance is too low", a spend
+limit, or an error that the key is invalid, writes `credits.json` in
+`grist_state_dir` (`{"spent_at": ...}`) and retires the warm sessions started on
+the key; another licence's grist is then answered resting. Only the factory's
+own, the grist smoke's key (`grist_test_key_file`), keeps the old fallback: it
+runs again at once on the subscription, one answer, one line in the record, one
+count against `daily_limit`, and while the mark stands its grists use the
+subscription. One `grist-credits-spent` job event (it says `credits spent` or
+`key refused`) is left in the normal lane for the Mayor; nothing pages the
+Governor. The first grist 24 hours after the mark tries the key again, and
 getting through clears the mark. See `features/grist_credits.feature`.
 
 `mw grist credits` (also `status`; `--json` for one object) looks the key's
 state up and changes nothing: whether `api_credits` is on or off, whether the
 key file is there (yes or no, never any of the key), the spent mark's time or
 none, this UTC calendar month's grists billed to the key and the sum of their
-`total_cost_usd` against $200, and the time of the last grist billed to the
-key. `mw grist credits on` and `off` set `[grist]` `api_credits` in this host's
+`total_cost_usd` against $200, the time of the last grist billed to the key,
+and this month's grists split by the Governor's and others': for each side the
+count, the sum of `total_cost_usd` and the part of it billed to the key, and
+how many were refused resting. `mw grist credits on` and `off` set `[grist]` `api_credits` in this host's
 `config.toml` through the writer `mw config set` uses, and print the old value,
 the new, the backup and the way back. `mw grist credits key` reads one line
 from stdin (echo off at a terminal), refuses an empty line, one that does not
@@ -3345,7 +3354,7 @@ pool_quiet = "10m"       # a kind with no grist this long keeps no warm session;
 pool_max_age = "15m"     # a warm session waiting this long is retired unused
 talk_context_cap = 80000 # context tokens at which a talk's session is ended for its key points
 talk_max_turns = 40      # turns at which it is
-api_credits = false      # true bills a grist to the Anthropic API key in api_key_file, and to the subscription once the key's credit is spent
+api_credits = false      # true bills other licences' grists to the Anthropic API key in api_key_file; off, they rest. The Governor's always use his subscription
 api_key_file = "/home/jwhite/.config/mw/anthropic-api.key"   # a full path or ~/..., mode 0600 (default shown)
 
 [grist-apps]             # where each app's rig is checked out here

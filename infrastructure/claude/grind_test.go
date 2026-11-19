@@ -441,3 +441,20 @@ func TestGrindSendsAPromptTooLongForAnArgumentOnStandardInput(t *testing.T) {
 		t.Fatal("expected a short prompt left on the command line")
 	}
 }
+
+// A call billed to an API key runs with no subscription token in its
+// environment, so its session can never fall back to the subscription
+// (mw-gq6.1517); a call with no key keeps the token.
+func TestGrindEnvWithAKeyCarriesNoSubscriptionToken(t *testing.T) {
+	environ := []string{"HOME=/home/mill", claude.OAuthTokenEnv + "=sk-ant-oat01-subscription", claude.APIKeyEnv + "=sk-ant-shell"}
+	call := aGrindCall(t, "/tmp/mw-grist-1")
+	if got := strings.Join(claude.GrindEnv(environ, call), "\n"); !strings.Contains(got, claude.OAuthTokenEnv+"=") || strings.Contains(got, "sk-ant-shell") {
+		t.Fatalf("a call on the subscription was given %q", got)
+	}
+	call.APIKey = "sk-ant-api03-other"
+	got := claude.GrindEnv(environ, call)
+	want := []string{"HOME=/home/mill", claude.APIKeyEnv + "=sk-ant-api03-other"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("a call on the key was given %q, want %q", got, want)
+	}
+}

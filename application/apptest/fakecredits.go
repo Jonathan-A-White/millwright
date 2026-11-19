@@ -61,3 +61,14 @@ func (f *FakeCreditState) Clear(context.Context) error {
 	f.Clears++
 	return nil
 }
+
+// FixtureAPIKey is the key UsableCredits reads.
+const FixtureAPIKey = "sk-ant-fixture-not-a-real-key"
+
+// UsableCredits are API credits that are on, with a usable key and no spent
+// mark: what a test mill is given so a grist of a licence not the Governor's
+// is ground at all, since such a grist is billed to the API credit alone and
+// never to the subscription (mw-gq6.1517).
+func UsableCredits() *application.GristCredits {
+	return &application.GristCredits{On: true, Key: &FakeCreditKey{Key: FixtureAPIKey}, State: &FakeCreditState{}}
+}

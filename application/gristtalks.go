@@ -475,9 +475,9 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 		}
 	}
 	spec := w.warmSpec(g.Ceilings.filled().Timeout)
-	billing := g.Credits.Choose(ctx)
-	if billing.Note != "" {
-		w.notes = append(w.notes, billing.Note)
+	billing, ok := g.gristBilling(ctx, w)
+	if !ok {
+		return
 	}
 	store := g.Talks.Store
 	key := w.talkKey()
@@ -537,6 +537,10 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 		if w.billing == BillingAPI {
 			result, err = g.billed(ctx, w, resume, billing, result, err)
 		}
+		if w.resting {
+			g.rest(ctx, w, result)
+			return
+		}
 		if g.resumeFailed(ctx, result, err) {
 			w.notes = append(w.notes, fmt.Sprintf("the session of the talk %q could not be resumed, so it starts fresh: %s", key.Talk, gristSaid(result, err)))
 			turn.reason = GristTalkResumeFailed
@@ -558,6 +562,10 @@ func (g GristGrind) grindTalk(ctx context.Context, w *gristWork, privKey string)
 		result, err = g.Grinder.Grind(ctx, call)
 		if w.billing == BillingAPI {
 			result, err = g.billed(ctx, w, call, billing, result, err)
+		}
+		if w.resting {
+			g.rest(ctx, w, result)
+			return
 		}
 	}
 	w.answered = g.now()
