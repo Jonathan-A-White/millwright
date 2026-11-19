@@ -831,3 +831,35 @@ func TestTheLiveBeadsOfAQueueAreReadWithoutTheirTextsAndTheirEdgesByTheirIds(t *
 		}
 	}
 }
+
+// One mw queue (Queue.Run) asks for what is ready, blocked, running here and
+// running elsewhere; the live beads are read once for all four, which is the
+// three statements of one listing (beads, labels, edges) and no more
+// (mw-gq6.1443).
+func TestMwQueueReadsTheLiveBeadsOnce(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard),
+		beads.WithRunCache(), beads.WithoutStoryTexts())
+
+	report, err := application.Queue{Tracker: g, Host: "desktop"}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Ready) == 0 {
+		t.Errorf("expected a story ready on the desktop, got none")
+	}
+	server.mu.Lock()
+	seen := append([]string(nil), server.seen...)
+	server.mu.Unlock()
+	if len(seen) != 3 {
+		t.Errorf("expected the three statements of one listing for one Queue.Run, got %d:\n%s", len(seen), strings.Join(seen, "\n"))
+	}
+	if got := server.listingReads(); got != 1 {
+		t.Errorf("expected the live beads read once, got %d reads", got)
+	}
+	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
+		t.Errorf("expected no bd started, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
+	}
+}
