@@ -40,6 +40,7 @@ func newPosternCmd() *cobra.Command {
 	root.AddCommand(key)
 	root.AddCommand(newPosternInboxCmd())
 	root.AddCommand(newPosternSendCmd())
+	root.AddCommand(newPosternOwedCmd())
 	root.AddCommand(newPosternSnapshotCmd())
 	root.AddCommand(newPosternViewCmd())
 	root.AddCommand(newPosternBeadCmd())
@@ -421,6 +422,7 @@ func answerTheGovernor(inbox *application.PosternInbox, backend *postern.HTTP, k
 	}
 	inbox.Sender = &application.PosternSend{
 		Threads:     inbox.Threads,
+		Receipts:    inbox.Memory,
 		Postern:     backend,
 		Chain:       newChain(backend, keys, nil),
 		Cipher:      inbox.Cipher,
@@ -565,7 +567,7 @@ func posternInboxLock(attachmentDir string) *hostlock.Lock {
 // postern_backend, by postern_channel.
 func newPosternSendCmd() *cobra.Command {
 	var class, bead, recommend, thread, topic, beadChannel, channelName, re string
-	var chain, newPost, inFactory, long bool
+	var chain, newPost, inFactory, long, receipt bool
 	var options, attach []string
 	var file, whyNow string
 	var allow []string
@@ -684,7 +686,7 @@ func newPosternSendCmd() *cobra.Command {
 			}
 			request := application.PosternSendRequest{
 				Class: class, Text: text, Bead: bead, Recommend: recommend, Options: options,
-				Thread: thread + beadChannel, Topic: topic + channelName, Re: re, Attachments: attach, Chain: chain, New: newPost, InFactory: inFactory,
+				Thread: thread + beadChannel, Topic: topic + channelName, Re: re, Attachments: attach, Chain: chain, New: newPost, InFactory: inFactory, Receipt: receipt,
 			}
 			if err := request.ValidateReplyFlags(); err != nil {
 				return err
@@ -781,6 +783,7 @@ func newPosternSendCmd() *cobra.Command {
 	for flag, use := range map[string]string{"thread": "use --bead-channel", "topic": "use --channel"} {
 		_ = cmd.Flags().MarkDeprecated(flag, use)
 	}
+	cmd.Flags().BoolVar(&receipt, "receipt", false, "with --re: this post only receipts the post it answers; mw keeps it, and mw postern owed lists the post, until a post of ours that is not a receipt answers in that thread")
 	cmd.Flags().BoolVar(&inFactory, "factory", false, "with --re: the post it answers is in Factory, which has no channel flag; needed only for a post mw has not seen")
 	cmd.Flags().BoolVar(&newPost, "new", false, "post top-level in Factory on purpose, though the Governor's newest Factory post has no answer yet")
 	cmd.Flags().BoolVar(&long, "long", false, "send past the word limits (80 warns and 120 refuses; a card's question 60 and 120): the alias of --allow words, needing no bead")
@@ -1099,4 +1102,43 @@ func newPosternNginxCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would change without touching anything")
 	_ = cmd.MarkFlagRequired("conf")
 	return cmd
+}
+
+// newPosternOwedCmd builds `mw postern owed`: the posts of the Governor's that
+// have only a receipt of ours, or no reply at all, past ten minutes.
+func newPosternOwedCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "owed",
+		Short: "List his posts that have only a receipt of ours, or no reply, past ten minutes",
+		Long: "owed lists each post of the Governor's whose only reply of ours is a receipt (mw postern send\n" +
+			"--receipt, or a short post that begins \"Got it\"), or that has no reply of ours at all, once it has\n" +
+			"stood over ten minutes: its txid, how old it is, his first 60 characters and the mw postern send\n" +
+			"--re line that answers it. A post of ours that is not a receipt, with --re into the same thread (his\n" +
+			"post or its root), clears a receipt. It reads the newest 300 records of the postern. With nothing\n" +
+			"owed it prints \"nothing owed\" and exits 0. mw status DAMPERS names the receipts as 'owed'.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			keys, err := posternKeys()
+			if err != nil {
+				return err
+			}
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
+			backend, err := posternBackend(keys)
+			if err != nil {
+				return err
+			}
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			_, err = application.PosternOwed{
+				Postern: backend, Cipher: posternCipher(keys), Keys: keys, Notes: gateway,
+				GovernorKey: governorKey, Now: posternClock, Out: cmd.OutOrStdout(),
+			}.Run(cmd.Context())
+			return err
+		},
+	}
 }
