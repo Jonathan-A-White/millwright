@@ -20,7 +20,9 @@ func TestEveryTestRunTicketNamesItsStory(t *testing.T) {
 	runs := rig.NewTestRuns(slots, 1)
 	// What a command reads from the one slot's file is what mw status would read
 	// of its ticket while it runs.
-	saysWho := func(into string) string { return "head -n 1 " + filepath.Join(slots, rig.TestRunsPrefix+"0.lock") + " > " + into }
+	saysWho := func(into string) string {
+		return "head -n 1 " + filepath.Join(slots, rig.TestRunsPrefix+"0.lock") + " > " + into
+	}
 	forStory := application.WithTestRunFor(context.Background(), "mw-x")
 	read := func(path string) string {
 		t.Helper()
