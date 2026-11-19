@@ -122,7 +122,9 @@ windows-uninstall` in WSL so that a host left frozen, or with WSL down in `shutd
   line's `gave_way_ms` is how long the host gave way (`mw giveway status` says the last one, from when to
   when, while the host does not give way); a whole `mw check` not kept to a Builder's call (`--wait`,
   `--background`, the gate worker) reads it and does not count that span against its wait limit, for it
-  was stopped then and waited for nobody (mw-gq6.1458).
+  was stopped then and waited for nobody (mw-gq6.1458). Every wait for the host's gate lock reads it
+  too, so a wait frozen near its 3-hour cap (`hostlock.GateCap`) is not refused for the span the host
+  gave way (mw-gq6.1478).
 
 Right at unlock: the Windows line's `on` exit=0 and its `ms` a second or two at most, and the WSL line of
 event `on` by `windows-unlock` within a couple of seconds of the unlock, with a `mark` ten seconds later whose

@@ -530,3 +530,95 @@ func TestAGateLockSaysWhoIsQueuedForItWithoutTakingAPlace(t *testing.T) {
 	<-done
 	first.Holding.Release(context.Background())
 }
+
+// gaveWayFrom is a host's give-way record that says it gave way once, from one
+// time to another.
+type gaveWayFrom struct{ from, to time.Time }
+
+func (g gaveWayFrom) GaveWayBetween(_ context.Context, from, to time.Time) time.Duration {
+	start, end := from, to
+	if g.from.After(start) {
+		start = g.from
+	}
+	if g.to.Before(end) {
+		end = g.to
+	}
+	if !end.After(start) {
+		return 0
+	}
+	return end.Sub(start)
+}
+
+// A wait for the gate lock that the host's give-way froze does not count the span
+// it gave way against its cap: it waited for nobody then, so it wakes with what it
+// had left at the freeze, not past the cap and refused (mw-gq6.1478).
+func TestAGateLockCapDoesNotCountAGiveWay(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Now()
+	var mu sync.Mutex
+	now := start
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	holder, err := hostlock.NewGate(dir).Take(context.Background(), "mw-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Holding.Release(context.Background())
+
+	// The host gives way from a minute into the wait to an hour into it; the wait
+	// wakes at 61 minutes, 2 of them spent, under its cap of an hour.
+	record := gaveWayFrom{from: start.Add(time.Minute), to: start.Add(60 * time.Minute)}
+	gate := hostlock.NewGate(dir, hostlock.WithGatePoll(2*time.Millisecond), hostlock.WithGateCap(time.Hour),
+		hostlock.WithGateClock(clock), hostlock.WithGateGaveWay(record))
+	seen := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		turn, err := gate.Take(context.Background(), "mw-b", func(string) { close(seen) })
+		if err == nil {
+			turn.Holding.Release(context.Background())
+		}
+		done <- err
+	}()
+	<-seen
+	mu.Lock()
+	now = start.Add(61 * time.Minute)
+	mu.Unlock()
+	select {
+	case err := <-done:
+		t.Fatalf("expected the wait to go on past the give-way, it ended: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	holder.Holding.Release(context.Background())
+	if err := <-done; err != nil {
+		t.Fatalf("expected the wait to take the lock once it was let go, got %v", err)
+	}
+
+	// The cap still holds once the time spent outside the give-way passes it.
+	again, err := hostlock.NewGate(dir).Take(context.Background(), "mw-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Holding.Release(context.Background())
+	mu.Lock()
+	now = start
+	mu.Unlock()
+	seen = make(chan struct{})
+	go func() {
+		turn, err := gate.Take(context.Background(), "mw-c", func(string) { close(seen) })
+		if err == nil {
+			turn.Holding.Release(context.Background())
+		}
+		done <- err
+	}()
+	<-seen
+	mu.Lock()
+	now = start.Add(121 * time.Minute) // 62 minutes spent outside the give-way
+	mu.Unlock()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "mw-a") {
+			t.Fatalf("expected a refusal naming the holder, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the wait to give up once its cap was spent outside the give-way")
+	}
+}

@@ -23,7 +23,9 @@ const GateQueueDir = "gate.queue"
 // GateCap is the most a close-out waits for this host's gate lock. A rig's
 // whole suite can take half an hour, and landings queue behind one another,
 // so the cap is far past an ordinary queue; it is there so that a gate stuck
-// for good is said, not waited on for ever.
+// for good is said, not waited on for ever. What the host gave way in the wait
+// is not counted against it, for a Gate given the host's give-way record
+// (WithGateGaveWay, mw-gq6.1478).
 const GateCap = 3 * time.Hour
 
 // GatePoll is how often a wait for the gate lock looks again.
@@ -42,9 +44,10 @@ const GatePoll = 2 * time.Second
 type Gate struct {
 	Dir string
 
-	cap  time.Duration
-	poll time.Duration
-	now  func() time.Time
+	cap     time.Duration
+	poll    time.Duration
+	now     func() time.Time
+	gaveWay application.GiveWaySpans
 }
 
 // Gate satisfies the port.
@@ -63,6 +66,14 @@ func WithGatePoll(poll time.Duration) GateOption { return func(g *Gate) { g.poll
 // judged by, and how long Take has waited, for a test that cannot wait ten minutes.
 func WithGateClock(now func() time.Time) GateOption { return func(g *Gate) { g.now = now } }
 
+// WithGateGaveWay gives the Gate the host's give-way record: what the host gave
+// way while Take waits is not counted against the cap, for the give-way stopped
+// the waiter and it waited for nobody then (mw-gq6.1478, as mw-gq6.1458 for a
+// check's own waits). Without it every span counts.
+func WithGateGaveWay(spans application.GiveWaySpans) GateOption {
+	return func(g *Gate) { g.gaveWay = spans }
+}
+
 // NewGate is this host's gate lock, kept in dir.
 func NewGate(dir string, opts ...GateOption) *Gate {
 	g := &Gate{Dir: dir, cap: GateCap, poll: GatePoll, now: time.Now}
@@ -73,6 +84,19 @@ func NewGate(dir string, opts ...GateOption) *Gate {
 }
 
 func (g *Gate) path() string { return filepath.Join(g.Dir, GateFile) }
+
+// waited is how much of the cap a wait begun at started has spent: the time
+// since, less what the host gave way since (mw-gq6.1478). The give-way record
+// is read only once the time since has reached the cap, so an ordinary wait
+// reads no file on each poll.
+func (g *Gate) waited(ctx context.Context, started time.Time) time.Duration {
+	now := g.now()
+	since := now.Sub(started)
+	if since < g.cap || g.gaveWay == nil {
+		return since
+	}
+	return since - min(g.gaveWay.GaveWayBetween(ctx, started, now), since)
+}
 
 // Take implements application.GateLock.
 func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (application.GateTurn, error) {
@@ -137,7 +161,7 @@ func (g *Gate) Take(ctx context.Context, holder string, held func(by string)) (a
 				held(waitedFor)
 			}
 		}
-		if waited := g.now().Sub(started); waited >= g.cap {
+		if waited := g.waited(ctx, started); waited >= g.cap {
 			file.Close()
 			return application.GateTurn{}, fmt.Errorf("this host's gate lock %s is still held by %q after %s: another gate is running long, or one is stuck",
 				path, gateHolder(path), waited.Round(time.Second))
