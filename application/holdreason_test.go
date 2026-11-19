@@ -59,17 +59,16 @@ func TestStuckDoesNotListAHoldTheHoldHelpersWroteAReasonFor(t *testing.T) {
 //	transient: the hold is undone in the same call
 //	filed: a story filed held, awaiting its release; mw stuck rightly lists it when live beads wait behind it with no reason
 var holdSites = map[string]string{
-	"application/ice.go:HoldStory":                    "refuses",
-	"application/dispatch.go:HoldClaimHeldBy":         "reason",
-	"application/next.go:HoldClaimHeldBy":             "reason",
-	"application/retry.go:HoldStory":                  "reason",
-	"application/retry.go:HoldClaimHeldBy":            "reason",
-	"application/postern.go:HoldStory":                "reason",
-	"application/posternapply.go:HoldStory":           "reason",
-	"application/eventcontrol.go:HoldStory":           "reason",
-	"application/foldsupersede.go:HoldStory":          "transient",
-	"infrastructure/beads/beads.go:StatusDeferred":    "filed",
-	"infrastructure/beads/dispatch.go:StatusDeferred": "implementation",
+	"application/ice.go:HoldStory":                 "refuses",
+	"application/dispatch.go:HoldClaimHeldBy":      "reason",
+	"application/next.go:HoldClaimHeldBy":          "reason",
+	"application/retry.go:HoldStory":               "reason",
+	"application/retry.go:HoldClaimHeldBy":         "reason",
+	"application/postern.go:HoldStory":             "reason",
+	"application/posternapply.go:HoldStory":        "reason",
+	"application/eventcontrol.go:HoldStory":        "reason",
+	"application/foldsupersede.go:HoldStory":       "transient",
+	"infrastructure/beads/beads.go:StatusDeferred": "filed",
 }
 
 var holdCall = regexp.MustCompile(`\.(HoldStory|HoldClaimHeldBy)\(`)
