@@ -1618,7 +1618,9 @@ func (i PosternInbox) fromLabel(m PosternInboxMessage) string {
 
 // UnreadCount reports how many messages addressed to this key are unread,
 // without reading them: it moves the cursor nowhere, so a notifier can call
-// it as often as it likes. A talk record is not counted: mw talk wait's.
+// it as often as it likes. A talk record is not counted: mw talk wait's. Nor is
+// a message kept for Ideas only, or one a pass already applied: the read prints
+// neither as a message (mw-gq6.1500).
 func (i PosternInbox) UnreadCount(ctx context.Context) (int, error) {
 	if err := i.wired(); err != nil {
 		return 0, err
@@ -1628,6 +1630,9 @@ func (i PosternInbox) UnreadCount(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	if mine, err = i.unreadWithoutHeld(ctx, mine); err != nil {
+		return 0, err
+	}
+	if mine, err = i.unreadWithoutApplied(ctx, mine); err != nil {
 		return 0, err
 	}
 	i.printf("%d\n", len(mine))
