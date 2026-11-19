@@ -694,6 +694,54 @@ func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near, w
 	return "", near, nearWhy
 }
 
+// foundInFlight is the story of the finding's own rig that is being worked now
+// (in progress, so claimed) and names the same file or symbol as the finding and
+// says the same fault in its title or description: the bug filed for the finding
+// may duplicate it, and is made to wait on it (mw-gq6.1440). A story of another
+// rig, a closed or unclaimed one, the finder itself, and one that shares only a
+// word or only a file are not it. why says what was shared.
+func foundInFlight(bug foundBug, beads []StoryDetail, rig, finder string) (id, why string) {
+	if rig == "" {
+		return "", ""
+	}
+	text := strings.Join(bug.said(), "\n")
+	refs, symbols, words := foundRefs(text), foundSymbols(text), foundFaultWords(text)
+	if len(refs) == 0 && len(symbols) == 0 {
+		return "", ""
+	}
+	for _, d := range beads {
+		if d.Story.ID == finder || d.IsParent() || !strings.EqualFold(strings.TrimSpace(d.Status), StatusInProgress) || d.Merged().Rig != rig {
+			continue
+		}
+		other := foundBeadText(d)
+		otherWords := foundFaultWords(other)
+		if !foundSameWords(words, otherWords) {
+			continue
+		}
+		shared := ""
+		otherRefs, otherSymbols := foundRefs(other), foundSymbols(other)
+		for _, file := range strings.Split(d.Merged().Files, ",") {
+			otherRefs = append(otherRefs, foundRef{path: strings.TrimSpace(file)})
+		}
+		for _, ref := range refs {
+			for _, o := range otherRefs {
+				if ref.path != "" && ref.path == o.path {
+					shared = "the file " + ref.path
+				}
+			}
+		}
+		for _, symbol := range slices.Sorted(maps.Keys(symbols)) {
+			if shared == "" && otherSymbols[symbol] {
+				shared = "the symbol " + symbol
+			}
+		}
+		if shared != "" {
+			return d.Story.ID, shared + " and the fault words " + strings.Join(foundSharedWords(words, otherWords), ", ")
+		}
+	}
+	return "", ""
+}
+
 // foundRefText is a ref as a person reads it: path:line, path:from-to or the
 // bare path.
 func foundRefText(r foundRef) string {
@@ -1154,6 +1202,26 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			}); err != nil {
 				report.Notes = append(report.Notes, fmt.Sprintf("%s was filed held, but its reason (%s) could not be written: %v", id, NoACReason, err))
 			}
+		}
+		// A story of the same rig being worked now that names the same file and
+		// fault may be landing this very fix: the bug waits on it, and is checked
+		// after it lands (mw-gq6.1440).
+		if inFlight, flightWhy := foundInFlight(bug, beads, overrides.Rig, c.id); inFlight != "" {
+			n.keepJoin(ctx, c, report, fmt.Sprintf("filed %s for the finding %q of %s as a possible duplicate of %s, in progress, by %s", id, strings.Join(bug.said(), " "), c.id, inFlight, flightWhy))
+			if err := writeRetrying(ctx, n, report, "the wait of a bug for a finding not fixed", func() error {
+				return n.Tracker.AddBlocker(ctx, id, inFlight)
+			}); err != nil {
+				report.Notes = append(report.Notes, fmt.Sprintf("%s could not be made to wait on %s: %v", id, inFlight, err))
+			}
+			note := fmt.Sprintf("may duplicate %s, a story of the same rig in progress that names %s; this bug waits on it, to be checked after it lands.", inFlight, flightWhy)
+			if err := writeRetrying(ctx, n, report, "the duplicate note of a bug for a finding not fixed", func() error {
+				return n.Tracker.CommentOnStory(ctx, id, note)
+			}); err != nil {
+				report.Notes = append(report.Notes, fmt.Sprintf("%s was filed held, but its note (%s) could not be written: %v", id, note, err))
+			}
+			report.Notes = append(report.Notes, fmt.Sprintf("%s may duplicate %s, a story of the same rig in progress", id, inFlight))
+			block = append(block, fmt.Sprintf("Filed: %s, held (may duplicate %s, in progress; waits on it). %s", id, inFlight, strings.Join(bug.lines, " ")))
+			continue
 		}
 		if near != "" {
 			n.keepJoin(ctx, c, report, fmt.Sprintf("filed %s for the finding %q of %s as a %s with %s", id, strings.Join(bug.said(), " "), c.id, why, near))

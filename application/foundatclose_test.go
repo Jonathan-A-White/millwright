@@ -746,3 +746,85 @@ func TestFoundAtCloseRigReadingDropsABareNameItsFullPathNames(t *testing.T) {
 		t.Errorf("expected rig=cairn files=src/sermons.steps.tsx, got rig=%q files=%q", got.Rig, got.Files)
 	}
 }
+
+// aFindingMeetingAStoryRun files the finding said by a landed story of lampas
+// and returns what was filed and the tracker, with one other story in the
+// tracker: in the epic of rig, with status and title and description as given.
+func aFindingMeetingAStoryRun(t *testing.T, finding, rig, status, title, description string) ([]application.StoryDetail, *apptest.FakeTracker) {
+	t.Helper()
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-c", domain.Path{Rig: "cairn", Branch: "trunk", Harness: domain.HarnessClaude, Model: "opus", Effort: "medium", Formula: "plain", Host: "laptop"})
+	tracker.AddEpic("mw-x", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{Files: "package.json"}})
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+finding+"\nFor the rig memory: nothing"))
+	epic := map[string]string{"lampas": "mw-x", "cairn": "mw-c"}[rig]
+	tracker.AddStory(epic, domain.Story{ID: epic + ".9", Title: title})
+	mustDo(t, tracker.SetDescription(epic+".9", description))
+	mustDo(t, tracker.SetStatus(epic+".9", status))
+	before := tracker.Stories()
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"lampas": "/rigs/lampas", "cairn": "/rigs/Cairn"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+	return theTestersFiled(t, tracker, before), tracker
+}
+
+const aFindingOfTheSectionsLeftOut = "Several sections are left out of data/sections.json although their title prints a text. AC: go test ./application passes. By design? no"
+
+// A bug filed for a finding that a story of the same rig, being worked now,
+// names the same file and fault words of, waits on that story and says it may
+// duplicate it; it is not released (mw-gq6.1440).
+func TestFoundNotFixedNamingAnInProgressStoryWaitsOnIt(t *testing.T) {
+	filed, tracker := aFindingMeetingAStoryRun(t, aFindingOfTheSectionsLeftOut, "lampas", apptest.StatusInProgress,
+		"Add the sections left out of data/sections.json", "The sections whose title prints a text are left out of data/sections.json; add them.")
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d", len(filed))
+	}
+	bug := filed[0]
+	if bug.Status != apptest.StatusDeferred {
+		t.Errorf("expected the bug held, got status %q", bug.Status)
+	}
+	if !slices.Contains(bug.Needs, "mw-x.9") {
+		t.Errorf("expected the bug to wait on mw-x.9, got needs %v", bug.Needs)
+	}
+	if !slices.ContainsFunc(tracker.Comments(bug.Story.ID), func(c string) bool { return strings.Contains(c, "may duplicate mw-x.9") }) {
+		t.Errorf("expected a 'may duplicate mw-x.9' note, got %v", tracker.Comments(bug.Story.ID))
+	}
+}
+
+// A story of another rig, a closed one, one not being worked, or one that
+// shares only a word or only the file is not named a possible duplicate and is
+// not waited on.
+func TestFoundNotFixedMeetingNoStoryInFlightOfItsRigWaitsOnNothing(t *testing.T) {
+	cases := []struct{ name, rig, status, title, description string }{
+		{"another rig", "cairn", apptest.StatusInProgress, "Add the sections left out of data/sections.json", "The sections whose title prints a text are left out of data/sections.json."},
+		{"closed", "lampas", apptest.StatusClosed, "Add the sections left out of data/sections.json", "The sections whose title prints a text are left out of data/sections.json."},
+		{"not claimed", "lampas", apptest.StatusOpen, "Add the sections left out of data/sections.json", "The sections whose title prints a text are left out of data/sections.json."},
+		{"one shared word", "lampas", apptest.StatusInProgress, "Pair the sections in the Lampas LXX list", "The pairing drops a verse."},
+		{"only the file", "lampas", apptest.StatusInProgress, "Sort data/sections.json by date", "The file is sorted by the year."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			filed, tracker := aFindingMeetingAStoryRun(t, aFindingOfTheSectionsLeftOut, c.rig, c.status, c.title, c.description)
+			if len(filed) != 1 {
+				t.Fatalf("expected 1 bug filed, got %d", len(filed))
+			}
+			if len(filed[0].Needs) != 0 {
+				t.Errorf("expected no wait, got needs %v", filed[0].Needs)
+			}
+			for _, note := range tracker.Comments(filed[0].Story.ID) {
+				if strings.Contains(note, "may duplicate") {
+					t.Errorf("expected no duplicate note, got %q", note)
+				}
+			}
+		})
+	}
+}
