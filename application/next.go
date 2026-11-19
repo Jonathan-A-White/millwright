@@ -1304,9 +1304,7 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 		began:    began,
 	}
 	report.Target = c.target
-	// Every test-runner ticket this close-out takes, the whole tests, the changed
-	// specs and the after-landing command, names the story (mw-gq6.1491).
-	ctx = WithTestRunFor(ctx, storyID)
+	ctx = WithTestRunFor(ctx, storyID) // every test-runner ticket of this close-out names the story (mw-gq6.1491)
 
 	// A story this host has already landed, and could not close, is finished
 	// with everything but the close. Running mw next again must close it —
