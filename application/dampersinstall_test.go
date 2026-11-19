@@ -109,3 +109,12 @@ func TestDampersNamesAWSLHostWithNoDoctorReport(t *testing.T) {
 		}
 	})
 }
+
+// A host that has never synced is already said to be asleep, never synced:
+// its missing doctor report is no second alarm.
+func TestDampersNamesNoDoctorReportOfAHostThatNeverSynced(t *testing.T) {
+	w := application.HostWork{Host: "desktop"}
+	if alarms := w.DoctorAlarms(); len(alarms) != 0 {
+		t.Fatalf("expected nothing for a host that never synced, got %+v", alarms)
+	}
+}
