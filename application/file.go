@@ -343,6 +343,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	f.warnNotRunnable(ctx, plan, func(key string) string { return ids[key] })
 	f.warnSmokeWithoutRef(plan, func(key string) string { return ids[key] })
 	f.warnRemoteShell(plan, func(key string) string { return ids[key] })
+	f.warnBranches(plan)
 	for _, id := range ownDemos {
 		f.print(demoNoHitlLine(id) + "\n")
 	}
@@ -395,6 +396,7 @@ func (f File) Check(ctx context.Context, plan domain.Plan) error {
 	}
 	f.warnSmokeWithoutRef(plan, func(key string) string { return key })
 	f.warnRemoteShell(plan, func(key string) string { return key })
+	f.warnBranches(plan)
 	f.filesNamed(plan, func(key string) string { return key })
 	f.mechanisms(plan, func(key string) string { return key })
 	f.warnNotRunnable(ctx, plan, func(key string) string { return key })
@@ -772,8 +774,7 @@ func (f File) validateFiles(stories []domain.PlanStory, defaults domain.Path) []
 
 // validateBranches says, naming the story key, each story whose branch is not one
 // of its rig's origin, as mw path set refuses it (mw-gq6.1416). A branch that
-// cannot be judged is taken without a word here: a plan names the epic's branch
-// for every story, and mw path set is where one the seat wrote is warned of.
+// cannot be judged is not refused here: warnBranches warns of one.
 func (f File) validateBranches(stories []domain.PlanStory, defaults domain.Path) []string {
 	var reasons []string
 	for _, story := range stories {
@@ -786,6 +787,32 @@ func (f File) validateBranches(stories []domain.PlanStory, defaults domain.Path)
 		}
 	}
 	return reasons
+}
+
+// warnBranches warns, once for each rig and branch, that a branch could not be
+// judged against the origin of a checkout this host has, because git could not
+// read it (mw-gq6.1451). A rig not checked out here is not warned of: a plan names
+// the epic's branch for every story, and that would warn on every filing on a host
+// without the rig. It refuses nothing.
+func (f File) warnBranches(plan domain.Plan) {
+	if f.Err == nil {
+		return
+	}
+	told := map[string]bool{}
+	for _, story := range plan.Stories {
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err != nil {
+			continue
+		}
+		branch, rig := strings.TrimSpace(path.Branch), strings.TrimSpace(path.Rig)
+		if dir := f.Rigs[rig]; dir == "" || told[rig+"\x00"+branch] {
+			continue
+		}
+		if _, warning := branchOnOrigin(f.Rigs, f.RigFiles, path); warning != "" {
+			told[rig+"\x00"+branch] = true
+			fmt.Fprintf(f.Err, "WARN: %s\n", warning)
+		}
+	}
 }
 
 // validateStepTitles says why a story is refused whose title, plus the most its

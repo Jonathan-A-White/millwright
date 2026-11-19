@@ -105,7 +105,13 @@ func (c *callersContext) theRigIsACheckout(name string, calling int, word string
 	if err := write("src/screens/"+word+".tsx", "export function "+word+"() {}\n"); err != nil {
 		return err
 	}
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
+	// An origin that has the plans' branch, "main": without one the branch cannot
+	// be judged and mw file warns of it (mw-gq6.1451).
+	for _, args := range [][]string{
+		{"init", "-q"}, {"add", "-A"},
+		{"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture"},
+		{"remote", "add", "origin", dir}, {"update-ref", "refs/remotes/origin/main", "HEAD"},
+	} {
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, out)
