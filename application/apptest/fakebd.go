@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // BdFault is one way a write to the beads server goes wrong for a FakeBd.
@@ -210,4 +211,15 @@ func (f *FakeBd) write(apply func()) application.BdRun {
 		apply()
 	}
 	return application.BdRun{Stderr: fmt.Sprintf("Error: %s\n", fault.Said), Exit: 1}
+}
+
+// titleRefused is why a FakeTracker refuses a story's title: none, or one over
+// domain.MaxTitleLength, which bd refuses too. A use case is held to the limit
+// as bd held lampas main's red (mw-gq6.1521); the beads adapter cuts a longer
+// title before bd sees it, but a title built to fit says more.
+func titleRefused(title string) error {
+	if title == "" {
+		return fmt.Errorf("a story needs a title")
+	}
+	return fmt.Errorf("title must be %d characters or less (got %d)", domain.MaxTitleLength, len(title))
 }
