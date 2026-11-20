@@ -45,7 +45,8 @@ func notMetFix(text string) string {
 }
 
 // landingVerdict is where a landing stands after its comments: the newest
-// comment opening VERIFIED or NOT MET decides.
+// comment opening VERIFIED or NOT MET decides, and an UNVERIFIED after a
+// VERIFIED withdraws it (mw-gq6.1540).
 type landingVerdict struct {
 	// Verified is true when the newest verdict opens VERIFIED.
 	Verified bool
@@ -65,6 +66,8 @@ func newestVerdict(comments []Comment) landingVerdict {
 			out = landingVerdict{Verified: true}
 		case commentMarksNotMet(c.Text):
 			out = landingVerdict{NotMet: true, Fix: notMetFix(c.Text)}
+		case out.Verified && commentWithdrawsVerified(c.Text):
+			out = landingVerdict{}
 		}
 	}
 	return out

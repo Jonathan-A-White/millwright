@@ -4149,6 +4149,12 @@ reason stands in the comment. `mw verify match` and the sleep pass drop such a m
 `dropped` counts them) and give each picture the words he sent with it. Neither command calls an agent. The steps are in
 `features/verify_confirm.feature`.
 
+A `VERIFIED` written in error is withdrawn by a later comment whose first word is `UNVERIFIED` (`UNVERIFIED: <why>`):
+comments are append-only, so the newest comment opening `VERIFIED` or `UNVERIFIED` decides. After a `VERIFIED`, an
+`UNVERIFIED` puts the landing back on the Governor's Verify line and among the landings `mw verify list` and the sweep
+treat as not yet verified; a `VERIFIED` written after that clears it again. An `UNVERIFIED` that follows no `VERIFIED`
+changes nothing, and it does not undo a `NOT MET`.
+
 `mw verify reject <bead> --txid <txid> --why "<why>"` takes back a proposal that is wrong. It writes one comment on the
 bead, `REJECTED PROPOSED from <txid>: <why>`, and nothing `VERIFIED`; `mw verify list` and `mw verify confirm` then no
 longer see that proposal, and `mw verify match` and the sleep pass do not propose the same txid for the bead again. A

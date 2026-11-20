@@ -128,15 +128,32 @@ func firstWord(text string) string {
 	return fields[0]
 }
 
-// verifiedIn reports whether a comment records the bead as verified: one whose
-// first word is VERIFIED.
+// UnverifiedWord is the first word of a comment that withdraws a VERIFIED
+// written in error: the landing is unverified again until a later VERIFIED
+// (mw-gq6.1540). Comments are append-only, so the newest of the two decides.
+const UnverifiedWord = "UNVERIFIED"
+
+// commentWithdrawsVerified reports whether text opens, after any leading white
+// space, with UNVERIFIED and then a word break: 'UNVERIFIED: written in error'
+// does, 'UNVERIFIEDLY' does not.
+func commentWithdrawsVerified(text string) bool {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(text), UnverifiedWord)
+	return ok && (rest == "" || strings.ContainsRune(" \t\r\n:,.-;!", rune(rest[0])))
+}
+
+// verifiedIn reports whether the comments record the bead as verified: the
+// newest comment that opens VERIFIED or UNVERIFIED opens VERIFIED.
 func verifiedIn(comments []Comment) bool {
+	verified := false
 	for _, c := range comments {
-		if firstWord(c.Text) == VerifiedWord {
-			return true
+		switch {
+		case firstWord(c.Text) == VerifiedWord:
+			verified = true
+		case commentWithdrawsVerified(c.Text):
+			verified = false
 		}
 	}
-	return false
+	return verified
 }
 
 // proposedFor reports whether a comment already proposes the bead verified from
