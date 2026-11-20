@@ -197,6 +197,14 @@ type PosternRecord struct {
 	// to say whether its sender may use an app's grinds. Empty for a record
 	// whose signer holds no app licence, and for every record on chain.
 	SignerApps []string
+
+	// Bead and Channel are where the record's message is, as its payload names
+	// it in the clear (clearNames: the bead outranks a channel name): both empty
+	// for Factory, and for a record that came by chain, which names neither.
+	// A record of ours has no other place to say its channel, for what we sealed
+	// to him we cannot read.
+	Bead    string
+	Channel string
 }
 
 // PosternUtxo is one unspent output the postern key's balance is built from.

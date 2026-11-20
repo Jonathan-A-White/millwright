@@ -18,7 +18,7 @@ const flatWindow = 300
 // under a bead's channel by design, and do not come this way). A send with --channel general is warned that
 // 'general' is a named channel and not Factory, where his Factory posts are;
 // and a plain send (class message, no --re, no channel, no --new) is refused
-// while the Governor's newest Factory post has no record of ours after it,
+// while the Governor's newest Factory post has no record of ours in Factory after it,
 // naming his txid and the line to answer it with; New (--new) sends it
 // top-level anyway. A card, a bead's channel or
 // a named channel is never stopped. A backend that cannot be read is no
@@ -47,8 +47,10 @@ func (s PosternSend) CheckAddressing(ctx context.Context, req PosternSendRequest
 }
 
 // unansweredFactoryPost is the txid of the Governor's newest post in Factory
-// among the last flatWindow records, when no record of ours came after it;
-// "" when there is none, or it is answered.
+// among the last flatWindow records, when no record of ours in Factory came
+// after it (a record of ours in a bead's or a named channel, which its payload
+// names in the clear, answers nothing here); "" when there is none, or it is
+// answered.
 func (s PosternSend) unansweredFactoryPost(ctx context.Context) (string, error) {
 	own, _, err := s.Keys.PublicKey()
 	if err != nil {
@@ -73,7 +75,10 @@ func (s PosternSend) unansweredFactoryPost(ctx context.Context) (string, error) 
 		}
 		switch {
 		case r.From == own && r.To == s.GovernorKey:
-			newest = ""
+			// Only a record of ours in Factory answers a post of his there.
+			if channelKeyOfRecord(r) == channelKey(PosternGeneralThread, false) {
+				newest = ""
+			}
 		case r.From == s.GovernorKey && r.To == own:
 			text, envelopeFrom, err := s.Cipher.Decrypt(privKey, r.Ciphertext)
 			if err != nil {

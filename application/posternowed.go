@@ -238,11 +238,37 @@ type owedPost struct {
 	Ts     time.Time
 }
 
+// channelKey names a channel for comparing: a bead's channel by its bead id, a
+// named one by its name.
+func channelKey(thread string, isBead bool) string {
+	if isBead {
+		return "bead:" + strings.TrimSpace(thread)
+	}
+	return "channel:" + strings.TrimSpace(thread)
+}
+
+// channelKey is the channel the post is in.
+func (p owedPost) channelKey() string { return channelKey(p.Thread, p.IsBead) }
+
+// channelKeyOfRecord is the channel a record of ours is in, as its payload names
+// it in the clear (mw-tdayrp7): Factory when it names neither, as a chain
+// record does.
+func channelKeyOfRecord(r PosternRecord) string {
+	bead, channel := PosternThread{Bead: r.Bead, Topic: r.Channel}.clearNames()
+	switch {
+	case bead != "":
+		return channelKey(bead, true)
+	case channel != "":
+		return channelKey(channel, false)
+	}
+	return channelKey(PosternGeneralThread, false)
+}
+
 // readThreads reads the newest flatWindow records of the index and reports his
 // posts among them, decrypted and verified as his (a reply to a card, a
 // transcript, a later part of a long post and a talk or call record are not
-// posts to answer), oldest first, and the txids and times of ours, which it
-// cannot read and need not.
+// posts to answer), oldest first, and the records of ours, which it
+// cannot read and need not: each says its channel in the clear (Bead, Channel).
 func readThreads(ctx context.Context, p Postern, c Cipher, keys PosternKeyFile, governor string) (posts []owedPost, ours []PosternRecord, err error) {
 	own, _, err := keys.PublicKey()
 	if err != nil {
@@ -345,10 +371,11 @@ func (o PosternOwed) Run(ctx context.Context) (PosternOwedReport, error) {
 		receipted[bareTxid(r.Re)] = r
 		receiptTxids[bareTxid(r.Txid)] = true
 	}
-	var latestReply time.Time
+	// A record of ours answers only a post in its own channel.
+	latestReply := map[string]time.Time{}
 	for _, r := range ours {
-		if !receiptTxids[bareTxid(r.Txid)] && r.Ts.After(latestReply) {
-			latestReply = r.Ts
+		if key := channelKeyOfRecord(r); !receiptTxids[bareTxid(r.Txid)] && r.Ts.After(latestReply[key]) {
+			latestReply[key] = r.Ts
 		}
 	}
 
@@ -364,7 +391,7 @@ func (o PosternOwed) Run(ctx context.Context) (PosternOwedReport, error) {
 		receipt, hasReceipt := receipted[key]
 		switch {
 		case hasReceipt && now.Sub(receipt.At) > OwedGrace:
-		case !hasReceipt && age < owedLookback && !latestReply.After(p.Ts):
+		case !hasReceipt && age < owedLookback && !latestReply[p.channelKey()].After(p.Ts):
 		default:
 			continue
 		}

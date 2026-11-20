@@ -1047,3 +1047,30 @@ func TestARefusedEventStreamIsUnreachable(t *testing.T) {
 		t.Fatalf("expected the error to be ErrPosternUnreachable, got: %v", err)
 	}
 }
+
+// A direct record names its bead or channel in the clear, and Messages hands it
+// on: it is all a record of ours says of where it is (mw-tdayrp7).
+func TestMessagesCarriesTheClearBeadAndChannelOfARecord(t *testing.T) {
+	var records []map[string]any
+	for seq, p := range []application.PosternPayload{
+		{V: 1, Kind: application.PosternMessageKind, Class: "message", To: "t", From: "f", Ts: 1, Ct: "x", Bead: "mw-a.1"},
+		{V: 1, Kind: application.PosternMessageKind, Class: "message", To: "t", From: "f", Ts: 2, Ct: "y", Channel: "ideas"},
+	} {
+		raw, _ := json.Marshal(p)
+		s, err := postern.RecordScript(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, map[string]any{"seq": seq + 1, "txid": fmt.Sprintf("direct:%d", seq), "scriptHex": s.String()})
+	}
+	body, _ := json.Marshal(map[string]any{"records": records, "next": 2})
+	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0&limit=200": {200, string(body)}})
+
+	got, err := backend.Messages(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("reading messages: %v", err)
+	}
+	if len(got) != 2 || got[0].Bead != "mw-a.1" || got[0].Channel != "" || got[1].Bead != "" || got[1].Channel != "ideas" {
+		t.Fatalf("expected the bead of the first and the channel of the second, got %+v", got)
+	}
+}
