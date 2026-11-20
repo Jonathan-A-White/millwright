@@ -691,7 +691,21 @@ func (g *Gateway) EditStory(ctx context.Context, id string, edit application.Sto
 		if strings.TrimSpace(*edit.Title) == "" {
 			return fmt.Errorf("a story needs a title")
 		}
-		args = append(args, "--title", strings.TrimSpace(*edit.Title))
+		title := strings.TrimSpace(*edit.Title)
+		if domain.FitTitle(title) != title {
+			// bd refuses a longer title outright (mw-gq6.1538): cut it as a create
+			// does, and keep the whole at the head of the description, the edit's
+			// own or else the one the story holds.
+			notes, err := g.notesFor(ctx, id, edit)
+			if err != nil {
+				return err
+			}
+			var fit string
+			fit, notes = fitTitle(title, notes)
+			edit.Description = &notes
+			title = fit
+		}
+		args = append(args, "--title", title)
 	}
 	if edit.Description != nil {
 		args = append(args, "--description", *edit.Description, "--allow-empty-description")
@@ -701,6 +715,19 @@ func (g *Gateway) EditStory(ctx context.Context, id string, edit application.Sto
 	}
 	_, err := g.call(ctx, args...)
 	return err
+}
+
+// notesFor is the description an edit's cut title is kept in: the edit's own,
+// or the story's as it stands when the edit names none.
+func (g *Gateway) notesFor(ctx context.Context, id string, edit application.StoryEdit) (string, error) {
+	if edit.Description != nil {
+		return strings.TrimSpace(*edit.Description), nil
+	}
+	story, err := g.showOne(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("reading story %s to keep the whole of its title: %w", id, err)
+	}
+	return strings.TrimSpace(story.Description), nil
 }
 
 // MoveStory implements application.WorkTracker: one bd update --parent.
