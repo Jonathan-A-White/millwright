@@ -71,6 +71,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newReleasePacedCmd())
 	root.AddCommand(newCauseCmd())
 	root.AddCommand(newTodoCmd())
+	root.AddCommand(newVoiceKeepAliveCmd())
 	root.AddCommand(newPathCmd())
 	root.AddCommand(newNamedHereCmd())
 	root.AddCommand(newPauseCmd())
