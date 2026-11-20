@@ -153,3 +153,74 @@ func TestBdParentsCountsEachBdOnceByItsParentsCommand(t *testing.T) {
 		t.Fatalf("expected %v, got %v", want, got)
 	}
 }
+
+// waits makes the check's wait a step of the test's own clock: it moves the
+// clock by the wait asked and the counter by connections, and records the wait.
+func (r *churnRun) waits(connections int64) *[]time.Duration {
+	var asked []time.Duration
+	r.check.Wait = func(_ context.Context, d time.Duration) {
+		asked = append(asked, d)
+		r.now = r.now.Add(d)
+		r.count += connections
+	}
+	return &asked
+}
+
+// A burst that has passed by the time the cure looks again is no cure-failed
+// (mw-gq6.1513): the cure waits a window, takes the rate again, and finds it
+// back under the limit.
+func TestBeadsChurnCureAfterABurstThatPassedReturnsNil(t *testing.T) {
+	r := newChurnRun(t)
+	r.probe(0, 0)
+	if verdict, reason := r.probe(5, 2000); verdict != application.DoctorFaulty {
+		t.Fatalf("expected the burst to be faulty, got %s (%s)", verdict, reason)
+	}
+	asked := r.waits(3) // a quiet window: 3 connections
+	if err := r.check.Cure(context.Background()); err != nil {
+		t.Fatalf("expected the cure to find the burst gone and return nil, got %v", err)
+	}
+	if len(*asked) != 1 || (*asked)[0] < 30*time.Second {
+		t.Fatalf("expected one wait of at least the shortest window, got %v", *asked)
+	}
+}
+
+// A rate still over the limit at the re-check still fails the cure, and the
+// error still names the top clients.
+func TestBeadsChurnCureWhileTheBurstStandsFailsAndNamesTheClients(t *testing.T) {
+	r := newChurnRun(t)
+	r.check.Clients = func(context.Context) ([]doctor.ChurnClient, error) {
+		return []doctor.ChurnClient{{Command: "mw dispatch", Count: 66}, {Command: "mw status", Count: 5}}, nil
+	}
+	r.probe(0, 0)
+	r.probe(5, 2000)
+	r.waits(1000) // 1000 in just over half a minute: well past 300 a minute
+	err := r.check.Cure(context.Background())
+	if err == nil {
+		t.Fatal("expected the cure to fail while the rate stands over the limit")
+	}
+	for _, want := range []string{"no cure", "mw dispatch 66", "past 300"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected the failed cure to say %q, got %q", want, err)
+		}
+	}
+}
+
+// A cure whose wait is cut by the ctx does not judge a window it did not wait
+// out: it fails, as the cure of a fault it could not look at again.
+func TestBeadsChurnCureCutShortFailsWithoutJudging(t *testing.T) {
+	r := newChurnRun(t)
+	r.probe(0, 0)
+	r.probe(5, 2000)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := r.check.Cure(ctx); err == nil {
+		t.Fatal("expected a cure whose wait was cut short to fail")
+	}
+}
+
+func TestBeadsChurnWayBackSaysWhatTheCureDoes(t *testing.T) {
+	way := newChurnRun(t).check.WayBack()
+	if !strings.Contains(way, "waits") || !strings.Contains(way, "changes nothing") {
+		t.Fatalf("expected the way back to say the cure waits and changes nothing, got %q", way)
+	}
+}
