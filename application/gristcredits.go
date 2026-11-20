@@ -1,12 +1,14 @@
 package application
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -45,9 +47,12 @@ type GristCreditKey interface {
 	Read(ctx context.Context) (key, refused string)
 }
 
-// GristCreditMark is the state file's content: when the key was found spent.
+// GristCreditMark is the state file's content: when the key was found spent,
+// and why, CreditsSpent or CreditsKeyRefused; a mark written before the why
+// was kept says none, which is read as CreditsSpent.
 type GristCreditMark struct {
 	SpentAt time.Time `json:"spent_at"`
+	Why     string    `json:"why,omitempty"`
 }
 
 // GristCreditState keeps the spent mark. The real adapter is
@@ -59,8 +64,10 @@ type GristCreditState interface {
 	Clear(ctx context.Context) error
 }
 
-// GristCredits decides what a grist is billed to: the API key while it has
-// credit, else the subscription.
+// GristCredits decides what a grind may bill to the API key: for the
+// factory's own grinds (Choose) the key while On and it has credit, else the
+// subscription; for a person marked API only (KeyOnly) the key while it has
+// credit, whatever On says, else nothing (mw-gq6.1518).
 type GristCredits struct {
 	On     bool
 	Key    GristCreditKey
@@ -77,6 +84,9 @@ type GristBilling struct {
 	key     string
 	// Retry says the key is tried again after a spent mark.
 	Retry bool
+	// OutOfCredit, on a billing KeyOnly refused, says what stood in the key's
+	// way was a spent mark for its credit, not a key that could not be used.
+	OutOfCredit bool
 	// Note is a plain sentence for the pass's report.
 	Note string
 }
@@ -89,10 +99,10 @@ func (b GristBilling) Key() string { return b.key }
 // GristCreditsRetry does not: the key is tried again, Retry set), else the
 // subscription. A key file or state that cannot be used bills the
 // subscription, with a note that says why. It is the factory's own choice,
-// for the grinds the factory runs for itself; a grist of a licence not the
-// Governor's is billed by KeyOnly.
+// for the grinds the factory runs for itself (verifymatch.go, the grist
+// smoke's key); a grist of a person marked API only is billed by KeyOnly.
 func (c *GristCredits) Choose(ctx context.Context) GristBilling {
-	billing, _, note := c.keyBilling(ctx)
+	billing, _, note := c.keyBilling(ctx, true)
 	if billing.Billing == BillingAPI {
 		return billing
 	}
@@ -100,21 +110,25 @@ func (c *GristCredits) Choose(ctx context.Context) GristBilling {
 }
 
 // KeyOnly is what a grist that may not use the subscription is billed to: the
-// key, as Choose would bill it, or nothing. ok false says the grist is not to
-// be ground, and why says, in a plain sentence for the pass's report, what
-// stands in the key's way: the switch off, no usable key file, a spent mark
-// less than GristCreditsRetry old, or a state that cannot be read.
+// key, as Choose would bill it but whatever On says, or nothing. ok false says
+// the grist is not to be ground, and why says, in a plain sentence for the
+// pass's report, what stands in the key's way: no credits set up, no usable
+// key file, a spent mark less than GristCreditsRetry old (billing.OutOfCredit
+// set when it marks the credit spent), or a state that cannot be read.
 func (c *GristCredits) KeyOnly(ctx context.Context) (billing GristBilling, ok bool, why string) {
-	billing, why, _ = c.keyBilling(ctx)
+	billing, why, _ = c.keyBilling(ctx, false)
 	return billing, billing.Billing == BillingAPI, why
 }
 
-// keyBilling is the key's billing when it may be used; else a zero billing,
-// why it may not (for KeyOnly) and the note Choose's subscription carries,
-// empty where it carries none.
-func (c *GristCredits) keyBilling(ctx context.Context) (billing GristBilling, why, note string) {
+// keyBilling is the key's billing when it may be used, the switch On asked
+// only when switched; else a billing that is not the key's, why it may not
+// (for KeyOnly) and the note Choose's subscription carries, empty where it
+// carries none.
+func (c *GristCredits) keyBilling(ctx context.Context, switched bool) (billing GristBilling, why, note string) {
 	switch {
-	case c == nil || !c.On:
+	case c == nil:
+		return GristBilling{}, "there are no API credits set up", ""
+	case switched && !c.On:
 		return GristBilling{}, "api credits are off", ""
 	case c.Key == nil:
 		return GristBilling{}, "there is no API key", ""
@@ -140,8 +154,12 @@ func (c *GristCredits) keyBilling(ctx context.Context) (billing GristBilling, wh
 	case !found:
 		return billing, "", ""
 	case c.now().Sub(mark.SpentAt) < GristCreditsRetry:
-		return GristBilling{}, fmt.Sprintf("the API credit was found spent at %s, and the key is tried again after %s",
-			mark.SpentAt.UTC().Format(time.RFC3339), mark.SpentAt.Add(GristCreditsRetry).UTC().Format(time.RFC3339)), ""
+		what := "the API credit was found spent"
+		if mark.Why == CreditsKeyRefused {
+			what = "the API key was found refused"
+		}
+		return GristBilling{OutOfCredit: mark.Why != CreditsKeyRefused}, fmt.Sprintf("%s at %s, and the key is tried again after %s",
+			what, mark.SpentAt.UTC().Format(time.RFC3339), mark.SpentAt.Add(GristCreditsRetry).UTC().Format(time.RFC3339)), ""
 	}
 	billing.Retry = true
 	return billing, "", ""
@@ -202,7 +220,7 @@ func (c *GristCredits) Spend(ctx context.Context, why, said string) (wrote bool,
 		if mark, found, err := c.State.Mark(ctx); err == nil && found && at.Sub(mark.SpentAt) < GristCreditsRetry {
 			return false, nil
 		}
-		if err := c.State.Spend(ctx, GristCreditMark{SpentAt: at}); err != nil {
+		if err := c.State.Spend(ctx, GristCreditMark{SpentAt: at, Why: why}); err != nil {
 			return false, fmt.Errorf("the spent mark could not be written: %w", err)
 		}
 	}
@@ -214,7 +232,8 @@ func (c *GristCredits) Spend(ctx context.Context, why, said string) (wrote bool,
 			said = strings.ReplaceAll(said, key, "[key]")
 		}
 	}
-	detail := fmt.Sprintf("%s: grists use the subscription until %s; %s", why, at.Add(GristCreditsRetry).Format(time.RFC3339), firstLine(said))
+	detail := fmt.Sprintf("%s: the factory's own grists use the subscription, and those of persons marked API only are refused, until %s; %s",
+		why, at.Add(GristCreditsRetry).Format(time.RFC3339), firstLine(said))
 	_, err = EventEmit{
 		Log: c.Events, Now: c.now,
 		Event: events.Event{
@@ -285,30 +304,34 @@ type GristCreditsAdmin struct {
 	// Home and Host say whether this host is home, which `key` needs.
 	Home HomeFile
 	Host string
-	// GovernorKey is the Governor's public key: the month's grists are split
-	// into his and everyone else's by it. Empty counts every grist as others'.
+	// GovernorKey is the Governor's public key: his grists are counted as his
+	// in the month's split by person. Empty names none of them his.
 	GovernorKey string
 	Now         func() time.Time
 	Out         io.Writer
 }
 
-// GristCreditsShare is one side of the month's grists: the Governor's or
-// everyone else's.
+// GristCreditsShare is one part of the month's grists: those billed to one
+// thing, or those of one person (mw-gq6.1518).
 type GristCreditsShare struct {
-	// Grists are the month's lines of the side but those refused resting;
-	// CostUSD is their total_cost_usd, whatever each was billed to, and
-	// APIUSD the part of it billed to the key.
+	// Name is the billing ("api", "subscription", "none"), or who: "the
+	// Governor", "person <id>", or "key <fingerprint>" for a key the mill
+	// knew no person of.
+	Name string `json:"name"`
+	// Grists are the month's lines of the share but those refused for want
+	// of credit; CostUSD is their total_cost_usd, whatever each was billed
+	// to, and APIUSD the part of it billed to the key.
 	Grists  int     `json:"grists"`
 	CostUSD float64 `json:"cost_usd"`
 	APIUSD  float64 `json:"api_usd"`
-	// Resting is how many of the side's grists were refused resting: the
-	// credit could not pay for them.
+	// Resting is how many of the share's grists were refused for want of
+	// credit, resting or out of credits: the credit could not pay for them.
 	Resting int `json:"resting"`
 }
 
 // add counts line in the share.
 func (s *GristCreditsShare) add(line GrindLine) {
-	if line.Reason == GristReasonResting {
+	if isGristReasonWantOfCredit(line.Reason) {
 		s.Resting++
 		return
 	}
@@ -337,10 +360,10 @@ type GristCreditsReport struct {
 	BudgetUSD float64 `json:"budget_usd"`
 	// LastAPI is the time of the latest grist ever billed to the key.
 	LastAPI *time.Time `json:"last_api"`
-	// Governor and Others split the month's grists by who sealed them: his
-	// are billed to his subscription, everyone else's to the key alone.
-	Governor GristCreditsShare `json:"governor"`
-	Others   GristCreditsShare `json:"others"`
+	// ByBilling splits the month's grists by what each was billed to, and
+	// ByPerson by who sent it: the Governor first, then the rest by cost.
+	ByBilling []GristCreditsShare `json:"by_billing"`
+	ByPerson  []GristCreditsShare `json:"by_person"`
 }
 
 func (a GristCreditsAdmin) now() time.Time {
@@ -390,13 +413,11 @@ func (a GristCreditsAdmin) Report(ctx context.Context) (GristCreditsReport, erro
 	if a.GovernorKey != "" {
 		governor = KeyFingerprint(a.GovernorKey)
 	}
+	byBilling, byPerson := gristShares{}, gristShares{}
 	for _, line := range lines {
 		if at := line.Time.UTC(); !at.Before(start) && at.Before(end) {
-			if governor != "" && line.Sender == governor {
-				report.Governor.add(line)
-			} else {
-				report.Others.add(line)
-			}
+			byBilling.add(cmp.Or(line.Billing, BillingSubscription), line)
+			byPerson.add(senderShareName(line, governor), line)
 		}
 		if line.Billing != BillingAPI {
 			continue
@@ -410,16 +431,63 @@ func (a GristCreditsAdmin) Report(ctx context.Context) (GristCreditsReport, erro
 			report.CostUSD += line.CostUSD
 		}
 	}
+	report.ByBilling, report.ByPerson = byBilling.sorted(gristGovernorShare), byPerson.sorted(gristGovernorShare)
 	return report, nil
+}
+
+// gristGovernorShare is the Governor's share's name in the split by person.
+const gristGovernorShare = "the Governor"
+
+// senderShareName is who sent line, as the split by person names them.
+func senderShareName(line GrindLine, governor string) string {
+	switch {
+	case governor != "" && line.Sender == governor:
+		return gristGovernorShare
+	case line.Person != "":
+		return "person " + line.Person
+	case line.Sender == "":
+		return "no sender"
+	}
+	return "key " + line.Sender
+}
+
+// gristShares are the shares of one split, by name.
+type gristShares map[string]*GristCreditsShare
+
+func (g gristShares) add(name string, line GrindLine) {
+	share := g[name]
+	if share == nil {
+		share = &GristCreditsShare{Name: name}
+		g[name] = share
+	}
+	share.add(line)
+}
+
+// sorted is the shares, first first, then by cost, most first, then by name.
+func (g gristShares) sorted(first string) []GristCreditsShare {
+	shares := make([]GristCreditsShare, 0, len(g))
+	for _, share := range g {
+		shares = append(shares, *share)
+	}
+	slices.SortFunc(shares, func(a, b GristCreditsShare) int {
+		switch {
+		case a.Name == first:
+			return -1
+		case b.Name == first:
+			return 1
+		}
+		return cmp.Or(cmp.Compare(b.CostUSD, a.CostUSD), cmp.Compare(a.Name, b.Name))
+	})
+	return shares
 }
 
 // String is the report as `mw grist credits` prints it.
 func (r GristCreditsReport) String() string {
 	var b strings.Builder
 	if r.On {
-		b.WriteString("api credits: on (grists are billed to the API key while it has credit)\n")
+		b.WriteString("api credits: on (the factory's own grinds are billed to the API key while it has credit; a person marked API only is billed to the key alone either way)\n")
 	} else {
-		b.WriteString("api credits: off (grists are billed to the subscription)\n")
+		b.WriteString("api credits: off (the factory's own grinds are billed to the subscription; a person marked API only is billed to the key alone either way)\n")
 	}
 	switch {
 	case r.KeyPresent && r.KeyNote != "":
@@ -442,17 +510,29 @@ func (r GristCreditsReport) String() string {
 	} else {
 		fmt.Fprintf(&b, "last grist billed to the key: %s\n", r.LastAPI.Format(time.RFC3339))
 	}
-	fmt.Fprintf(&b, "this month by sender (the Governor's are billed to his subscription, others' to the key alone):\n")
-	fmt.Fprintf(&b, "  the Governor: %s\n", r.Governor)
-	fmt.Fprintf(&b, "  others: %s\n", r.Others)
+	b.WriteString("this month by billing:\n")
+	for _, share := range r.ByBilling {
+		fmt.Fprintf(&b, "  %s: %s\n", share.Name, share.text(false))
+	}
+	b.WriteString("this month by person:\n")
+	for _, share := range r.ByPerson {
+		fmt.Fprintf(&b, "  %s: %s\n", share.Name, share.text(true))
+	}
 	return b.String()
 }
 
-// String is the share as the report prints it.
-func (s GristCreditsShare) String() string {
-	text := fmt.Sprintf("%d %s, $%.2f ($%.2f billed to the key)", s.Grists, plural(s.Grists, "grist", "grists"), s.CostUSD, s.APIUSD)
+// String is the share as the report prints it in the split by person.
+func (s GristCreditsShare) String() string { return s.text(true) }
+
+// text is the share's grists and cost, withKey with the part billed to the
+// key, and how many were refused for want of credit.
+func (s GristCreditsShare) text(withKey bool) string {
+	text := fmt.Sprintf("%d %s, $%.2f", s.Grists, plural(s.Grists, "grist", "grists"), s.CostUSD)
+	if withKey {
+		text += fmt.Sprintf(" ($%.2f billed to the key)", s.APIUSD)
+	}
 	if s.Resting > 0 {
-		text += fmt.Sprintf(", %d refused resting", s.Resting)
+		text += fmt.Sprintf(", %d refused for want of credit", s.Resting)
 	}
 	return text
 }
@@ -498,9 +578,9 @@ func (a GristCreditsAdmin) Switch(ctx context.Context, on bool) error {
 		return err
 	}
 	if on {
-		a.say("api credits are now on: the next grist is billed to the API key while it has credit (mw grist credits off turns it off; the way back above restores the file as it was)")
+		a.say("api credits are now on: the factory's own grinds are billed to the API key while it has credit (mw grist credits off turns it off; the way back above restores the file as it was)")
 	} else {
-		a.say("api credits are now off: every grist is billed to the subscription (mw grist credits on turns it on; the way back above restores the file as it was)")
+		a.say("api credits are now off: the factory's own grinds are billed to the subscription, and a person marked API only is still billed to the key alone (mw grist credits on turns it on; the way back above restores the file as it was)")
 	}
 	return nil
 }
@@ -518,7 +598,7 @@ func (a GristCreditsAdmin) Clear(ctx context.Context) error {
 	if err := a.State.Clear(ctx); err != nil {
 		return err
 	}
-	a.say("the spent mark (%s) is removed: the next grist is billed to the key again if api credits are on", mark.SpentAt.UTC().Format(time.RFC3339))
+	a.say("the spent mark (%s) is removed: the next grist of a person marked API only is billed to the key again, and the factory's own if api credits are on", mark.SpentAt.UTC().Format(time.RFC3339))
 	return nil
 }
 
@@ -556,12 +636,48 @@ func (a GristCreditsAdmin) SetKey(ctx context.Context, read func() (string, erro
 	}
 	a.say("the API key is written to %s, mode 0600 (the key is not shown)", a.KeyPath)
 	if a.On {
-		a.say("api credits are on: the next grist is billed to the key")
+		a.say("api credits are on: the factory's own grinds and persons marked API only are billed to the key")
 	} else {
-		a.say("api credits are still off: mw grist credits on bills grists to the key")
+		a.say("api credits are still off: persons marked API only are billed to the key, and mw grist credits on bills the factory's own grinds to it too")
 	}
 	if _, found, err := a.State.Mark(ctx); err == nil && found {
 		a.say("a spent mark stands for the old key: mw grist credits clear removes it")
 	}
 	return nil
+}
+
+// The words round the renewal day in GristReasonOutOfCredits's reason.
+const (
+	gristReasonOutOfCreditsStart = "The tutor is out of credits until "
+	gristReasonOutOfCreditsEnd   = "; send it again then."
+)
+
+// GristReasonOutOfCredits is the refusal of a grist of a person marked API
+// only while the API credit is spent: it names the day the credit renews,
+// "Dec 17" (mw-gq6.1518). Like GristReasonResting it is no use of the day.
+func GristReasonOutOfCredits(renews time.Time) string {
+	return gristReasonOutOfCreditsStart + renews.Format("Jan 2") + gristReasonOutOfCreditsEnd
+}
+
+// isGristReasonWantOfCredit says reason is a refusal for want of the API
+// credit: GristReasonResting, or GristReasonOutOfCredits for any day.
+func isGristReasonWantOfCredit(reason string) bool {
+	return reason == GristReasonResting ||
+		strings.HasPrefix(reason, gristReasonOutOfCreditsStart) && strings.HasSuffix(reason, gristReasonOutOfCreditsEnd)
+}
+
+// GristCreditsRenewal is the next day the API credit renews after now: day of
+// this month (the last day of a month that has no day) while that is still to
+// come, else of the next month. The renewal day itself counts as come, since a
+// credit spent on it is spent after it renewed.
+func GristCreditsRenewal(now time.Time, day int) time.Time {
+	now = now.UTC()
+	on := func(year int, month time.Month) time.Time {
+		last := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+		return time.Date(year, month, min(max(day, 1), last), 0, 0, 0, 0, time.UTC)
+	}
+	if renews := on(now.Year(), now.Month()); now.Day() < renews.Day() {
+		return renews
+	}
+	return on(now.Year(), now.Month()+1)
 }

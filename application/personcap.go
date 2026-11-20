@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,12 +22,35 @@ const (
 	PersonFailureKeepFor = time.Minute
 )
 
+// A person's billing mark, as the postern backend keeps it (the Key screen's
+// 'API only' switch, mw-cvwm1u.22): PersonBillingMax bills the person's grists
+// to the Governor's subscription, his Max, and is the default; PersonBillingAPI
+// bills them to the factory's API credit alone (mw-gq6.1518).
+const (
+	PersonBillingMax = "max"
+	PersonBillingAPI = "api"
+)
+
 // Person is a self-registered person as the postern backend knows them
-// (GET /api/register/person): the device keys that share one daily cap.
+// (GET /api/register/person): the device keys that share one daily cap, and
+// the billing mark, PersonBillingMax or PersonBillingAPI.
 type Person struct {
 	ID         string
 	Keys       []string
 	DailyLimit int
+	Billing    string
+}
+
+// APIOnly says the person is marked API only.
+func (p Person) APIOnly() bool { return p.Billing == PersonBillingAPI }
+
+// personBilling is the billing mark the backend said: "api" is API only, and
+// anything else, nothing included, is the Max.
+func personBilling(said string) string {
+	if strings.EqualFold(strings.TrimSpace(said), PersonBillingAPI) {
+		return PersonBillingAPI
+	}
+	return PersonBillingMax
 }
 
 // PersonRegister is the postern backend's person lookup, signed by the mill's
@@ -88,7 +112,7 @@ func (c *PersonCap) Lookup(ctx context.Context, key string) (Person, bool) {
 	if err != nil {
 		keep = PersonFailureKeepFor
 		if c.Log != nil {
-			fmt.Fprintf(c.Log, "mw grist: the person lookup failed, so the daily limit counts each key alone for now: %v\n", err)
+			fmt.Fprintf(c.Log, "mw grist: the person lookup failed, so for now the daily limit counts each key alone and the key's grists are billed to the Max: %v\n", err)
 		}
 	}
 	if c.kept == nil {
@@ -113,20 +137,28 @@ func (c *PersonCap) ask(ctx context.Context, key string) (Person, bool, error) {
 	if person.DailyLimit <= 0 {
 		person.DailyLimit = DefaultGristDailyLimit
 	}
+	person.Billing = personBilling(person.Billing)
 	return person, true, nil
 }
 
-// dailyCap says how many grist the sender may send today and whose fingerprints
-// the day is counted over: the person's keys together at the person's cap when
-// the backend knows the sender, else the sender alone at the home's limit.
-func (g GristGrind) dailyCap(ctx context.Context, senderKey, sender string, limit int) (int, []string) {
-	person, known := g.Persons.Lookup(ctx, senderKey)
-	if !known {
-		return limit, []string{sender}
+// dailyCap says how many grist w's sender may send today and whose
+// fingerprints the day is counted over: the person's keys together at the
+// person's cap when the backend knows the sender (unless PersonDayOff), else
+// the sender alone at the home's limit. A person marked API only is held to
+// apiLimit too, the lower of the two (mw-gq6.1518).
+func (g GristGrind) dailyCap(w *gristWork, limit, apiLimit int) (int, []string) {
+	senders := []string{w.sender}
+	if !w.personKnown {
+		return limit, senders
 	}
-	senders := []string{sender}
-	for _, key := range person.Keys {
-		senders = append(senders, KeyFingerprint(key))
+	if !g.PersonDayOff {
+		limit = w.person.DailyLimit
+		for _, key := range w.person.Keys {
+			senders = append(senders, KeyFingerprint(key))
+		}
 	}
-	return person.DailyLimit, senders
+	if w.person.APIOnly() {
+		limit = min(limit, apiLimit)
+	}
+	return limit, senders
 }

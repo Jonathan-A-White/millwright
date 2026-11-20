@@ -36,6 +36,14 @@ type creditsContext struct {
 	pooled  bool
 	events  *apptest.FakeEventLog
 
+	// person says what the postern backend's person lookup answers for the
+	// phone's key: personKnown, its billing mark, or lookupFails. today, when
+	// set, is the mill's clock instead of gristNow.
+	personKnown bool
+	billing     string
+	lookupFails bool
+	today       time.Time
+
 	// shellKey and shellKeySet are ANTHROPIC_API_KEY as the scenario found
 	// it, put back when it ends.
 	shellKey    string
@@ -74,18 +82,22 @@ func (cc *creditsContext) wire(m *application.GristGrind) {
 	}
 	real := claude.NewGrinder(claude.WithGrindProgram(cc.program))
 	m.Grinder = real
-	var credits *application.GristCredits
-	if cc.on {
-		credits = &application.GristCredits{
-			On:     true,
-			Key:    grist.CreditKeyFile{Path: cc.keyFile},
-			State:  &grist.CreditState{Dir: cc.state},
-			Events: cc.events,
-			Host:   "laptop",
-			Now:    func() time.Time { return gristNow },
-		}
+	// The credits are there whatever api_credits says: the switch is the
+	// factory's own grinds', and a person marked API only is billed to the key
+	// alone either way (mw-gq6.1518).
+	credits := &application.GristCredits{
+		On:     cc.on,
+		Key:    grist.CreditKeyFile{Path: cc.keyFile},
+		State:  &grist.CreditState{Dir: cc.state},
+		Events: cc.events,
+		Host:   "laptop",
+		Now:    cc.now,
 	}
 	m.Credits = credits
+	m.Persons = &application.PersonCap{Register: creditsRegister{cc}}
+	if !cc.today.IsZero() {
+		m.Now = cc.now
+	}
 	if cc.pooled {
 		pool := &cc.c.pool
 		if pool.pool == nil {
@@ -129,6 +141,13 @@ func registerGristCredits(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Given(`^the API answers a grind billed to the key with "([^"]*)"$`, cc.apiAnswers)
 	ctx.Given(`^the API refuses the key$`, cc.apiRefuses)
 	ctx.Given(`^the key was found spent (\d+) hours ago$`, cc.foundSpent)
+	ctx.Given(`^api_credits is (on|off), and there is no key file$`, cc.noKeyFile)
+	ctx.Given(`^the phone's licence belongs to a person marked "([^"]*)"$`, cc.personMarked)
+	ctx.Given(`^the phone's licence belongs to no person$`, cc.noPerson)
+	ctx.Given(`^the person lookup fails$`, cc.lookupFailing)
+	ctx.Given(`^today is (\S+) on the mill's clock$`, cc.todayIs)
+	ctx.Then(`^the phone's line of the record was refused because "([^"]*)"$`, cc.phoneLineRefused)
+	ctx.Then(`^the newest line of the mill's record is billed to "([^"]*)"$`, cc.newestLineBilled)
 
 	ctx.Then(`^(\d+) sessions? (?:was|were) given the key "([^"]*)" in (?:its|their) environment$`, cc.sessionsGivenKey)
 	ctx.Then(`^(\d+) sessions? (?:was|were) given no ANTHROPIC_API_KEY$`, cc.sessionsGivenNone)
@@ -209,7 +228,86 @@ func (cc *creditsContext) apiRefuses() error {
 
 func (cc *creditsContext) foundSpent(hours int) error {
 	return (&grist.CreditState{Dir: cc.state}).Spend(context.Background(),
-		application.GristCreditMark{SpentAt: gristNow.Add(-time.Duration(hours) * time.Hour)})
+		application.GristCreditMark{SpentAt: cc.now().Add(-time.Duration(hours) * time.Hour)})
+}
+
+// now is the clock of the scenario's mill and credits.
+func (cc *creditsContext) now() time.Time {
+	if cc.today.IsZero() {
+		return gristNow
+	}
+	return cc.today
+}
+
+// creditsRegister is the postern backend's person lookup as the scenario
+// says it: the phone's key a person's with a billing mark, no person's, or a
+// lookup that fails.
+type creditsRegister struct{ cc *creditsContext }
+
+func (r creditsRegister) RegisterPerson(_ context.Context, key string) (application.Person, bool, error) {
+	switch {
+	case r.cc.lookupFails:
+		return application.Person{}, false, fmt.Errorf("the postern backend answered 503")
+	case !r.cc.personKnown || key != r.cc.c.phoneKey:
+		return application.Person{}, false, nil
+	}
+	return application.Person{ID: "p-phone", Keys: []string{key}, Billing: r.cc.billing}, true, nil
+}
+
+func (cc *creditsContext) noKeyFile(switchState string) error {
+	cc.on = switchState == "on"
+	return nil
+}
+
+func (cc *creditsContext) personMarked(billing string) error {
+	cc.personKnown, cc.billing = true, billing
+	return nil
+}
+
+func (cc *creditsContext) noPerson() error {
+	cc.personKnown = false
+	return nil
+}
+
+func (cc *creditsContext) lookupFailing() error {
+	cc.lookupFails = true
+	return nil
+}
+
+func (cc *creditsContext) todayIs(day string) error {
+	at, err := time.Parse(time.DateOnly, day)
+	if err != nil {
+		return err
+	}
+	cc.today = at.Add(10 * time.Hour)
+	return nil
+}
+
+func (cc *creditsContext) phoneLineRefused(reason string) error {
+	lines, err := cc.c.state.Lines(context.Background())
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		if line.Sender == application.KeyFingerprint(cc.c.phoneKey) {
+			if line.Status != application.GristRefused || line.Reason != reason {
+				return fmt.Errorf("expected the phone's line refused because %q, got %s because %q", reason, line.Status, line.Reason)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a line of the phone's in %+v", lines)
+}
+
+func (cc *creditsContext) newestLineBilled(billing string) error {
+	lines, err := cc.c.state.Lines(context.Background())
+	if err != nil || len(lines) == 0 {
+		return fmt.Errorf("expected lines in the record, got %d %v", len(lines), err)
+	}
+	if last := lines[len(lines)-1]; last.Billing != billing {
+		return fmt.Errorf("expected the newest line billed to %q, got %+v", billing, last)
+	}
+	return nil
 }
 
 // runs reads the stand-in's log, oldest first.

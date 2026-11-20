@@ -1,6 +1,7 @@
 package application_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -185,14 +186,28 @@ func (g *keyedGrinder) keys() []string {
 	return keys
 }
 
-// creditMill is aSmallMill billing through credits and a keyedGrinder.
+// creditMill is aSmallMill billing through credits and a keyedGrinder, its
+// grist's sender a person marked API only (mw-gq6.1518).
 func creditMill(t *testing.T, onKey application.SessionResult) (application.GristGrind, *apptest.FakePostern, *keyedGrinder, *application.GristCredits, *apptest.FakeCreditState, *apptest.FakeEventLog) {
 	t.Helper()
 	mill, backend, _ := aSmallMill(t)
 	credits, state, log := creditsFor()
 	grinder := &keyedGrinder{onKey: onKey}
 	mill.Grinder, mill.Credits = grinder, credits
+	mill.Persons = markedPersons(smallMillPhone, application.PersonBillingAPI)
+	mill.Now = func() time.Time { return creditsNow }
 	return mill, backend, grinder, credits, state, log
+}
+
+// markedPersons is a person lookup that knows key alone, as person p-phone's,
+// with the billing mark billing.
+func markedPersons(key, billing string) *application.PersonCap {
+	return application.NewPersonCap(aRegister(func(_ context.Context, asked string) (application.Person, bool, error) {
+		if asked != key {
+			return application.Person{}, false, nil
+		}
+		return application.Person{ID: "p-phone", Keys: []string{key}, Billing: billing}, true, nil
+	}), &bytes.Buffer{})
 }
 
 // factoryCreditMill is creditMill whose grist is sealed by the factory's own
@@ -529,11 +544,11 @@ func TestTheGovernorsGristIsBilledToTheSubscriptionWhateverTheCredits(t *testing
 	}
 }
 
-// Another licence's grist is not ground at all while the API credit cannot be
-// used: no key, a key file the mill refuses, the switch off, no credits, or a
-// standing spent mark. It is refused, resting, and never runs on the
-// subscription (mw-gq6.1517).
-func TestAnotherLicencesGristRestsWithoutCredit(t *testing.T) {
+// A person marked API only's grist is not ground at all while the API key
+// cannot be used: no key, a key file the mill refuses, no credits, or a
+// standing mark the API's refusal of the key wrote. It is refused, resting,
+// and never runs on the subscription (mw-gq6.1517, mw-gq6.1518).
+func TestAnAPIOnlyPersonsGristRestsWithoutAUsableKey(t *testing.T) {
 	cases := map[string]func(mill *application.GristGrind, c *application.GristCredits, s *apptest.FakeCreditState){
 		"no key file": func(_ *application.GristGrind, c *application.GristCredits, _ *apptest.FakeCreditState) {
 			c.Key = &apptest.FakeCreditKey{}
@@ -541,12 +556,11 @@ func TestAnotherLicencesGristRestsWithoutCredit(t *testing.T) {
 		"a refused key": func(_ *application.GristGrind, c *application.GristCredits, _ *apptest.FakeCreditState) {
 			c.Key = &apptest.FakeCreditKey{Refused: "the key file is readable by others"}
 		},
-		"the switch off": func(_ *application.GristGrind, c *application.GristCredits, _ *apptest.FakeCreditState) { c.On = false },
 		"no credits at all": func(m *application.GristGrind, _ *application.GristCredits, _ *apptest.FakeCreditState) {
 			m.Credits = nil
 		},
-		"a standing mark": func(_ *application.GristGrind, _ *application.GristCredits, s *apptest.FakeCreditState) {
-			s.Set(application.GristCreditMark{SpentAt: creditsNow.Add(-2 * time.Hour)})
+		"a standing mark of a refused key": func(_ *application.GristGrind, _ *application.GristCredits, s *apptest.FakeCreditState) {
+			s.Set(application.GristCreditMark{SpentAt: creditsNow.Add(-2 * time.Hour), Why: application.CreditsKeyRefused})
 		},
 	}
 	for name, set := range cases {
@@ -559,7 +573,7 @@ func TestAnotherLicencesGristRestsWithoutCredit(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(grinder.calls) != 0 {
-				t.Fatalf("expected no grind for another licence without credit, got %q", grinder.keys())
+				t.Fatalf("expected no grind for an API-only person without a usable key, got %q", grinder.keys())
 			}
 			if report.Refused != 1 || len(backend.Delivered()) != 1 {
 				t.Fatalf("expected one refusal delivered, got %+v", report)
@@ -580,7 +594,7 @@ func TestAnotherLicencesGristRestsWithoutCredit(t *testing.T) {
 // the day.
 func TestARestingRefusalIsNoUseOfTheDay(t *testing.T) {
 	mill, _, _, credits, _, _ := creditMill(t, application.SessionResult{})
-	credits.On = false
+	credits.Key = &apptest.FakeCreditKey{}
 	mill.Ceilings.DailyLimit = 1
 	for i := 0; i < 2; i++ {
 		if err := mill.State.Append(context.Background(), application.GrindLine{
@@ -599,16 +613,22 @@ func TestARestingRefusalIsNoUseOfTheDay(t *testing.T) {
 	}
 }
 
-// Another licence's grind billed to the key that finds the credit spent writes
-// the mark and is answered resting: it is not run again on the subscription
-// (mw-gq6.1517).
-func TestAnotherLicencesGristSpentMidGrindRestsAndIsNotRetried(t *testing.T) {
-	for name, onKey := range map[string]application.SessionResult{
-		"credit spent": {IsError: true, Subtype: "success", Said: "Credit balance is too low"},
-		"key refused":  {IsError: true, Said: `API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`},
+// An API-only person's grind billed to the key that finds the credit spent
+// writes the mark and is answered out of credits until the renewal day; one
+// that finds the key refused, resting. Neither is run again on the
+// subscription (mw-gq6.1517, mw-gq6.1518).
+func TestAnAPIOnlyPersonsGristSpentMidGrindIsRefusedAndNotRetried(t *testing.T) {
+	for name, tc := range map[string]struct {
+		onKey  application.SessionResult
+		reason string
+	}{
+		"credit spent": {application.SessionResult{IsError: true, Subtype: "success", Said: "Credit balance is too low"},
+			"The tutor is out of credits until Nov 17; send it again then."},
+		"key refused": {application.SessionResult{IsError: true, Said: `API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`},
+			application.GristReasonResting},
 	} {
 		t.Run(name, func(t *testing.T) {
-			mill, backend, grinder, _, state, log := creditMill(t, onKey)
+			mill, backend, grinder, _, state, log := creditMill(t, tc.onKey)
 			report, err := mill.Run(context.Background())
 			if err != nil {
 				t.Fatal(err)
@@ -625,11 +645,11 @@ func TestAnotherLicencesGristSpentMidGrindRestsAndIsNotRetried(t *testing.T) {
 			if report.Refused != 1 || len(backend.Delivered()) != 1 {
 				t.Fatalf("expected one refusal delivered, got %+v", report)
 			}
-			if answer := openFakeAnswer(t, backend.Delivered()[0]); answer.Status != application.GristRefused || answer.Reason != application.GristReasonResting {
-				t.Fatalf("expected the grist answered resting, got %+v", answer)
+			if answer := openFakeAnswer(t, backend.Delivered()[0]); answer.Status != application.GristRefused || answer.Reason != tc.reason {
+				t.Fatalf("expected the grist refused %q, got %+v", tc.reason, answer)
 			}
-			if line := lineOf(t, mill); line.Billing != application.BillingAPI || line.Reason != application.GristReasonResting {
-				t.Fatalf("expected a resting line billed to api, got %+v", line)
+			if line := lineOf(t, mill); line.Billing != application.BillingAPI || line.Reason != tc.reason {
+				t.Fatalf("expected a refused line billed to api, got %+v", line)
 			}
 		})
 	}
@@ -697,13 +717,16 @@ func talkCreditMill(t *testing.T, onKey application.SessionResult) (application.
 	credits, state, _ := creditsFor()
 	grinder := &keyedGrinder{onKey: onKey}
 	mill.Postern, mill.Grinder, mill.Credits = backend, grinder, credits
+	mill.Persons = markedPersons(smallMillPhone, application.PersonBillingAPI)
+	mill.Now = func() time.Time { return creditsNow }
 	mill.Talks = application.NewGristTalks(&creditTalks{dir: t.TempDir()})
 	return mill, backend, grinder, state
 }
 
 // A talk's grist is billed by its sealer too: the Governor's to the
-// subscription, another licence's to the key, and another licence's resting
-// when the key's credit is spent, never on the subscription (mw-gq6.1517).
+// subscription, an API-only person's to the key, and an API-only person's
+// refused out of credits when the key's credit is spent, never on the
+// subscription (mw-gq6.1517, mw-gq6.1518).
 func TestATalksGristIsBilledBySealer(t *testing.T) {
 	good := application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[],"placeName":"Top drawer"}`), SessionID: "s1"}
 	t.Run("the Governor's", func(t *testing.T) {
@@ -739,8 +762,8 @@ func TestATalksGristIsBilledBySealer(t *testing.T) {
 		if keys := grinder.keys(); len(keys) != 1 || keys[0] != testAPIKey {
 			t.Fatalf("expected one grind on the key and none on the subscription, got %q", keys)
 		}
-		if answer := openFakeAnswer(t, backend.Delivered()[0]); answer.Status != application.GristRefused || answer.Reason != application.GristReasonResting {
-			t.Fatalf("expected the talk's grist answered resting, got %+v", answer)
+		if answer := openFakeAnswer(t, backend.Delivered()[0]); answer.Status != application.GristRefused || answer.Reason != outOfCreditsNov17 {
+			t.Fatalf("expected the talk's grist answered out of credits, got %+v", answer)
 		}
 	})
 	t.Run("another's, a standing mark", func(t *testing.T) {
@@ -752,23 +775,29 @@ func TestATalksGristIsBilledBySealer(t *testing.T) {
 		if len(grinder.calls) != 0 {
 			t.Fatalf("expected no grind, got %q", grinder.keys())
 		}
-		if line := lineOf(t, mill); line.Reason != application.GristReasonResting {
-			t.Fatalf("expected a resting line, got %+v", line)
+		if line := lineOf(t, mill); line.Reason != outOfCreditsNov17 {
+			t.Fatalf("expected an out-of-credits line, got %+v", line)
 		}
 	})
 }
 
+// outOfCreditsNov17 is the out-of-credits refusal at creditsNow (Oct 20), the
+// credit renewing on the 17th.
+const outOfCreditsNov17 = "The tutor is out of credits until Nov 17; send it again then."
+
 // mw grist credits splits the month's grists and their list-price cost by
-// the Governor's own and everyone else's, whatever each was billed to.
-func TestCreditsReportSplitsTheMonthByTheGovernorAndOthers(t *testing.T) {
+// what each was billed to, and by person: the Governor, a person by their id,
+// a key with no person by its fingerprint (mw-gq6.1518).
+func TestCreditsReportSplitsTheMonthByBillingAndByPerson(t *testing.T) {
 	record := &apptest.FakeGristState{}
 	governor, other := application.KeyFingerprint(smallMillPhone), application.KeyFingerprint(gristStrangerKey)
 	for _, line := range []application.GrindLine{
-		{Time: creditsNow.AddDate(0, -1, 0), Sender: other, Billing: application.BillingAPI, CostUSD: 7},
+		{Time: creditsNow.AddDate(0, -1, 0), Sender: other, Person: "p-ann", Billing: application.BillingAPI, CostUSD: 7},
 		{Time: creditsNow, Sender: governor, Billing: application.BillingSubscription, CostUSD: 1.5},
 		{Time: creditsNow, Sender: governor, Billing: application.BillingSubscription, CostUSD: 0.5},
-		{Time: creditsNow, Sender: other, Billing: application.BillingAPI, CostUSD: 2.25},
-		{Time: creditsNow, Sender: other, Status: application.GristRefused, Reason: application.GristReasonResting},
+		{Time: creditsNow, Sender: other, Person: "p-ann", Billing: application.BillingAPI, CostUSD: 2.25},
+		{Time: creditsNow, Sender: other, Person: "p-ann", Billing: application.BillingNone, Status: application.GristRefused, Reason: outOfCreditsNov17},
+		{Time: creditsNow, Sender: other, Billing: application.BillingSubscription, CostUSD: 0.75},
 	} {
 		if err := record.Append(context.Background(), line); err != nil {
 			t.Fatal(err)
@@ -782,14 +811,37 @@ func TestCreditsReportSplitsTheMonthByTheGovernorAndOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Governor.Grists != 2 || report.Governor.CostUSD != 2 || report.Governor.APIUSD != 0 {
-		t.Errorf("expected the Governor's 2 grists at $2.00, none on the key, got %+v", report.Governor)
+	share := func(shares []application.GristCreditsShare, name string) application.GristCreditsShare {
+		for _, s := range shares {
+			if s.Name == name {
+				return s
+			}
+		}
+		t.Fatalf("expected a share named %q in %+v", name, shares)
+		return application.GristCreditsShare{}
 	}
-	if report.Others.Grists != 1 || report.Others.CostUSD != 2.25 || report.Others.APIUSD != 2.25 || report.Others.Resting != 1 {
-		t.Errorf("expected others' 1 grist at $2.25 on the key and 1 resting, got %+v", report.Others)
+	if api := share(report.ByBilling, "api"); api.Grists != 1 || api.CostUSD != 2.25 {
+		t.Errorf("expected 1 grist at $2.25 billed to api, got %+v", api)
+	}
+	if sub := share(report.ByBilling, "subscription"); sub.Grists != 3 || sub.CostUSD != 2.75 {
+		t.Errorf("expected 3 grists at $2.75 billed to the subscription, got %+v", sub)
+	}
+	if none := share(report.ByBilling, "none"); none.Resting != 1 {
+		t.Errorf("expected 1 refused for want of credit billed to none, got %+v", none)
+	}
+	if gov := share(report.ByPerson, "the Governor"); gov.Grists != 2 || gov.CostUSD != 2 || gov.APIUSD != 0 {
+		t.Errorf("expected the Governor's 2 grists at $2.00, none on the key, got %+v", gov)
+	}
+	if ann := share(report.ByPerson, "person p-ann"); ann.Grists != 1 || ann.APIUSD != 2.25 || ann.Resting != 1 {
+		t.Errorf("expected p-ann's 1 grist at $2.25 on the key and 1 refused, got %+v", ann)
+	}
+	if key := share(report.ByPerson, "key "+other); key.Grists != 1 || key.CostUSD != 0.75 {
+		t.Errorf("expected the unregistered key's 1 grist at $0.75, got %+v", key)
 	}
 	text := report.String()
-	for _, want := range []string{"the Governor: 2 grists, $2.00", "others: 1 grist, $2.25 ($2.25 billed to the key), 1 refused resting"} {
+	for _, want := range []string{"this month by billing:", "  api: 1 grist, $2.25", "  subscription: 3 grists, $2.75",
+		"this month by person:", "  the Governor: 2 grists, $2.00 ($0.00 billed to the key)",
+		"  person p-ann: 1 grist, $2.25 ($2.25 billed to the key), 1 refused for want of credit"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("expected the report to say %q, got:\n%s", want, text)
 		}
@@ -803,7 +855,7 @@ func TestCreditsReportSplitsTheMonthByTheGovernorAndOthers(t *testing.T) {
 func TestARestingRefusalIsRecordedAsNotBilled(t *testing.T) {
 	t.Run("a grist", func(t *testing.T) {
 		mill, _, grinder, credits, _, _ := creditMill(t, application.SessionResult{})
-		credits.On = false
+		credits.Key = &apptest.FakeCreditKey{}
 		if _, err := mill.Run(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -823,8 +875,8 @@ func TestARestingRefusalIsRecordedAsNotBilled(t *testing.T) {
 		if len(grinder.calls) != 0 {
 			t.Fatalf("expected no grind, got %q", grinder.keys())
 		}
-		if line := lineOf(t, mill); line.Reason != application.GristReasonResting || line.Billing != application.BillingNone {
-			t.Fatalf("expected a resting line billed to none, got billing %q in %+v", line.Billing, line)
+		if line := lineOf(t, mill); line.Reason != outOfCreditsNov17 || line.Billing != application.BillingNone {
+			t.Fatalf("expected an out-of-credits line billed to none, got billing %q in %+v", line.Billing, line)
 		}
 	})
 }

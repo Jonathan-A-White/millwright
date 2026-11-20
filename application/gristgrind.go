@@ -46,10 +46,11 @@ const (
 	// the blob announced or not sealed by the grist's sender.
 	GristReasonOverrideForged = "The grind text this grist brings is not the blob the grist announced."
 	GristReasonOverrideLost   = "The grind text this grist brings could not be fetched; send it again."
-	// GristReasonResting is for a grist of a licence not the Governor's while
-	// the factory's API credit cannot be used: such a grist is billed to the
-	// credit alone, never to the Governor's subscription (mw-gq6.1517). It is
-	// no use of the key's day.
+	// GristReasonResting is for a grist of a person marked API only while the
+	// factory's API key cannot be used: such a grist is billed to the credit
+	// alone, never to the Governor's subscription (mw-gq6.1517, mw-gq6.1518).
+	// A credit found spent is refused GristReasonOutOfCredits instead. Neither
+	// is a use of the key's day.
 	GristReasonResting = "The tutor is resting until the factory's credit is topped up; send it again later."
 
 	// gristReasonDailyStart and gristReasonDailyEnd are the words round the
@@ -130,9 +131,14 @@ type GristGrind struct {
 	Ceilings GristCeilings
 	// Persons, when set, is asked before the daily limit is counted whether
 	// the sender is a self-registered person, whose device keys then share
-	// one day at the person's own cap (config [grist] person_cap). Nil counts
-	// every key alone.
+	// one day at the person's own cap, and what the person's grists are billed
+	// to: the Max unless they are marked API only (mw-gq6.1518). Nil knows no
+	// one: every key counts alone and is billed to the Max.
 	Persons *PersonCap
+	// PersonDayOff ([grist] person_cap = false) counts every key's day alone
+	// at the home's limit, even a person's; Persons is still asked for the
+	// billing mark.
+	PersonDayOff bool
 	// Refreshes keeps each rig's checkout from being fetched more than once a
 	// minute; nil fetches before every grist.
 	Refreshes *GrindRefreshes
@@ -273,9 +279,13 @@ type gristWork struct {
 	// daily limit is lifted for it and for no one who merely names a smoke talk.
 	testKey bool
 	// governor is set when the grist was sealed by the Governor's key: his
-	// grists are billed to his subscription, everyone else's to the API
-	// credit alone (gristBilling).
+	// grists are billed to his subscription (gristBilling).
 	governor bool
+	// person is the registered person the sender's key belongs to, when
+	// personKnown: the person's billing mark says whether the grist is
+	// billed to the API credit alone (gristBilling, mw-gq6.1518).
+	person      Person
+	personKnown bool
 	// model and effort are what the grind runs on: the grist's own when it
 	// asks, else the grind file's; modelFrom and effortFrom say which.
 	model, effort         string
@@ -322,10 +332,12 @@ type gristWork struct {
 	// billing is what the grind was billed to ("api" or "subscription"); empty
 	// when no grind ran.
 	billing string
-	// resting is set when a grind of another licence's grist on the key found
-	// the credit spent or the key refused: it is answered resting, not run
-	// again on the subscription.
-	resting bool
+	// resting is set when a grind of an API-only person's grist on the key
+	// found the credit spent or the key refused: it is refused for want of
+	// credit (outOfCredit says the credit was spent), not run again on the
+	// subscription.
+	resting     bool
+	outOfCredit bool
 	// talkWait is closed when the grist's turn in its talk has come, and
 	// talkLeave gives the turn to the talk's next grist; talk is the turn as it
 	// ran, nil for a grist with no talk or a session that gave no result.
@@ -743,10 +755,12 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	// the factory's, sent by every smoke of every app (mw-gq6.340).
 	if !w.testKey {
 		// A self-registered person's device keys share one day at the person's
-		// own cap; the Governor's keys keep the home's setting (mw-cvwm1u.6).
+		// own cap, and one marked API only is held to the API's cap too; the
+		// Governor's keys keep the home's setting (mw-cvwm1u.6, mw-gq6.1518).
 		limit, senders := ceilings.DailyLimit, []string{w.sender}
-		if g.Persons != nil && !w.governor {
-			limit, senders = g.dailyCap(ctx, envelopeFrom, w.sender, limit)
+		if !w.governor {
+			w.person, w.personKnown = g.Persons.Lookup(ctx, envelopeFrom)
+			limit, senders = g.dailyCap(w, limit, ceilings.APIDailyLimit)
 		}
 		if sentToday(lines, senders, g.now()) >= limit {
 			w.settle(GristRefused, GristReasonDaily(limit))
@@ -1159,7 +1173,7 @@ func sentToday(lines []GrindLine, senders []string, now time.Time) int {
 	sent := 0
 	for _, line := range lines {
 		if !slices.Contains(senders, line.Sender) || IsGristReasonLimited(line.Reason) || isGristReasonMillFault(line.Reason) ||
-			line.Reason == GristReasonResting {
+			isGristReasonWantOfCredit(line.Reason) {
 			continue
 		}
 		if ly, lm, ld := line.Time.UTC().Date(); ly == y && lm == m && ld == d {
@@ -1286,13 +1300,15 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	g.keepRun(ctx, w)
 }
 
-// gristBilling is what w's grind is billed to (mw-gq6.1517): the Governor's
+// gristBilling is what w's grind is billed to (mw-gq6.1518): the Governor's
 // own grist to his subscription, whatever the credits say; the factory's test
-// key's as the factory's own (GristCredits.Choose: the key while it has
-// credit, else the subscription); and any other licence's to the API credit
-// alone (GristCredits.KeyOnly). Another licence's grist the credit cannot pay
-// for is settled refused, GristReasonResting, and ok is false: it is not
-// ground, and nothing of it reaches the subscription.
+// key's as the factory's own (GristCredits.Choose: the key while api_credits
+// is on and it has credit, else the subscription); a person's marked API only
+// to the API credit alone (GristCredits.KeyOnly); and every other sender's,
+// a person on the Max, a key that is no person's or one the lookup could not
+// tell, to the subscription. An API-only person's grist the credit cannot pay
+// for is settled refused for want of credit (wantOfCredit), and ok is false:
+// it is not ground, and nothing of it reaches the subscription.
 func (g GristGrind) gristBilling(ctx context.Context, w *gristWork) (billing GristBilling, ok bool) {
 	switch {
 	case w.governor:
@@ -1303,13 +1319,30 @@ func (g GristGrind) gristBilling(ctx context.Context, w *gristWork) (billing Gri
 			w.notes = append(w.notes, billing.Note)
 		}
 		return billing, true
+	case !w.apiOnly():
+		return GristBilling{Billing: BillingSubscription}, true
 	}
 	billing, ok, why := g.Credits.KeyOnly(ctx)
 	if !ok {
-		w.notes = append(w.notes, fmt.Sprintf("%s was not ground: it is not the Governor's, so it is billed to the API credit alone, and %s", shortTxid(w.record.Txid), why))
-		w.settle(GristRefused, GristReasonResting)
+		w.notes = append(w.notes, fmt.Sprintf("%s was not ground: its sender is marked API only, so it is billed to the API credit alone, and %s", shortTxid(w.record.Txid), why))
+		w.settle(GristRefused, g.wantOfCredit(billing.OutOfCredit))
 	}
 	return billing, ok
+}
+
+// apiOnly says w's sender is a registered person marked API only.
+func (w *gristWork) apiOnly() bool {
+	return w.personKnown && w.person.APIOnly()
+}
+
+// wantOfCredit is the refusal of an API-only person's grist the credit cannot
+// pay for: out of credits until the day it renews when the credit was found
+// spent (outOfCredit), else resting until it is topped up.
+func (g GristGrind) wantOfCredit(outOfCredit bool) string {
+	if outOfCredit {
+		return GristReasonOutOfCredits(GristCreditsRenewal(g.now(), g.Ceilings.filled().CreditsRenewDay))
+	}
+	return GristReasonResting
 }
 
 // fallsBack says a grind of w's billed to the key may run again on the
@@ -1319,11 +1352,12 @@ func (w *gristWork) fallsBack() bool {
 }
 
 // rest settles w, whose grind on the key found the credit spent or the key
-// refused, as refused resting, with what that grind said kept in its record.
+// refused, as refused for want of credit, with what that grind said kept in
+// its record.
 func (g GristGrind) rest(ctx context.Context, w *gristWork, result SessionResult) {
 	w.answered = g.now()
 	w.result = result
-	w.settle(GristRefused, GristReasonResting)
+	w.settle(GristRefused, g.wantOfCredit(w.outOfCredit))
 	g.keepRun(ctx, w)
 }
 
@@ -1331,10 +1365,10 @@ func (g GristGrind) rest(ctx context.Context, w *gristWork, result SessionResult
 // credit or the key itself failed (CreditFailureOf) writes the spent mark and
 // retires the warm sessions started on the key. The factory's own grist
 // (fallsBack) then runs again at once on the subscription: the grist is one
-// line of the record, so it counts once against the day. Any other licence's
-// is not run again: w.resting is set, and its caller answers it resting
-// (mw-gq6.1517). A grind that got through on a key tried again after the mark
-// clears the mark.
+// line of the record, so it counts once against the day. An API-only
+// person's is not run again: w.resting is set, and its caller answers it
+// refused for want of credit (mw-gq6.1517, mw-gq6.1518). A grind that got
+// through on a key tried again after the mark clears the mark.
 func (g GristGrind) billed(ctx context.Context, w *gristWork, call GrindCall, billing GristBilling, result SessionResult, err error) (SessionResult, error) {
 	why := CreditFailureOf(result, err)
 	if why == "" {
@@ -1354,8 +1388,8 @@ func (g GristGrind) billed(ctx context.Context, w *gristWork, call GrindCall, bi
 	}
 	g.Pool.RetireKeyed(ctx)
 	if !w.fallsBack() {
-		w.resting = true
-		w.notes = append(w.notes, fmt.Sprintf("the API key was not used for %s (%s), and it is not the Governor's, so it is answered resting, not run again on the subscription", shortTxid(w.record.Txid), why))
+		w.resting, w.outOfCredit = true, why == CreditsSpent
+		w.notes = append(w.notes, fmt.Sprintf("the API key was not used for %s (%s), and its sender is marked API only, so it is refused, not run again on the subscription", shortTxid(w.record.Txid), why))
 		return result, err
 	}
 	w.notes = append(w.notes, fmt.Sprintf("the API key was not used for %s (%s), so it ran again on the subscription", shortTxid(w.record.Txid), why))
@@ -1640,8 +1674,8 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	line := GrindLine{
 		Time: now.UTC(), Txid: w.record.Txid, App: name.App, Kind: name.Kind, V: name.V,
 		Sender: w.sender, Model: w.model, ModelID: w.result.ModelID, Effort: w.effort, ModelFrom: w.modelFrom, EffortFrom: w.effortFrom,
-		Billing: cmp.Or(w.billing, BillingNone),
-		Status:  w.status, Reason: w.reason, Photos: len(w.plain.Attachments),
+		Billing: cmp.Or(w.billing, BillingNone), Person: w.person.ID,
+		Status: w.status, Reason: w.reason, Photos: len(w.plain.Attachments),
 		Tokens: w.result.Fuel.Total(), CostUSD: w.result.CostUSD, Turns: w.result.Turns,
 		Denials: w.result.Denials, Seconds: now.Sub(w.started).Seconds(), Commit: w.commit,
 		Delivered: delivered, Notes: w.notes,

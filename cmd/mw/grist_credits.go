@@ -26,7 +26,9 @@ func newGristCreditsCmd() *cobra.Command {
 		Long: "credits (and credits status) prints: whether [grist] api_credits is on or off; whether the key file\n" +
 			"(api_key_file) is there, yes or no, and never any of the key; the spent mark, the time the mill\n" +
 			"found the key out of credit, or none; this UTC calendar month's grists billed to the key and the\n" +
-			"sum of their total_cost_usd against $200; and the time of the last grist billed to the key.\n" +
+			"sum of their total_cost_usd against $200; the time of the last grist billed to the key; and this\n" +
+			"month's grists split by what each was billed to and by person. api_credits speaks for the\n" +
+			"factory's own grinds alone: a person marked API only on postern is billed to the key either way.\n" +
 			"--json prints the same as one object. It reads and changes nothing.\n\n" +
 			"  on / off   set [grist] api_credits in this host's config.toml, through the writer mw config set\n" +
 			"             uses, and say what changed and the way back\n" +
@@ -60,9 +62,9 @@ func newGristCreditsCmd() *cobra.Command {
 	cmd.AddCommand(status)
 
 	for _, on := range []bool{true, false} {
-		word, what := "off", "bill every grist to the subscription"
+		word, what := "off", "bill the factory's own grinds to the subscription"
 		if on {
-			word, what = "on", "bill a grist to the API key while it has credit"
+			word, what = "on", "bill the factory's own grinds to the API key while it has credit"
 		}
 		cmd.AddCommand(&cobra.Command{
 			Use:   word,

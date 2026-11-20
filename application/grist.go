@@ -267,6 +267,12 @@ type GristCeilings struct {
 	// its key points: the context tokens of a turn, and a session's turns.
 	TalkContextCap int
 	TalkMaxTurns   int
+	// APIDailyLimit is how many grist a person marked API only may send a day
+	// ([grist] api_daily_limit); CreditsRenewDay the day of the month the API
+	// credit renews ([grist] credits_renew_day), which an out-of-credits
+	// refusal names (mw-gq6.1518).
+	APIDailyLimit   int
+	CreditsRenewDay int
 }
 
 // The ceilings when config says nothing; infrastructure/config's defaults
@@ -278,6 +284,8 @@ const (
 	DefaultGristTimeout            = 10 * time.Minute
 	DefaultGristTalkContextCap     = 80000
 	DefaultGristTalkMaxTurns       = 40
+	DefaultGristAPIDailyLimit      = 30
+	DefaultGristCreditsRenewDay    = 17
 )
 
 // DefaultGristModels are the models a grind may name when config says
@@ -313,6 +321,12 @@ func (c GristCeilings) filled() GristCeilings {
 	}
 	if c.TalkMaxTurns <= 0 {
 		c.TalkMaxTurns = DefaultGristTalkMaxTurns
+	}
+	if c.APIDailyLimit <= 0 {
+		c.APIDailyLimit = DefaultGristAPIDailyLimit
+	}
+	if c.CreditsRenewDay <= 0 {
+		c.CreditsRenewDay = DefaultGristCreditsRenewDay
 	}
 	return c
 }
@@ -481,6 +495,10 @@ type GrindLine struct {
 	// written before it was kept says nothing, and one written before
 	// mw-gq6.1520 says "subscription" for a grist that ran no grind.
 	Billing string `json:"billing"`
+	// Person is the id the postern backend gives the registered person whose
+	// key sent the grist, when the mill looked them up and they are one; mw
+	// grist credits counts the month by it (mw-gq6.1518).
+	Person string `json:"person,omitempty"`
 	// ModelFrom and EffortFrom say where Model and Effort came from: "grist"
 	// when the sender asked for them, "grind file" otherwise.
 	ModelFrom  string `json:"model_from,omitempty"`

@@ -3296,23 +3296,38 @@ its transcript deleted. `mw grist talks --end <app> <talk>` ends a talk now,
 writing no key points. See `features/grist_talk_cap.feature`.
 
 The Governor's own grists (sealed by `postern_governor_key`) are billed to his
-subscription, whatever the credits say. Every other licence's grist is billed to
-the Anthropic API key alone and never to his subscription (mw-gq6.1517). With
-`[grist]` `api_credits = true` and a key in `api_key_file` (default
+subscription, his Max, whatever the credits say. Every other sender's grist is
+billed by the billing mark the postern backend keeps on the registered person
+the key belongs to (the Key screen's 'API only' switch, said as `billing` by
+`GET /api/register/person`; mw-gq6.1518): `"max"`, the default, bills it to the
+subscription too, and so does a key that is no person's, a person with no mark
+or an unknown one, and a lookup that failed. A person marked `"api"` is billed
+to the Anthropic API key alone and never to the subscription, whatever
+`api_credits` says. With a key in `api_key_file` (default
 `~/.config/mw/anthropic-api.key`; it must be mode 0600, else the mill says in
 its report that the file is not used), the claude session of such a grind, cold
 or warm, gets `ANTHROPIC_API_KEY` in its environment and nowhere else (never an
 argument, a log, an event or a line of the record), and no
-`CLAUDE_CODE_OAUTH_TOKEN` beside it. With `api_credits` off, no usable key file
-or a standing spent mark, another licence's grist is not ground: it is refused,
-"The tutor is resting until the factory's credit is topped up; send it again
-later.", which is no use of the key's day. Builders and seats never get the key.
-Every line of `grinds.jsonl` says `billing`: `"api"` or `"subscription"`. A
-grind billed to the key that ends with "Credit balance is too low", a spend
-limit, or an error that the key is invalid, writes `credits.json` in
-`grist_state_dir` (`{"spent_at": ...}`) and retires the warm sessions started on
-the key; another licence's grist is then answered resting. Only the factory's
-own, the grist smoke's key (`grist_test_key_file`), keeps the old fallback: it
+`CLAUDE_CODE_OAUTH_TOKEN` beside it. With no usable key file, or a standing mark
+of a key the API refused, an API-only person's grist is not ground: it is
+refused, "The tutor is resting until the factory's credit is topped up; send it
+again later."; with a standing mark of a spent credit it is refused naming the
+next day the credit renews (`credits_renew_day`, the 17th): "The tutor is out of
+credits until Dec 17; send it again then." Neither is a use of the key's day. An
+API-only person may send `api_daily_limit` grists a day (30), counted over the
+person's keys as the person's day is; the next is refused with the daily
+limit's own words, which say to send it again tomorrow. A person on the Max
+keeps `daily_limit`. Builders and seats never get the key. Every line of
+`grinds.jsonl` says `billing`: `"api"` or `"subscription"`, or `"none"` for a
+grist that ran no grind, and `person`, the backend's id of the sender's person,
+when it is one. A grind billed to the key that ends with "Credit balance is too
+low", a spend limit, or an error that the key is invalid, writes `credits.json`
+in `grist_state_dir` (`{"spent_at": ..., "why": ...}`) and retires the warm
+sessions started on the key; an API-only person's grist is then refused as
+above, never run again on the subscription. `api_credits` now speaks only for
+the factory's own grinds: the grist smoke's key (`grist_test_key_file`) and
+`mw verify`'s match call are billed to the key while it is on and the key has
+credit, else to the subscription; the smoke's grist keeps the old fallback: it
 runs again at once on the subscription, one answer, one line in the record, one
 count against `daily_limit`, and while the mark stands its grists use the
 subscription. One `grist-credits-spent` job event (it says `credits spent` or
@@ -3325,9 +3340,11 @@ state up and changes nothing: whether `api_credits` is on or off, whether the
 key file is there (yes or no, never any of the key), the spent mark's time or
 none, this UTC calendar month's grists billed to the key and the sum of their
 `total_cost_usd` against $200, the time of the last grist billed to the key,
-and this month's grists split by the Governor's and others': for each side the
-count, the sum of `total_cost_usd` and the part of it billed to the key, and
-how many were refused resting. `mw grist credits on` and `off` set `[grist]` `api_credits` in this host's
+and this month's grists split by what they were billed to (`api`,
+`subscription`, `none`) and by person (the Governor, `person <id>`, or
+`key <fingerprint>` for a key with no person): for each the count and the sum
+of `total_cost_usd`, by person the part of it billed to the key too, and how
+many were refused for want of credit. `mw grist credits on` and `off` set `[grist]` `api_credits` in this host's
 `config.toml` through the writer `mw config set` uses, and print the old value,
 the new, the backup and the way back. `mw grist credits key` reads one line
 from stdin (echo off at a terminal), refuses an empty line, one that does not
@@ -3347,14 +3364,16 @@ efforts = "low,medium,high"   # what a grist may ask for; the grind file's own e
 max_attachments = 4
 max_attachment_bytes = 8388608
 daily_limit = 50         # grist a day from one key
-person_cap = true        # a self-registered person's device keys are counted together at the person's own cap (50), asked of the postern backend; false counts each key alone at daily_limit
+person_cap = true        # a self-registered person's device keys are counted together at the person's own cap (50), asked of the postern backend; false counts each key alone at daily_limit (the person's billing mark is asked for either way)
+api_daily_limit = 30     # grist a day from a person marked API only, counted as the person's day is
+credits_renew_day = 17   # the day of the month the API credit renews, which an out-of-credits refusal names
 concurrency = 2          # grists ground at once, the mill's own limit; the rest queue. The host's cap on Builders does not apply
 timeout = "10m"
 pool_quiet = "10m"       # a kind with no grist this long keeps no warm session; "0s" keeps no warm pool at all
 pool_max_age = "15m"     # a warm session waiting this long is retired unused
 talk_context_cap = 80000 # context tokens at which a talk's session is ended for its key points
 talk_max_turns = 40      # turns at which it is
-api_credits = false      # true bills other licences' grists to the Anthropic API key in api_key_file; off, they rest. The Governor's always use his subscription
+api_credits = false      # true bills the factory's own grinds (the grist smoke's key, mw verify's match) to the Anthropic API key in api_key_file. A person marked API only is billed to the key whatever it says; everyone else uses the Governor's subscription
 api_key_file = "/home/jwhite/.config/mw/anthropic-api.key"   # a full path or ~/..., mode 0600 (default shown)
 
 [grist-apps]             # where each app's rig is checked out here
@@ -4066,7 +4085,7 @@ confidence = 0.8        # the least confidence, above 0 and up to 1, at which a 
 realtime   = true       # whether the follower matches a picture of his as it saves it (true when left out)
 ```
 
-The call is billed to the API key when `[grist] api_credits` is on, as the mill's grinds are. The steps are in
+The call is billed to the API key when `[grist] api_credits` is on, as the factory's own grinds are. The steps are in
 `features/verify_match.feature`.
 
 **Real time.** With `[verify] realtime` on (the default; `realtime = false` turns it off on both routes below and leaves

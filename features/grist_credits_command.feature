@@ -2,7 +2,10 @@ Feature: mw grist credits, the API key's switch and ledger looked up and changed
   mw grist credits (also status, and --json) says whether the mill bills grists
   to the Anthropic API key: the switch, whether the key file is there (never any
   of the key), the spent mark, this UTC calendar month's grists billed to the key
-  and their total_cost_usd against $200, and the time of the last one. on and off
+  and their total_cost_usd against $200, the time of the last one, and this
+  month's grists split by what they were billed to and by person (the
+  Governor, a registered person by the id the postern backend gives them, or a
+  key with no person by its fingerprint) (mw-gq6.1518). on and off
   set [grist] api_credits in the config through the writer mw config set uses.
   key reads one line from stdin and writes the key file 0600, on the home only.
   clear removes the spent mark when the month's credits renew.
@@ -13,7 +16,7 @@ Feature: mw grist credits, the API key's switch and ledger looked up and changed
 
   Scenario: With nothing set up it says the switch is off, no key, no mark, nothing billed
     When mw grist credits is run
-    Then mw grist credits printed the line "api credits: off (grists are billed to the subscription)"
+    Then mw grist credits printed the line "api credits: off (the factory's own grinds are billed to the subscription; a person marked API only is billed to the key alone either way)"
     And mw grist credits printed the line "key file: no, <key file>"
     And mw grist credits printed the line "spent mark: none"
     And mw grist credits printed the line "this month (2026-10): 0 grists billed to the key, $0.00 of $200.00"
@@ -27,11 +30,26 @@ Feature: mw grist credits, the API key's switch and ledger looked up and changed
     And the mill's record holds a grist billed to "subscription" at 2026-10-19T10:00:00Z costing 9.00 dollars
     And the mill's record holds a grist billed to "api" at 2026-09-30T23:59:59Z costing 40.00 dollars
     When mw grist credits status is run
-    Then mw grist credits printed the line "api credits: on (grists are billed to the API key while it has credit)"
+    Then mw grist credits printed the line "api credits: on (the factory's own grinds are billed to the API key while it has credit; a person marked API only is billed to the key alone either way)"
     And mw grist credits printed the line "key file: yes, <key file>"
     And mw grist credits printed the line "this month (2026-10): 2 grists billed to the key, $3.75 of $200.00"
     And mw grist credits printed the line "last grist billed to the key: 2026-10-19T09:30:00Z"
     And "sk-ant-secret-key-1" is in nothing mw grist credits printed
+
+  Scenario: It splits the month's grists by what they were billed to and by person
+    Given the mill's record holds a grist billed to "subscription" at 2026-10-19T10:00:00Z costing 9.00 dollars from the Governor
+    And the mill's record holds a grist billed to "api" at 2026-10-02T08:00:00Z costing 1.50 dollars from the person "p-ann"
+    And the mill's record holds a grist billed to "api" at 2026-10-19T09:30:00Z costing 2.25 dollars from the person "p-ann"
+    And the mill's record holds a grist billed to "subscription" at 2026-10-19T11:00:00Z costing 0.50 dollars from the person "p-bo"
+    And the mill's record holds a grist billed to "api" at 2026-09-30T23:59:59Z costing 40.00 dollars from the person "p-ann"
+    When mw grist credits is run
+    Then mw grist credits printed the line "this month by billing:"
+    And mw grist credits printed the line "  api: 2 grists, $3.75"
+    And mw grist credits printed the line "  subscription: 2 grists, $9.50"
+    And mw grist credits printed the line "this month by person:"
+    And mw grist credits printed the line "  the Governor: 1 grist, $9.00 ($0.00 billed to the key)"
+    And mw grist credits printed the line "  person p-ann: 2 grists, $3.75 ($3.75 billed to the key)"
+    And mw grist credits printed the line "  person p-bo: 1 grist, $0.50 ($0.00 billed to the key)"
 
   Scenario: A key file others can read is present but not used, and the line says why
     Given the key file holds "sk-ant-secret-key-1" at mode 0644

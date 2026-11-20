@@ -829,12 +829,10 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 	}
 	slots := hostlock.GrindSlots(stateDir, ceilings.Concurrency)
 	// A person's device keys share one day at the person's cap, unless the
-	// [grist] table turns person_cap off (mw-cvwm1u.6).
-	var persons *application.PersonCap
-	if ceilings.PersonCap {
-		// The route is signed by the mill's own key, as the mill's other calls are.
-		persons = application.NewPersonCap(backend, os.Stderr)
-	}
+	// [grist] table turns person_cap off (mw-cvwm1u.6); the person's billing
+	// mark is asked for whatever it says (mw-gq6.1518). The route is signed by
+	// the mill's own key, as the mill's other calls are.
+	persons := application.NewPersonCap(backend, os.Stderr)
 	return application.GristGrind{
 		Postern:      backend,
 		Cipher:       postern.NewCipher(keys),
@@ -857,11 +855,13 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		GovernorKey:  governorKey,
 		TestKey:      testKey,
 		Persons:      persons,
+		PersonDayOff: !ceilings.PersonCap,
 		Talks:        application.NewGristTalks(grist.NewTalks(stateDir)),
 		Ceilings: application.GristCeilings{
 			Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 			MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
 			Timeout: ceilings.Timeout, TalkContextCap: ceilings.TalkContextCap, TalkMaxTurns: ceilings.TalkMaxTurns,
+			APIDailyLimit: ceilings.APIDailyLimit, CreditsRenewDay: ceilings.CreditsRenewDay,
 		},
 		Out: out,
 	}, nil

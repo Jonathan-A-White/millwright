@@ -440,6 +440,9 @@ func (h *HTTP) RegisterPerson(ctx context.Context, key string) (application.Pers
 		PersonID   string   `json:"personId"`
 		Keys       []string `json:"keys"`
 		DailyLimit int      `json:"dailyLimit"`
+		// Billing is the person's billing mark, "max" or "api" (postern
+		// mw-cvwm1u.22); a backend before it says nothing, which is the Max.
+		Billing string `json:"billing"`
 	}
 	if err := h.authDo(ctx, http.MethodGet, "/api/register/person?key="+url.QueryEscape(key), nil, &body); err != nil {
 		return application.Person{}, false, err
@@ -447,7 +450,7 @@ func (h *HTTP) RegisterPerson(ctx context.Context, key string) (application.Pers
 	if !body.Known {
 		return application.Person{}, false, nil
 	}
-	return application.Person{ID: body.PersonID, Keys: body.Keys, DailyLimit: body.DailyLimit}, true, nil
+	return application.Person{ID: body.PersonID, Keys: body.Keys, DailyLimit: body.DailyLimit, Billing: body.Billing}, true, nil
 }
 
 // authDo is do, proven to the backend first: it asks for a fresh challenge

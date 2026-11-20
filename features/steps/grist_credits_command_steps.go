@@ -63,6 +63,8 @@ func InitializeGristCreditsCommandScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the key file holds "([^"]*)" at mode (\d+)$`, c.keyFileHolds)
 	ctx.Given(`^the key was found spent at (\S+)$`, c.foundSpent)
 	ctx.Given(`^the mill's record holds a grist billed to "([^"]*)" at (\S+) costing ([\d.]+) dollars$`, c.recordHolds)
+	ctx.Given(`^the mill's record holds a grist billed to "([^"]*)" at (\S+) costing ([\d.]+) dollars from the Governor$`, c.recordHoldsTheGovernors)
+	ctx.Given(`^the mill's record holds a grist billed to "([^"]*)" at (\S+) costing ([\d.]+) dollars from the person "([^"]*)"$`, c.recordHoldsAPersons)
 
 	ctx.When(`^mw grist credits(?: status)? is run$`, func() error { return c.run("status", false) })
 	ctx.When(`^mw grist credits is run with --json$`, func() error { return c.run("status", true) })
@@ -146,6 +148,26 @@ func (c *creditsCommandContext) foundSpent(at string) error {
 }
 
 func (c *creditsCommandContext) recordHolds(billing, at, cost string) error {
+	return c.recordHoldsFrom(billing, at, cost, application.GrindLine{})
+}
+
+// creditsGovernorKey is the Governor's key of the credits workbench, and
+// creditsPersonKey the key a person's grists of it are sealed by.
+const (
+	creditsGovernorKey = "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	creditsPersonKey   = "02bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
+func (c *creditsCommandContext) recordHoldsTheGovernors(billing, at, cost string) error {
+	return c.recordHoldsFrom(billing, at, cost, application.GrindLine{Sender: application.KeyFingerprint(creditsGovernorKey)})
+}
+
+func (c *creditsCommandContext) recordHoldsAPersons(billing, at, cost, person string) error {
+	return c.recordHoldsFrom(billing, at, cost, application.GrindLine{Sender: application.KeyFingerprint(creditsPersonKey), Person: person})
+}
+
+// recordHoldsFrom appends line, billed and timed and costed as said.
+func (c *creditsCommandContext) recordHoldsFrom(billing, at, cost string, line application.GrindLine) error {
 	t, err := time.Parse(time.RFC3339, at)
 	if err != nil {
 		return err
@@ -154,7 +176,8 @@ func (c *creditsCommandContext) recordHolds(billing, at, cost string) error {
 	if err != nil {
 		return err
 	}
-	return c.record.Append(context.Background(), application.GrindLine{Time: t, Billing: billing, CostUSD: usd, Status: "answered"})
+	line.Time, line.Billing, line.CostUSD, line.Status = t, billing, usd, "answered"
+	return c.record.Append(context.Background(), line)
 }
 
 // admin is the use case as the command wires it, on the settings the config
@@ -168,7 +191,7 @@ func (c *creditsCommandContext) admin() application.GristCreditsAdmin {
 	return application.GristCreditsAdmin{
 		On: on, KeyPath: c.keyFile, Keys: grist.CreditKeyFile{Path: c.keyFile},
 		State: &grist.CreditState{Dir: c.state}, Record: c.record,
-		Config: configfile.New(c.config), Home: c.home, Host: c.host,
+		Config: configfile.New(c.config), Home: c.home, Host: c.host, GovernorKey: creditsGovernorKey,
 		Now: func() time.Time { return now }, Out: &c.out,
 	}
 }
