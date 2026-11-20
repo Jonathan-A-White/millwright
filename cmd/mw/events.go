@@ -137,6 +137,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Host:       host,
 		Reaches:    handsReaches(host),
 		Retired:    retired,
+		Rules:      rigRulesIfKnown(),
 		Now:        posternViewClock,
 		Err:        cmd.ErrOrStderr(),
 		VerifyDays: verifyDays,

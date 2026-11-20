@@ -81,6 +81,7 @@ func newPosternViewCmd() *cobra.Command {
 				Host:       host,
 				Reaches:    handsReaches(host),
 				Retired:    retired,
+				Rules:      rigRulesIfKnown(),
 				Now:        posternViewClock,
 				Err:        cmd.ErrOrStderr(),
 				Events:     homeEventLog(),

@@ -140,6 +140,7 @@ func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) 
 		Host:       v.host,
 		Reaches:    handsReaches(v.host),
 		Retired:    retired,
+		Rules:      rigRulesIfKnown(),
 		Now:        posternViewClock,
 		VerifyDays: verifyDays,
 	})
