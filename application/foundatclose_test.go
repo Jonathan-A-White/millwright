@@ -828,3 +828,85 @@ func TestFoundNotFixedMeetingNoStoryInFlightOfItsRigWaitsOnNothing(t *testing.T)
 		})
 	}
 }
+
+// A bug filed from a finding runs on the rig's default route, sonnet at high
+// effort, and not on the finder's model and effort: the finder's are about its
+// own work, and a dearer model needs its reason written. The rig, branch,
+// harness, formula and host are copied as before, and the description names the
+// finder's model and effort so the Mayor may raise the bug with a reason
+// (mw-gq6.1426).
+func TestAFoundStoryRunsOnSonnetHighNotOnTheFindersFableXHighAndSaysWhatTheFinderRanOn(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "fable", Effort: "xhigh", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{Files: "application/next.go"}})
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+
+		"The parser drops a trailing line (application/parse.go:12). AC: go test ./application -run TestParseKeepsTheLastLine passes. By design? no\n"+
+		"For the rig memory: nothing"))
+	before := tracker.Stories()
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d: %+v", len(filed), filed)
+	}
+	got := filed[0].Merged()
+	if got.Model != domain.ModelSonnet || got.Effort != domain.EffortHigh {
+		t.Errorf("expected sonnet/high, got %s/%s", got.Model, got.Effort)
+	}
+	if got.Rig != "millwright" || got.Branch != "main" || got.Harness != domain.HarnessClaude || got.Formula != "tdd-feature" || got.Host != domain.HostAuto {
+		t.Errorf("expected rig, branch, harness, formula copied and host auto, got %s", got.Summary())
+	}
+	line := ""
+	for _, l := range strings.Split(filed[0].Description, "\n") {
+		if strings.HasPrefix(l, "Finder mw-x.1 ran on ") {
+			line = l
+		}
+	}
+	if !strings.Contains(line, "fable/xhigh") || !strings.Contains(line, "sonnet/high") {
+		t.Errorf("expected a line naming the finder's fable/xhigh and the bug's sonnet/high, got %q in:\n%s", line, filed[0].Description)
+	}
+}
+
+// A bug of another rig whose newest story is not known gets the default route
+// too, not the finder's model and effort (mw-gq6.1426).
+func TestAFoundStoryOfAnotherRigWithNoKnownStoryRunsOnSonnetHigh(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude, Model: "fable", Effort: "xhigh", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{Files: "package.json"}})
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+
+		"Both carry it (Cairn/vite.config.ts:19 and legend/vite.config.ts:31). AC: go test ./application passes. By design? no\nFor the rig memory: nothing"))
+	before := tracker.Stories()
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"lampas": "/rigs/lampas", "cairn": "/rigs/Cairn", "legend": "/rigs/legend"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 bug filed, got %d", len(filed))
+	}
+	if got := filed[0].Merged(); got.Model != domain.ModelSonnet || got.Effort != domain.EffortHigh {
+		t.Errorf("expected sonnet/high, got %s/%s", got.Model, got.Effort)
+	}
+	if !strings.Contains(filed[0].Description, "Finder mw-x.1 ran on fable/xhigh") {
+		t.Errorf("expected the finder's route named, got:\n%s", filed[0].Description)
+	}
+}

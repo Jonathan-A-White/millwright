@@ -475,17 +475,26 @@ func foundNamesRig(text, lowerName string) bool {
 	return false
 }
 
+// The route a bug filed from a finding runs on: Sonnet at high effort, the
+// factory's default. The finder's model and effort are about the finder's own
+// work, so they are not copied; a dearer model needs its reason written on the
+// bug, by the Mayor (mw-gq6.1426).
+const (
+	foundBugModel  = domain.ModelSonnet
+	foundBugEffort = domain.EffortHigh
+)
+
 // foundNoRigPlace is the path of a bug whose rig cannot be told: no rig, branch
-// or formula, which are a rig's, and the finder's harness, model and effort,
-// which are about the work and not the repo.
+// or formula, which are a rig's, and the finder's harness, which is about the
+// work and not the repo; its model and effort are the default route's.
 func foundNoRigPlace(files string, finder domain.Path) domain.Path {
-	return domain.Path{Files: files, Host: domain.HostAuto, Harness: finder.Harness, Model: finder.Model, Effort: finder.Effort}
+	return domain.Path{Files: files, Host: domain.HostAuto, Harness: finder.Harness, Model: foundBugModel, Effort: foundBugEffort}
 }
 
 // foundRigPlace is the path of a bug filed in rig with files, from the rig's
 // newest story's defaults when one is known.
 func foundRigPlace(rig, files string, finder domain.Path, newest map[string]domain.Path) foundPlacing {
-	path := domain.Path{Rig: rig, Files: files, Host: domain.HostAuto, Harness: finder.Harness, Model: finder.Model, Effort: finder.Effort}
+	path := domain.Path{Rig: rig, Files: files, Host: domain.HostAuto, Harness: finder.Harness, Model: foundBugModel, Effort: foundBugEffort}
 	if known, ok := newest[rig]; ok {
 		path.Branch, path.Harness, path.Model, path.Effort, path.Formula = known.Branch, known.Harness, known.Model, known.Effort, known.Formula
 	}
@@ -1054,7 +1063,7 @@ func (n Next) findingOnMain(ctx context.Context, c *closeOut, report *NextReport
 // foundCheckBound is the longest a read of main for one finding may take.
 const foundCheckBound = 5 * time.Minute
 
-func foundDescription(c *closeOut, bug foundBug, host string) string {
+func foundDescription(c *closeOut, bug foundBug, host string, filed domain.Path) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (%s) landed, and its closing comment lists %s under 'Found, not fixed:':\n\n", c.id, c.detail.Story.Title, thisOrThese(len(bug.said())))
 	for _, line := range bug.said() {
@@ -1063,6 +1072,7 @@ func foundDescription(c *closeOut, bug foundBug, host string) string {
 	if bug.item != nil && bug.item.ByDesign != "" {
 		fmt.Fprintf(&b, "\nBy design: %s (the Builder's answer to whether the code's own comment says it is deliberate).\n", bug.item.ByDesign)
 	}
+	fmt.Fprintf(&b, "\nFinder %s ran on %s/%s; the bug runs on the rig default, %s/%s; the Mayor may raise it with a reason.\n", c.id, c.path.Model, c.path.Effort, filed.Model, filed.Effort)
 	fmt.Fprintf(&b, "\nSeen by: %s\n\nThe Builder saw it and did not fix it, and nobody has checked it since. Read it, word what is to be done and its acceptance (the Builder's, if it gave one, is in the acceptance field), and release this bug, or close it if it is not one.\n\nSource: mw next on %s (mw-t5shinh.24).\n", c.id, host)
 	return b.String()
 }
@@ -1149,6 +1159,10 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		// (mw-gq6.672, mw-gq6.1195); the Builder's size for the finding is set below.
 		overrides := c.path.WithoutSourceKeys()
 		overrides.Files = foundFiles(bug.said(), c.path.Files)
+		// The finder's model and effort are its own too: the bug runs on the
+		// default route, and the description says what the finder ran on
+		// (mw-gq6.1426).
+		overrides.Model, overrides.Effort = foundBugModel, foundBugEffort
 		// The finder's host is about the finder's work, so the bug goes to any host
 		// (mw-gq6.1255).
 		overrides.Host = domain.HostAuto
@@ -1177,7 +1191,7 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			EpicID:      epicID,
 			Standalone:  standalone,
 			Title:       bug.title,
-			Description: foundDescription(c, bug, n.Host),
+			Description: foundDescription(c, bug, n.Host, overrides),
 			Acceptance:  acceptance,
 			Priority:    2,
 			Overrides:   overrides,
