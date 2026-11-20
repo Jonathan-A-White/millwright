@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +30,8 @@ type gdriveStandIn struct {
 	calls []string
 	title string
 	cell  string // what a PUT to the selftest's sheet last wrote
+	// docEnd is the end index of the stand-in Doc "doc1"; a batchUpdate moves it.
+	docEnd int
 }
 
 func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
@@ -36,7 +39,7 @@ func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("MW_GOOGLE_CLIENT_FILE", "")
-	g := &gdriveStandIn{title: "House chores"}
+	g := &gdriveStandIn{title: "House chores", docEnd: 120}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +64,33 @@ func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
 			return
 		}
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc1/export":
+			if r.URL.Query().Get("mimeType") != "text/plain" {
+				http.Error(w, `{"error":{"message":"wrong export type"}}`, http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte("The summer trip\nDay 1: arrive\n"))
+		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/doc1":
+			_, _ = w.Write([]byte(`{"id":"doc1","name":"Summer trip","mimeType":"application/vnd.google-apps.document"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/drive/v3/files/pdf1":
+			_, _ = w.Write([]byte(`{"id":"pdf1","name":"Lease","mimeType":"application/pdf"}`))
+		case strings.HasPrefix(r.URL.Path, "/v4/spreadsheets/doc1") || strings.HasPrefix(r.URL.Path, "/v4/spreadsheets/pdf1"):
+			http.Error(w, `{"error":{"message":"Requested entity was not found."}}`, http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/documents/doc1:batchUpdate":
+			var in struct {
+				Requests []struct {
+					InsertText struct {
+						Text string `json:"text"`
+					} `json:"insertText"`
+				} `json:"requests"`
+			}
+			_ = json.Unmarshal(body, &in)
+			for _, req := range in.Requests {
+				g.docEnd += len([]rune(req.InsertText.Text))
+			}
+			_, _ = w.Write([]byte(`{"documentId":"doc1"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/documents/doc1":
+			_, _ = w.Write([]byte(`{"title":"Summer trip","body":{"content":[{"endIndex":1},{"endIndex":` + strconv.Itoa(g.docEnd) + `}]}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v4/spreadsheets":
 			_, _ = w.Write([]byte(`{"spreadsheetId":"made-1"}`))
 		case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/drive/v3/files/"):
@@ -88,11 +118,12 @@ func standInGdrive(t *testing.T) (*gdriveStandIn, string) {
 	mux.HandleFunc("/drive/v3/files/", api)
 	mux.HandleFunc("/v4/spreadsheets", api)
 	mux.HandleFunc("/v4/spreadsheets/", api)
+	mux.HandleFunc("/v1/documents/", api)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
 	old := gdriveEndpoints
-	gdriveEndpoints = gdrive.Endpoints{Auth: "https://accounts.example/auth", Token: server.URL + "/token", Drive: server.URL, Sheets: server.URL}
+	gdriveEndpoints = gdrive.Endpoints{Auth: "https://accounts.example/auth", Token: server.URL + "/token", Drive: server.URL, Sheets: server.URL, Docs: server.URL}
 	t.Cleanup(func() { gdriveEndpoints = old })
 	return g, home
 }
@@ -394,5 +425,102 @@ func TestGdriveSelftestMakesWritesReadsBackAndTrashes(t *testing.T) {
 	}
 	if created != 1 || trashed != 1 {
 		t.Fatalf("expected one create and one trash, got %d and %d: %v", created, trashed, g.calls)
+	}
+}
+
+func TestGdriveDocReadPrintsTheDocsPlainText(t *testing.T) {
+	_, home := standInGdrive(t)
+	signedIn(t, home)
+
+	said, err := runGdrive(t, "", "gdrive", "doc", "read", "doc1")
+	if err != nil || said != "The summer trip\nDay 1: arrive\n" {
+		t.Fatalf("expected the Doc's text, got %q %v", said, err)
+	}
+}
+
+func TestGdriveDocAppendInsertsOneParagraphAtTheEndAndDeletesNothing(t *testing.T) {
+	g, home := standInGdrive(t)
+	signedIn(t, home)
+
+	said, err := runGdrive(t, "", "gdrive", "doc", "append", "doc1", "--", "Booked: the villa")
+	if err != nil {
+		t.Fatalf("doc append: %v %s", err, said)
+	}
+	for _, want := range []string{"Summer trip", "138"} {
+		if !strings.Contains(said, want) {
+			t.Fatalf("doc append lacks %q: %s", want, said)
+		}
+	}
+	var batches []string
+	for _, c := range g.calls {
+		if strings.Contains(c, ":batchUpdate") {
+			batches = append(batches, c)
+		}
+		if strings.Contains(c, "deleteContentRange") || strings.HasPrefix(c, "DELETE ") {
+			t.Fatalf("an append must delete nothing: %s", c)
+		}
+	}
+	if len(batches) != 1 {
+		t.Fatalf("expected one batchUpdate, got %v", batches)
+	}
+	_, body, _ := strings.Cut(batches[0], " ")
+	_, body, _ = strings.Cut(body, " ")
+	var sent struct {
+		Requests []map[string]json.RawMessage `json:"requests"`
+	}
+	if err := json.Unmarshal([]byte(body), &sent); err != nil || len(sent.Requests) != 1 {
+		t.Fatalf("expected one request, got %q %v", body, err)
+	}
+	if len(sent.Requests[0]) != 1 || sent.Requests[0]["insertText"] == nil {
+		t.Fatalf("expected an insertText alone, got %q", body)
+	}
+	var insert struct {
+		Text string          `json:"text"`
+		End  json.RawMessage `json:"endOfSegmentLocation"`
+		At   json.RawMessage `json:"location"`
+	}
+	_ = json.Unmarshal(sent.Requests[0]["insertText"], &insert)
+	if insert.End == nil || insert.At != nil || insert.Text != "\nBooked: the villa" {
+		t.Fatalf("expected the text as a new paragraph at the end of the body, got %q", body)
+	}
+}
+
+func TestGdriveDocAppendRefusesEmptyText(t *testing.T) {
+	g, home := standInGdrive(t)
+	signedIn(t, home)
+	said, err := runGdrive(t, "", "gdrive", "doc", "append", "doc1", "--", "  ")
+	if err == nil {
+		t.Fatalf("expected a refusal, got %q", said)
+	}
+	for _, c := range g.calls {
+		if strings.Contains(c, ":batchUpdate") {
+			t.Fatalf("nothing should be sent for empty text: %s", c)
+		}
+	}
+}
+
+func TestGdriveReadAndWriteOnADocNameItAndPointToDocRead(t *testing.T) {
+	g, home := standInGdrive(t)
+	signedIn(t, home)
+
+	for _, args := range [][]string{
+		{"gdrive", "read", "doc1"},
+		{"gdrive", "read", "doc1", "--sheet", "Sheet1"},
+		{"gdrive", "write", "doc1", "Sheet1!A1", "x"},
+	} {
+		said, err := runGdrive(t, "", args...)
+		if err == nil || !strings.Contains(said, "Google Doc") || !strings.Contains(said, "mw gdrive doc read") || strings.Contains(said, "404") {
+			t.Fatalf("mw %v: expected the file named as a Google Doc and doc read named, got %q %v", args, said, err)
+		}
+	}
+	for _, c := range g.calls {
+		if strings.HasPrefix(c, "PUT ") {
+			t.Fatalf("nothing may be written to a Doc: %s", c)
+		}
+	}
+
+	said, err := runGdrive(t, "", "gdrive", "read", "pdf1")
+	if err == nil || !strings.Contains(said, "application/pdf") || !strings.Contains(said, "Lease") {
+		t.Fatalf("expected the other kind of file named, got %q %v", said, err)
 	}
 }

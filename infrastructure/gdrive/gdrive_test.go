@@ -3,6 +3,8 @@ package gdrive_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -623,5 +625,102 @@ func TestSelftestNeverTrashesAnotherFileWithTheSameName(t *testing.T) {
 		if id == "id-other" {
 			t.Fatalf("trashed a file it did not create: %v", d.trashed)
 		}
+	}
+}
+
+// docServer is a Drive and Docs that holds one Google Doc, "doc1", and one
+// spreadsheet, "sheet1"; the Sheets API answers 404 for the Doc.
+func docServer(t *testing.T, sent *[]string) gdrive.Endpoints {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {})
+	mux.HandleFunc("/drive/v3/files/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/drive/v3/files/doc1/export":
+			_, _ = w.Write([]byte("line one\nline two\n"))
+		case "/drive/v3/files/doc1":
+			_, _ = w.Write([]byte(`{"id":"doc1","name":"Trip","mimeType":"application/vnd.google-apps.document"}`))
+		case "/drive/v3/files/sheet1/export":
+			http.Error(w, `{"error":{"message":"Export only supports Docs Editors files."}}`, http.StatusForbidden)
+		case "/drive/v3/files/sheet1":
+			_, _ = w.Write([]byte(`{"id":"sheet1","name":"Chores","mimeType":"application/vnd.google-apps.spreadsheet"}`))
+		default:
+			http.Error(w, `{"error":{"message":"File not found"}}`, http.StatusNotFound)
+		}
+	})
+	mux.HandleFunc("/v4/spreadsheets/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"Requested entity was not found."}}`, http.StatusNotFound)
+	})
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			raw, _ := io.ReadAll(r.Body)
+			*sent = append(*sent, string(raw))
+			_, _ = w.Write([]byte(`{"documentId":"doc1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"title":"Trip","body":{"content":[{"endIndex":1},{"endIndex":27}]}}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return gdrive.Endpoints{Token: server.URL + "/token", Drive: server.URL, Sheets: server.URL, Docs: server.URL}
+}
+
+func TestDocTextIsTheExportedPlainText(t *testing.T) {
+	var sent []string
+	s := freshSession(t, docServer(t, &sent))
+	got, err := s.DocText(context.Background(), "doc1")
+	if err != nil || got != "line one\nline two\n" {
+		t.Fatalf("expected the Doc's text, got %q %v", got, err)
+	}
+}
+
+func TestDocAppendSendsOneInsertTextAtTheEndOfTheBodyAndReportsTheEnd(t *testing.T) {
+	var sent []string
+	s := freshSession(t, docServer(t, &sent))
+	got, err := s.DocAppend(context.Background(), "doc1", "Booked: villa")
+	if err != nil || got.Title != "Trip" || got.EndIndex != 27 {
+		t.Fatalf("expected the title and end index, got %+v %v", got, err)
+	}
+	want := `{"requests":[{"insertText":{"endOfSegmentLocation":{},"text":"\nBooked: villa"}}]}`
+	if len(sent) != 1 || sent[0] != want {
+		t.Fatalf("expected %s, got %v", want, sent)
+	}
+}
+
+func TestSheetsCallsOnADocSayItIsADoc(t *testing.T) {
+	var sent []string
+	s := freshSession(t, docServer(t, &sent))
+	ctx := context.Background()
+	check := func(what string, err error) {
+		t.Helper()
+		var wrong *gdrive.WrongKindError
+		if !errors.As(err, &wrong) || wrong.MimeType != gdrive.MimeDoc || !strings.Contains(err.Error(), "a Google Doc") || !strings.Contains(err.Error(), "mw gdrive doc read") {
+			t.Fatalf("%s: expected a wrong-kind error naming the Doc and doc read, got %v", what, err)
+		}
+	}
+	_, _, err := s.Tabs(ctx, "doc1")
+	check("Tabs", err)
+	_, err = s.Read(ctx, "doc1", "Sheet1", "A1")
+	check("Read", err)
+	_, err = s.Write(ctx, "doc1", "Sheet1!A1", []string{"x"}, true)
+	check("Write", err)
+}
+
+func TestDocCallsOnASpreadsheetNameItAndPointToRead(t *testing.T) {
+	var sent []string
+	s := freshSession(t, docServer(t, &sent))
+	_, err := s.DocText(context.Background(), "sheet1")
+	if err == nil || !strings.Contains(err.Error(), "a spreadsheet") || !strings.Contains(err.Error(), "mw gdrive read") {
+		t.Fatalf("expected the spreadsheet named, got %v", err)
+	}
+}
+
+func TestAMissingFileKeepsGooglesOwnRefusal(t *testing.T) {
+	var sent []string
+	s := freshSession(t, docServer(t, &sent))
+	_, err := s.DocText(context.Background(), "nope")
+	var refused *gdrive.HTTPError
+	if !errors.As(err, &refused) || refused.Status != http.StatusNotFound {
+		t.Fatalf("expected the plain 404, got %v", err)
 	}
 }

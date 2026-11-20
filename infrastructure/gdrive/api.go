@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -93,9 +94,25 @@ func (s Session) GetJSON(ctx context.Context, address string, into any) error {
 // into (nil to ignore it). A refusal is said as HTTP status and Google's own
 // message, cut short.
 func (s Session) call(ctx context.Context, method, address string, body any, into any) error {
-	access, err := s.bearer(ctx)
+	raw, err := s.fetch(ctx, method, address, body)
 	if err != nil {
 		return err
+	}
+	if into == nil {
+		return nil
+	}
+	if err := json.Unmarshal(raw, into); err != nil {
+		return fmt.Errorf("Google's answer was not the JSON expected: %w", err)
+	}
+	return nil
+}
+
+// fetch sends one request with the bearer token and returns the answer's body
+// as it came. A refusal is said as in call.
+func (s Session) fetch(ctx context.Context, method, address string, body any) ([]byte, error) {
+	access, err := s.bearer(ctx)
+	if err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
@@ -103,13 +120,13 @@ func (s Session) call(ctx context.Context, method, address string, body any, int
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		reader = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, address, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+access)
 	if body != nil {
@@ -121,12 +138,12 @@ func (s Session) call(ctx context.Context, method, address string, body any, int
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("calling Google: %w", scrubTransport(err))
+		return nil, fmt.Errorf("calling Google: %w", scrubTransport(err))
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
-		return fmt.Errorf("reading Google's answer: %w", err)
+		return nil, fmt.Errorf("reading Google's answer: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
 		var refused struct {
@@ -140,17 +157,11 @@ func (s Session) call(ctx context.Context, method, address string, body any, int
 			msg = msg[:200] + "…"
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
-			return fmt.Errorf("%w: Google refused the token (HTTP 401); run mw gdrive auth again", ErrNotSignedIn)
+			return nil, fmt.Errorf("%w: Google refused the token (HTTP 401); run mw gdrive auth again", ErrNotSignedIn)
 		}
-		return &HTTPError{Status: resp.StatusCode, Message: msg}
+		return nil, &HTTPError{Status: resp.StatusCode, Message: msg}
 	}
-	if into == nil {
-		return nil
-	}
-	if err := json.Unmarshal(raw, into); err != nil {
-		return fmt.Errorf("Google's answer was not the JSON expected: %w", err)
-	}
-	return nil
+	return raw, nil
 }
 
 // File is one Drive file as find lists it.
@@ -216,7 +227,7 @@ func (s Session) Tabs(ctx context.Context, id string) (string, []Tab, error) {
 	}
 	fields := "properties.title,sheets.properties(title,sheetId,gridProperties(rowCount,columnCount))"
 	if err := s.call(ctx, http.MethodGet, s.sheetURL(id, "?fields="+url.QueryEscape(fields)), nil, &out); err != nil {
-		return "", nil, err
+		return "", nil, s.ofKind(ctx, id, MimeSheet, err)
 	}
 	tabs := make([]Tab, 0, len(out.Sheets))
 	for _, sh := range out.Sheets {
@@ -234,7 +245,7 @@ func (s Session) title(ctx context.Context, id string) (string, error) {
 		} `json:"properties"`
 	}
 	if err := s.call(ctx, http.MethodGet, s.sheetURL(id, "?fields=properties.title"), nil, &out); err != nil {
-		return "", err
+		return "", s.ofKind(ctx, id, MimeSheet, err)
 	}
 	return out.Properties.Title, nil
 }
@@ -269,7 +280,7 @@ func (s Session) values(ctx context.Context, id, a1 string) ([][]string, error) 
 		Values [][]any `json:"values"`
 	}
 	if err := s.call(ctx, http.MethodGet, s.sheetURL(id, "/values/"+url.PathEscape(a1)), nil, &out); err != nil {
-		return nil, err
+		return nil, s.ofKind(ctx, id, MimeSheet, err)
 	}
 	rows := make([][]string, len(out.Values))
 	for i, row := range out.Values {
@@ -411,4 +422,126 @@ func (s Session) trash(ctx context.Context, id string) error {
 		return fmt.Errorf("Google did not say the file is trashed")
 	}
 	return nil
+}
+
+// The Drive mime types mw gdrive tells apart.
+const (
+	MimeSheet  = "application/vnd.google-apps.spreadsheet"
+	MimeDoc    = "application/vnd.google-apps.document"
+	mimeSlides = "application/vnd.google-apps.presentation"
+	mimeForm   = "application/vnd.google-apps.form"
+	mimeFolder = "application/vnd.google-apps.folder"
+)
+
+// WrongKindError is a command that needs one kind of file given another: the
+// Sheets and Docs APIs answer a bare 404 or 400 for it, this says what the
+// file is and which command reads it.
+type WrongKindError struct {
+	Name     string
+	MimeType string
+	// Wanted is the mime type the command works on.
+	Wanted string
+}
+
+// Kind is what the file is, in words.
+func (e *WrongKindError) Kind() string {
+	switch e.MimeType {
+	case MimeSheet:
+		return "a spreadsheet"
+	case MimeDoc:
+		return "a Google Doc"
+	case mimeSlides:
+		return "a Google Slides presentation"
+	case mimeForm:
+		return "a Google Form"
+	case mimeFolder:
+		return "a folder"
+	}
+	return "a file of type " + e.MimeType
+}
+
+func (e *WrongKindError) Error() string {
+	wanted := "a spreadsheet"
+	if e.Wanted == MimeDoc {
+		wanted = "a Google Doc"
+	}
+	msg := fmt.Sprintf("%q is %s, not %s", e.Name, e.Kind(), wanted)
+	switch e.MimeType {
+	case MimeDoc:
+		msg += ": read it with mw gdrive doc read <file-id> and add to it with mw gdrive doc append <file-id> -- \"<text>\""
+	case MimeSheet:
+		msg += ": use mw gdrive read <file-id> and mw gdrive write <file-id> <range> <value>..."
+	}
+	return msg
+}
+
+// ofKind turns a refusal of a Sheets or Docs call on id into a WrongKindError
+// when the file is not the wanted kind. Only a 400, 403 or 404 is looked into;
+// when the file's kind cannot be had, or is the wanted one, the original
+// refusal stands.
+func (s Session) ofKind(ctx context.Context, id, wanted string, refusal error) error {
+	var refused *HTTPError
+	if !errors.As(refusal, &refused) {
+		return refusal
+	}
+	if refused.Status != http.StatusBadRequest && refused.Status != http.StatusForbidden && refused.Status != http.StatusNotFound {
+		return refusal
+	}
+	var meta File
+	address := s.Endpoints.Drive + "/drive/v3/files/" + url.PathEscape(id) + "?supportsAllDrives=true&fields=id,name,mimeType"
+	if err := s.call(ctx, http.MethodGet, address, nil, &meta); err != nil || meta.MimeType == "" || meta.MimeType == wanted {
+		return refusal
+	}
+	return &WrongKindError{Name: meta.Name, MimeType: meta.MimeType, Wanted: wanted}
+}
+
+// DocText is the Google Doc's text as Drive exports it as text/plain.
+func (s Session) DocText(ctx context.Context, id string) (string, error) {
+	address := s.Endpoints.Drive + "/drive/v3/files/" + url.PathEscape(id) + "/export?mimeType=" + url.QueryEscape("text/plain")
+	raw, err := s.fetch(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		return "", s.ofKind(ctx, id, MimeDoc, err)
+	}
+	return string(raw), nil
+}
+
+// Appended is what a doc append changed: the Doc's title and the end index of
+// its body after the text went in.
+type Appended struct {
+	Title    string
+	EndIndex int
+}
+
+func (s Session) docURL(id, suffix string) string {
+	return s.Endpoints.Docs + "/v1/documents/" + url.PathEscape(id) + suffix
+}
+
+// DocAppend adds text to the end of the Google Doc's body as a new paragraph
+// (a line break, then text), with one insertText at the end-of-segment location.
+// It sends nothing that deletes or rewrites what the Doc holds. The end index
+// is read from the Doc after the insert.
+func (s Session) DocAppend(ctx context.Context, id, text string) (Appended, error) {
+	body := map[string]any{"requests": []any{map[string]any{"insertText": map[string]any{
+		"text":                 "\n" + text,
+		"endOfSegmentLocation": map[string]any{},
+	}}}}
+	if err := s.call(ctx, http.MethodPost, s.docURL(id, ":batchUpdate"), body, nil); err != nil {
+		return Appended{}, s.ofKind(ctx, id, MimeDoc, err)
+	}
+	var doc struct {
+		Title string `json:"title"`
+		Body  struct {
+			Content []struct {
+				EndIndex int `json:"endIndex"`
+			} `json:"content"`
+		} `json:"body"`
+	}
+	if err := s.call(ctx, http.MethodGet, s.docURL(id, "?fields="+url.QueryEscape("title,body.content.endIndex")), nil, &doc); err != nil {
+		return Appended{}, fmt.Errorf("the text was added, but reading the Doc back failed: %w", err)
+	}
+	end := 0
+	if n := len(doc.Body.Content); n > 0 {
+		end = doc.Body.Content[n-1].EndIndex
+	}
+	return Appended{Title: doc.Title, EndIndex: end}, nil
 }
