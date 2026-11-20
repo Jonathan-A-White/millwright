@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -79,6 +80,10 @@ type File struct {
 	// be released. A nil Approve leaves them held — which is what an unattended
 	// run does, since nobody is there to say yes.
 	Approve func(context.Context, FiledPlan) (bool, error)
+
+	// Pause waits between the tries of a wait the tracker could not write for a
+	// passing fault; nil waits for real.
+	Pause func(context.Context, time.Duration) error
 }
 
 // FiledPlan is what came of filing a plan: the ids the tracker gave the epic
@@ -266,7 +271,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	// The stories go in the order nothing comes before what it waits on, so
 	// that a story can name what it waits on by the id it already has.
 	ids := make(map[string]string, len(order))
-	var ownDemos []string
+	var ownDemos, unwrittenWaits []string
 	for _, story := range order {
 		path, err := story.PathFrom(plan.Epic.Defaults)
 		if err != nil {
@@ -291,12 +296,20 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			MostUrgent:      mostUrgent,
 			EstimateMinutes: story.Estimate,
 			Overrides:       story.PathOverrides(),
-			Needs:           needs,
 			Labels:          story.Labels,
 		})
 		if err != nil {
 			return filed, fmt.Errorf("filing story %s under %s (the epic and %d of its stories are filed and held): %w",
 				story.Key, epicID, len(filed.Stories), err)
+		}
+		// The waits are written after the create, one dependency at a time and
+		// tried again on a passing fault, as a create with --deps runs the cycle
+		// check inside it and makes nothing when that times out (mw-gq6.1495).
+		// A wait that cannot be written leaves the story filed and held, and the
+		// rest of the plan is filed; the error is returned at the end.
+		_, unwritten := writeWaits(ctx, f.Tracker, f.Pause, f.sayOut, id, needs)
+		for _, why := range unwritten {
+			unwrittenWaits = append(unwrittenWaits, fmt.Sprintf("story %s (%s) does not wait on %s", story.Key, id, why))
 		}
 		var inFlight []InFlight
 		if workErr == nil {
@@ -354,6 +367,12 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 		f.print(fmt.Sprintf("\nWaived for %s: %s. The Governor's word is on the epic.\n", epicID, strings.Join(f.Waive.Names, ", ")))
 	}
 
+	if len(unwrittenWaits) > 0 {
+		f.print(filed.holdings())
+		return filed, fmt.Errorf("the plan is filed and held under %s, but %d of its waits could not be written, so those stories do not yet wait: %s; "+
+			"make each with bd dep add <story> <waits-on> when the server is calmer, then release",
+			epicID, len(unwrittenWaits), strings.Join(unwrittenWaits, "; "))
+	}
 	if f.Approve == nil {
 		f.print(filed.holdings())
 		return filed, nil
@@ -877,6 +896,11 @@ func (f File) print(block string) {
 		return
 	}
 	fmt.Fprint(f.Out, block)
+}
+
+// sayOut prints one formatted line on Out, if there is one.
+func (f File) sayOut(format string, args ...any) {
+	f.print(fmt.Sprintf(format, args...))
 }
 
 // Tree is the plan as a person reads it: the epic and the default Path its

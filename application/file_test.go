@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -519,6 +521,92 @@ func TestFileWarnsWhenABranchCannotBeJudged(t *testing.T) {
 					t.Errorf("expected on Err %q, got %q", c.want, got)
 				}
 			})
+		}
+	}
+}
+
+// timedOutNeedsTracker is a tracker whose create fails when it carries Needs,
+// as bd's does when the cycle check run inside a create with --deps times out
+// (mw-gq6.1495), and whose AddBlocker works, failing the first failures tries
+// of each wait on the same fault.
+type timedOutNeedsTracker struct {
+	*apptest.FakeTracker
+	failures int
+	tries    int
+}
+
+var errCycleCheckTimedOut = errors.New("invalid dependency: failed to check for dependency cycle: read tcp 10.0.0.2:3307: i/o timeout")
+
+func (s *timedOutNeedsTracker) CreateStory(ctx context.Context, story application.NewStory) (string, error) {
+	if len(story.Needs) > 0 {
+		return "", errCycleCheckTimedOut
+	}
+	return s.FakeTracker.CreateStory(ctx, story)
+}
+
+func (s *timedOutNeedsTracker) AddBlocker(ctx context.Context, blocked, blocker string) error {
+	s.tries++
+	if s.tries <= s.failures {
+		return errCycleCheckTimedOut
+	}
+	return s.FakeTracker.AddBlocker(ctx, blocked, blocker)
+}
+
+func TestAPlanWhoseWaitsTimeOut(t *testing.T) {
+	for _, failures := range []int{0, 2} {
+		base := apptest.NewFakeTracker()
+		base.AddFormula("tdd-feature")
+		tracker := &timedOutNeedsTracker{FakeTracker: base, failures: failures}
+		var pauses int
+
+		filed, err := application.File{
+			Tracker: tracker,
+			Pause:   func(context.Context, time.Duration) error { pauses++; return nil },
+		}.Run(context.Background(), twoStoryPlan())
+		if err != nil {
+			t.Fatalf("failures %d: expected the plan filed, got %v", failures, err)
+		}
+		if len(filed.Stories) != 2 {
+			t.Fatalf("failures %d: expected two stories filed, got %d", failures, len(filed.Stories))
+		}
+		first, second := filed.Stories[0].ID, filed.Stories[1].ID
+		epic, err := base.ShowEpic(context.Background(), filed.EpicID)
+		if err != nil {
+			t.Fatalf("failures %d: reading the epic: %v", failures, err)
+		}
+		var needs []string
+		for _, s := range epic.Stories {
+			if s.Story.ID == second {
+				needs = s.Needs
+			}
+		}
+		if !slices.Equal(needs, []string{first}) {
+			t.Errorf("failures %d: expected %s to wait on %s, got %q", failures, second, first, needs)
+		}
+		if failures > 0 && pauses == 0 {
+			t.Errorf("failures %d: expected a pause before the wait was tried again", failures)
+		}
+	}
+}
+
+func TestAPlanWhoseWaitsAlwaysTimeOutIsFiledHeldAndSaysWhichWaitsAreUnwritten(t *testing.T) {
+	base := apptest.NewFakeTracker()
+	base.AddFormula("tdd-feature")
+	tracker := &timedOutNeedsTracker{FakeTracker: base, failures: 1 << 30}
+
+	filed, err := application.File{
+		Tracker: tracker,
+		Pause:   func(context.Context, time.Duration) error { return nil },
+	}.Run(context.Background(), twoStoryPlan())
+	if err == nil {
+		t.Fatal("expected an error when a wait could not be written")
+	}
+	if len(filed.Stories) != 2 {
+		t.Fatalf("expected both stories filed, got %d", len(filed.Stories))
+	}
+	for _, want := range []string{filed.Stories[1].ID, filed.Stories[0].ID, "i/o timeout"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the error to say %q, got %q", want, err)
 		}
 	}
 }

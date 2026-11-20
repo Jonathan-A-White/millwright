@@ -328,7 +328,14 @@ const (
 // again after a growing pause when the tracker failed on a passing fault. It
 // returns the needs written and, for each that was not, a line 'need: why'.
 func (f TesterFiler) writeWaits(ctx context.Context, id string, needs []string) (written, unwritten []string) {
-	pause := f.Pause
+	return writeWaits(ctx, f.Tracker, f.Pause, f.say, id, needs)
+}
+
+// writeWaits is what TesterFiler.writeWaits and File do: a nil pause waits for
+// real, and say tells each try again.
+func writeWaits(ctx context.Context, tracker interface {
+	AddBlocker(ctx context.Context, blocked, blocker string) error
+}, pause func(context.Context, time.Duration) error, say func(string, ...any), id string, needs []string) (written, unwritten []string) {
 	if pause == nil {
 		pause = waitFor
 	}
@@ -336,10 +343,10 @@ func (f TesterFiler) writeWaits(ctx context.Context, id string, needs []string) 
 		var err error
 		delay := waitFirstPause
 		for try := 1; try <= WaitTries; try++ {
-			if err = f.Tracker.AddBlocker(ctx, id, need); err == nil || !passingDepFault(err) || try == WaitTries {
+			if err = tracker.AddBlocker(ctx, id, need); err == nil || !passingDepFault(err) || try == WaitTries {
 				break
 			}
-			f.say("  note: %s could not be made to wait on %s (%s), trying again in %s\n", id, need, firstLine(err.Error()), delay)
+			say("  note: %s could not be made to wait on %s (%s), trying again in %s\n", id, need, firstLine(err.Error()), delay)
 			if waitErr := pause(ctx, delay); waitErr != nil {
 				err = fmt.Errorf("%w (and waiting to try again: %v)", err, waitErr)
 				break
