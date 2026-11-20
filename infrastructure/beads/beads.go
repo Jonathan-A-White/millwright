@@ -410,16 +410,23 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 
 // childrenOf lists every story filed under an epic, in the order they were
 // filed, each with the epic's defaults overlaid: one bd list, closed and
-// claimed stories included.
+// claimed stories included, up to application.BdBigParentChildren of them.
 func (g *Gateway) childrenOf(ctx context.Context, id string, defaults domain.Path) ([]application.StoryDetail, error) {
 	stories, kept := g.childrenInRun(ctx, id, true)
 	if !kept {
-		out, err := g.call(ctx, "list", "--parent", id, "--limit", "0", "--all", "--json")
+		// Never --limit 0: a list of every child of a big epic stalled bd for
+		// every seat on the host (mw-gq6.1504). One more than the limit is asked
+		// for, so that an epic over it is told from one at it.
+		out, err := g.call(ctx, "list", "--parent", id, "--limit", strconv.Itoa(application.BdBigParentChildren+1), "--all", "--json")
 		if err != nil {
 			return nil, err
 		}
 		if stories, err = decodeBeads(out); err != nil {
 			return nil, fmt.Errorf("reading the stories of %s: %w", id, err)
+		}
+		if len(stories) > application.BdBigParentChildren {
+			return nil, fmt.Errorf("%s has more than %d children, and listing them all stalls bd for every seat on the host, so they were not read: "+
+				"read it with mw brief %s", id, application.BdBigParentChildren, id)
 		}
 	}
 	var filed []application.StoryDetail
