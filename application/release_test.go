@@ -664,7 +664,7 @@ func TestPacedReleaseDryRunReleasesNothingAndPrintsWhatItWould(t *testing.T) {
 
 // The pace line is a key ([pace] usage_line, mw-6ww.119.10.8): ReleasePaced.UsageLine
 // moves it, and zero is the default of 60.
-func TestPacedReleaseAtALineOf85ReleasesAtSeventyPercentAndNamesTheLine(t *testing.T) {
+func TestReleasePacedAtALineOf85ReleasesAtSeventyPercentAndNamesTheLine(t *testing.T) {
 	held := application.StatusHeld
 	tracker, ids := pacedList(t, 70, held, held, held, held)
 	var out strings.Builder
@@ -687,7 +687,7 @@ func TestPacedReleaseAtALineOf85ReleasesAtSeventyPercentAndNamesTheLine(t *testi
 	}
 }
 
-func TestPacedReleaseAtALineOf85StillRefusesOver85(t *testing.T) {
+func TestReleasePacedAtALineOf85StillRefusesOver85(t *testing.T) {
 	held := application.StatusHeld
 	tracker, ids := pacedList(t, 90, held, held)
 	var out strings.Builder
