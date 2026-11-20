@@ -114,6 +114,9 @@ type LoopShare struct {
 	Share *InvestShare `json:"share"`
 	Lines []string     `json:"lines"`
 	Bound string       `json:"bound,omitempty"`
+	// Features is each rig's landings told by lane, as mw report's FEATURES
+	// lines have them.
+	Features []FeatureShare `json:"features"`
 }
 
 // LoopBrief is the one read for the weekly loop sitting. Its six parts are the
@@ -218,7 +221,7 @@ func ReadLoopBrief(in LoopInputs) LoopBrief {
 		}
 	}
 
-	brief.Share = LoopShare{Share: r.InvestShare, Lines: r.InvestShare.lines()}
+	brief.Share = LoopShare{Share: r.InvestShare, Lines: r.InvestShare.lines(), Features: r.featureShares()}
 	if brief.Share.Lines == nil {
 		brief.Share.Lines = []string{}
 	}
@@ -328,6 +331,9 @@ func (b LoopBrief) String() string {
 	}
 	if b.Share.Bound != "" {
 		out.WriteString("  " + b.Share.Bound + "\n")
+	}
+	for _, s := range b.Share.Features {
+		wrapInto(&out, "", s.Line())
 	}
 	return out.String()
 }

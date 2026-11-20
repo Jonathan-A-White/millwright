@@ -13,7 +13,7 @@ func TestReportModelsCountByTheModelThatRanAndOnceAStory(t *testing.T) {
 		{id: "a", rig: "lampas", model: "opus", ran: "opus", landed: true, attempts: 2, tokens: 3000, costUSD: 3},
 		// A second landing row of the same story is not a second landing.
 		{id: "a", rig: "lampas", model: "opus", ran: "opus", landed: true, attempts: 2},
-		{id: "b", rig: "lampas", model: "opus", ran: "opus", landed: true, attempts: 1, bugStory: true, tokens: 1000, costUSD: 1},
+		{id: "b", rig: "lampas", model: "opus", ran: "opus", landed: true, attempts: 1, kind: KindBug, tokens: 1000, costUSD: 1},
 		{id: "c", rig: "orrery", model: "sonnet", ran: "sonnet", landed: true, attempts: 1},
 		// The window before, a bug filed and an escape are not MODELS'.
 		{id: "d", rig: "lampas", ran: "opus", landed: true, previous: true},

@@ -523,3 +523,43 @@ func IsTesterFinding(description string) bool {
 		strings.HasPrefix(first, "finding (tester's") ||
 		strings.Contains(first, "from the tester")
 }
+
+// The kinds StoryKind tells a story as, for the FEATURES lines of mw report and
+// mw loop brief and for the kinds of MODELS.
+const (
+	KindFeature  = "feature"
+	KindContent  = "content"
+	KindBug      = "bug"
+	KindTaste    = "taste"
+	KindFriction = "friction"
+	KindTester   = "tester"
+
+	// LabelTaste marks a story of that kind by a label, as the [taste] title tag
+	// does, and LabelFriction (acunmet.go) a friction one.
+	LabelTaste = "taste"
+)
+
+// StoryKind is what kind of work d is: a Tester story is KindTester; a bug (its
+// type, a [bug] title or the label bug) KindBug; a [taste] title or label
+// KindTaste; a [friction] title or label KindFriction; a story labelled
+// LabelModelStory KindContent; anything else KindFeature.
+func StoryKind(d StoryDetail) string {
+	title := strings.ToLower(strings.TrimSpace(d.Story.Title))
+	switch {
+	case IsTesterStory(d):
+		return KindTester
+	case domain.IsBugStory(d.Type, d.Story.Title) || hasLabel(d.Labels, LabelBug):
+		return KindBug
+	case strings.HasPrefix(title, "[taste]") || hasLabel(d.Labels, LabelTaste):
+		return KindTaste
+	case strings.HasPrefix(title, "[friction]") || hasLabel(d.Labels, LabelFriction):
+		return KindFriction
+	case hasLabel(d.Labels, LabelModelStory):
+		return KindContent
+	}
+	return KindFeature
+}
+
+// IsFeatureKind says a kind StoryKind gave counts as a feature: content is a
+// feature of a model's making.
+func IsFeatureKind(kind string) bool { return kind == KindFeature || kind == KindContent }
