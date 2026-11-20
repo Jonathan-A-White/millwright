@@ -3315,3 +3315,22 @@ func TestWindowsDriveMountKey(t *testing.T) {
 		t.Errorf("a mount that is not a full path was no error")
 	}
 }
+
+// [pace] usage_line (mw-6ww.119.10.8) is the week's usage, in percent, over which
+// a paced release lets nothing go: 60 until the config says otherwise.
+func TestPaceUsageLineIsSixtyUntilTheTableSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nusage_line = 85\n")
+	if line, err := config.PaceUsageLine(); err != nil || line != 60 {
+		t.Fatalf("expected the default 60, not a root-table key, got %v: %v", line, err)
+	}
+	writeConfig(t, "[pace]\nusage_line = 85\n")
+	if line, err := config.PaceUsageLine(); err != nil || line != 85 {
+		t.Fatalf("expected 85, got %v: %v", line, err)
+	}
+	for _, bad := range []string{"0", "101", "-5", "\"lots\""} {
+		writeConfig(t, "[pace]\nusage_line = "+bad+"\n")
+		if _, err := config.PaceUsageLine(); err == nil {
+			t.Errorf("expected pace.usage_line = %s to be refused", bad)
+		}
+	}
+}

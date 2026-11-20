@@ -661,3 +661,44 @@ func TestPacedReleaseDryRunReleasesNothingAndPrintsWhatItWould(t *testing.T) {
 		}
 	}
 }
+
+// The pace line is a key ([pace] usage_line, mw-6ww.119.10.8): ReleasePaced.UsageLine
+// moves it, and zero is the default of 60.
+func TestPacedReleaseAtALineOf85ReleasesAtSeventyPercentAndNamesTheLine(t *testing.T) {
+	held := application.StatusHeld
+	tracker, ids := pacedList(t, 70, held, held, held, held)
+	var out strings.Builder
+	released, err := application.ReleasePaced{
+		Tracker:   tracker,
+		Readings:  application.UsageReadings{Notes: tracker},
+		Now:       func() time.Time { return pacedNow },
+		UsageLine: 85,
+		Out:       &out,
+	}.Run(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("releasing the list: %v\n%s", err, out.String())
+	}
+	if len(released) != 3 {
+		t.Errorf("expected 3 released at 70%% with the line at 85, got %v:\n%s", released, out.String())
+	}
+	comments, _ := tracker.StoryComments(context.Background(), ids[0])
+	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1].Text, "not over 85%") {
+		t.Errorf("expected the note to name the line of 85%%, got %+v", comments)
+	}
+}
+
+func TestPacedReleaseAtALineOf85StillRefusesOver85(t *testing.T) {
+	held := application.StatusHeld
+	tracker, ids := pacedList(t, 90, held, held)
+	var out strings.Builder
+	released, err := application.ReleasePaced{
+		Tracker:   tracker,
+		Readings:  application.UsageReadings{Notes: tracker},
+		Now:       func() time.Time { return pacedNow },
+		UsageLine: 85,
+		Out:       &out,
+	}.Run(context.Background(), ids)
+	if err != nil || len(released) != 0 || !strings.Contains(out.String(), "is over 85%") {
+		t.Errorf("expected none released and 'is over 85%%', got %v, %v:\n%s", released, err, out.String())
+	}
+}

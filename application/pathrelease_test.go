@@ -253,3 +253,17 @@ func TestPathSetOnlyWarnsOfCallersOnARigThatDoesNotReleaseOnPath(t *testing.T) {
 		t.Errorf("expected no comment, got %+v", comments)
 	}
 }
+
+func TestPathSetReleasesAModelStoryAtSeventyPercentWhenTheLineIs85(t *testing.T) {
+	tracker, rules := aModelPassRig(t, 70)
+	var out strings.Builder
+	_, err := application.PathSet{Tracker: tracker, Rules: rules, Out: &out, After: []string{"mw-gq6.3"},
+		Readings: application.UsageReadings{Notes: tracker}, UsageLine: 85, Now: func() time.Time { return pacedNow }}.
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil)
+	if err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	if strings.Contains(out.String(), "held: mw-gq6.2") {
+		t.Errorf("expected the model story not held at 70%% with the line at 85, got:\n%s", out.String())
+	}
+}

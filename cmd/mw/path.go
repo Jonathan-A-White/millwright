@@ -111,6 +111,10 @@ func newPathSetCmd() *cobra.Command {
 					readings = application.UsageReadings{Notes: mwGateway(dir, host)}
 				}
 			}
+			usageLine, err := config.PaceUsageLine()
+			if err != nil {
+				return err
+			}
 			retired, err := config.RetiredHosts()
 			if err != nil {
 				return err
@@ -122,7 +126,7 @@ func newPathSetCmd() *cobra.Command {
 					cloudBook, cloudPlan = cloudStatus(dir, host)
 				}
 			}
-			_, err = application.PathSet{Tracker: gateway, Retired: retired, CloudBook: cloudBook, CloudPlan: cloudPlan, Readings: readings, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
+			_, err = application.PathSet{Tracker: gateway, Retired: retired, CloudBook: cloudBook, CloudPlan: cloudPlan, Readings: readings, UsageLine: usageLine, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
 				After: afterIDs, Hold: hold, OverClaim: overClaim}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err
