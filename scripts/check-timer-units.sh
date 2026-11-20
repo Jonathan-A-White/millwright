@@ -309,10 +309,11 @@ need "$SWEEP_SERVICE" "OnFailure=mw-unit-failed@%n.service"
 need "$SWEEP_TIMER" "OnCalendar=Sun *-*-* 04:40:00 UTC"
 need "$SWEEP_TIMER" "OnBootSec=15min"
 need "$SWEEP_TIMER" "Persistent=false"
-# The host tidy pair: `mw host tidy go-cache` daily and 20 minutes after boot, no
+# The host tidy pair: `mw host tidy go-cache` and `mw host tidy tmp` daily and 20 minutes after boot, no
 # catch-up (docs/host-tidy.md).
 need "$TIDY_SERVICE" "Type=oneshot"
 need "$TIDY_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw host tidy go-cache"
+need "$TIDY_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw host tidy tmp"
 need "$TIDY_SERVICE" "OnFailure=mw-unit-failed@%n.service"
 need "$TIDY_TIMER" "OnCalendar=*-*-* 05:10:00 UTC"
 need "$TIDY_TIMER" "OnBootSec=20min"

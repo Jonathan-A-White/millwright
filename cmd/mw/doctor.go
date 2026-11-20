@@ -27,6 +27,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/flushlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gocache"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
+	"github.com/Jonathan-A-White/millwright/infrastructure/tmpdisk"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	vaultpkg "github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -426,6 +427,8 @@ func newDoctorCmd() *cobra.Command {
 			if dir, err := gocache.Dir(); err == nil {
 				goCacheSize.Dir = dir
 			}
+			// /tmp over 20 GB (mw-d40q096); the cure is the daily tmp tidy.
+			tmpSize := &application.TmpSizeCheck{Host: host, Dir: os.TempDir(), Disk: tmpdisk.Disk{}}
 			rootDisk := doctor.NewRootDiskBudget()
 			rootDisk.Budget, rootDisk.Margin = rootDiskBudget, rootDiskMargin
 			rootDisk.Note = func(ctx context.Context, text string) error {
@@ -611,6 +614,7 @@ func newDoctorCmd() *cobra.Command {
 				strayPreviews,
 				builderBurn,
 				goCacheSize,
+				tmpSize,
 				stuckClaims,
 				rigKinds,
 				rigOrigins,

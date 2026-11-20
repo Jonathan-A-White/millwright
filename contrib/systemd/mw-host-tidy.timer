@@ -5,7 +5,7 @@
 # it with a drop-in (`systemctl --user edit mw-host-tidy.timer`), never by
 # editing this file. The run frees disk and spends no fuel.
 [Unit]
-Description=Daily and at boot, delete Go build cache files unused for a day (mw host tidy go-cache)
+Description=Daily and at boot, delete Go build cache files unused for a day (mw host tidy go-cache, tmp)
 
 [Timer]
 OnCalendar=*-*-* 05:10:00 UTC

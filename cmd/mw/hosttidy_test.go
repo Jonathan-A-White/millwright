@@ -80,3 +80,77 @@ func TestGoCacheTidyOfACacheThatIsNotThereIsNoError(t *testing.T) {
 		t.Fatalf("failed: %v\n%s", err, out)
 	}
 }
+
+// tmpEntry makes a file (or, for a name ending in "/", a directory holding one
+// file) under dir, last touched age ago, and returns its path.
+func tmpEntry(t *testing.T, dir, name string, age time.Duration) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	file := path
+	if strings.HasSuffix(name, "/") {
+		file = filepath.Join(path, "blob")
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("leftover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	touched := time.Now().Add(-age)
+	for _, p := range []string{file, filepath.Dir(file)} {
+		if err := os.Chtimes(p, touched, touched); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
+}
+
+// mw-d40q096: /tmp held 72 GB of Node's compile cache, 18 GB of Playwright's,
+// and a Go test's dirs by the hundred; nothing took them away.
+func TestTmpTidyRemovesWhatIsUntouchedForADayAndKeepsTheRest(t *testing.T) {
+	dir := t.TempDir()
+	oldNode := tmpEntry(t, dir, "node-compile-cache/v22/old.cache", 36*time.Hour)
+	freshNode := tmpEntry(t, dir, "node-compile-cache/v22/fresh.cache", time.Hour)
+	oldPlaywright := tmpEntry(t, dir, "playwright-transform-cache-1000/ab/old.js", 3*24*time.Hour)
+	freshPlaywright := tmpEntry(t, dir, "playwright-transform-cache-1000/ab/fresh.js", 2*time.Hour)
+	oldTest := tmpEntry(t, dir, "TestOneSettledPack123456/", 36*time.Hour)
+	freshTest := tmpEntry(t, dir, "TestSyncRepacks987654/", time.Hour)
+	// A test dir whose own mtime is old but which holds a file touched an hour ago.
+	busyTest := tmpEntry(t, dir, "TestBusy111/", 36*time.Hour)
+	busyFile := tmpEntry(t, dir, "TestBusy111/sub/live", time.Hour)
+	stranger := tmpEntry(t, dir, "someone-elses-notes/", 30*24*time.Hour)
+	testFile := tmpEntry(t, dir, "TestNotADir", 30*24*time.Hour)
+
+	out, err := runMw(t, "host", "tidy", "tmp", "--dir", dir)
+	if err != nil {
+		t.Fatalf("mw host tidy tmp failed: %v\n%s", err, out)
+	}
+	for _, gone := range []string{oldNode, oldPlaywright, oldTest} {
+		if exists(gone) {
+			t.Errorf("%s was untouched for over a day and is still there", gone)
+		}
+	}
+	for _, kept := range []string{freshNode, freshPlaywright, freshTest, busyTest, busyFile, stranger, testFile} {
+		if !exists(kept) {
+			t.Errorf("%s was removed, and is not stale", kept)
+		}
+	}
+	if !strings.Contains(out, "removed 3 entries") || !strings.Contains(out, "kept 4 entries") {
+		t.Errorf("the run does not say what it did: %q", out)
+	}
+}
+
+func TestTmpTidyDryRunDeletesNothing(t *testing.T) {
+	dir := t.TempDir()
+	old := tmpEntry(t, dir, "TestOld1/", 36*time.Hour)
+	out, err := runMw(t, "host", "tidy", "tmp", "--dir", dir, "--dry-run")
+	if err != nil {
+		t.Fatalf("failed: %v\n%s", err, out)
+	}
+	if !exists(old) {
+		t.Errorf("--dry-run removed %s", old)
+	}
+	if !strings.Contains(out, "would remove 1 entries") {
+		t.Errorf("--dry-run does not say what it would do: %q", out)
+	}
+}

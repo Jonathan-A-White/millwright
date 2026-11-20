@@ -5995,7 +5995,11 @@ Builders write about 16 GB a day, so the cache settled near 110 GB. It touches
 only the files Go makes there, and Go rebuilds what it needs. `--dry-run` says
 what it would delete. The timer (`sh scripts/install-units.sh --enable
 mw-host-tidy`) runs it daily and at boot; `mw doctor go-cache-size` names a host
-whose cache is over 30 GB and cures it the same way. `docs/host-tidy.md` is the
+whose cache is over 30 GB and cures it the same way. `mw host tidy tmp` does the
+same for `/tmp` (Node's compile cache, Playwright's transform cache, and the
+`Test*` directories a killed Go test leaves, each untouched for over a day, owned
+by the user; `--dir`, `--dry-run`); the same timer runs it, and `mw doctor
+tmp-size` names a host whose `/tmp` is over 20 GB. `docs/host-tidy.md` is the
 table, and lists the other caches that only grow.
 
 ## mw doctor
@@ -6255,6 +6259,12 @@ after the one before starts the 10 minutes again). The Builder's way to make loa
 day and Go keeps an entry 5 days. The cure is `mw host tidy go-cache`: it deletes the
 cache's files not used for over a day, which Go rebuilds (mw-gq6.1537). The daily
 `mw-host-tidy.timer` keeps it down.
+
+**tmp-size** names a host whose `/tmp` (the system temp) holds over 20 GB of the
+user's files: the Laptop's reached 254 GB from Node's compile cache, Playwright's
+transform cache and the directories of Go tests killed before they cleaned up. The
+cure is `mw host tidy tmp`, which deletes what has not been touched for a day
+(mw-d40q096).
 
 **tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
 2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool

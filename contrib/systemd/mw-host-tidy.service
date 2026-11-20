@@ -1,11 +1,13 @@
-# One `mw host tidy go-cache` run, as the user, then it exits: no daemon. For
+# One `mw host tidy go-cache` run and one `mw host tidy tmp`, as the user, then it exits: no daemon. For
 # `systemctl --user`; see docs/host-tidy.md.
 #
 # Started by mw-host-tidy.timer, daily, on every host. It deletes the files of
 # Go's build cache not used for over a day: Go keeps them 5 days and a host's
-# Builders write about 16 GB of them a day (mw-gq6.1537).
+# Builders write about 16 GB of them a day (mw-gq6.1537). Then it deletes what
+# Node's and Playwright's caches and killed Go tests left in /tmp untouched for
+# a day (mw-d40q096).
 [Unit]
-Description=Delete Go build cache files unused for a day (mw host tidy go-cache)
+Description=Delete Go build cache files and /tmp leftovers unused for a day (mw host tidy go-cache, tmp)
 OnFailure=mw-unit-failed@%n.service
 
 [Service]
@@ -17,6 +19,7 @@ EnvironmentFile=-%h/.config/mw/dispatch.env
 # one reads no bead, and a host without the file has none.
 EnvironmentFile=-%h/.config/mw/beads.env
 ExecStart=/usr/bin/env %h/.local/bin/mw host tidy go-cache
+ExecStart=/usr/bin/env %h/.local/bin/mw host tidy tmp
 
 # Deleting is disk work, never a session's: stay out of its way.
 Nice=19
