@@ -65,6 +65,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newProveCmd())
 	root.AddCommand(newQueueCmd())
 	root.AddCommand(newFoldCmd())
+	root.AddCommand(newGroomCmd())
 	root.AddCommand(newStampCmd())
 	root.AddCommand(newReleaseCmd())
 	root.AddCommand(newReleasePacedCmd())

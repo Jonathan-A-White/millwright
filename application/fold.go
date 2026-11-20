@@ -69,9 +69,21 @@ func (f Fold) Run(ctx context.Context) (FoldReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("reading the bugs of %s: %w", f.Rig, err)
 	}
+	report.Bugs, report.Groups = foldGroups(stories, f.Rig, minSize, false)
+	f.print(report)
+	return report, nil
+}
+
+// foldGroups is the bugs of rig among stories grouped by foldKey (wide: by
+// groomFoldKey, with found-at-close beads and [taste] ones counted as bugs),
+// the groups of minSize or more, largest first, and how many bugs it counted.
+// A bug that already waits on a fold story is folded and left out.
+func foldGroups(stories []StoryDetail, rig string, minSize int, wide bool) (int, []FoldGroup) {
+	bugs := 0
+	groups := []FoldGroup{}
 	openFolds := map[string]bool{}
 	for _, d := range stories {
-		if isFoldTitle(d.Story.Title, f.Rig) && strings.ToLower(strings.TrimSpace(d.Status)) != StatusClosed {
+		if isFoldTitle(d.Story.Title, rig) && strings.ToLower(strings.TrimSpace(d.Status)) != StatusClosed {
 			openFolds[d.Story.ID] = true
 		}
 	}
@@ -79,17 +91,20 @@ func (f Fold) Run(ctx context.Context) (FoldReport, error) {
 	var order []string
 	for _, d := range stories {
 		status := strings.ToLower(strings.TrimSpace(d.Status))
-		if d.IsEpic || IsTesterStory(d) || d.Iced() || d.Merged().Rig != f.Rig || (status != StatusOpen && status != StatusInProgress && status != StatusHeld) {
+		if d.IsEpic || IsTesterStory(d) || d.Iced() || d.Merged().Rig != rig || (status != StatusOpen && status != StatusInProgress && status != StatusHeld) {
 			continue
 		}
-		if !hasLabel(d.Labels, LabelBug) && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(d.Story.Title)), "[bug]") {
+		if !hasLabel(d.Labels, LabelBug) && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(d.Story.Title)), "[bug]") && !(wide && foldsWhenWide(d)) {
 			continue
 		}
-		if isFoldTitle(d.Story.Title, f.Rig) || waitsOnFold(d, openFolds) {
+		if isFoldTitle(d.Story.Title, rig) || waitsOnFold(d, openFolds) {
 			continue
 		}
-		report.Bugs++
-		key := foldKey(d, f.Rig)
+		bugs++
+		key := foldKey(d, rig)
+		if wide {
+			key = groomFoldKey(d, rig)
+		}
 		if key == "" {
 			continue
 		}
@@ -102,11 +117,11 @@ func (f Fold) Run(ctx context.Context) (FoldReport, error) {
 	}
 	for _, slot := range order {
 		if group := byKey[slot]; len(group.Bugs) >= minSize {
-			report.Groups = append(report.Groups, *group)
+			groups = append(groups, *group)
 		}
 	}
-	sort.SliceStable(report.Groups, func(i, j int) bool {
-		a, b := report.Groups[i], report.Groups[j]
+	sort.SliceStable(groups, func(i, j int) bool {
+		a, b := groups[i], groups[j]
 		if len(a.Bugs) != len(b.Bugs) {
 			return len(a.Bugs) > len(b.Bugs)
 		}
@@ -116,8 +131,7 @@ func (f Fold) Run(ctx context.Context) (FoldReport, error) {
 		}
 		return a.Key < b.Key
 	})
-	f.print(report)
-	return report, nil
+	return bugs, groups
 }
 
 func (f Fold) print(report FoldReport) {
