@@ -28,10 +28,10 @@ func aTmuxOfItsOwn(t *testing.T) {
 // server several new connections: the largest single source of the beads-churn
 // alarm. It reads over one connection kept open for the run, as mw next does.
 //
-// Two reads have no kept read in the Gateway yet, the open mail and the open
-// formulas of the tidy (OpenMail, OpenFormulas): they are the only bd left, one
-// each.
-func TestTheMillhandTickStartsNoBdButTheTidysTwoWithAKeptConnection(t *testing.T) {
+// The tidy's open mail and open formulas (OpenMail, OpenFormulas) are read over
+// the kept connection as well (mw-gq6.1544): they were the two bd a tick still
+// started, one each.
+func TestTheMillhandTickStartsNoBd(t *testing.T) {
 	aTmuxOfItsOwn(t)
 	privateTmux(t, "scratch")
 	asked := aQuietBd(t)
@@ -42,9 +42,8 @@ func TestTheMillhandTickStartsNoBdButTheTidysTwoWithAKeptConnection(t *testing.T
 	if err != nil {
 		t.Fatalf("expected the tick to complete, got %q, %v\n%s", out, err, readAsked(t, asked))
 	}
-	calls := strings.Split(strings.TrimSpace(readAsked(t, asked)), "\n")
-	if len(calls) > 2 || (len(calls) == 2 && (!strings.Contains(calls[0], " list --type mail --status open ") || !strings.Contains(calls[1], " list --limit 0 --brief "))) {
-		t.Errorf("expected no bd started by a tick but the tidy's open mail and open formulas, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
+	if got := strings.TrimSpace(readAsked(t, asked)); got != "" {
+		t.Errorf("expected no bd started by a tick, got %d:\n%s", len(strings.Split(got, "\n")), got)
 	}
 	if got := server.queries("from"); got == 0 {
 		t.Errorf("expected the tick's reads to go over the kept connection, the server was asked nothing; the tick said:\n%s", out)
