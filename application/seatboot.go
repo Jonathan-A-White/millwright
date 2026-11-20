@@ -802,7 +802,7 @@ func TesterKickoffPrompt(seat, storyID, vaultDir string) string {
 		"Before you stop, run `mw check %s`: for a Tester it checks the branch holds no commits, every formula "+
 		"step is closed and the FINDINGS are written, and exits non-zero when any of that fails. "+
 		"This session is headless and ends when your turn ends: run anything long in the foreground "+
-		"and wait for it, never in the background.", seat, storyID, bdVault(vaultDir), storyID)
+		"and wait for it, never in the background. "+loadAdvice, seat, storyID, bdVault(vaultDir), storyID)
 }
 
 // RebaseKickoffPrompt is the first thing a session sent back to rebase is told.
@@ -893,6 +893,7 @@ func BatchFixRules() string {
 		"both stories' intent is kept; fix code or tests so that the batch holds every story's change and passes; " +
 		"and run the rig's suite in the foreground until it is green. " +
 		"Commit everything you change on the batch as it is, detached: make or switch to no branch.\n\n" +
+		loadAdvice + "\n\n" +
 		"You may not push. You may not revert a story's branch or its merge, and you may not drop a story's change. " +
 		"You may not delete, skip or loosen a test without saying so on that story. " +
 		"A branch you cannot merge while keeping both intents you leave set aside, and say why.\n\n" +
@@ -1099,7 +1100,8 @@ var longCommandAdvice = "Story sessions have no run_in_background. " +
 	"A command that may outrun the 10-minute foreground limit (mw check, a full suite, a build) starts as " +
 	"`nohup <cmd> > /tmp/<name>-<story>.log 2>&1 & echo $!`, and you wait with `" + LongCommandWait + "`, " +
 	"repeated until the pid is gone, then read the log: never a fixed `sleep N` to poll, " +
-	"and never end the turn while it runs. Run anything shorter in the foreground and wait for it. "
+	"and never end the turn while it runs. Run anything shorter in the foreground and wait for it. " +
+	loadAdvice
 
 // LongCommandWait is the one wait a Builder makes on a command it started in the
 // background: it returns when the pid is gone, or after 550 s, inside the

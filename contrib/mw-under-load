@@ -19,10 +19,12 @@
 #
 # Never start busy loops, stress or yes by hand on a host to make load: on
 # 2026-10-16 sixteen of them on the Laptop put its load at 44 of 20 cores, and
-# dispatch, two close-outs and a batch waited for calm (mw-gq6.483).
+# dispatch, two close-outs and a batch waited for calm (mw-gq6.483); on
+# 2026-11-19 a batch's fixer ran forty burners of its own for 40 minutes, load 55
+# to 65 of 20 cores (mw-gq6.1529).
 #
-# Settings:
-#   MW_UNDER_LOAD_MAX      the most loops                       (4)
+# Settings (an ask over a limit is cut to it, and said on stderr):
+#   MW_UNDER_LOAD_MAX      the most loops, never over the whole free cores  (4)
 #   MW_UNDER_LOAD_SECONDS  each loop's own deadline, never above 1800  (1800)
 #   MW_UNDER_LOAD_CORES    the host's cores                     (nproc)
 #   MW_UNDER_LOAD_LOADAVG  where the 1-min load is read from    (/proc/loadavg)
@@ -45,7 +47,10 @@ seconds=${MW_UNDER_LOAD_SECONDS:-1800}
 for v in "$cores" "$max" "$seconds"; do
 	case $v in "" | *[!0-9]*) die "MW_UNDER_LOAD_CORES, _MAX and _SECONDS must be whole numbers, got '$v'" ;; esac
 done
-[ "$seconds" -le 1800 ] || seconds=1800
+if [ "$seconds" -gt 1800 ]; then
+	echo "mw-under-load: asked for $seconds s; a loop runs 1800 s (30 minutes) at most, so it runs 1800 s" >&2
+	seconds=1800
+fi
 [ "$seconds" -ge 1 ] || seconds=1
 
 load=""
@@ -60,6 +65,11 @@ esac
 free=$(awk -v c="$cores" -v l="$load" 'BEGIN { f = c - l; if (f < 1) f = 0; print int(f) }')
 loops=$free
 [ "$loops" -le "$max" ] || loops=$max
+# Said when the ask is more than the host can give: never more loops than its
+# whole free cores (its cores less its load), whatever MW_UNDER_LOAD_MAX says.
+if [ -n "${MW_UNDER_LOAD_MAX:-}" ] && [ "$max" -gt "$free" ]; then
+	echo "mw-under-load: asked for $max loops; the host has $cores cores at load $load, so $free at most" >&2
+fi
 
 me=$$
 pids=""

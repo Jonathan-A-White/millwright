@@ -535,3 +535,58 @@ func endsWithItsCommand(t *testing.T) string {
 	}
 	return ""
 }
+
+// A Builder that asks for more loops than the host has cores, or loops that run
+// longer than 30 minutes, is held to the host's cores and to 30 minutes, and
+// told so: forty hand-made burners on the 20-core home put its load at 55 to 65
+// for 40 minutes (mw-gq6.1529).
+func TestUnderLoadCapsAnAskForMoreLoopsThanTheHostHasCoresAndSaysSo(t *testing.T) {
+	cmd, release := startHolding(t, "1.00", 8, "MW_UNDER_LOAD_MAX=40")
+	got := waitLoops(t, cmd.Process.Pid, 7)
+	if len(got) != 7 {
+		t.Fatalf("40 asked on 8 cores at load 1 should give the 7 whole free cores, got %d: %v", len(got), got)
+	}
+	// No eighth loop comes late.
+	time.Sleep(300 * time.Millisecond)
+	if again := loopsOf(t, cmd.Process.Pid); len(again) != 7 {
+		t.Fatalf("the loops grew past the host's free cores: %v", again)
+	}
+	_ = os.WriteFile(release, nil, 0o644)
+	_ = cmd.Wait()
+}
+
+func TestUnderLoadSaysWhenItTrimsTheLoopsAskedForOrTheirDuration(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		env   []string
+		wants []string
+	}{
+		{"loops over the cores", []string{"MW_UNDER_LOAD_MAX=40"}, []string{"asked for 40 loops", "8 cores", "load 1.00", "7 at most"}},
+		{"seconds over the limit", []string{"MW_UNDER_LOAD_MAX=1", "MW_UNDER_LOAD_SECONDS=99999"}, []string{"asked for 99999 s", "1800"}},
+		{"seconds over the limit, as minutes", []string{"MW_UNDER_LOAD_MAX=1", "MW_UNDER_LOAD_SECONDS=3600"}, []string{"asked for 3600 s", "30 minutes"}},
+	} {
+		cmd := underLoad(t, "1.00", 8, tc.env, "true")
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		for _, want := range tc.wants {
+			if !strings.Contains(stderr.String(), want) {
+				t.Errorf("%s: expected stderr to contain %q, got %q", tc.name, want, stderr.String())
+			}
+		}
+	}
+}
+
+func TestUnderLoadSaysNothingOfTrimmingWhenWhatWasAskedIsWithinTheLimits(t *testing.T) {
+	cmd := underLoad(t, "1.00", 8, []string{"MW_UNDER_LOAD_MAX=2", "MW_UNDER_LOAD_SECONDS=60"}, "true")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stderr.String(), "asked for") {
+		t.Fatalf("nothing was trimmed, so nothing should be said of it: %q", stderr.String())
+	}
+}
