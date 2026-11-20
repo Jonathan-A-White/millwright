@@ -48,6 +48,10 @@
 #      so a landing of a millwright story rebuilds the box's mw (mw-gq6.632)
 #   l. a rig named in BOOST_RIGS by a git@github.com: or ssh://git@github.com/ url is cloned from
 #      the https url of the same repository, so every rig's origin is https (mw-gq6.746)
+#   m. a Boost runs mw doctor and mw host sweep like any host: the dispatch step enables
+#      mw-doctor.timer and mw-host-sweep.timer beside mw-dispatch.timer, in one install-units.sh
+#      call; a box made before them (mw-dispatch.timer armed, neither of the two) gets both on a
+#      re-run, and no dispatch is started for it (mw-gq6.1524)
 # The shell linter is run over the script when it is installed, and skipped when not.
 
 set -eu
@@ -248,11 +252,16 @@ if [ "$1" = --dry-run ]; then
 fi
 echo "$head" >"$STATE/mw-built"
 EOF
+# Arms the timer of each unit it is named, as the real one does: a unit the
+# script does not name is not armed.
 cat >"$TEMPLATE/scripts/install-units.sh" <<'EOF'
 #!/bin/sh
 echo "install-units.sh $*" >>"$CALLS"
 systemctl --user daemon-reload
-systemctl --user enable --now mw-dispatch.timer
+enable=0
+for a; do [ "$a" = --enable ] && enable=1; done
+[ "$enable" = 1 ] || exit 0
+for a; do case $a in -*) ;; *) systemctl --user enable --now "$a.timer" ;; esac; done
 EOF
 
 # The vault a clone produces, with the file that says what a Boost's tables hold.
@@ -414,6 +423,7 @@ printf '%s\n' "$OUT" | grep -Fq "would:" || fail "$NAME: no step says what it wo
 dispatch_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] dispatch:/) } on')
 printf '%s\n' "$dispatch_out" | grep -F "would:" | grep -Fq "mw-dispatch.timer.d/boost-pace.conf" || fail "$NAME: the dispatch step does not plan the timer drop-in: $dispatch_out"
 printf '%s\n' "$dispatch_out" | grep -F "would:" | grep -Fq "start --no-block mw-dispatch.service" || fail "$NAME: the dispatch step does not plan a first dispatch: $dispatch_out"
+printf '%s\n' "$dispatch_out" | grep -F "would:" | grep -Fq "install-units.sh --enable mw-dispatch mw-doctor mw-host-sweep" || fail "$NAME: the dispatch step does not plan mw-doctor.timer and mw-host-sweep.timer beside mw-dispatch.timer: $dispatch_out"
 browsers_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] browsers:/) } on')
 printf '%s\n' "$browsers_out" | grep -F "would:" | grep -Fq "install --with-deps chromium" || fail "$NAME: the browsers step does not plan a Playwright chromium install: $browsers_out"
 config_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] config:/) } on')
@@ -481,6 +491,11 @@ grep -Fxq "PublicKey = $HUB_PUB" "$WGC" || fail "$NAME: wg0.conf has no hub key"
 grep -Fq 'AllowedIPs = 10.88.0.0/24' "$WGC" || fail "$NAME: wg0.conf has no AllowedIPs"
 [ -e "$STATE/units/system/active-wg-quick@wg0" ] || fail "$NAME: wg-quick@wg0 was not started"
 [ -e "$STATE/units/user/enabled-mw-dispatch.timer" ] || fail "$NAME: mw-dispatch.timer was not enabled"
+# m. the doctor and the host sweep, as on any host: one install-units.sh call arms all three
+for timer in mw-doctor.timer mw-host-sweep.timer; do
+	[ -e "$STATE/units/user/enabled-$timer" ] || fail "$NAME: $timer was not enabled, so mw status names this host 'no doctor report': $(grep '^install-units' "$CALLS")"
+done
+[ "$(grep -c '^install-units.sh ' "$CALLS")" = 1 ] || fail "$NAME: install-units.sh was not called once: $(grep '^install-units' "$CALLS")"
 [ -e "$BOOT/var/lib/systemd/linger/tester" ] || fail "$NAME: linger was not enabled"
 grep -Fq 'boost-bootstrap' "$HOME_DIR/.profile" || fail "$NAME: ~/.profile has no block"
 # a login shell finds the installed go, though Ubuntu's own ~/.profile (above the block) already put ~/.local/bin on PATH
@@ -520,6 +535,25 @@ for s in $STEPS; do
 	printf '%s\n' "$step_out" | grep -Eq '^    (run|would):' && fail "$NAME: step $s acts on a second run: $step_out"
 	printf '%s\n' "$step_out" | grep -Fq '    skip:' || fail "$NAME: step $s does not say it skipped: $step_out"
 done
+echo "ok: $NAME"
+
+NAME="a box made before the doctor's timer gets it and the host sweep's on a re-run, and no dispatch"
+rm -f "$STATE/units/user/enabled-mw-doctor.timer" "$STATE/units/user/active-mw-doctor.timer" \
+	"$STATE/units/user/enabled-mw-host-sweep.timer" "$STATE/units/user/active-mw-host-sweep.timer"
+: >"$CALLS"
+RC=0
+OUT3=$(boost --env-file "$ENVFILE" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT3"
+for timer in mw-doctor.timer mw-host-sweep.timer; do
+	[ -e "$STATE/units/user/active-$timer" ] || fail "$NAME: $timer was not enabled and started: $(grep -E '^(install-units|systemctl user)' "$CALLS")"
+done
+[ "$(grep -c '^install-units.sh --enable mw-dispatch mw-doctor mw-host-sweep$' "$CALLS")" = 1 ] || fail "$NAME: install-units.sh was not called once with all three: $(grep '^install-units' "$CALLS")"
+grep -q '^systemctl user start .*mw-dispatch.service' "$CALLS" && fail "$NAME: a dispatch was started though only the doctor's and the sweep's timers were missing: $(grep '^systemctl user ' "$CALLS")"
+: >"$CALLS"
+RC=0
+OUT3=$(boost --env-file "$ENVFILE" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: the run after exited $RC: $OUT3"
+[ -z "$(changing "$CALLS")" ] || fail "$NAME: the run after changed something: $(changing "$CALLS")"
 echo "ok: $NAME"
 
 NAME="a ~/.profile with the old one-guard block gets it replaced in place, once"
