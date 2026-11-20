@@ -41,9 +41,11 @@ const beadsChurnShortest = 30 * time.Second
 
 // BeadsChurn is the check that watches how fast the beads server answers new
 // connections: each run reads the server's count and judges the rate since the
-// run before. It never cures — a client that opens a connection per call has
-// to be found and changed — so a fault is damped after one try, and its note is
-// what wakes the Millhand to look.
+// run before. Its cure changes nothing — a client that opens a connection per
+// call has to be found and changed — but waits a window and takes the rate
+// again, so a burst that has already passed is cured, not cure-failed; a rate
+// still over the limit is damped after that one try, and its note is what wakes
+// the Millhand to look.
 type BeadsChurn struct {
 	// Counter is how many connections the server has answered since it started.
 	Counter func(ctx context.Context) (int64, error)
@@ -58,6 +60,9 @@ type BeadsChurn struct {
 	Clients func(ctx context.Context) ([]ChurnClient, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// Wait pauses the cure for the window it looks again after; nil sleeps,
+	// ending early with ctx.
+	Wait func(ctx context.Context, d time.Duration)
 }
 
 // ChurnClient is a command whose children were bd processes, and how many.
@@ -165,13 +170,51 @@ func (b *BeadsChurn) whoSays(ctx context.Context) string {
 	return line
 }
 
-// Cure implements application.DoctorCheck: there is none.
-func (b *BeadsChurn) Cure(context.Context) error {
-	return fmt.Errorf("no cure: changed nothing; a client that opens a connection per call is found by ss -tnp on the server's port and changed to keep one")
+// beadsChurnRecheckWait is how long the cure waits before it takes the rate
+// again: a little over beadsChurnShortest, so the second run of Probe judges the
+// window and does not leave it to a later run.
+const beadsChurnRecheckWait = beadsChurnShortest + 5*time.Second
+
+// Cure implements application.DoctorCheck: it changes nothing, but waits one
+// window and takes the rate again as Probe does. A burst that has passed by then
+// (the rate back under the limit) is no fault, so the cure returns nil and is
+// logged cured, not cure-failed (mw-gq6.1513); a rate still over the limit fails
+// the cure with the fault's own words, the top clients among them, and the
+// damper ends the episode as it did.
+func (b *BeadsChurn) Cure(ctx context.Context) error {
+	b.wait(ctx, beadsChurnRecheckWait)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("no cure: changed nothing; the wait to look at the rate again was cut short: %v", err)
+	}
+	verdict, reason := b.Probe(ctx)
+	switch verdict {
+	case application.DoctorOK:
+		return nil
+	case application.DoctorFaulty:
+		return fmt.Errorf("no cure: changed nothing; the rate was still over the limit when taken again: %s; "+
+			"a client that opens a connection per call is found by ss -tnp on the server's port and changed to keep one", reason)
+	}
+	return fmt.Errorf("no cure: changed nothing; the rate could not be taken again: %s", reason)
+}
+
+// wait pauses for d, ending early with ctx.
+func (b *BeadsChurn) wait(ctx context.Context, d time.Duration) {
+	if b.Wait != nil {
+		b.Wait(ctx, d)
+		return
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 // Damper implements application.DoctorCheck: one failed cure ends an episode.
 func (b *BeadsChurn) Damper() (time.Duration, int) { return 0, 1 }
 
 // WayBack implements application.DoctorCheck.
-func (b *BeadsChurn) WayBack() string { return "none: no cure runs" }
+func (b *BeadsChurn) WayBack() string {
+	return "none: the cure waits about 35 seconds and takes the rate again, and changes nothing"
+}

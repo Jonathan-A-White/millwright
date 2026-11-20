@@ -6093,8 +6093,11 @@ commands whose children were most of the `bd` processes it sampled for ten secon
 (mw-gq6.825). The follower, when it started a `bd` for every read of the beads' head, brought the home
 to 514 a minute and Dolt to 1.6 cores all day (mw-gq6.596). The first run, one after
 a restart of the server and one more than an hour after the last only take a sample.
-There is no cure — a client that opens a connection per call is found with `ss -tnp`
-on the server's port and changed — so the second faulty run writes the note.
+Its cure changes nothing — a client that opens a connection per call is found with
+`ss -tnp` on the server's port and changed — but waits about 35 seconds and takes the
+rate again: a burst that has passed by then is logged `cured`, not `cure-failed`
+(mw-gq6.1513), and a rate still over the limit fails the cure with the clients named,
+so the second faulty run writes the note.
 
 **beads-stores** looks only at the vault's files: faulty when `.beads/dolt` and
 `.beads/embeddeddolt` both exist, which is what a `bd` run without
