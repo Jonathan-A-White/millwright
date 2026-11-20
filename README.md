@@ -515,7 +515,14 @@ its rig runs that many on any host, and `mw status` shows the same line under it
 over 7 days, a grilling open over 7 days with no card), review (his open cards, open
 demos and unrun hands steps over 8). The limits are the config file's `[dampers]` table:
 `ready_p1`, `p1_untouched_days`, `demo_waiting_days`, `grilling_days`, `testers_per_rig`,
-`review_queue`, `needs_you`. `mw doctor` repeats the counts on one `dampers:` line.
+`review_queue`, `needs_you`, `ready_fixes_per_rig`. `mw doctor` repeats the counts on one `dampers:` line.
+
+Two alarms judge the stories ready below P1 a rig at a time, in the lanes the feature share uses
+(a feature, or a story a feature waits on, against a fix). `feature floor: <rig>: 4 features ready,
+floor 5: carve or release before a fix` rings for a rig whose file keeps a `feature_floor` and has
+fewer ready features than it (`mw nudge` says it too, as the clause `floor:<rig>`); `fix queue:
+<rig>: 49 fixes ready, limit 10: release none; fold or ice` rings for a rig with more ready fixes
+than `ready_fixes_per_rig` (default 10).
 
 His badge's number has an alarm of its own (mw-27f7myz.4). Each time `mw postern view` writes the
 view it also writes, atomically, `needs-counts.json` in the same directory: for the needs waiting on

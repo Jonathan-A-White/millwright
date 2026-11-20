@@ -2861,17 +2861,17 @@ func TestDampersAreReadFromTheTableAndLeaveTheRestZero(t *testing.T) {
 		t.Fatalf("expected zero settings, which read as the defaults, got %+v, %v", got, err)
 	}
 
-	writeConfig(t, "[dampers]\nready_p1 = 12\np1_untouched_days = 4\ndemo_waiting_days = 6\ngrilling_days = 9\ntesters_per_rig = 2\nreview_queue = 5\nneeds_you = 40\n")
+	writeConfig(t, "[dampers]\nready_p1 = 12\np1_untouched_days = 4\ndemo_waiting_days = 6\ngrilling_days = 9\ntesters_per_rig = 2\nreview_queue = 5\nneeds_you = 40\nready_fixes_per_rig = 7\n")
 	got, err := config.Dampers()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := config.DampersSettings{ReadyP1: 12, P1UntouchedDays: 4, DemoWaitingDays: 6, GrillingDays: 9, TestersPerRig: 2, ReviewQueue: 5, NeedsYou: 40}
+	want := config.DampersSettings{ReadyP1: 12, P1UntouchedDays: 4, DemoWaitingDays: 6, GrillingDays: 9, TestersPerRig: 2, ReviewQueue: 5, NeedsYou: 40, ReadyFixesPerRig: 7}
 	if got != want {
 		t.Fatalf("expected %+v, got %+v", want, got)
 	}
 
-	for _, bad := range []string{"ready_p1 = 0\n", "review_queue = many\n", "grilling_days = -1\n", "needs_you = 0\n"} {
+	for _, bad := range []string{"ready_p1 = 0\n", "review_queue = many\n", "grilling_days = -1\n", "needs_you = 0\n", "ready_fixes_per_rig = 0\n"} {
 		writeConfig(t, "[dampers]\n"+bad)
 		key, _, _ := strings.Cut(bad, " ")
 		if _, err := config.Dampers(); err == nil || !strings.Contains(err.Error(), key) {

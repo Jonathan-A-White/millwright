@@ -95,6 +95,8 @@ func newNudgeCmd() *cobra.Command {
 				CloudBook:    cloudBook,
 				CloudPlan:    cloudPlan,
 				Retired:      retired,
+				FeatureFloor: featureFloors(dir),
+				Graph:        tracker,
 				Tracker:      tracker,
 				Notes:        tracker,
 				Mayor:        application.MayorReader{Tracker: tracker, Notes: tracker},

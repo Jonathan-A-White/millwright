@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // DefaultNudgeAfter is how long a claimed story may run with nothing landed,
@@ -161,6 +163,12 @@ type Nudge struct {
 	// A nil CloudBook leaves them out.
 	CloudBook CloudBook
 	CloudPlan CloudPlan
+
+	// FeatureFloor is each rig's feature_floor, and Graph the beads a feature's
+	// waits are read from: a rig under its floor is a clause of its own, keyed
+	// "floor:<rig>", in the words DAMPERS says. A nil FeatureFloor leaves them out.
+	FeatureFloor map[string]int
+	Graph        BeadGraph
 
 	// GiveWayStale is giveway_stale: a host whose give-way note was not rewritten
 	// for twice this is not believed. Zero reads DefaultGiveWayStale.
@@ -369,7 +377,29 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		clauses = append(clauses, NudgeClause{Key: "host:" + w.Host, Text: text})
 	}
 
+	clauses = append(clauses, n.floorClauses(ctx, work)...)
 	return append(clauses, n.cloudClauses(ctx, now)...), nil
+}
+
+// floorClauses are the clauses for the rigs under their feature floor, as the
+// DAMPERS section says them (LaneAlarms). A graph that cannot be read counts no
+// waits, the same as a gauge missing.
+func (n Nudge) floorClauses(ctx context.Context, work WorkInHand) []NudgeClause {
+	if len(n.FeatureFloor) == 0 {
+		return nil
+	}
+	var graph []domain.GraphBead
+	if n.Graph != nil {
+		graph, _ = n.Graph.BeadGraph(ctx)
+	}
+	var clauses []NudgeClause
+	for _, a := range LaneAlarms(work, graph, n.FeatureFloor, 0) {
+		if a.Principle == DamperFeatureFloor {
+			rig, _, _ := strings.Cut(a.Text, ":")
+			clauses = append(clauses, NudgeClause{Key: "floor:" + rig, Text: a.Line()})
+		}
+	}
+	return clauses
 }
 
 // cloudClauses are the clauses for the cloud's boxes being made past the

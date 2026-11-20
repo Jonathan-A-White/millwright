@@ -597,3 +597,16 @@ func TestNudgeSaysNothingOfARetiredHostHoldingAClaim(t *testing.T) {
 		t.Fatalf("expected nothing of a retired host, got %+v", clauses)
 	}
 }
+
+func TestNudgeNamesARigUnderItsFeatureFloor(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{FeatureFloor: map[string]int{"lampas": 2}})
+
+	if len(clauses) != 1 || clauses[0].Key != "floor:lampas" {
+		t.Fatalf("expected one clause keyed floor:lampas, got %+v", clauses)
+	}
+	if want := "feature floor: lampas: 0 features ready, floor 2: carve or release before a fix"; clauses[0].Text != want {
+		t.Fatalf("expected the clause to read %q, got %q", want, clauses[0].Text)
+	}
+}

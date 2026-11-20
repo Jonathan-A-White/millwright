@@ -30,17 +30,21 @@ type DamperLimits struct {
 	// NeedsYou is how many needs waiting on him the view's counts file may show
 	// before the alarm rings: the number his badge reads.
 	NeedsYou int
+	// ReadyFixesPerRig is how many fix-lane stories below P1 may be ready on one
+	// rig before the fix queue alarm.
+	ReadyFixesPerRig int
 }
 
 // The defaults of DamperLimits.
 const (
-	DefaultDamperReadyP1         = 10
-	DefaultDamperP1UntouchedDays = 5
-	DefaultDamperDemoWaitingDays = 7
-	DefaultDamperGrillingDays    = 7
-	DefaultDamperTestersPerRig   = 1
-	DefaultDamperReviewQueue     = 8
-	DefaultDamperNeedsYou        = 25
+	DefaultDamperReadyP1          = 10
+	DefaultDamperP1UntouchedDays  = 5
+	DefaultDamperDemoWaitingDays  = 7
+	DefaultDamperGrillingDays     = 7
+	DefaultDamperTestersPerRig    = 1
+	DefaultDamperReviewQueue      = 8
+	DefaultDamperNeedsYou         = 25
+	DefaultDamperReadyFixesPerRig = 10
 )
 
 // DamperFacts is everything the alarms are judged from, all read already.
@@ -72,6 +76,9 @@ type DamperFacts struct {
 	// Receipts are the receipts of ours that no real answer has followed
 	// (PosternReceiptKey's notes).
 	Receipts []PosternReceipt
+	// FeatureFloor is, for each rig whose file keeps a feature_floor, how many
+	// feature-lane stories below P1 it keeps ready; a rig not in it has no floor.
+	FeatureFloor map[string]int
 }
 
 // DamperProposal is one bead holding a proposal of mw verify match that nobody
@@ -209,6 +216,13 @@ const (
 	// DamperOwed is the alarm for his posts that have only a receipt of ours
 	// past OwedGrace: mw postern owed lists them (mw-gq6.1539).
 	DamperOwed = "owed"
+	// DamperFeatureFloor is the alarm for a rig with a feature_floor and fewer
+	// feature-lane stories ready below P1 than it: the Mayor carves or releases a
+	// feature before another fix (mw-6ww.119.10.4).
+	DamperFeatureFloor = "feature floor"
+	// DamperFixQueue is the alarm for a rig with more fix-lane stories ready below
+	// P1 than ready_fixes_per_rig: the Mayor releases none, and folds or ices.
+	DamperFixQueue = "fix queue"
 )
 
 // DoctorInstallChecks are the checks of mw doctor that say a fix the Governor
@@ -228,7 +242,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 		{&l.ReadyP1, DefaultDamperReadyP1}, {&l.P1UntouchedDays, DefaultDamperP1UntouchedDays},
 		{&l.DemoWaitingDays, DefaultDamperDemoWaitingDays}, {&l.GrillingDays, DefaultDamperGrillingDays},
 		{&l.TestersPerRig, DefaultDamperTestersPerRig}, {&l.ReviewQueue, DefaultDamperReviewQueue},
-		{&l.NeedsYou, DefaultDamperNeedsYou},
+		{&l.NeedsYou, DefaultDamperNeedsYou}, {&l.ReadyFixesPerRig, DefaultDamperReadyFixesPerRig},
 	} {
 		if *one.have <= 0 {
 			*one.have = one.want
@@ -241,7 +255,7 @@ func (l DamperLimits) orDefaults() DamperLimits {
 // to five beads, then how many more.
 func (a DamperAlarm) Line() string {
 	line := a.Principle + " · " + a.Text
-	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor || a.Principle == DamperNeedsFilesKey || a.Principle == DamperRefusedHold || a.Principle == DamperOpenRefused || a.Principle == DamperCloudMake {
+	if a.Principle == DamperStuck || a.Principle == DamperInversion || a.Principle == DamperMetered || a.Principle == DamperNoHost || a.Principle == DamperDoctor || a.Principle == DamperNeedsFilesKey || a.Principle == DamperRefusedHold || a.Principle == DamperOpenRefused || a.Principle == DamperCloudMake || a.Principle == DamperFeatureFloor || a.Principle == DamperFixQueue {
 		line = a.Principle + ": " + a.Text
 	}
 	if len(a.Beads) == 0 {
@@ -511,6 +525,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	for _, alarm := range facts.SlowMakes {
 		report.Alarms = append(report.Alarms, alarm.damper())
 	}
+	report.Alarms = append(report.Alarms, LaneAlarms(facts.Work, facts.Graph, facts.FeatureFloor, limits.ReadyFixesPerRig)...)
 	if len(queue) > limits.ReviewQueue {
 		add(DamperReview, fmt.Sprintf("his review queue is %d: %d cards, %d demos, %d hands steps (limit %d)",
 			len(queue), len(cards), len(demos), len(hands), limits.ReviewQueue), uniqueStrings(queue))
@@ -709,6 +724,9 @@ type DamperSurvey struct {
 	// silent.
 	Cloud     CloudBook
 	CloudPlan CloudPlan
+	// FeatureFloor is each rig's feature_floor from its file (FeatureFloors); nil
+	// judges no floor.
+	FeatureFloor map[string]int
 	// Now is the clock DamperCounts judges the alarms at; nil reads the host's.
 	Now func() time.Time
 }
@@ -721,7 +739,7 @@ type NeedsCountsReader interface {
 
 // Dampers reads the alarms from work already read.
 func (s DamperSurvey) Dampers(ctx context.Context, work WorkInHand, now time.Time) (DampersReport, error) {
-	facts := DamperFacts{Now: now, Work: work, Notes: map[string]string{}}
+	facts := DamperFacts{Now: now, Work: work, Notes: map[string]string{}, FeatureFloor: s.FeatureFloor}
 	if s.Notes != nil {
 		for _, prefix := range []string{PosternQuestionKey(""), HandsStepsKey(""), LoopSittingKey, PosternReceiptPrefix} {
 			kept, err := s.Notes.NotesWithPrefix(ctx, prefix)

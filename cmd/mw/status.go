@@ -388,10 +388,11 @@ func damperSurvey(tracker *beads.Gateway, dir, host string) (application.DamperS
 		Limits: application.DamperLimits{
 			ReadyP1: limits.ReadyP1, P1UntouchedDays: limits.P1UntouchedDays, DemoWaitingDays: limits.DemoWaitingDays,
 			GrillingDays: limits.GrillingDays, TestersPerRig: limits.TestersPerRig, ReviewQueue: limits.ReviewQueue,
-			NeedsYou: limits.NeedsYou,
+			NeedsYou: limits.NeedsYou, ReadyFixesPerRig: limits.ReadyFixesPerRig,
 		},
-		NeedsCounts: needsCountsReader(),
-		Proposals:   tracker,
+		FeatureFloor: featureFloors(dir),
+		NeedsCounts:  needsCountsReader(),
+		Proposals:    tracker,
 	}, nil
 }
 
