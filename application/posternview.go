@@ -355,6 +355,10 @@ type PosternView struct {
 	// host is no place a dispatch starts a story, so its up_next is left out.
 	Retired []string
 
+	// Rules, when set, is the rig files of the vault: up_next keeps each rig's
+	// feature_share as a dispatch does. Nil gives the order by priority and age.
+	Rules EpicRules
+
 	// Now is the clock written_at is stamped with and every window is
 	// measured against. The zero value reads the real one.
 	Now func() time.Time
@@ -613,7 +617,7 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	}
 
 	hosts, hostNeeds := v.hosts(ctx, b, notes)
-	v.upNext(b, hosts)
+	v.upNext(ctx, b, hosts)
 	needs = append(needs, hostNeeds...)
 	sortPosternNeeds(needs)
 
@@ -1936,7 +1940,7 @@ func (v PosternView) hosts(ctx context.Context, b *viewBuild, notes map[string]s
 // is no session's to start, so it is left out. A retired host lists none. A
 // host=auto story is listed under every live host, since a dispatch on any of
 // them would start it.
-func (v PosternView) upNext(b *viewBuild, hosts []PosternViewHost) {
+func (v PosternView) upNext(ctx context.Context, b *viewBuild, hosts []PosternViewHost) {
 	for i := range hosts {
 		if IsRetired(v.Retired, hosts[i].Name) {
 			continue
@@ -1953,7 +1957,7 @@ func (v PosternView) upNext(b *viewBuild, hosts []PosternViewHost) {
 			}
 			startable = append(startable, d)
 		}
-		for _, detail := range inStartOrder(startable) {
+		for _, detail := range inShareOrderOfView(ctx, b, v.Rules, inStartOrder(startable)) {
 			if len(hosts[i].UpNext) == PosternViewUpNext {
 				break
 			}

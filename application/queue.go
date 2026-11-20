@@ -16,8 +16,8 @@ const MostBlockedShown = 5
 // Queue is `mw queue`: the stories ready on a host in the exact order a
 // dispatch starts them, why each sits where it does, and the next blocked
 // stories with what they wait on. It reads and writes nothing, and it never
-// decides an order of its own: the order is inStartOrder's, the one Dispatch
-// sorts by.
+// decides an order of its own: the order is Dispatch's, inStartOrder's with each
+// rig's feature share kept (inShareOrder).
 type Queue struct {
 	Tracker WorkTracker
 	Host    string
@@ -112,8 +112,14 @@ func (q Queue) Run(ctx context.Context) (QueueReport, error) {
 			unblocked = append(unblocked, detail)
 		}
 	}
-	for _, detail := range inStartOrder(unblocked) {
+	// The order is Dispatch's: inStartOrder with each rig's feature share kept.
+	// What a feature waits on is read from the blocked stories already in hand.
+	inOrder, moved := inShareOrder(ctx, inStartOrder(unblocked), shares.running, q.Rules, func() map[string]bool { return featureWaits(blocked) })
+	for _, detail := range inOrder {
 		row := q.row(detail)
+		if reason := moved[detail.Story.ID]; reason != "" {
+			row.Why += ", " + reason
+		}
 		// A bead with children is a parent: its children are the work, and a
 		// dispatch passes it over by the parent gate, so it is no story to start
 		// (mw-gq6.1088).
