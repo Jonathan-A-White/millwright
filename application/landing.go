@@ -31,6 +31,11 @@ var (
 	ErrMergeConflict = errors.New("the merge has conflicts")
 	ErrPushRejected  = errors.New("the push was rejected: the branch moved on the remote")
 	ErrPushTransient = errors.New("the push failed: a fault at the remote, not a stated refusal")
+	// ErrPushPrivateTerm is a push mw would not make: a commit it would send
+	// adds a line holding a term of the private list, even if a later commit
+	// takes it out (mw-gq6.1543). The refusal names the commit and file, never
+	// the term nor the line.
+	ErrPushPrivateTerm = errors.New("the push was not made: a commit adds a line holding a term of the private list")
 )
 
 // MergeConflict is a merge that could not be made, with the paths git left

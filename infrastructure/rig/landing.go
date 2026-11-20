@@ -492,7 +492,8 @@ func listed(union []string, file string) bool {
 }
 
 // Push implements application.Landing: what the landing worktree has checked
-// out becomes the branch on the remote. The refspec has no leading plus and
+// out becomes the branch on the remote, once no commit it sends adds a private
+// term (checkPrivateTerms). The refspec has no leading plus and
 // there is no --force anywhere: a remote that has moved on refuses this push,
 // which is the point.
 func (w *Worktrees) Push(ctx context.Context, landingDir, remote, branch string) error {
@@ -501,6 +502,9 @@ func (w *Worktrees) Push(ctx context.Context, landingDir, remote, branch string)
 	}
 	if branch == "" {
 		return fmt.Errorf("pushing from %s: onto which branch?", landingDir)
+	}
+	if err := w.checkPrivateTerms(ctx, landingDir, remote, branch); err != nil {
+		return err
 	}
 	if _, err := w.git(ctx, landingDir, "push", remote, "HEAD:refs/heads/"+branch); err != nil {
 		switch {

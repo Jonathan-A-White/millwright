@@ -272,3 +272,109 @@ func TestPrivateTermsPassesThisRepository(t *testing.T) {
 		t.Fatalf("this repository holds a private term over the baseline: %v\n%s", err, out)
 	}
 }
+
+// aBranchAddingThenRemoving returns a repository whose main holds a clean file
+// and whose branch "story" adds a line with termOne in docs/b.md in one commit
+// and removes it in the next, so the tip is clean but the first commit is not.
+func aBranchAddingThenRemoving(t *testing.T) (repo, first string) {
+	t.Helper()
+	repo = aRepoTracking(t, map[string][]byte{"docs/a.md": []byte("clean\n")})
+	gitIn(t, repo, "branch", "-M", "main")
+	gitIn(t, repo, "checkout", "-q", "-b", "story")
+	if err := os.WriteFile(filepath.Join(repo, "docs/b.md"), []byte("fine\nthe Zorblax line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, repo)
+	first = strings.TrimSpace(gitIn(t, repo, "rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(repo, "docs/b.md"), []byte("fine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, repo)
+	return repo, first
+}
+
+func TestPrivateTermsCommitsNamesTheCommitAndFileOfATermAddedThenRemoved(t *testing.T) {
+	list := aTermsDirWithBaseline(t, "other thing", termOne)
+	repo, first := aBranchAddingThenRemoving(t)
+
+	// the tip alone is clean, as the check of the tip says.
+	if out, err := privateTerms(t, repo, list); err != nil {
+		t.Fatalf("expected the tip to pass, got %v:\n%s", err, out)
+	}
+	out, err := privateTerms(t, repo, list, "--commits=main..story")
+	if err == nil {
+		t.Fatalf("expected a failure over main..story, got a pass:\n%s", out)
+	}
+	if !strings.Contains(out, first[:12]) || !strings.Contains(out, "docs/b.md") {
+		t.Fatalf("expected the first commit and docs/b.md named:\n%s", out)
+	}
+	if !strings.Contains(out, "list line 4") {
+		t.Fatalf("expected the term's list line named:\n%s", out)
+	}
+	noLeak(t, out, termOne, "the Zorblax", "fine")
+}
+
+func TestPrivateTermsCommitsPassesARangeWhoseCommitsHoldNoTerm(t *testing.T) {
+	list := aTermsDirWithBaseline(t, termOne)
+	repo, _ := aBranchAddingThenRemoving(t)
+	// the range holds the second commit alone: it removes the term, adds none.
+	out, err := privateTerms(t, repo, list, "--commits=story~1..story")
+	if err != nil || !strings.Contains(out, "ok") {
+		t.Fatalf("expected a pass, got %v:\n%s", err, out)
+	}
+	// an empty range.
+	if out, err := privateTerms(t, repo, list, "--commits=story..story"); err != nil {
+		t.Fatalf("expected a pass on an empty range, got %v:\n%s", err, out)
+	}
+}
+
+func TestPrivateTermsCommitsHoldsToTheBaselineAndReadsWords(t *testing.T) {
+	list := aTermsDirWithBaseline(t, termOne)
+	repo := aRepoTracking(t, map[string][]byte{"a.md": []byte("zorblax\n")})
+	gitIn(t, repo, "branch", "-M", "main")
+	baselineOf(t, repo, list) // a.md may hold one line with the term
+	gitIn(t, repo, "checkout", "-q", "-b", "story")
+	// a commit that rewrites the baselined line stays within the baseline; one
+	// that holds the term only as part of another word holds none.
+	if err := os.WriteFile(filepath.Join(repo, "a.md"), []byte("zorblax again\nzorblaxes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, repo)
+	if out, err := privateTerms(t, repo, list, "--commits=main..story"); err != nil {
+		t.Fatalf("expected a pass within the baseline, got %v:\n%s", err, out)
+	}
+	// two lines with the term added by one commit are over the baseline of one.
+	if err := os.WriteFile(filepath.Join(repo, "a.md"), []byte("zorblax again\nzorblax twice\nzorblax thrice\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, repo)
+	out, err := privateTerms(t, repo, list, "--commits=main..story")
+	if err == nil || !strings.Contains(out, "a.md") {
+		t.Fatalf("expected a failure naming a.md, got %v:\n%s", err, out)
+	}
+	noLeak(t, out, termOne, "twice", "thrice")
+}
+
+func TestPrivateTermsCommitsSkipsWithNoList(t *testing.T) {
+	repo, _ := aBranchAddingThenRemoving(t)
+	out, err := privateTerms(t, repo, filepath.Join(t.TempDir(), "private-terms.txt"), "--commits=main..story")
+	if err != nil || !strings.Contains(out, "skipped") {
+		t.Fatalf("expected a pass saying skipped, got %v:\n%s", err, out)
+	}
+	list := aTermsDir(t, termOne) // no baseline beside it
+	out, err = privateTerms(t, repo, list, "--commits=main..story")
+	if err != nil || !strings.Contains(out, "skipped") {
+		t.Fatalf("expected a pass saying skipped with no baseline, got %v:\n%s", err, out)
+	}
+}
+
+func TestPrivateTermsCommitsReadsEveryCommitNotOnTheRemote(t *testing.T) {
+	list := aTermsDirWithBaseline(t, termOne)
+	repo, first := aBranchAddingThenRemoving(t)
+	// the range as the landing gives it: HEAD, not what a remote-tracking ref holds.
+	gitIn(t, repo, "update-ref", "refs/remotes/origin/main", "main")
+	out, err := privateTerms(t, repo, list, "--commits=HEAD --not --remotes=origin")
+	if err == nil || !strings.Contains(out, first[:12]) {
+		t.Fatalf("expected a failure naming the first commit, got %v:\n%s", err, out)
+	}
+}
