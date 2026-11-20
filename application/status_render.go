@@ -886,6 +886,18 @@ func (w HostWork) DoctorAlarms() []DamperAlarm {
 	return alarms
 }
 
+// TicksAlarms is the DAMPERS alarm of a host that has synced and left no ticks
+// note: the TICKS section is written only when the note is known, so nothing
+// else says that its timers' counts never reached the home (mw-gq6.1522). A
+// retired host is gone, and a host that has never synced is already said to be
+// asleep: neither is named.
+func (w HostWork) TicksAlarms() []DamperAlarm {
+	if w.Retired || w.NeverSynced() || w.Ticks.Known() {
+		return nil
+	}
+	return []DamperAlarm{{Principle: DamperDoctor, Text: w.Host + ": no ticks note"}}
+}
+
 // writeMw is the line beside the sync line that says which mw the host runs:
 // its commit, and that it is behind main when it is not main's.
 func (w HostWork) writeMw(b *strings.Builder, main string) {

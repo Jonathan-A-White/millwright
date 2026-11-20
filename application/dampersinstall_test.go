@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 )
 
 // installAlarmsOf is the DAMPERS alarms an mw status of the VPS reads about
@@ -16,6 +17,7 @@ func installAlarmsOf(t *testing.T, host string, verdict application.DoctorVerdic
 	tracker := aTrackerPathedToVPS(t)
 	storyOn(t, tracker, "mw-gq6.9", "A story", host)
 	syncedAt(t, tracker, host, time.Minute)
+	leftTicks(t, tracker, host)
 	if err := tracker.SetNote(context.Background(), application.DoctorVerdictKey(host), verdict.Note()); err != nil {
 		t.Fatalf("leaving the verdict of %s: %v", host, err)
 	}
@@ -26,6 +28,16 @@ func installAlarmsOf(t *testing.T, host string, verdict application.DoctorVerdic
 		}
 	}
 	return found
+}
+
+// leftTicks is the ticks note of a host whose timers have run, so that a
+// fixture about another alarm is not also named for leaving none (mw-gq6.1522).
+func leftTicks(t *testing.T, tracker *apptest.FakeTracker, host string) {
+	t.Helper()
+	note := application.HostTicks{Dispatch: application.TickCount{Known: true}}.Note()
+	if err := tracker.SetNote(context.Background(), application.TicksKey(host), note); err != nil {
+		t.Fatalf("leaving the ticks of %s: %v", host, err)
+	}
 }
 
 // mw-gq6.1429: the desktop's doctor report was a week old when its fstrim
@@ -85,6 +97,7 @@ func TestDampersNamesAWSLHostWithNoDoctorReport(t *testing.T) {
 		tracker := aTrackerPathedToVPS(t)
 		storyOn(t, tracker, "mw-gq6.9", "A story", "desktop")
 		syncedAt(t, tracker, "desktop", time.Minute)
+		leftTicks(t, tracker, "desktop")
 		var found []application.DamperAlarm
 		for _, alarm := range otherHostStatus(t, tracker).Dampers.Alarms {
 			if strings.Contains(alarm.Text, "desktop:") {
@@ -117,4 +130,47 @@ func TestDampersNamesNoDoctorReportOfAHostThatNeverSynced(t *testing.T) {
 	if alarms := w.DoctorAlarms(); len(alarms) != 0 {
 		t.Fatalf("expected nothing for a host that never synced, got %+v", alarms)
 	}
+}
+
+// mw-gq6.1522: a host that has synced but left no ticks note was named by no
+// alarm and no line, because the TICKS section is written only when the note is
+// known. A synced host with no ticks note is one standing alarm, by host.
+func TestDampersNamesAHostWithNoTicksNote(t *testing.T) {
+	ticksAlarmsOf := func(t *testing.T, leaveTicks bool) []application.DamperAlarm {
+		t.Helper()
+		tracker := aTrackerPathedToVPS(t)
+		storyOn(t, tracker, "mw-gq6.9", "A story", "desktop")
+		syncedAt(t, tracker, "desktop", time.Minute)
+		if leaveTicks {
+			leftTicks(t, tracker, "desktop")
+		}
+		var found []application.DamperAlarm
+		for _, alarm := range otherHostStatus(t, tracker).Dampers.Alarms {
+			if strings.Contains(alarm.Text, "desktop:") && strings.Contains(alarm.Text, "ticks") {
+				found = append(found, alarm)
+			}
+		}
+		return found
+	}
+
+	t.Run("a synced host with no ticks note is named", func(t *testing.T) {
+		found := ticksAlarmsOf(t, false)
+		if len(found) != 1 || !strings.Contains(found[0].Text, "no ticks note") || found[0].Principle != application.DamperDoctor {
+			t.Fatalf("expected one alarm saying desktop has no ticks note, got %+v", found)
+		}
+	})
+
+	t.Run("a host that left a ticks note is not named", func(t *testing.T) {
+		if found := ticksAlarmsOf(t, true); len(found) != 0 {
+			t.Fatalf("expected nothing from a host with a ticks note, got %+v", found)
+		}
+	})
+
+	t.Run("a host that never synced, or is retired, is not named", func(t *testing.T) {
+		for _, w := range []application.HostWork{{Host: "desktop"}, {Host: "desktop", Said: "x", Retired: true}} {
+			if alarms := w.TicksAlarms(); len(alarms) != 0 {
+				t.Fatalf("expected nothing for %+v, got %+v", w, alarms)
+			}
+		}
+	})
 }
