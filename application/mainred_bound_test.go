@@ -2,11 +2,14 @@ package application_test
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // mw-gq6.1421: the run of the failing tests alone on main is given its bound
@@ -80,5 +83,58 @@ func TestARunOfMainThatWasMadeDoesNotSayMainWasNotChecked(t *testing.T) {
 	first := verdictLine(got.mail)
 	if strings.Contains(first, "main not checked") {
 		t.Errorf("expected a refusal after a run on main to leave out main not checked, got %q", first)
+	}
+}
+
+// mw-gq6.1453: the home's run of the failing tests is cut at the bound counted
+// from the moment it has a slot there, as the run on this host is, so a wait at
+// the home for a test-runner slot is not counted.
+
+// aHomeThatWaitsForASlot is a NamedElsewhere whose home takes slotWait to give
+// the run a slot, and then passes the tests: the wait is the ctx's to cut, as an
+// ssh's is. It remembers the bound it was handed.
+type aHomeThatWaitsForASlot struct {
+	slotWait time.Duration
+	bound    time.Duration
+}
+
+func (h *aHomeThatWaitsForASlot) RunNamedOn(ctx context.Context, _, _, _ string, _ []string) (application.NamedRun, error) {
+	h.bound = application.RunBoundOf(ctx)
+	select {
+	case <-time.After(h.slotWait):
+	case <-ctx.Done():
+		return application.NamedRun{}, ctx.Err()
+	}
+	return application.NamedRun{Checked: application.Checked{Command: "go test -run", Passed: true}, Ran: true}, nil
+}
+
+func TestTheHostGapBoundStartsAfterTheHomesSlot(t *testing.T) {
+	home := &aHomeThatWaitsForASlot{slotWait: 300 * time.Millisecond}
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	landing := &aMainLanding{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}}
+	named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.01s)\nFAIL\n")}
+	report, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: landing, Landing: landing,
+		Checks: twoFailingTests{}, Slot: aSlot{}, Mailbox: apptest.NewFakeMailbox(),
+		NamedChecks: named, MainAloneBound: 50 * time.Millisecond, MainAloneSlotWait: time.Minute,
+		LoadWait:       func(context.Context, time.Duration) error { return nil },
+		NamedElsewhere: home,
+		Home:           &apptest.FakeHomeFile{Text: "desktop 2026-09-29T00:10:00Z mw@desktop"},
+		Seat:           "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(context.Background(), "mw-x.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Reason != application.ReasonHostGap || report.MainRed == nil || report.MainRed.Gap == nil {
+		t.Errorf("expected the story held as a host gap, as the home passes the tests after waiting longer than the bound for a slot, got reason %q, notes %q", report.Reason, report.Notes)
+	}
+	if home.bound != 50*time.Millisecond {
+		t.Errorf("expected the home's run handed the bound of 50ms to count once it has a slot, got %s", home.bound)
 	}
 }

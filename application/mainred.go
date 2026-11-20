@@ -648,7 +648,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	// tool a cloud box lacks fails them there and nowhere else (mw-gq6.1395).
 	var gap *HostGap
 	if allOnMain {
-		gap = n.hostGap(ctx, report, c.path.Rig, base, asked, run, bound)
+		gap = n.hostGap(ctx, report, c.path.Rig, base, asked, run, bound, slotWait)
 	}
 	labelMain(report, labelNote(tests, at, func(test string) string {
 		if onMain[test] {
@@ -683,8 +683,10 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 // this host is not the home and the port is given, and returns the gap when the
 // home passes them: the failure is this host's. A home that fails them too, or
 // could not be asked, leaves main's red as this host's run found it; why is a
-// note either way (mw-gq6.1395).
-func (n Next) hostGap(ctx context.Context, report *NextReport, rigName, base string, tests []string, here NamedRun, bound time.Duration) *HostGap {
+// note either way (mw-gq6.1395). The home's run is given its bound as this
+// host's is: counted from when it has a test-runner slot, so the call may take
+// the bound and the most the wait for a slot may take (mw-gq6.1453).
+func (n Next) hostGap(ctx context.Context, report *NextReport, rigName, base string, tests []string, here NamedRun, bound, slotWait time.Duration) *HostGap {
 	if n.NamedElsewhere == nil || n.Home == nil {
 		return nil
 	}
@@ -693,9 +695,9 @@ func (n Next) hostGap(ctx context.Context, report *NextReport, rigName, base str
 		return nil
 	}
 	home := record.Host
-	bounded, cancel := context.WithTimeout(ctx, bound)
+	bounded, cancel := context.WithTimeout(ctx, slotWait+bound)
 	defer cancel()
-	far, err := n.NamedElsewhere.RunNamedOn(bounded, home, rigName, base, tests)
+	far, err := n.NamedElsewhere.RunNamedOn(WithRunBound(bounded, bound), home, rigName, base, tests)
 	why := ""
 	switch {
 	case err != nil:
