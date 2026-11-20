@@ -68,6 +68,7 @@ test:
 	scripts/check-gate-jobs.sh
 	scripts/check-tracked-binaries.sh
 	scripts/check-private-terms.sh
+	@if git rev-parse --verify -q origin/main >/dev/null; then scripts/check-private-terms.sh --commits=origin/main..HEAD; fi
 	scripts/check-template.sh
 	$(GO) test -tags $(TAGS) -timeout $(TEST_TIMEOUT) $(TIMING_FLAGS) $(PKG)
 	$(GO) vet -tags $(TAGS) $(PKG)
@@ -105,7 +106,10 @@ test:
 # stand-in bd (scripts/check-beads-restore-drill.sh). Then that no tracked line
 # holds more of a term of the vault's private list than the baseline beside it
 # allows (scripts/check-private-terms.sh; it reads the list and baseline in the vault and passes, saying "skipped", where the
-# list or the baseline is missing, and the same check runs in make test). Then
+# list or the baseline is missing, and the same check runs in make test), and no
+# commit not yet on origin/main adds one (--commits, which a landing's push runs
+# too: a term added in one commit and taken out in the next is in the history
+# the push sends, mw-gq6.1543). Then
 # that application/ code that is not a test holds no time.Now() or time.Since(
 # beyond the per-file counts in scripts/realclock-baseline.txt: a wait or
 # timeout bound takes the injected clock, and a deliberate real-clock use says
@@ -141,6 +145,7 @@ lint:
 	scripts/check-shellcheck-directives.sh
 	scripts/check-tracked-binaries.sh
 	scripts/check-private-terms.sh
+	@if git rev-parse --verify -q origin/main >/dev/null; then scripts/check-private-terms.sh --commits=origin/main..HEAD; fi
 	scripts/check-realclock.sh
 	scripts/check-file-length_test.sh
 	scripts/check-file-length.sh

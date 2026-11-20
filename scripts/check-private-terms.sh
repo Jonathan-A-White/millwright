@@ -6,6 +6,7 @@
 # holds one.
 #
 #   scripts/check-private-terms.sh [--baseline] [REPO]
+#   scripts/check-private-terms.sh --commits RANGE [REPO]
 #
 # The list is the file named by MW_PRIVATE_TERMS, else
 # ~/millwright-vault/rigs/private-terms.txt: one fixed term a line, `#` starts a
@@ -20,6 +21,15 @@
 # does not name (it is allowed 0). The failure names the file, the line number
 # and the term's line number in the list.
 #
+# `--commits RANGE` (or --commits=RANGE; RANGE is git log's, as base..head, or
+# several words such as "HEAD --not --remotes=origin") reads instead the lines
+# each commit of the range ADDS (merge commits aside: their branches' own commits
+# are in the range), so that a term added in one commit and taken out in the next
+# is found, which the tip alone cannot show (mw-gq6.1543). The same baseline
+# holds: a commit adding more lines with a term to a file than the baseline
+# allows it fails. It names the commit (twelve digits), the file and the term's
+# list line, never the term nor the line.
+#
 # With no list, or no baseline beside it, it passes and says which is missing.
 # `--baseline` prints a fresh baseline to stdout and changes nothing. Reads only
 # the tracked files of the repository: the one this script is in, or REPO.
@@ -28,13 +38,26 @@ set -eu
 
 mode=check
 REPO_ROOT=
+RANGE=
+want_range=
 for arg in "$@"; do
+	if [ -n "$want_range" ]; then
+		RANGE=$arg
+		want_range=
+		continue
+	fi
 	case $arg in
 	--baseline) mode=baseline ;;
+	--commits=*) mode=commits; RANGE=${arg#--commits=} ;;
+	--commits) mode=commits; want_range=1 ;;
 	-*) echo "check-private-terms: unknown option $arg" >&2; exit 2 ;;
 	*) REPO_ROOT=$arg ;;
 	esac
 done
+if [ -n "$want_range" ] || { [ "$mode" = commits ] && [ -z "$RANGE" ]; }; then
+	echo "check-private-terms: --commits needs a range" >&2
+	exit 2
+fi
 if [ -z "$REPO_ROOT" ]; then
 	REPO_ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null) || REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 fi
@@ -50,7 +73,7 @@ if [ ! -f "$LIST" ]; then
 	echo "check-private-terms: skipped: no list of terms at $LIST"
 	exit 0
 fi
-if [ "$mode" = check ] && [ ! -f "$BASELINE" ]; then
+if [ "$mode" != baseline ] && [ ! -f "$BASELINE" ]; then
 	echo "check-private-terms: skipped: no baseline at $BASELINE (beside the list)"
 	exit 0
 fi
@@ -86,6 +109,79 @@ done <"$tmp/terms.tsv"
 
 if [ ! -s "$tmp/terms.hashed" ]; then
 	[ "$mode" = baseline ] || echo "check-private-terms: ok: the list holds no term"
+	exit 0
+fi
+
+if [ "$mode" = commits ]; then
+	# The added lines of each commit: after a file's "@@" every line is a hunk
+	# line, one starting with + an added one; "+++ b/path" before it names the
+	# file. No line is printed.
+	set -f
+	# shellcheck disable=SC2086
+	if ! git -C "$REPO_ROOT" -c core.quotepath=off log --no-merges --no-color --format='commit %H' -p -U0 $RANGE -- >"$tmp/added" 2>"$tmp/giterr"; then
+		echo "check-private-terms: git log failed in $REPO_ROOT for the range given" >&2
+		exit 2
+	fi
+	set +f
+	LC_ALL=C awk -v termsfile="$tmp/terms.hashed" -v baseline="$BASELINE" '
+		function isalnum(c) { return c ~ /^[A-Za-z0-9]$/ }
+		function whole(low, t,    start, p, abs, len) {
+			len = length(t); start = 1
+			while ((p = index(substr(low, start), t)) > 0) {
+				abs = start + p - 1
+				if (!isalnum(abs > 1 ? substr(low, abs - 1, 1) : "") && !isalnum(substr(low, abs + len, 1)))
+					return 1
+				start = abs + 1
+			}
+			return 0
+		}
+		BEGIN {
+			while ((getline row < termsfile) > 0) {
+				n1 = index(row, "\t"); num = substr(row, 1, n1 - 1); rest = substr(row, n1 + 1)
+				n2 = index(rest, "\t"); h = substr(rest, 1, n2 - 1); t = substr(rest, n2 + 1)
+				if (h in listline) continue
+				listline[h] = num; hashes[++nterms] = h; term[h] = t
+			}
+			while ((getline row < baseline) > 0) {
+				n1 = index(row, " "); if (n1 == 0) continue
+				h = substr(row, 1, n1 - 1); rest = substr(row, n1 + 1)
+				n2 = index(rest, " "); if (n2 == 0) continue
+				allowed[h SUBSEP substr(rest, n2 + 1)] = substr(rest, 1, n2 - 1) + 0
+			}
+		}
+		/^commit [0-9a-f]+$/ { commit = substr($2, 1, 12); inhunk = 0; path = ""; next }
+		/^diff --git / { inhunk = 0; next }
+		/^@@ / { inhunk = 1; next }
+		!inhunk && /^\+\+\+ / {
+			path = substr($0, 5); sub(/\t.*$/, "", path)
+			if (path == "/dev/null") path = ""; else sub(/^b\//, "", path)
+			next
+		}
+		inhunk && substr($0, 1, 1) == "+" {
+			low = tolower(substr($0, 2))
+			for (i = 1; i <= nterms; i++) {
+				h = hashes[i]
+				if (!whole(low, term[h])) continue
+				key = commit SUBSEP h SUBSEP path
+				count[key]++
+			}
+		}
+		END {
+			for (key in count) {
+				split(key, kp, SUBSEP); c = kp[1]; h = kp[2]; p = kp[3]
+				ok = ((h SUBSEP p) in allowed) ? allowed[h SUBSEP p] : 0
+				if (count[key] > ok)
+					print "commit " c " " p ": adds " count[key] " lines holding a private term (list line " listline[h] "), over its baseline of " ok
+			}
+		}
+	' "$tmp/added" | sort >"$tmp/out"
+	if [ -s "$tmp/out" ]; then
+		echo "check-private-terms: a commit of the range adds a line holding a term of the private list, more than the baseline allows (a later commit taking it out does not undo it in the history):" >&2
+		sed 's/^/  /' "$tmp/out" >&2
+		echo "check-private-terms: rewrite the commit so it never holds the line (the term is in the list's line named, not shown here)" >&2
+		exit 1
+	fi
+	echo "check-private-terms: ok: no commit of the range adds a private term"
 	exit 0
 fi
 
