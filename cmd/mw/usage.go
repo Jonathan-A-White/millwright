@@ -150,6 +150,14 @@ const (
 	usageReadCaptureFile = "capture.txt"
 )
 
+// usageReadTerminal is the terminal mw usage read drives, and usageReadWait how
+// it waits between its steps (nil sleeps): a test swaps them for a stand-in
+// screen and no waiting.
+var (
+	usageReadTerminal = func() application.UsageTerminal { return tmux.NewTerminal() }
+	usageReadWait     func(ctx context.Context, d time.Duration) error
+)
+
 func newUsageReadCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "read",
@@ -178,6 +186,10 @@ func newUsageReadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Setting the reading reads the notes and the pause's state, and a
+			// read started a bd each (mw-gq6.1546): they are read over one
+			// connection kept open for the run.
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
 			state := filepath.Join(home, UsageStateDir)
 			zone, err := time.LoadLocation("America/New_York")
 			if err != nil {
@@ -185,7 +197,7 @@ func newUsageReadCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			return application.UsageRead{
-				Terminal: tmux.NewTerminal(), Lock: hostlock.NewTry(state, usageReadLockFile),
+				Terminal: usageReadTerminal(), Lock: hostlock.NewTry(state, usageReadLockFile), Wait: usageReadWait,
 				Dir: dir, Zone: zone,
 				Set: application.UsageSet{
 					Readings: application.UsageReadings{Notes: mwGateway(dir, host)}, Floors: application.UsageFloors{Notes: mwGateway(dir, host)},

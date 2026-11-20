@@ -145,6 +145,14 @@ func newVerifyMatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The match reads the open demos, the landings and their comments,
+			// and a read started a bd each (mw-gq6.1546): they are read over
+			// one connection kept open for the run.
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
 			match, _, err := newVerifyMatch(cmd.OutOrStdout())
 			if err != nil {
 				return err

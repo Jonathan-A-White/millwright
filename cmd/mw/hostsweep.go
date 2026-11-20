@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostsweep"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
@@ -79,6 +80,12 @@ func newHostSweepCmd() *cobra.Command {
 				return err
 			}
 
+			// The sweep reads its stories' states from the tracker, and a read
+			// started a bd, several new connections to the beads server each
+			// run of the timer (mw-gq6.1546): one connection kept open serves
+			// them, and the run's cache keeps its read to a list of every bead.
+			defer keepBeadsConnection(vault, cmd.ErrOrStderr())()
+
 			mark := filepath.Join(home, hostSweepListedMark)
 			dry, first := hostSweepDry(mark, dryRun, fromTimer)
 			if first {
@@ -86,7 +93,7 @@ func newHostSweepCmd() *cobra.Command {
 			}
 			sweep := application.HostSweep{
 				Files:    hostsweep.Disk{Rigs: rigs, Vault: vault, Home: home},
-				Stories:  mwGateway(vault, host),
+				Stories:  mwGateway(vault, host, beads.WithRunCache()),
 				RunsAge:  time.Duration(runsDays) * application.HostSweepDay,
 				AsideAge: time.Duration(asideDays) * application.HostSweepDay,
 				DryRun:   dry,

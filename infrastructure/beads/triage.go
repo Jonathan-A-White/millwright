@@ -16,13 +16,15 @@ var _ application.TriageSource = (*Gateway)(nil)
 // in, because the orphan sweep needs them. A bead's rig is its own, or its
 // parent epic's when it names none.
 func (g *Gateway) TriageBeads(ctx context.Context) ([]application.TriageBead, error) {
-	out, err := g.call(ctx, "list", "--all", "--limit", "0", "--exclude-type", "mail,event", "--json")
-	if err != nil {
-		return nil, err
-	}
-	all, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading every bead: %w", err)
+	all, kept := g.triageOverConnection(ctx)
+	if !kept {
+		out, err := g.call(ctx, "list", "--all", "--limit", "0", "--exclude-type", "mail,event", "--json")
+		if err != nil {
+			return nil, err
+		}
+		if all, err = decodeBeads(out); err != nil {
+			return nil, fmt.Errorf("reading every bead: %w", err)
+		}
 	}
 	rigOf := make(map[string]string, len(all))
 	for _, b := range all {
