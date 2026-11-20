@@ -408,11 +408,20 @@ func TestAFoundStoryKeepsADottedFileNameWholeAndIsNotPinnedToTheFindersHost(t *t
 // what it filed and the Landed mail's body.
 func aSingleLandingSaying(t *testing.T, comment string) ([]application.StoryDetail, string) {
 	t.Helper()
+	return aSingleLandingSayingAll(t, comment)
+}
+
+// aSingleLandingSayingAll is aSingleLandingSaying for a story with several
+// comments, the first written first.
+func aSingleLandingSayingAll(t *testing.T, comments ...string) ([]application.StoryDetail, string) {
+	t.Helper()
 	ctx := context.Background()
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
 	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
-	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", comment))
+	for _, comment := range comments {
+		mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", comment))
+	}
 	before := tracker.Stories()
 	vault := newFakeVault()
 	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
@@ -444,6 +453,18 @@ func TestFoundNotFixedFilesAFindingAtP3(t *testing.T) {
 	filed, _ := aSingleLandingSaying(t, "Done.\nFound, not fixed:\nA is wrong (a.go:1). AC: go test ./x passes. By design? no\nFor the rig memory: nothing")
 	if len(filed) != 1 || filed[0].Priority != 3 {
 		t.Fatalf("expected 1 bug at P3, got %+v", filed)
+	}
+}
+
+// A Mayor's comment after the Builder's closing comment, with a 'For the rig
+// memory:' line and no 'Found, not fixed:' heading, does not withdraw the
+// Builder's findings (mw-gq6.1547).
+func TestFoundNotFixedOfTheBuildersCommentIsFiledAfterAMayorsCommentWithoutTheSection(t *testing.T) {
+	filed, _ := aSingleLandingSayingAll(t,
+		"Done.\nFound, not fixed:\nA is wrong (a.go:1). AC: go test ./x passes. By design? no\nB is wrong (b.go:2). AC: go test ./y passes. By design? no\nFor the rig memory: nothing",
+		"Re-scoped: the acceptance is met.\nFor the rig memory: as the Builder's comment proposes")
+	if len(filed) != 2 {
+		t.Fatalf("expected the Builder's 2 findings filed as 2 bugs, got %d: %+v", len(filed), filed)
 	}
 }
 

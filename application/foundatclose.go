@@ -133,12 +133,17 @@ func endsFoundSection(line string) bool {
 	return false
 }
 
-// closingFoundNotFixed reads the story's closing comment: the newest that has a
-// 'For the rig memory:' section, else the newest that has the heading.
+// closingFoundNotFixed reads the story's closing comment: the newest that has
+// both a 'For the rig memory:' section and the 'Found, not fixed:' heading, else
+// the newest that has the heading. A newer comment with a rig-memory line and no
+// Found section (the Mayor's re-scope) answers the acceptance and does not
+// withdraw the Builder's finds (mw-gq6.1547).
 func closingFoundNotFixed(comments []Comment) FoundNotFixed {
 	for i := len(comments) - 1; i >= 0; i-- {
 		if ParseFactProposals(comments[i].Text).Found {
-			return ParseFoundNotFixed(comments[i].Text)
+			if found := ParseFoundNotFixed(comments[i].Text); found.Found {
+				return found
+			}
 		}
 	}
 	for i := len(comments) - 1; i >= 0; i-- {
