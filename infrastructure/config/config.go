@@ -1087,6 +1087,9 @@ type GristSettings struct {
 	// subscription, as before.
 	APICredits bool
 	APIKeyFile string
+	// APIDailyLimit and CreditsRenewDay are gristBillingSettings's.
+	APIDailyLimit   int
+	CreditsRenewDay int
 }
 
 // Grist reports the ceilings of the `[grist]` table of
@@ -1194,6 +1197,9 @@ func Grist() (GristSettings, error) {
 			return GristSettings{}, fmt.Errorf("the [%s] table of %s says api_key_file = %q: it must be a full path", GristTable, path, said)
 		}
 		settings.APIKeyFile = said
+	}
+	if err := gristBillingSettings(table, path, &settings); err != nil {
+		return GristSettings{}, err
 	}
 	return settings, nil
 }
