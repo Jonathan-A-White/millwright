@@ -29,7 +29,10 @@ const LabelFoundAtClose = "found-at-close"
 const (
 	// foundAtCloseCap is how many bugs one close-out files; the lines after the
 	// cap go into one more bug that lists them.
-	foundAtCloseCap = 5
+	foundAtCloseCap = 2
+	// foundBugPriority is the priority a bug filed from a finding has: P3, so the
+	// Mayor raises the ones he wants worked first (mw-6ww.119.10).
+	foundBugPriority = 3
 	// foundTitleFirst is how many characters of the line the filed bug's title
 	// carries.
 	foundTitleFirst = 100
@@ -1100,8 +1103,22 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 	if len(section.Lines) == 0 {
 		return ""
 	}
-	bugs := foundBugs(c.id, section.Lines)
+	// A finding the Builder says is by design files nothing: the mail names it,
+	// and it does not use up a place of the cap.
+	var filable, byDesign []string
+	for _, line := range section.Lines {
+		if ParseFoundItem(line).ByDesign == "yes" {
+			byDesign = append(byDesign, line)
+		} else {
+			filable = append(filable, line)
+		}
+	}
+	bugs := foundBugs(c.id, filable)
 	block := []string{"Found, not fixed, said in the closing comment:"}
+	for _, line := range byDesign {
+		report.Notes = append(report.Notes, fmt.Sprintf("the finding of %s is by design, so no bug is filed: %s", c.id, line))
+		block = append(block, "By design, not filed: "+line)
+	}
 
 	lost := func(err error, unfiled []foundBug) {
 		var lines []string
@@ -1193,7 +1210,7 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			Title:       bug.title,
 			Description: foundDescription(c, bug, n.Host, overrides),
 			Acceptance:  acceptance,
-			Priority:    2,
+			Priority:    foundBugPriority,
 			Overrides:   overrides,
 			Labels:      []string{LabelBug, LabelFoundAtClose},
 		}
