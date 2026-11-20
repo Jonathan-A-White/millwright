@@ -134,15 +134,6 @@ func (r HostSweepReport) Bytes() int64 {
 	return n
 }
 
-// Summary is the report in a phrase.
-func (r HostSweepReport) Summary() string {
-	verb := "host sweep removed "
-	if r.DryRun {
-		verb = "host sweep would remove "
-	}
-	return verb + counted(len(r.Acts), "item", "items") + " (" + humanBytes(r.Bytes()) + ")"
-}
-
 // String is the report as a person reads it.
 func (r HostSweepReport) String() string {
 	if len(r.Acts) == 0 && len(r.Kept) == 0 && len(r.Notes) == 0 {
