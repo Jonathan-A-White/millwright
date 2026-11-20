@@ -67,6 +67,9 @@ type QueueReport struct {
 	// not counted among the stories to start.
 	Parents []QueueRow     `json:"parents"`
 	Blocked []QueueBlocked `json:"blocked"`
+	// FeatureShare is the feature_share of the rig the report is narrowed to, as
+	// its file says it; null when no rig is named or its file holds none.
+	FeatureShare *float64 `json:"feature_share"`
 }
 
 // Run reads the host's ready and blocked stories and prints them.
@@ -146,6 +149,15 @@ func (q Queue) Run(ctx context.Context) (QueueReport, error) {
 			ID: detail.Story.ID, Title: detail.Story.Title, Rig: detail.Merged().Rig,
 			Priority: detail.Priority, WaitsOn: append([]string{}, detail.Needs...),
 		})
+	}
+
+	if q.Rig != "" && q.Rules != nil {
+		// A read that fails leaves the share null: mw queue only reads, and the
+		// refusal of the file is named where it is landed and shown (mw path show).
+		if required, err := q.Rules.EpicRequirements(ctx, q.Rig); err == nil && required.FeatureShare > 0 {
+			share := required.FeatureShare
+			report.FeatureShare = &share
+		}
 	}
 
 	if q.Out != nil {

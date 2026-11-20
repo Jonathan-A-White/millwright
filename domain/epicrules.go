@@ -96,6 +96,17 @@ type EpicRequirements struct {
 	// (mw-gq6.761). It is no requirement of an epic either, so Any does not
 	// count it.
 	Capacity Capacity
+	// FeatureShare is the share, a fraction above 0 and at most 1, of the rig's
+	// running stories that dispatch keeps in the feature lane (feature_share);
+	// FeatureShareMin and FeatureShareMax are the bounds the loop may move it
+	// between, and FeatureFloor is how many feature stories the rig keeps ready
+	// (feature_floor, a whole number above zero). A key the file does not hold is
+	// left at zero, and FeatureShareBounds holds the three fractions to each
+	// other. None is a requirement of an epic either, so Any does not count them.
+	FeatureShare    float64
+	FeatureShareMin float64
+	FeatureShareMax float64
+	FeatureFloor    int
 	// Landing is how the rig's stories land, as its file wrote it: a key the
 	// file does not hold is left at its zero, and LandingSettings gives the
 	// settings with the defaults filled in. Nothing reads it before Land Rush 2.

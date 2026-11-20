@@ -3,6 +3,7 @@ package vault
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -50,6 +51,15 @@ const (
 	CapacityNginxConnectionsKey = "capacity_nginx_worker_connections"
 	CapacityMemoryFreeKey       = "capacity_memory_free_mb"
 
+	// The feature keys: the share of a rig's running stories kept in the feature
+	// lane, the bounds the loop moves it between (each a fraction above 0 and at
+	// most 1, min at most share at most max), and the floor of features kept ready
+	// (a whole number above zero). Only the Governor's word sets them.
+	FeatureShareKey    = domain.FeatureShareKey
+	FeatureShareMinKey = domain.FeatureShareMinKey
+	FeatureShareMaxKey = domain.FeatureShareMaxKey
+	FeatureFloorKey    = domain.FeatureFloorKey
+
 	// The landing keys: how a rig's stories land (plans/0117). A value of these
 	// that makes no sense reads as its default with a warning, never an error.
 	LandingKey          = "landing"
@@ -91,6 +101,10 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	capacity_sse_cap       = 500     # the cap on server-sent-event connections
 //	capacity_nginx_worker_connections = 1024
 //	capacity_memory_free_mb = 800    # memory expected free
+//	feature_share          = 0.6     # of the running stories, kept in the feature lane
+//	feature_share_min      = 0.4     # the bounds the loop moves it between
+//	feature_share_max      = 0.8
+//	feature_floor          = 5       # feature stories kept ready
 //	landing               = "batch"   # or "each", the default
 //	batch_every            = "30m"
 //	batch_min              = 2
@@ -142,6 +156,7 @@ var knownKeys = map[string]bool{
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
 	CapacityViewersKey: true, CapacitySSECapKey: true, CapacityNginxConnectionsKey: true, CapacityMemoryFreeKey: true,
+	FeatureShareKey: true, FeatureShareMinKey: true, FeatureShareMaxKey: true, FeatureFloorKey: true,
 }
 
 // bareKey is what a key may be for a lenient read to set it aside as one it
@@ -177,6 +192,29 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			if warning := setLandingKey(&requirements.Landing, key, value); warning != "" {
 				requirements.Warnings = append(requirements.Warnings, fmt.Sprintf("line %d: %s", i+1, warning))
 			}
+			continue
+		}
+		if found && featureShareKeys[key] {
+			n, err := strconv.ParseFloat(value, 64)
+			if err != nil || math.IsNaN(n) || n <= 0 || n > 1 {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = <a fraction above 0 and at most 1, such as 0.6>`, got %q", i+1, key, lines[i])
+			}
+			switch key {
+			case FeatureShareKey:
+				requirements.FeatureShare = n
+			case FeatureShareMinKey:
+				requirements.FeatureShareMin = n
+			default:
+				requirements.FeatureShareMax = n
+			}
+			continue
+		}
+		if found && key == FeatureFloorKey {
+			n, err := strconv.Atoi(value)
+			if err != nil || n <= 0 {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = <a whole number above zero>`, got %q", i+1, key, lines[i])
+			}
+			requirements.FeatureFloor = n
 			continue
 		}
 		if found && capacityKeys[key] {
@@ -345,9 +383,10 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, the feature keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
 				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, NeedsLaptopKey, NightlySuiteKey, SuiteEpicKey, SuiteEveryKey, SuiteHostKey, BuilderCallKey,
 				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey,
+				FeatureShareKey, FeatureShareMinKey, FeatureShareMaxKey, FeatureFloorKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
 	}
@@ -355,8 +394,15 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 		return requirements, nil, fmt.Errorf("%s and %s go together: a rig's file names both or neither (got %s only)", SuiteEveryKey, SuiteHostKey,
 			map[bool]string{true: SuiteEveryKey, false: SuiteHostKey}[requirements.SuiteEvery > 0])
 	}
+	if err := domain.FeatureShareBounds(requirements.FeatureShare, requirements.FeatureShareMin, requirements.FeatureShareMax); err != nil {
+		return requirements, nil, err
+	}
 	return requirements, unknown, nil
 }
+
+// featureShareKeys are the keys of a rig's file that hold a fraction of its
+// feature share.
+var featureShareKeys = map[string]bool{FeatureShareKey: true, FeatureShareMinKey: true, FeatureShareMaxKey: true}
 
 // capacityKeys are the keys of a rig's file that record its capacity facts.
 var capacityKeys = map[string]bool{

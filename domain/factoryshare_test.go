@@ -63,3 +63,28 @@ func TestAnInvestShareOutsideTheBoundsIsRefusedNamingBoth(t *testing.T) {
 		t.Errorf("a key of another table was checked: %v", err)
 	}
 }
+
+func TestFeatureShareBoundsHoldTheShareBetweenItsBoundsAndSkipAKeyNotSet(t *testing.T) {
+	for _, c := range []struct {
+		share, min, max float64
+		names           []string
+	}{
+		{0.6, 0.4, 0.8, nil},
+		{0.4, 0.4, 0.8, nil},
+		{0.8, 0.4, 0.8, nil},
+		{0.9, 0, 0, nil},
+		{0, 0.8, 0.4, []string{"feature_share_min", "feature_share_max"}},
+		{0.9, 0.4, 0.8, []string{"feature_share", "feature_share_max"}},
+		{0.3, 0.4, 0.8, []string{"feature_share", "feature_share_min"}},
+	} {
+		err := FeatureShareBounds(c.share, c.min, c.max)
+		if len(c.names) == 0 && err != nil {
+			t.Errorf("%v %v %v: %v", c.share, c.min, c.max, err)
+		}
+		for _, name := range c.names {
+			if err == nil || !strings.Contains(err.Error(), name+" =") {
+				t.Errorf("%v %v %v: %v does not name %s", c.share, c.min, c.max, err, name)
+			}
+		}
+	}
+}

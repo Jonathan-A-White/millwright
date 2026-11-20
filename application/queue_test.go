@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -256,5 +257,39 @@ func TestTheQueueWithNoParentsPrintsNoParentsSection(t *testing.T) {
 	}
 	if len(got.Parents) != 0 || strings.Contains(out.String(), "parent") {
 		t.Fatalf("expected no parents, got %+v:\n%s", got.Parents, out.String())
+	}
+}
+
+func TestTheQueueJSONCarriesTheRigsFeatureShareOrNull(t *testing.T) {
+	ctx := context.Background()
+	tracker := aQueueOf(t, queued{"mw-q.1", 1, 2, domain.SizeS, ""})
+	rules := apptest.NewFakeEpicRules()
+	read := func(rig string, rules application.EpicRules) string {
+		var out bytes.Buffer
+		if _, err := (application.Queue{Tracker: tracker, Host: "vps", Rig: rig, Rules: rules, Now: func() time.Time { return queueNow }, JSON: true, Out: &out}).Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+			t.Fatalf("expected JSON, got %q: %v", out.String(), err)
+		}
+		share, present := doc["feature_share"]
+		if !present {
+			t.Fatalf("no feature_share key in %s", out.String())
+		}
+		return fmt.Sprint(share)
+	}
+	if got := read("lampas", rules); got != "<nil>" {
+		t.Errorf("before the key is set feature_share = %s, want null", got)
+	}
+	if got := read("", nil); got != "<nil>" {
+		t.Errorf("with no rules feature_share = %s, want null", got)
+	}
+	rules.Require("lampas", domain.EpicRequirements{FeatureShare: 0.6})
+	if got := read("lampas", rules); got != "0.6" {
+		t.Errorf("with the key set feature_share = %s, want 0.6", got)
+	}
+	if got := read("", rules); got != "<nil>" {
+		t.Errorf("with no rig named feature_share = %s, want null", got)
 	}
 }
