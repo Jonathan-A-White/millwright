@@ -899,7 +899,8 @@ func (w HostWork) TicksAlarms() []DamperAlarm {
 }
 
 // writeMw is the line beside the sync line that says which mw the host runs:
-// its commit, and that it is behind main when it is not main's.
+// its commit, and that it is behind main when it is not main's. A host that
+// left no commit says so even when main is unknown.
 func (w HostWork) writeMw(b *strings.Builder, main string) {
 	switch {
 	case w.MwCommit != "" && w.BehindMain:
@@ -908,6 +909,8 @@ func (w HostWork) writeMw(b *strings.Builder, main string) {
 		clip(b, "    mw "+w.MwCommit)
 	case w.BehindMain:
 		clip(b, fmt.Sprintf("    mw commit not noted · behind main (%s)", mainShort(main)))
+	default:
+		clip(b, "    mw commit not noted")
 	}
 }
 

@@ -1219,3 +1219,20 @@ func TestStatusFuelLineNamesTheBuilderLedger(t *testing.T) {
 		t.Fatalf("expected the report to say %q, got:\n%s", want, printed)
 	}
 }
+
+// TestOtherHostsSectionSaysAHostWithNoMwCommit is the reading of mw-gq6.1523:
+// a host that left no mw commit note said nothing about its mw when main was
+// unknown, so it looked as quiet as a host on main's commit.
+func TestOtherHostsSectionSaysAHostWithNoMwCommit(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Something on the cloud", "cloud1")
+	syncedAt(t, tracker, "cloud1", 3*time.Minute)
+
+	block := section(otherHostStatusAtMain(t, tracker, ""))
+	if !strings.Contains(block, "mw commit not noted") {
+		t.Errorf("expected a host that noted no commit to say so with main unknown, got:\n%s", block)
+	}
+	if strings.Contains(block, "behind main") {
+		t.Errorf("expected no claim about main while main is unknown, got:\n%s", block)
+	}
+}
