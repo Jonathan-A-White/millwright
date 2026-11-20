@@ -1344,6 +1344,7 @@ Feature: mw status
 
   Scenario: A Boost whose doctor found everything ok shows no doctor line and no doctor alarm
     Given a status story "mw-gq6.112" filed under it, overriding "host" with "laptop"
+    And the dispatch log of "laptop" holds 1 good run
     And the host "laptop" syncs
     And the doctor of "laptop" runs now and finds everything ok
     When mw status reads the host
@@ -1353,6 +1354,7 @@ Feature: mw status
 
   Scenario: A Boost whose doctor report is a day old is said to be stale, not ok
     Given a status story "mw-gq6.113" filed under it, overriding "host" with "laptop"
+    And the dispatch log of "laptop" holds 1 good run
     And the host "laptop" syncs
     And the doctor of "laptop" ran 30 hours ago and found everything ok
     When mw status reads the host
@@ -1362,6 +1364,7 @@ Feature: mw status
 
   Scenario: A stale faulty report is not trusted as a fresh alarm but names what it last said
     Given a status story "mw-gq6.114" filed under it, overriding "host" with "laptop"
+    And the dispatch log of "laptop" holds 1 good run
     And the host "laptop" syncs
     And the doctor of "laptop" ran 30 hours ago and found "boost-config" faulty: "tests.millwright differs"
     When mw status reads the host
