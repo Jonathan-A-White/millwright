@@ -39,7 +39,7 @@ func newConfirmRig(t *testing.T) *confirmRig {
 }
 
 func (r *confirmRig) confirm() application.VerifyConfirm {
-	return application.VerifyConfirm{Beads: r.beads, Notes: r.notes, Sender: r.sender, Out: &r.out}
+	return application.VerifyConfirm{Beads: r.beads, Notes: r.notes, Sender: r.sender, Now: func() time.Time { return verifyNow }, Out: &r.out}
 }
 
 func TestVerifyConfirmWritesTheStandingFormClosesTheDemoAndClearsItsCard(t *testing.T) {
