@@ -45,6 +45,9 @@ func HoldReasonLabels() []string {
 	return []string{"grilling", LabelHitl, LabelDemo, LabelIcebox}
 }
 
+// stuckNoReason is the Why of a held root with no reason written.
+const stuckNoReason = "held, no reason written"
+
 // StuckRoot is a held bead that live beads wait behind, and so cannot move
 // until it does.
 type StuckRoot struct {
@@ -172,7 +175,7 @@ func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
 		case hasHoldLabel(b.Labels) || waitsOnUnfinished(byID, b):
 		default:
 			if live := behind(b.ID); len(live) > 0 {
-				maybe = append(maybe, StuckRoot{ID: b.ID, Why: "held, no reason written", Behind: live})
+				maybe = append(maybe, StuckRoot{ID: b.ID, Why: stuckNoReason, Behind: live})
 			}
 		}
 	}
