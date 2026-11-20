@@ -70,13 +70,17 @@ func NewTunnel(host string, reach []string, unit, command string) *Tunnel {
 // Name implements application.DoctorCheck.
 func (t *Tunnel) Name() string { return TunnelName }
 
-// Probe implements application.DoctorCheck: cannot-tell "internet
-// unreachable" when none of Reach's hosts connect — a dead internet is the
+// Probe implements application.DoctorCheck: ok, n/a, when no tunnel host is
+// set (a Boost holds no tunnel, mw-gq6.1524), with no ssh tried; cannot-tell
+// "internet unreachable" when none of Reach's hosts connect — a dead internet is the
 // wifi check's fault, not this one's; otherwise one ssh call to the VPS
 // running Command, faulty "tunnel port not listening on <host>" when it
 // prints no listening socket, ok when it does, and cannot-tell when ssh
 // itself fails to get through.
 func (t *Tunnel) Probe(ctx context.Context) (application.Verdict, string) {
+	if strings.TrimSpace(t.Host) == "" {
+		return application.DoctorOK, "n/a: no tunnel host set ([doctor] tunnel_host, or [watch] host): this host holds no tunnel"
+	}
 	if !Reach(ctx, t.reach()) {
 		return application.DoctorCannotTell, "internet unreachable"
 	}

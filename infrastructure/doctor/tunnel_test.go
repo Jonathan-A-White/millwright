@@ -116,6 +116,26 @@ func TestTheTunnelProbeIsFaultyWhenTheListenerIsAbsent(t *testing.T) {
 	}
 }
 
+// A host with no tunnel host set (a Boost: no [doctor] tunnel_host, no [watch]
+// host) holds no reverse tunnel: the check does not apply there, so it says
+// n/a and tries no ssh, rather than cannot-tell on "ssh : exit status 255"
+// every run (mw-gq6.1524).
+func TestTheTunnelProbeIsNotApplicableWithNoTunnelHost(t *testing.T) {
+	program, calls := fakeTunnelSSH(t, "", 255)
+	check := &doctor.Tunnel{Reach: []string{localListener(t)}, Host: "", SSH: program}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.HasPrefix(reason, "n/a: ") {
+		t.Fatalf("expected ok (n/a: ...), got %s (%s)", verdict, reason)
+	}
+	if !strings.Contains(reason, "tunnel_host") {
+		t.Errorf("expected the reason to name the setting that would make it apply, got %q", reason)
+	}
+	if got := callLines(t, calls); len(got) != 0 {
+		t.Fatalf("expected no ssh call, got %v", got)
+	}
+}
+
 func TestTheTunnelProbeIsCannotTellWhenSSHFails(t *testing.T) {
 	program, calls := fakeTunnelSSH(t, "", 255)
 	check := &doctor.Tunnel{Reach: []string{localListener(t)}, Host: "vps", SSH: program}
