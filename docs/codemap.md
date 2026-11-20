@@ -64,7 +64,7 @@ Files: [codemap-detail.md](codemap-detail.md).
 | Event* | cmd/mw/events.go | event_follow |
 | Prompt*, Cards, Grill, Todo* | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/grill.go, cmd/mw/todo.go, cmd/mw/todo_search.go, infra/todoindex/index.go | {prompt,card,todo*} |
 | Grist* | cmd/mw/grist.go, cmd/mw/gristsmoke.go, cmd/mw/grist_talks.go | {grist*,scorer} |
-| Triage*, Queue, Fold (+supersede), Sleep, Verify (+lint-checkit), mw needs sweep | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/fold.go, cmd/mw/sleep.go, cmd/mw/verify.go | verify_* |
+| Triage*, Queue, Fold (+supersede), Groom, Sleep, Verify (+lint-checkit), mw needs sweep | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/fold.go, cmd/mw/groom.go, cmd/mw/sleep.go, cmd/mw/verify.go | verify_* |
 
 cmd/mw/root.go, cmd/mw/version.go
 

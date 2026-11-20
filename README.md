@@ -450,6 +450,19 @@ the first `:` after the app name, as in `Lampas Review:`), the largest group fir
 do not fold`; iced bugs and a story that is itself a fold (its title says `<screen> fold:` after the app) are left out. It runs no model and writes nothing. The fold rule: a folded bug's check
 is copied into the fold's acceptance criteria and the bug is closed as superseded by the fold (mw-gq6.588).
 
+`mw groom <rig> [--json]` is the Mayor's weekly grooming list for one rig, from one read of the tracker, at zero tokens:
+the rig's FEATURES line (the last 7 days' landings by lane) against its `feature_share` and its `feature_floor`
+against the features ready now; the fix budget, `(1 - feature_share)` of the week's non-express landings against the
+fixes landed, running and ready; every open epic whose every child is closed (`done, still open`) and every epic whose
+only unfinished children are demos; every held bead with live beads behind it and no `HELD:` reason (as `mw stuck`);
+the open features whose root blocker is a bug, with the bug; auto-found beads (found-at-close, a Tester's, `[taste]`)
+held 21 days or more, the ice candidates, never one labelled `his-report` or `his-priority` or one a feature waits on;
+the paced lists (`plans/*/release-order*.txt`) of the rig with nothing open or running; and the fold groups of 3 or
+more, as `mw fold` makes them but with found-at-close beads grouped by the directory of their `files` key
+(`dir:<directory>`) and `[taste]` ones by screen. `--json` prints the same as eight keys (`features`, `fix_budget`,
+`epics`, `held_no_reason`, `blocked_features`, `ice_candidates`, `paced_lists`, `fold_groups`). It runs no model and
+writes nothing; `mw fold` keeps its groups as they were (mw-6ww.119.10.7).
+
 `mw fold supersede <fold-id> [--dry-run]` does that closing for a fold's bugs: it reads the ids under `Folded bugs`
 in the fold's description and, for each, leaves it alone and says so when a session works it (`in progress`), when
 it is already closed, or when its id is not in the fold's acceptance criteria; for the rest, each open story that
