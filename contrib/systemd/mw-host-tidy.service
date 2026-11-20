@@ -1,0 +1,31 @@
+# One `mw host tidy go-cache` run, as the user, then it exits: no daemon. For
+# `systemctl --user`; see docs/host-tidy.md.
+#
+# Started by mw-host-tidy.timer, daily, on every host. It deletes the files of
+# Go's build cache not used for over a day: Go keeps them 5 days and a host's
+# Builders write about 16 GB of them a day (mw-gq6.1537).
+[Unit]
+Description=Delete Go build cache files unused for a day (mw host tidy go-cache)
+OnFailure=mw-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+
+# Like mw-doctor.service, it runs the binary at its one fixed, known place.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+# Every unit that runs mw carries beads.env (scripts/check-timer-units.sh); this
+# one reads no bead, and a host without the file has none.
+EnvironmentFile=-%h/.config/mw/beads.env
+ExecStart=/usr/bin/env %h/.local/bin/mw host tidy go-cache
+
+# Deleting is disk work, never a session's: stay out of its way.
+Nice=19
+IOSchedulingClass=idle
+
+# Type=oneshot has no start timeout by default. A cache of 100 GB is some
+# hundreds of thousands of files; the run is one walk and as many unlinks.
+TimeoutStartSec=30min
+
+# A squeeze on memory may kill it first, before the seat it shares the host with.
+OOMScoreAdjust=500
+MemoryMax=256M
