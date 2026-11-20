@@ -364,6 +364,9 @@ func (k Check) gateLockRefusal(ctx, waitCtx context.Context, c *closeOut, try sl
 	}
 	record := strings.TrimSuffix(try.record, ".slot") + "-gate.slot"
 	if earlier := k.noteWait(ctx, c.id, record, holder, since); earlier != "" {
+		// This line tells the Builder to hand back if the lock is held again: keep
+		// what the close-out reads that hand-back by (mw-gq6.1516).
+		k.noteLimit(ctx, c, fmt.Sprintf("%s's gate lock is still held by %s, since %s", k.Host, holder, sinceAt), holder)
 		return GateLockHandBack{Why: fmt.Sprintf("%s did not start: after %s %s's gate lock is still held by %s, since %s, and nothing was run; it was held when this %s was tried at %s as well, which is counted once for this attempt and is not a failure of the %s: %s, and if the lock is held again, comment on the story naming this %s and who holds the lock, and hand back",
 			try.label, waited.Round(time.Second), k.Host, holder, sinceAt, try.noun, earlier, try.noun, try.again, try.noun)}
 	}
