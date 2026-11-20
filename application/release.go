@@ -439,11 +439,21 @@ func (p FiledPlan) released(count int) string {
 // The pace of a paced release (mw-u2w5klk, "The model stories and the pace"): at
 // most ReleasePacedMax stories of a list running or open at once, and none
 // released while the week's usage reads over ReleasePacedUsageLine percent. They
-// are the epic's numbers, kept here and nowhere else; they are no config keys.
+// are the epic's numbers; the line is the default of the config's [pace]
+// usage_line key (ReleasePaced.UsageLine, PathSet.UsageLine), the count is no key.
 const (
 	ReleasePacedMax       = 3
 	ReleasePacedUsageLine = 60.0
 )
+
+// usageLineOf is the line a paced release holds to: line when it is set, else the
+// default ReleasePacedUsageLine.
+func usageLineOf(line float64) float64 {
+	if line > 0 {
+		return line
+	}
+	return ReleasePacedUsageLine
+}
 
 // LabelModelStory marks a story that is a model's judgement (a pass over a batch
 // of chapters, say): it is released at the pace above, whoever releases it.
@@ -463,6 +473,9 @@ type ReleasePaced struct {
 	// DryRun releases nothing and writes nothing, and prints what it would.
 	DryRun bool
 	Out    io.Writer
+	// UsageLine is the percent of the week's usage over which nothing is released
+	// (the config's [pace] usage_line); zero is ReleasePacedUsageLine.
+	UsageLine float64
 }
 
 // Run releases the next stories of ids the pace allows and reports their ids.
@@ -508,7 +521,7 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 	}
 
 	// The usage speaks first, before the skipped are named; the count after.
-	pace, err := checkPace(ctx, r.Readings, now, active, "the list")
+	pace, err := checkPace(ctx, r.Readings, r.UsageLine, now, active, "the list")
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +560,7 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 	note := fmt.Sprintf("RELEASED by mw release-paced: usage %.1f%% of the week (read %s, the week resets %s), not over %.0f%%; "+
 		"%d of the list running or open, so room for %d (at most %d at once)",
 		reading.Percent, reading.At.UTC().Format(time.RFC3339), reading.Resets.UTC().Format(time.RFC3339),
-		ReleasePacedUsageLine, active, room, ReleasePacedMax)
+		usageLineOf(r.UsageLine), active, room, ReleasePacedMax)
 	var released []string
 	for _, id := range chosen {
 		if err := r.Tracker.ReleaseStory(ctx, id); err != nil {
@@ -587,10 +600,11 @@ func (p Pace) Held() string { return p.Why + p.hint }
 
 // checkPace is the one pace check of a paced release, used by ReleasePaced.Run
 // and by mw path set (whyStayHeld) for a story labelled model-story: the newest
-// usage reading must be current and not over ReleasePacedUsageLine, and fewer
+// usage reading must be current and not over line (ReleasePacedUsageLine when 0), and fewer
 // than ReleasePacedMax stories may already be running or open (active, of what,
 // as the count says it). A reason is no error; a reading that cannot be read is.
-func checkPace(ctx context.Context, readings UsageReadings, now time.Time, active int, of string) (Pace, error) {
+func checkPace(ctx context.Context, readings UsageReadings, line float64, now time.Time, active int, of string) (Pace, error) {
+	line = usageLineOf(line)
 	const unreported = "no usage was reported (mw usage read, or mw usage set <percent>)"
 	if readings.Notes == nil {
 		return Pace{OnUsage: true, Why: unreported}, nil
@@ -607,10 +621,10 @@ func checkPace(ctx context.Context, readings UsageReadings, now time.Time, activ
 		return Pace{Reading: reading, OnUsage: true, hint: "; run mw usage read",
 			Why: fmt.Sprintf("usage %.1f%% is STALE (%s)", reading.Percent, why)}, nil
 	}
-	if reading.Percent > ReleasePacedUsageLine {
+	if reading.Percent > line {
 		return Pace{Reading: reading, OnUsage: true,
 			Why: fmt.Sprintf("usage %.1f%% of the week (read %s) is over %.0f%%",
-				reading.Percent, reading.At.UTC().Format(time.RFC3339), ReleasePacedUsageLine)}, nil
+				reading.Percent, reading.At.UTC().Format(time.RFC3339), line)}, nil
 	}
 	room := ReleasePacedMax - active
 	if room <= 0 {

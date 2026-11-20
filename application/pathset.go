@@ -51,6 +51,9 @@ type PathSet struct {
 	// (ReleasePacedUsageLine, ReleasePacedMax), which needs them: with none
 	// (a nil Notes) such a story stays held.
 	Readings UsageReadings
+	// UsageLine is the percent of the week's usage over which such a story stays
+	// held (the config's [pace] usage_line); zero is ReleasePacedUsageLine.
+	UsageLine float64
 
 	// Out is where the path that was set is printed. A nil Out prints nothing.
 	Out io.Writer

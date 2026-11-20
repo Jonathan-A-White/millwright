@@ -220,7 +220,7 @@ func (s PathSet) whyOverThePace(ctx context.Context, id string, story StoryDetai
 	if s.Now != nil {
 		now = s.Now()
 	}
-	pace, err := checkPace(ctx, s.Readings, now.UTC(), active, "its epic's model stories")
+	pace, err := checkPace(ctx, s.Readings, s.UsageLine, now.UTC(), active, "its epic's model stories")
 	if err != nil {
 		return "", err
 	}

@@ -83,11 +83,12 @@ func newReleasePacedCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "release-paced <list-file>",
-		Short: "Un-hold the next stories of a list file at the pace of the epic: at most 3 at once, none over 60% of the week",
+		Short: "Un-hold the next stories of a list file at the pace of the epic: at most 3 at once, none over 60% of the week (the [pace] usage_line key moves the 60)",
 		Long: "release-paced reads a list file of story ids, one a line, in release order (blank lines and\n" +
 			"lines starting # are left out), and un-holds the next ones that are held.\n\n" +
 			"The pace is the epic's: never more than 3 stories of the list running or open at once, and\n" +
-			"none while mw usage show reads over 60% of the week. A story of the list that is open or\n" +
+			"none while mw usage show reads over 60% of the week (mw config set pace.usage_line 85 moves\n" +
+			"the 60). A story of the list that is open or\n" +
 			"running counts against the 3 and is left as it is; one that is closed, not in the tracker,\n" +
 			"iced, or held on the Governor's word is skipped and named. When it releases none it says why:\n" +
 			"the usage reading, the count, or that the reading is missing or stale (mw usage read).\n\n" +
@@ -117,11 +118,16 @@ func newReleasePacedCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			line, err := config.PaceUsageLine()
+			if err != nil {
+				return err
+			}
 			_, err = application.ReleasePaced{
-				Tracker:  gateway,
-				Readings: application.UsageReadings{Notes: mwGateway(dir, host)},
-				DryRun:   dryRun,
-				Out:      cmd.OutOrStdout(),
+				Tracker:   gateway,
+				Readings:  application.UsageReadings{Notes: mwGateway(dir, host)},
+				UsageLine: line,
+				DryRun:    dryRun,
+				Out:       cmd.OutOrStdout(),
 			}.Run(cmd.Context(), ids)
 			return err
 		},
