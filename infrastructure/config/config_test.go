@@ -1790,6 +1790,28 @@ func TestGristAPICreditsAreOffUnlessTheTableSaysTrue(t *testing.T) {
 	}
 }
 
+// api_daily_limit (the grists a day of a person marked API only) is 30 and
+// credits_renew_day (the day of the month the API credit renews) 17, unless
+// the table says otherwise (mw-gq6.1518).
+func TestGristAPIDailyLimitAndCreditsRenewDay(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Grist()
+	if err != nil || got.APIDailyLimit != 30 || got.CreditsRenewDay != 17 {
+		t.Fatalf("expected an api daily limit of 30 and the 17th, got %+v %v", got, err)
+	}
+	writeConfig(t, "[grist]\napi_daily_limit = 12\ncredits_renew_day = 3\n")
+	got, err = config.Grist()
+	if err != nil || got.APIDailyLimit != 12 || got.CreditsRenewDay != 3 {
+		t.Fatalf("expected the table's 12 and the 3rd, got %+v %v", got, err)
+	}
+	for _, bad := range []string{"api_daily_limit = 0", "api_daily_limit = lots", "credits_renew_day = 0", "credits_renew_day = 32"} {
+		writeConfig(t, "[grist]\n"+bad+"\n")
+		if _, err := config.Grist(); err == nil || !strings.Contains(err.Error(), strings.Fields(bad)[0]) {
+			t.Errorf("expected %q refused, naming the key, got %v", bad, err)
+		}
+	}
+}
+
 func TestGristCeilingsThatAreNotNumbersAreRefused(t *testing.T) {
 	for _, bad := range []string{"daily_limit = 0", "concurrency = 0", "concurrency = two", "max_attachments = four", `timeout = "soon"`,
 		`pool_quiet = "-1m"`, `pool_quiet = "soon"`, `pool_max_age = "0s"`, "talk_context_cap = 0", "talk_context_cap = lots", "talk_max_turns = 0", "talk_max_turns = -3"} {

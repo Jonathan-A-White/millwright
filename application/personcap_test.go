@@ -338,3 +338,41 @@ func TestPersonCapOffCountsEachKeyAlone(t *testing.T) {
 		t.Fatalf("expected the grist answered, got %+v", answer)
 	}
 }
+
+// The postern backend's person lookup says the person's billing mark, the
+// Key screen's 'API only' switch, as billing: "api" is API only, and "max",
+// an unknown word or no field at all is the Governor's Max (mw-gq6.1518).
+func TestPersonLookupReadsTheBillingMark(t *testing.T) {
+	for name, tc := range map[string]struct {
+		said any
+		want string
+	}{
+		"absent":  {nil, application.PersonBillingMax},
+		"max":     {"max", application.PersonBillingMax},
+		"api":     {"api", application.PersonBillingAPI},
+		"unknown": {"card", application.PersonBillingMax},
+	} {
+		t.Run(name, func(t *testing.T) {
+			url := aSigningBackend(t, func(w http.ResponseWriter, r *http.Request) {
+				body := map[string]any{"known": true, "personId": "p1", "keys": []string{gristPhoneKey}, "dailyLimit": 50}
+				if tc.said != nil {
+					body["billing"] = tc.said
+				}
+				_ = json.NewEncoder(w).Encode(body)
+			})
+			persons := application.NewPersonCap(posternhttp.NewHTTP(url, aMillKey(t)), &bytes.Buffer{})
+			person, known := persons.Lookup(context.Background(), gristPhoneKey)
+			if !known || person.Billing != tc.want {
+				t.Fatalf("expected a person billed %q, got %+v %v", tc.want, person, known)
+			}
+		})
+	}
+	t.Run("a failed lookup", func(t *testing.T) {
+		persons := application.NewPersonCap(aRegister(func(context.Context, string) (application.Person, bool, error) {
+			return application.Person{Billing: "api"}, true, errors.New("the backend is down")
+		}), &bytes.Buffer{})
+		if person, known := persons.Lookup(context.Background(), gristPhoneKey); known || person.Billing == application.PersonBillingAPI {
+			t.Fatalf("expected no person, and so the Max, got %+v %v", person, known)
+		}
+	})
+}
