@@ -200,16 +200,34 @@ func (s *factoryServer) listed(q, id string) bool {
 	if strings.Contains(q, "d.issue_id in (") {
 		return strings.Contains(q, "'"+strings.ToLower(id)+"'")
 	}
-	if !strings.Contains(q, "i.status <> 'closed'") {
+	if hangs := stepsAsked.FindStringSubmatch(q); hangs != nil {
+		for _, e := range s.edges {
+			if e[0] == id && e[1] == hangs[1] && e[2] == "parent-child" {
+				return true
+			}
+		}
+		return false
+	}
+	openMail := strings.Contains(q, "i.issue_type = 'mail' and i.status = 'open'")
+	if !openMail && !strings.Contains(q, "i.status <> 'closed'") {
 		return true
 	}
 	for _, b := range s.beads {
 		if b[0] == id {
-			return b[4] != "closed" || b[5] == "epic"
+			if openMail {
+				return b[5] == "mail" && b[4] == "open"
+			}
+			if strings.Contains(q, "i.issue_type not in ('mail', 'event')") && (b[5] == "mail" || b[5] == "event") {
+				return false
+			}
+			return b[4] != "closed" || (b[5] == "epic" && strings.Contains(q, "or i.issue_type = 'epic'"))
 		}
 	}
 	return false
 }
+
+// stepsAsked is the root a listing of a formula's steps asks for.
+var stepsAsked = regexp.MustCompile(`d\.type = 'parent-child' and d\.depends_on_issue_id = '([^']*)'`)
 
 // status is the status of the bead id, nil for one the vault does not hold.
 func (s *factoryServer) status(id string) driver.Value {
