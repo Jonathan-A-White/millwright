@@ -92,6 +92,10 @@ func (c standInConn) QueryContext(_ context.Context, query string, _ []driver.Na
 				{"e-1.1", "The story", "do it", "", "open", "task", nil, nil, "2026-10-01 10:05:00", nil, "2026-10-01 10:05:00", nil, int64(2), `{}`, nil, int64(0)},
 				{"e-0", "Long gone", "", "", "closed", "task", nil, nil, "2026-08-01 00:00:00", nil, "2026-08-01 00:00:00", "2026-08-01 00:00:00", int64(2), `{}`, nil, int64(0)},
 			}}, nil
+	case strings.Contains(q, "i.close_reason as close_reason"):
+		return &standInRows{cols: []string{"id", "title", "issue_type", "closed_at", "close_reason", "metadata"}}, nil
+	case strings.Contains(q, "i.close_reason is not null"):
+		return &standInRows{cols: []string{"id", "close_reason"}, rows: [][]driver.Value{{"e-0", "landed abc"}}}, nil
 	case strings.Contains(q, "select i.id, i.title, i.status"):
 		return &standInRows{cols: []string{"id", "title", "status", "issue_type", "priority", "created_at"}, rows: [][]driver.Value{
 			{"e-1", "The epic", "open", "epic", int64(1), "2026-10-01 10:00:00"},

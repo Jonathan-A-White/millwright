@@ -50,6 +50,14 @@ func newNeedsSweepCmd() *cobra.Command {
 			if dryRun && write {
 				return fmt.Errorf("mw needs sweep: --dry-run and --write are opposites; give one")
 			}
+			// The sweep reads every bead and the comments of each landing, and a
+			// read started a bd each (mw-gq6.1546): they are read over one
+			// connection kept open for the run.
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
 			sweep, err := newNeedsSweep(cmd.OutOrStdout())
 			if err != nil {
 				return err
