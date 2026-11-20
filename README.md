@@ -6200,6 +6200,16 @@ never touched; a story the tracker cannot be asked about is left alone and said 
 (cannot-tell). Without it such a server holds its port until a later gate that hashes
 to the same port refuses to start (mw-i80dx.12).
 
+**builder-burn** names a Builder's (or a batch fixer's) tree of processes that keeps
+more of them running than the host has cores, look after look for over 10 minutes: a
+tree is a process working in a story's worktree or a landing and everything that
+descends from it, and its load is the count of those in state R, which the load average
+counts. A batch's fixer ran forty busy loops of its own for 40 minutes on the 20-core
+home, load 55 to 65, and the Millhand found it (mw-gq6.1529). The cure mails the
+Mayor, one mail an hour while it lasts, and stops nothing (a look more than 30 minutes
+after the one before starts the 10 minutes again). The Builder's way to make load is
+`contrib/mw-under-load`, which every session's prompt names with its numbers.
+
 **tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
 2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool
 files (`/tmp/nbs-spool-*`), `/tmp/bd`, and a stale Claude Code session
@@ -6488,7 +6498,8 @@ and returns at once; `systemctl --user status <unit>` follows it. A long
 close-out started by hand goes through it, never a bare `systemd-run`.
 
 `contrib/mw-under-load <command>` runs a command beside busy loops when a check
-must hold *under load*: at most `min(4, cores - 1-min load)` of them, none when
+must hold *under load*: at most `min(4, cores - 1-min load)` of them (a larger
+`MW_UNDER_LOAD_MAX`, or seconds over 1800, is cut and said on stderr), none when
 the host's load is already at or over its cores (it says so on stderr and runs
 the command plain). Every loop ends when the command ends, when `mw-under-load`
 is killed (TERM or INT; a KILL leaves the loops watching its pid), and within 30

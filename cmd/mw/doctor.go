@@ -509,6 +509,23 @@ func newDoctorCmd() *cobra.Command {
 					return detail.Status == application.StateClosed, nil
 				},
 			}
+			// A Builder's tree of processes that keeps the host over its cores for
+			// over ten minutes, as a batch's fixer's forty burners did (mw-gq6.1529).
+			builderBurn := &application.BuilderBurnCheck{
+				Host:         host,
+				WorktreeDirs: worktreeDirs,
+				LandingDirs:  landingDirs,
+				Table:        doctor.RunnableProcs{},
+				Cores: func(ctx context.Context) (int, error) {
+					reading, err := hostload.Proc{}.Load(ctx)
+					return reading.Cores, err
+				},
+				State: store,
+				Mail: func(ctx context.Context, message application.NewMessage) error {
+					_, err := mwGateway(vault, host).Send(ctx, message)
+					return err
+				},
+			}
 			// Claims no host names, held by a dispatch that died, with no session.
 			stuckGateway := mwGateway(vault, host)
 			stuckClaims := &application.NoSessionClaimsCheck{
@@ -586,6 +603,7 @@ func newDoctorCmd() *cobra.Command {
 				recheckSkips,
 				staleLandings,
 				strayPreviews,
+				builderBurn,
 				stuckClaims,
 				rigKinds,
 				rigOrigins,
