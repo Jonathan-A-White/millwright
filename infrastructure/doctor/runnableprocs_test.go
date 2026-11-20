@@ -92,10 +92,16 @@ func TestRunnableProcsReadsTheRealTableOfThisHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	self := os.Getpid()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, p := range snap.Processes {
 		if p.Pid == self {
-			if !p.Running {
-				t.Errorf("the test itself is running: %+v", p)
+			// Whether the test's main thread is on a core as it is read is chance,
+			// so only what does not move is asserted.
+			if p.Ppid != os.Getppid() || p.Cwd != cwd || len(p.Argv) == 0 {
+				t.Errorf("the test itself, as /proc has it: %+v (parent %d, directory %s)", p, os.Getppid(), cwd)
 			}
 			return
 		}
