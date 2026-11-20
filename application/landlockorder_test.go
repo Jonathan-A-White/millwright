@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,11 +30,14 @@ type aLandingAndACheckOfOneRig struct {
 	holding application.Holding
 	yielded bool
 	said    lockedBuffer
+	// resuming is told, without blocking, each time the landing is about to take
+	// the slot alone again: the lock it held must have been given back by then.
+	resuming chan struct{}
 }
 
 func newALandingAndACheckOfOneRig(t *testing.T) *aLandingAndACheckOfOneRig {
 	t.Helper()
-	l := &aLandingAndACheckOfOneRig{t: t, aWholeCheckBesideTheHostsGateLock: newWholeCheckBesideTheGateLock(t, &scriptedChecks{passes: []bool{true}})}
+	l := &aLandingAndACheckOfOneRig{t: t, aWholeCheckBesideTheHostsGateLock: newWholeCheckBesideTheGateLock(t, &scriptedChecks{passes: []bool{true}}), resuming: make(chan struct{}, 1)}
 	holding, err := l.slots.Take(context.Background(), l.rigDir, "mw land on laptop, landing a batch of millwright")
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +64,10 @@ func (l *aLandingAndACheckOfOneRig) yield(ctx context.Context) func() {
 	l.yielded = true
 	return func() {
 		l.yielded = false
+		select {
+		case l.resuming <- struct{}{}:
+		default:
+		}
 		if err := y.Resume(ctx); err != nil {
 			l.t.Errorf("the slot could not be taken alone again: %v", err)
 		}
@@ -89,7 +97,7 @@ func (l *aLandingAndACheckOfOneRig) startCheck() <-chan checkEnded {
 	go func() {
 		report, err := application.Check{
 			Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: l.checks,
-			Slot: l.slots, GateLock: l.gate, Records: l.records, PartSlotWait: 3 * time.Second,
+			Slot: l.slots, GateLock: l.gate, Records: l.records, PartSlotWait: checkSlotWait,
 			GateNoticeEvery: time.Hour, Host: "laptop", Remote: "origin",
 			Rigs: map[string]string{"millwright": l.rigDir},
 			Out:  writerOf(l.told),
@@ -98,6 +106,10 @@ func (l *aLandingAndACheckOfOneRig) startCheck() <-chan checkEnded {
 	}()
 	return ended
 }
+
+// checkSlotWait is the wait a whole check is given for the merge slot: a deadlock
+// outlasts it, a working order never reads it.
+const checkSlotWait = 30 * time.Second
 
 type checkEnded struct {
 	report application.CheckReport
@@ -115,7 +127,8 @@ func (l *aLandingAndACheckOfOneRig) waitQueued(n int) {
 }
 
 // finishes fails the test unless the landing's gate and the check both end, with
-// the tests passed, inside a second.
+// the tests passed, and the check without having waited out its wait for the slot
+// (a deadlock's way out).
 func (l *aLandingAndACheckOfOneRig) finishes(gated <-chan application.Checked, checked <-chan checkEnded, began time.Time) {
 	l.t.Helper()
 	select {
@@ -134,8 +147,8 @@ func (l *aLandingAndACheckOfOneRig) finishes(gated <-chan application.Checked, c
 	case <-time.After(5 * time.Second):
 		l.t.Fatalf("expected the check to end\ncheck said:\n%s", l.told.String())
 	}
-	if took := time.Since(began); took > time.Second {
-		l.t.Errorf("expected both to end inside a second, they took %s\nlanding said:\n%s\ncheck said:\n%s", took, l.said.String(), l.told.String())
+	if took := time.Since(began); took >= checkSlotWait {
+		l.t.Errorf("expected both to end before the check's wait for the slot ran out (%s), they took %s\nlanding said:\n%s\ncheck said:\n%s", checkSlotWait, took, l.said.String(), l.told.String())
 	}
 	if holder := l.gate.Holder(); holder != "" {
 		l.t.Errorf("expected the gate lock to be free after both, %q holds it", holder)
@@ -179,8 +192,9 @@ func TestALandingThatWaitedForACalmHostHoldingTheGateLockAndAWholeCheckQueuedBot
 	land.Next.LoadWait = func(context.Context, time.Duration) error {
 		checked = l.startCheck()
 		// The check takes the slot the landing gave up and queues for the lock the
-		// landing holds.
-		for deadline := time.Now().Add(200 * time.Millisecond); l.queuedGate() < 1 && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		// landing holds, or, the lock being given back for the wait, goes on and says
+		// it passed: the wait ends on either, with a generous bound (mw-gq6.1482).
+		for deadline := time.Now().Add(5 * time.Second); l.queuedGate() < 1 && !strings.Contains(l.told.String(), "passed") && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		}
 		return nil
 	}

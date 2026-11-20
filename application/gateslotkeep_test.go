@@ -120,11 +120,19 @@ func (l *aLandingAndACheckOfOneRig) givesTheLockBackFor(t *testing.T, land appli
 	go func() { gated <- land.GateTheBatch(context.Background(), l.rigDir, l.report()) }()
 	// Once the check shares the slot and the wait has ended, the landing waits for
 	// the check to end before it takes the slot alone: the lock it holds then is the
-	// one that stalls the check (mw-gq6.1316), and it must be free.
-	for deadline := time.Now().Add(2 * time.Second); sharer.get() == nil && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+	// one that stalls the check (mw-gq6.1316), and it must be free. Both are waited
+	// for as events, with an outer bound that is not what is measured (mw-gq6.1482).
+	for deadline := time.Now().Add(10 * time.Second); sharer.get() == nil; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("expected a check to share the slot\n%s", l.said.String())
+		}
 	}
-	time.Sleep(300 * time.Millisecond)
-	freed = sharer.get() != nil && l.gate.Holder() == ""
+	select {
+	case <-l.resuming:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("expected the landing to go to take the slot alone again\n%s", l.said.String())
+	}
+	freed = l.gate.Holder() == ""
 	if err := sharer.get().Release(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +142,63 @@ func (l *aLandingAndACheckOfOneRig) givesTheLockBackFor(t *testing.T, land appli
 		t.Fatalf("expected the landing's gate to end\n%s", l.said.String())
 	}
 	return freed, gate
+}
+
+// slowGate is the host's gate lock whose holdings give the lock back only after a
+// delay, as a busy host does (mw-gq6.1482): the test must wait for the lock to be
+// given back, not for a time it hoped that would take.
+type slowGate struct {
+	inner application.GateLock
+	delay time.Duration
+}
+
+func (g slowGate) Take(ctx context.Context, holder string, held func(string)) (application.GateTurn, error) {
+	turn, err := g.inner.Take(ctx, holder, held)
+	if turn.Holding != nil {
+		turn.Holding = slowHolding{Holding: turn.Holding, delay: g.delay}
+	}
+	return turn, err
+}
+
+type slowHolding struct {
+	application.Holding
+	delay time.Duration
+}
+
+func (h slowHolding) Release(ctx context.Context) error {
+	time.Sleep(h.delay)
+	return h.Holding.Release(ctx)
+}
+
+// A landing that is slow to give the gate lock back, on a host under load, has
+// still given it back when the check that shares the slot is let go of.
+func TestASlowGiveBackOfTheGateLockIsWaitedFor(t *testing.T) {
+	l := newALandingAndACheckOfOneRig(t)
+	defer l.holding.Release(context.Background())
+	other, err := l.gate.Take(context.Background(), "mw-gq6.894", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sharer sharerBox
+	land := l.land()
+	land.Next.GateLock = slowGate{inner: l.gate, delay: time.Second}
+	go func() {
+		l.waitQueued(1)
+		s, err := l.slots.TakeShared(context.Background(), l.rigDir, "mw check mw-x.1")
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		sharer.set(s)
+		other.Holding.Release(context.Background())
+	}()
+	freed, gate := l.givesTheLockBackFor(t, land, &sharer)
+	if !freed {
+		t.Errorf("expected the gate lock to be given back while a check shared the slot, it was kept\n%s", l.said.String())
+	}
+	if !gate.Passed {
+		t.Errorf("expected the landing's gate to pass, got %+v\n%s", gate, l.said.String())
+	}
 }
 
 func TestAYieldedWaitWithACheckSharingTheSlotGivesTheLockBack(t *testing.T) {
