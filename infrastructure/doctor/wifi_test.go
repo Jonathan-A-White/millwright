@@ -176,15 +176,18 @@ func TestTheWifiProbeWaitsFiveMinutesBeforeItCallsAnOutageFaulty(t *testing.T) {
 	}
 }
 
-func TestTheWifiProbeIsCannotTellWhenPowershellIsAbsent(t *testing.T) {
+// A host that is not Windows-backed (a Boost, the VPS) has no Wi-Fi this check
+// can bounce: the check does not apply there, and says so as the n/a checks do,
+// ok and not cannot-tell (mw-gq6.1524).
+func TestTheWifiProbeIsNotApplicableWhenPowershellIsAbsent(t *testing.T) {
 	check := &doctor.Wifi{
 		Reach:      []string{unreachableHost(t)},
 		Powershell: missingFile(t),
 		State:      doctor.New(t.TempDir()),
 	}
 	verdict, reason := check.Probe(context.Background())
-	if verdict != application.DoctorCannotTell {
-		t.Fatalf("expected cannot-tell, got %s (%s)", verdict, reason)
+	if verdict != application.DoctorOK || !strings.HasPrefix(reason, "n/a: ") {
+		t.Fatalf("expected ok (n/a: ...), got %s (%s)", verdict, reason)
 	}
 	if !strings.Contains(reason, "not Windows-backed") {
 		t.Errorf("expected the reason to explain why, got %q", reason)

@@ -51,7 +51,8 @@ const (
 // disconnects and reconnects to that same network. It never joins any
 // network but the one already associated, and never runs anything elevated.
 // On a host that is not Windows-backed — no powershell.exe where Windows
-// puts it — the check is inert: cannot-tell, every run.
+// puts it, a Boost or the VPS — the check does not apply: ok, "n/a: ...",
+// every run, as the other checks say of a host they do not fit (mw-gq6.1524).
 type Wifi struct {
 	// Reach are the host:port pairs the probe tries to resolve and
 	// TCP-connect to. Empty reads DefaultDoctorReach.
@@ -85,14 +86,14 @@ func NewWifi(reach []string, powershell string, state application.DoctorState) *
 // Name implements application.DoctorCheck.
 func (w *Wifi) Name() string { return WifiName }
 
-// Probe implements application.DoctorCheck: cannot-tell when this host is not
+// Probe implements application.DoctorCheck: ok, n/a, when this host is not
 // Windows-backed; otherwise ok if any reach host connects. Unreachable is
 // only faulty once this check's own state says the internet has looked
 // unreachable for five minutes straight — before that it is cannot-tell,
 // "faulty (waiting 5m)", and no cure runs.
 func (w *Wifi) Probe(ctx context.Context) (application.Verdict, string) {
 	if _, err := os.Stat(w.powershell()); err != nil {
-		return application.DoctorCannotTell, fmt.Sprintf("powershell not found at %s: this host is not Windows-backed", w.powershell())
+		return application.DoctorOK, fmt.Sprintf("n/a: powershell not found at %s: this host is not Windows-backed", w.powershell())
 	}
 
 	if w.reachable(ctx) {

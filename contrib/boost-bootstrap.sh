@@ -43,7 +43,9 @@
 #  13  dispatch   ~/.config/mw/dispatch.env, a drop-in that lets the dispatch service read the env files,
 #                 a timer drop-in that ticks every five minutes (a Boost has no follower to spring it),
 #                 linger, mw-dispatch.timer enabled (scripts/install-units.sh), then one dispatch started
-#                 when the step changed anything
+#                 when the step changed anything; mw-doctor.timer and mw-host-sweep.timer enabled
+#                 beside it in the same call, as on any host, so the home reads this box's doctor
+#                 report and its disk is swept (mw-gq6.1524)
 #
 # Inputs are environment variables, or a small env file of NAME=VALUE lines
 # (--env-file, or BOOST_ENV_FILE) that must not be readable by group or others.
@@ -1065,9 +1067,25 @@ PACE_DIR=$HOME/.config/systemd/user/mw-dispatch.timer.d
 PACE_TEXT='[Timer]
 OnCalendar=
 OnCalendar=*:0/5'
+# The timers a Boost runs, armed by one install-units.sh call: the dispatch, and
+# the two every host runs. mw-doctor's report is what mw status reads for this
+# host ('no doctor report' without it), and mw-host-sweep frees the disk its
+# stories fill (mw-gq6.1524). The home's own (mail-notify, health, the
+# Millhand's, report, usage-read, needs-nightly, postern-mirror, view-follow)
+# serve the Mayor's seat or the home's data, and a member's parent-note a
+# member's host: none is a Boost's.
+BOOST_UNITS="mw-dispatch mw-doctor mw-host-sweep"
+# timers_armed <name>...: true when every named unit's timer is enabled and active.
+timers_armed() {
+	local n
+	for n in "$@"; do
+		systemctl --user is-enabled "$n.timer" >/dev/null 2>&1 || return 1
+		systemctl --user is-active "$n.timer" >/dev/null 2>&1 || return 1
+	done
+}
 s_dispatch() {
 	local dropin_changed=0 acted=0 pathline
-	step dispatch "mw-dispatch.timer every five minutes, its env files and linger"
+	step dispatch "mw-dispatch.timer every five minutes, its env files and linger; mw-doctor.timer and mw-host-sweep.timer"
 	pathline="PATH=$HOME/.local/bin:$HOME/.local/go/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
 	if [ -f "$MW_DIR/dispatch.env" ]; then
 		skip "$MW_DIR/dispatch.env exists (the host owns it)"
@@ -1098,17 +1116,21 @@ s_dispatch() {
 	elif act "loginctl enable-linger $USER_NAME"; then
 		as_root loginctl enable-linger "$USER_NAME"
 	fi
-	if systemctl --user is-enabled mw-dispatch.timer >/dev/null 2>&1 && systemctl --user is-active mw-dispatch.timer >/dev/null 2>&1; then
-		skip "mw-dispatch.timer is enabled and active"
+	# shellcheck disable=SC2086 # the unit names hold no spaces; word splitting is the point
+	if timers_armed $BOOST_UNITS; then
+		skip "mw-dispatch.timer, mw-doctor.timer and mw-host-sweep.timer are enabled and active"
 		if [ "$dropin_changed" = 1 ]; then
 			systemctl --user daemon-reload
 			systemctl --user restart mw-dispatch.timer
 		fi
 	else
-		acted=1
-		if act "sh $RIG/scripts/install-units.sh --enable mw-dispatch"; then
+		# A box made before the doctor's and the sweep's timers has its dispatch
+		# armed already: arming those two starts no dispatch of its own.
+		timers_armed mw-dispatch || acted=1
+		if act "sh $RIG/scripts/install-units.sh --enable $BOOST_UNITS"; then
 			[ -f "$RIG/scripts/install-units.sh" ] || die "$RIG/scripts/install-units.sh is missing"
-			sh "$RIG/scripts/install-units.sh" --enable mw-dispatch
+			# shellcheck disable=SC2086 # as above
+			sh "$RIG/scripts/install-units.sh" --enable $BOOST_UNITS
 		fi
 	fi
 	# A box just made dispatches now, not at the timer's first tick.

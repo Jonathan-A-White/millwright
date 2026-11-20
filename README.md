@@ -158,6 +158,8 @@ Next, `scripts/install-units.sh` puts this host's timers where systemd finds
 them (*Running a host on a timer*, below). Which ones a host wants depends on
 what it does here:
 
+- every host wants `mw-doctor` and `mw-host-sweep` (a Boost too: its bootstrap
+  arms them beside `mw-dispatch`);
 - a host that runs Builders wants `mw-dispatch`;
 - the Mayor's home wants `mw-mail-notify` and `mw-health`;
 - a host with a Millhand wants the two Millhand timers, `mw-millhand-tick` and
