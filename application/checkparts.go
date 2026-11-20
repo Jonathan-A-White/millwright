@@ -575,6 +575,9 @@ func (k Check) slotRefusal(ctx context.Context, c *closeOut, try slotTry, err er
 	}
 	earlier := k.noteSlotWait(ctx, c.id, try.record, waited)
 	if earlier != "" {
+		// The line tells the Builder to hand back if the slot is held again: keep
+		// what the close-out reads that hand-back by (mw-gq6.1516).
+		k.noteLimit(ctx, c, fmt.Sprintf("the merge slot of %s is still held by %s, since %s", c.path.Rig, waited.Holder, since), waited.Holder)
 		return fmt.Errorf("%s did not start: after %s the merge slot of %s is still held by %s, since %s, and nothing was run; it was held when this %s was tried at %s as well, which is counted once for this attempt and is not a failure of the %s: %s, and if the slot is held again, comment on the story naming this %s and who holds the slot, and hand back",
 			try.label, waited.Waited.Round(time.Second), c.path.Rig, waited.Holder, since, try.noun, earlier, try.noun, try.again, try.noun)
 	}

@@ -51,10 +51,10 @@ func (k Check) noteLimit(ctx context.Context, c *closeOut, still, holder string)
 	_, _ = k.Records.PutRunFile(ctx, c.id, CheckLimitFileName(c.attempt()), record)
 }
 
-// forgetLimit takes away what an earlier call of a whole check left when its
+// forgetLimit takes away what an earlier call of a check left when its
 // wait ended on its limit: this call is the newer word.
 func (k Check) forgetLimit(ctx context.Context, storyID string, attempt int) {
-	if k.Records == nil || !k.HandBackAtOnce {
+	if k.Records == nil {
 		return
 	}
 	name := CheckLimitFileName(attempt)

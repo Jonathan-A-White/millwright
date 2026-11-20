@@ -117,3 +117,34 @@ func TestACloseOutDoesNotReadAClearedWaitRecordAsAGateWait(t *testing.T) {
 		t.Fatalf("expected a refusal for %s, got %s", application.ReasonOpenSteps, report.Reason)
 	}
 }
+
+// A check not given --wait that is handed back on the gate lock a second time in
+// the attempt tells the Builder to hand back if the lock is held again: that
+// hand-back must leave the record the close-out reads, as one at the wait limit
+// does (mw-gq6.1516).
+func TestAWholeCheckHandedBackOnASecondHeldGateIsRefusedAsGateWait(t *testing.T) {
+	w := newWholeCheckBesideTheGateLock(t, &scriptedChecks{passes: []bool{true}})
+	closeOut, err := w.gate.Take(context.Background(), "mw-5r3p30.1189", nil)
+	mustDo(t, err)
+	defer closeOut.Holding.Release(context.Background())
+
+	first, _ := w.check(80 * time.Millisecond)
+	if one := slotRefusalOf(first); one == nil || strings.Contains(one.Why, "counted once") {
+		t.Fatalf("expected the first hand-back to be a plain wait, got %+v", first.Refusals)
+	}
+	second, _ := w.check(80 * time.Millisecond)
+	if two := slotRefusalOf(second); two == nil || !strings.Contains(two.Why, "counted once") {
+		t.Fatalf("expected the second hand-back to say it is counted once, got %+v", second.Refusals)
+	}
+
+	text, err := w.records.ReadRunFile(context.Background(), "mw-x.1", application.CheckLimitFileName(1))
+	if err != nil || !strings.Contains(text, "mw-5r3p30.1189") {
+		t.Fatalf("expected %s to name the holder, got %q (%v)", application.CheckLimitFileName(1), text, err)
+	}
+
+	tracker, lands, _ := aStoryWhoseStepCloseLostTheLock(t, false)
+	report, _ := theCloseOutReadingTheRun(t, tracker, lands, map[string]string{application.CheckLimitFileName(1): text})
+	if report.Landed || report.Reason != application.ReasonGateWait {
+		t.Fatalf("expected a refusal for gate-wait, got %s: %+v", report.Reason, report)
+	}
+}
