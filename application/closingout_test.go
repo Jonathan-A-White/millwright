@@ -239,3 +239,27 @@ func TestACloseOutMarksItsStoryInTheTrackerWhileItRunsAndClearsItAtTheEnd(t *tes
 		t.Errorf("expected the mark cleared at the end, got %+v", detail.ClosingOut)
 	}
 }
+
+// mw-gq6.1525: a claim pathed to another host, under a running close-out, is
+// worded in mw status's OTHER HOSTS section as a ready story is.
+func TestStatusSaysAnotherHostsClaimIsClosingOut(t *testing.T) {
+	ctx := context.Background()
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Claimed on the laptop, being landed", "laptop")
+	claim(t, tracker, "mw-gq6.30", 40*time.Minute)
+	// The close-out renews the claim's lease while it runs.
+	mustDo(t, tracker.SetLeaseExpires("mw-gq6.30", statusNow.Add(3*time.Minute)))
+	syncedAt(t, tracker, "laptop", time.Minute)
+	mark := application.ClosingOut{By: "laptop", Since: statusNow.Add(-21 * time.Minute), Until: statusNow.Add(3 * time.Minute)}
+	mustDo(t, tracker.SetStoryMetadata(ctx, "mw-gq6.30", map[string]string{application.ClosingOutField: mark.String()}))
+
+	report, err := application.Status{Tracker: tracker, Notes: tracker, Host: "vps", Seat: "builder", Now: func() time.Time { return statusNow }}.Run(ctx)
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	printed := report.String()
+	_, others, found := strings.Cut(printed, "OTHER HOSTS")
+	if !found || !strings.Contains(others, "closing out 21m") {
+		t.Fatalf("expected the other host's claim to be said to be closing out 21m, got:\n%s", printed)
+	}
+}

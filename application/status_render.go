@@ -780,6 +780,11 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		if line := w.Pins[d.Story.ID]; line != "" {
 			wrapInto(b, "      ", line)
 		}
+		// A close-out running on a story says so wherever the story is pathed,
+		// as its tracker mark carries it (mw-gq6.1525).
+		if mark, closing := closingMark(nil, d, w.Now); closing {
+			wrapInto(b, "      ", fmt.Sprintf("%s, by the Mayor's close-out on %s: dispatch leaves it alone", mark.since(w.Now), d.ClosingOut.By))
+		}
 		if QueuedForBatch(d) {
 			wait := BatchWait{Since: d.QueuedAt}
 			if had, ok := w.Waits[d.Story.ID]; ok {
