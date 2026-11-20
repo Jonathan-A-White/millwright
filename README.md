@@ -104,6 +104,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
   - [Waking the Millhand by timer](#waking-the-millhand-by-timer)
 - [Watching a host from one that can lose its network](#watching-a-host-from-one-that-can-lose-its-network)
 - [mw host sweep](#mw-host-sweep)
+- [mw host tidy](#mw-host-tidy)
 - [mw doctor](#mw-doctor)
 - [Heavy work on a small host](#heavy-work-on-a-small-host)
 - [The Path](#the-path)
