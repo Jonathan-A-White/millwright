@@ -233,10 +233,12 @@ func (c *nextContext) theBugsHaveThePathAndNoAcceptance(epic, id string) error {
 	for _, bug := range bugs {
 		// The files key is the finding's own when it names a file
 		// (mw-gq6.1068) and the host is auto (mw-gq6.1255); everything else is the
-		// finder's.
+		// finder's, except the model and effort, which are the default route's,
+		// sonnet at high (mw-gq6.1426).
 		got, want := bug.Merged(), landed.Merged()
 		got.Files, want.Files = "", ""
 		want.Host = domain.HostAuto
+		want.Model, want.Effort = domain.ModelSonnet, domain.EffortHigh
 		if got != want {
 			return fmt.Errorf("the path of %s is %+v, expected %+v", bug.Story.ID, got, want)
 		}
