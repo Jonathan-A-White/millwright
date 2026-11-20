@@ -1,7 +1,9 @@
 package application_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -217,5 +219,16 @@ func TestPathShowNamesABugWithNoSweepAndATesterWithNoLandedStory(t *testing.T) {
 	}
 	if want := "no landed story: mw-gq6.1"; !strings.Contains(shown.String(), want) {
 		t.Errorf("expected path show to say %q, got:\n%s", want, shown)
+	}
+}
+
+func TestPathShowFailsWhenTheStorysRigFileIsRefused(t *testing.T) {
+	tracker := aQueueOf(t, queued{"mw-q.1", 1, 2, domain.SizeS, ""})
+	rules := apptest.NewFakeEpicRules()
+	rules.Err = fmt.Errorf("reading rigs/lampas.toml: feature_share = 0.9 is above feature_share_max = 0.8")
+	var shown bytes.Buffer
+	_, err := application.PathShow{Tracker: tracker, Rules: rules, Out: &shown}.Run(context.Background(), "mw-q.1")
+	if err == nil || !strings.Contains(err.Error(), "feature_share") || !strings.Contains(err.Error(), "feature_share_max") {
+		t.Errorf("err = %v, want the rig file's refusal naming both keys", err)
 	}
 }

@@ -544,6 +544,14 @@ func (s PathShow) Run(ctx context.Context, id string) (domain.Path, error) {
 		fmt.Fprint(s.Out, pathLines(path))
 		warnBeforeDispatch(ctx, s.Out, s.Rules, story)
 	}
+	// A rig's file that is refused (a feature_share over its feature_share_max, a
+	// key that is no key) stops the show, so that a file nothing else reads until a
+	// landing is named where the path is looked at.
+	if s.Rules != nil && strings.TrimSpace(path.Rig) != "" {
+		if _, err := s.Rules.EpicRequirements(ctx, path.Rig); err != nil {
+			return path, fmt.Errorf("the rig file of %s: %w", path.Rig, err)
+		}
+	}
 	return path, nil
 }
 

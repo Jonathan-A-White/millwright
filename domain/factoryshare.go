@@ -74,3 +74,30 @@ func CheckFactoryChange(after *ConfigTOML, table, key string) error {
 	}
 	return nil
 }
+
+// Keys of a rig's file that set the rig's feature share, the bounds the loop may
+// move it between, and the floor of features kept ready.
+const (
+	FeatureShareKey    = "feature_share"
+	FeatureShareMinKey = "feature_share_min"
+	FeatureShareMaxKey = "feature_share_max"
+	FeatureFloorKey    = "feature_floor"
+)
+
+// FeatureShareBounds holds the three feature-share keys of a rig's file to each
+// other, a zero being a key the file does not hold: each one held is a fraction
+// above 0 and at most 1 (the file's reader has refused any other), and min is at
+// most share, share at most max, min at most max. The error names the keys at
+// fault, with the values.
+func FeatureShareBounds(share, min, max float64) error {
+	if share > 0 && min > 0 && share < min {
+		return fmt.Errorf("%s = %v is below %s = %v: the share must lie from the minimum to the maximum", FeatureShareKey, share, FeatureShareMinKey, min)
+	}
+	if share > 0 && max > 0 && share > max {
+		return fmt.Errorf("%s = %v is above %s = %v: the share must lie from the minimum to the maximum", FeatureShareKey, share, FeatureShareMaxKey, max)
+	}
+	if min > 0 && max > 0 && min > max {
+		return fmt.Errorf("%s = %v is above %s = %v: the minimum must be at most the maximum", FeatureShareMinKey, min, FeatureShareMaxKey, max)
+	}
+	return nil
+}

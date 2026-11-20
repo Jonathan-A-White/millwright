@@ -661,3 +661,94 @@ func TestARigsFileNamesItsSuiteHostAndHowOftenItRunsThereAndRefusesTheRest(t *te
 		t.Errorf("neither key: %+v, %v", got, err)
 	}
 }
+
+// A rig's file keeps the share of its running stories that are features, the
+// bounds the loop may move it between, and the floor of features kept ready
+// (plans/balance-2026-11-19, S2). A file without the keys reads as none.
+func TestFeatureShareKeysAreReadFromARigsFile(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", "feature_share = 0.6 # his word\nfeature_share_min = 0.4\nfeature_share_max = 0.8\nfeature_floor = 5\n")
+
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	if got.FeatureShare != 0.6 || got.FeatureShareMin != 0.4 || got.FeatureShareMax != 0.8 || got.FeatureFloor != 5 || got.Any() {
+		t.Errorf("feature keys = %v %v %v %v (Any %v), want 0.6 0.4 0.8 5 and no epic requirement",
+			got.FeatureShare, got.FeatureShareMin, got.FeatureShareMax, got.FeatureFloor, got.Any())
+	}
+
+	writeRigFile(t, dir, "lampas", "feature_share = 0.6\n")
+	if got, err = v.EpicRequirements(context.Background(), "lampas"); err != nil || got.FeatureShare != 0.6 || got.FeatureShareMin != 0 || got.FeatureFloor != 0 {
+		t.Errorf("the share alone: %+v, %v", got, err)
+	}
+
+	writeRigFile(t, dir, "lampas", "epic_sections = [\"Demo\"]\n")
+	if got, err = v.EpicRequirements(context.Background(), "lampas"); err != nil || got.FeatureShare != 0 {
+		t.Errorf("without the keys: share = %v, %v, want 0", got.FeatureShare, err)
+	}
+
+	// A landing reads the keys too, and does not set them aside as unknown.
+	writeRigFile(t, dir, "lampas", "feature_share = 0.6\nfeature_floor = 5\n")
+	got, unknown, err := v.LandingRequirements(context.Background(), "lampas")
+	if err != nil || len(unknown) != 0 || got.FeatureShare != 0.6 || got.FeatureFloor != 5 {
+		t.Errorf("a landing read: %+v, unknown %v, %v", got, unknown, err)
+	}
+}
+
+func TestFeatureShareKeysRefuseAValueOutOfRange(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	for _, key := range []string{"feature_share", "feature_share_min", "feature_share_max"} {
+		for _, bad := range []string{`"most"`, `0`, `-0.1`, `1.5`, `60%`} {
+			writeRigFile(t, dir, "lampas", key+" = "+bad+"\n")
+			if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("%s = %s: err = %v, want a refusal naming %s", key, bad, err, key)
+			}
+		}
+	}
+	writeRigFile(t, dir, "lampas", "feature_share = 1\n")
+	if got, err := v.EpicRequirements(context.Background(), "lampas"); err != nil || got.FeatureShare != 1 {
+		t.Errorf("feature_share = 1: %v, %v, want it read", got.FeatureShare, err)
+	}
+	for _, bad := range []string{`"five"`, `0`, `-3`, `1.5`} {
+		writeRigFile(t, dir, "lampas", "feature_floor = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "feature_floor") {
+			t.Errorf("feature_floor = %s: err = %v, want a refusal naming feature_floor", bad, err)
+		}
+	}
+}
+
+func TestFeatureShareMustLieFromItsMinimumToItsMaximumAndTheRefusalNamesBothKeys(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	cases := []struct {
+		file string
+		keys []string
+	}{
+		{"feature_share = 0.9\nfeature_share_max = 0.8\n", []string{"feature_share", "feature_share_max"}},
+		{"feature_share = 0.3\nfeature_share_min = 0.4\n", []string{"feature_share", "feature_share_min"}},
+		{"feature_share_min = 0.8\nfeature_share_max = 0.4\n", []string{"feature_share_min", "feature_share_max"}},
+	}
+	for _, c := range cases {
+		writeRigFile(t, dir, "lampas", c.file)
+		_, err := v.EpicRequirements(context.Background(), "lampas")
+		if err == nil {
+			t.Errorf("%q: read, want a refusal", c.file)
+			continue
+		}
+		for _, key := range c.keys {
+			if !strings.Contains(err.Error(), key+" =") {
+				t.Errorf("%q: %v does not name %s", c.file, err, key)
+			}
+		}
+	}
+	// A share on a bound, and a share with no bound set, are read.
+	for _, ok := range []string{"feature_share = 0.8\nfeature_share_max = 0.8\n", "feature_share = 0.4\nfeature_share_min = 0.4\nfeature_share_max = 0.8\n", "feature_share = 0.9\n"} {
+		writeRigFile(t, dir, "lampas", ok)
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err != nil {
+			t.Errorf("%q: %v, want it read", ok, err)
+		}
+	}
+}
