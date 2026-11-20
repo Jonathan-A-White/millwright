@@ -68,12 +68,12 @@ Feature: A landing whose closing comment lists what the Builder found and did no
     Then the story "mw-gq6.1" is closed
     And exactly 2 bugs were filed under "mw-gq6"
 
-  Scenario: Seven lines file five bugs and one that lists the other two
+  Scenario: Seven lines file two bugs and one that lists the other five
     Given the story "mw-gq6.1" carries the closing comment "Done.\nFound, not fixed:\nFinding one (a.go:1)\nFinding two (a.go:2)\nFinding three (a.go:3)\nFinding four (a.go:4)\nFinding five (a.go:5)\nFinding six (a.go:6)\nFinding seven (a.go:7)\nFor the rig memory: nothing"
     When mw closes out "mw-gq6.1"
     Then the story "mw-gq6.1" is closed
-    And exactly 6 bugs were filed under "mw-gq6"
-    And a bug filed under "mw-gq6" quotes: Finding five (a.go:5)
+    And exactly 3 bugs were filed under "mw-gq6"
+    And a bug filed under "mw-gq6" quotes: Finding two (a.go:2)
     And one bug filed under "mw-gq6" quotes both: Finding six (a.go:6) | Finding seven (a.go:7)
 
   Scenario: The same fault named by a second story, worded differently, is not filed again
