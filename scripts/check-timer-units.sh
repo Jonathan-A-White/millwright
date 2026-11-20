@@ -101,6 +101,8 @@ NIGHTLY_SERVICE=$DIR/mw-needs-nightly.service
 NIGHTLY_TIMER=$DIR/mw-needs-nightly.timer
 SWEEP_SERVICE=$DIR/mw-host-sweep.service
 SWEEP_TIMER=$DIR/mw-host-sweep.timer
+TIDY_SERVICE=$DIR/mw-host-tidy.service
+TIDY_TIMER=$DIR/mw-host-tidy.timer
 FOLLOW_SERVICE=$DIR/mw-view-follow.service
 FAILED_TEMPLATE=$DIR/mw-unit-failed@.service
 SYS_FAILED_TEMPLATE=$DIR/system/mw-unit-failed@.service
@@ -141,6 +143,8 @@ fail() {
 [ -f "$NIGHTLY_TIMER" ] || fail "$NIGHTLY_TIMER does not exist"
 [ -f "$SWEEP_SERVICE" ] || fail "$SWEEP_SERVICE does not exist"
 [ -f "$SWEEP_TIMER" ] || fail "$SWEEP_TIMER does not exist"
+[ -f "$TIDY_SERVICE" ] || fail "$TIDY_SERVICE does not exist"
+[ -f "$TIDY_TIMER" ] || fail "$TIDY_TIMER does not exist"
 [ -f "$FOLLOW_SERVICE" ] || fail "$FOLLOW_SERVICE does not exist"
 [ -f "$FAILED_TEMPLATE" ] || fail "$FAILED_TEMPLATE does not exist"
 [ -f "$SYS_FAILED_TEMPLATE" ] || fail "$SYS_FAILED_TEMPLATE does not exist"
@@ -155,7 +159,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
 	# and complains about them (not the rig's to change): those lines are noted
 	# and do not fail. A line names a rig unit by its path or, as systemd does for
 	# some faults, by its file name alone.
-	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $REPORT_SERVICE $REPORT_TIMER $PARENT_SERVICE $PARENT_TIMER $USAGE_SERVICE $USAGE_TIMER $NIGHTLY_SERVICE $NIGHTLY_TIMER $SWEEP_SERVICE $SWEEP_TIMER $FOLLOW_SERVICE $FAILED_TEMPLATE"
+	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $REPORT_SERVICE $REPORT_TIMER $PARENT_SERVICE $PARENT_TIMER $USAGE_SERVICE $USAGE_TIMER $NIGHTLY_SERVICE $NIGHTLY_TIMER $SWEEP_SERVICE $SWEEP_TIMER $TIDY_SERVICE $TIDY_TIMER $FOLLOW_SERVICE $FAILED_TEMPLATE"
 	# shellcheck disable=SC2086 # the unit paths hold no spaces; word splitting is the point
 	out=$(systemd-analyze --user verify $UNITS 2>&1) || {
 		echo "$out" >&2
@@ -305,6 +309,14 @@ need "$SWEEP_SERVICE" "OnFailure=mw-unit-failed@%n.service"
 need "$SWEEP_TIMER" "OnCalendar=Sun *-*-* 04:40:00 UTC"
 need "$SWEEP_TIMER" "OnBootSec=15min"
 need "$SWEEP_TIMER" "Persistent=false"
+# The host tidy pair: `mw host tidy go-cache` daily and 20 minutes after boot, no
+# catch-up (docs/host-tidy.md).
+need "$TIDY_SERVICE" "Type=oneshot"
+need "$TIDY_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw host tidy go-cache"
+need "$TIDY_SERVICE" "OnFailure=mw-unit-failed@%n.service"
+need "$TIDY_TIMER" "OnCalendar=*-*-* 05:10:00 UTC"
+need "$TIDY_TIMER" "OnBootSec=20min"
+need "$TIDY_TIMER" "Persistent=false"
 # The events follower (it republishes the view too), a daemon with no timer.
 need "$FOLLOW_SERVICE" "ExecStart=/usr/bin/env mw events follow"
 need "$FOLLOW_SERVICE" "Restart=on-failure"

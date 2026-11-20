@@ -5960,6 +5960,17 @@ lists each path with its size and the reason and changes nothing. The timer
 (`sh scripts/install-units.sh --enable mw-host-sweep`) runs it weekly and at
 boot; its first run on a host only lists. `docs/host-sweep.md` is the table.
 
+## mw host tidy
+
+`mw host tidy go-cache` deletes the files of Go's build cache (`GOCACHE`, else
+`~/.cache/go-build`) not used for over a day. Go keeps them 5 days and a host's
+Builders write about 16 GB a day, so the cache settled near 110 GB. It touches
+only the files Go makes there, and Go rebuilds what it needs. `--dry-run` says
+what it would delete. The timer (`sh scripts/install-units.sh --enable
+mw-host-tidy`) runs it daily and at boot; `mw doctor go-cache-size` names a host
+whose cache is over 30 GB and cures it the same way. `docs/host-tidy.md` is the
+table, and lists the other caches that only grow.
+
 ## mw doctor
 
 ```sh
@@ -6211,6 +6222,12 @@ home, load 55 to 65, and the Millhand found it (mw-gq6.1529). The cure mails the
 Mayor, one mail an hour while it lasts, and stops nothing (a look more than 30 minutes
 after the one before starts the 10 minutes again). The Builder's way to make load is
 `contrib/mw-under-load`, which every session's prompt names with its numbers.
+
+**go-cache-size** names a host whose Go build cache (`GOCACHE`, else
+`~/.cache/go-build`) is over 30 GB: the Builders of a host write about 16 GB of it a
+day and Go keeps an entry 5 days. The cure is `mw host tidy go-cache`: it deletes the
+cache's files not used for over a day, which Go rebuilds (mw-gq6.1537). The daily
+`mw-host-tidy.timer` keeps it down.
 
 **tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
 2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool

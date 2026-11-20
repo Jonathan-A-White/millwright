@@ -25,6 +25,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/flushlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gocache"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	vaultpkg "github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -420,6 +421,11 @@ func newDoctorCmd() *cobra.Command {
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget, tmpLeftovers.GoBuildBudget = tmpLeftoversBudget, goBuildBudget
 			tmpLeftovers.GateHolder = hostGateHolder()
+			// A Go build cache over 30 GB (mw-gq6.1537); the cure is the daily tidy.
+			goCacheSize := &application.GoCacheSizeCheck{Host: host, Disk: gocache.Disk{}}
+			if dir, err := gocache.Dir(); err == nil {
+				goCacheSize.Dir = dir
+			}
 			rootDisk := doctor.NewRootDiskBudget()
 			rootDisk.Budget, rootDisk.Margin = rootDiskBudget, rootDiskMargin
 			rootDisk.Note = func(ctx context.Context, text string) error {
@@ -604,6 +610,7 @@ func newDoctorCmd() *cobra.Command {
 				staleLandings,
 				strayPreviews,
 				builderBurn,
+				goCacheSize,
 				stuckClaims,
 				rigKinds,
 				rigOrigins,

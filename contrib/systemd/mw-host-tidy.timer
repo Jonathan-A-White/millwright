@@ -1,0 +1,20 @@
+# Runs mw-host-tidy.service every day at 05:10 UTC and 20 minutes after the host
+# boots. For `systemctl --user`; see docs/host-tidy.md.
+#
+# The cadence is a fuel knob (PROVISIONAL, for the Governor to confirm): change
+# it with a drop-in (`systemctl --user edit mw-host-tidy.timer`), never by
+# editing this file. The run frees disk and spends no fuel.
+[Unit]
+Description=Daily and at boot, delete Go build cache files unused for a day (mw host tidy go-cache)
+
+[Timer]
+OnCalendar=*-*-* 05:10:00 UTC
+OnBootSec=20min
+# No catch-up: a host that was asleep or off does not run the tidy it missed,
+# and it is not woken to run it.
+Persistent=false
+WakeSystem=false
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target
