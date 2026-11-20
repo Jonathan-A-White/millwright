@@ -404,18 +404,87 @@ func TestAFoundStoryKeepsADottedFileNameWholeAndIsNotPinnedToTheFindersHost(t *t
 	}
 }
 
-// A finding the Builder says is by design is filed saying so.
-func TestAFindingSaidToBeByDesignIsFiledSayingSo(t *testing.T) {
-	tracker, rules := aBatchEpicToTest(t)
+// aSingleLandingSaying lands mw-x.1 with the closing comment given and returns
+// what it filed and the Landed mail's body.
+func aSingleLandingSaying(t *testing.T, comment string) ([]application.StoryDetail, string) {
+	t.Helper()
 	ctx := context.Background()
-	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.1", "Done.\nFound, not fixed:\nThe loader reads the file twice (application/load.go:40). AC: go test ./application -run TestLoadReadsOnce passes. By design? yes\nFor the rig memory: nothing"))
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", comment))
 	before := tracker.Stories()
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
+	mailbox := apptest.NewFakeMailbox()
+	report, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: &scriptedChecks{passes: []bool{true}}, Slot: aSlot{}, Mailbox: mailbox,
+		RetryWait: func(context.Context, time.Duration) error { return nil },
+		Seat:      "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	if err != nil || report.Refused || !report.Landed {
+		t.Fatalf("expected the story landed, got err %v and %+v", err, report)
+	}
+	mail, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+	body := ""
+	for _, m := range mail {
+		if strings.HasPrefix(m.Subject, application.MailLanded) {
+			body = m.Body
+		}
+	}
+	return theTestersFiled(t, tracker, before), body
+}
 
-	aBatchLandedWithTesters(t, application.TesterTrial{}, tracker, rules, "mw-e.1", "mw-e.2")
+// A finding is filed at P3: the Mayor raises what he wants worked first.
+func TestFoundNotFixedFilesAFindingAtP3(t *testing.T) {
+	filed, _ := aSingleLandingSaying(t, "Done.\nFound, not fixed:\nA is wrong (a.go:1). AC: go test ./x passes. By design? no\nFor the rig memory: nothing")
+	if len(filed) != 1 || filed[0].Priority != 3 {
+		t.Fatalf("expected 1 bug at P3, got %+v", filed)
+	}
+}
 
-	filed := theTestersFiled(t, tracker, before)
-	if len(filed) != 1 || !strings.Contains(filed[0].Description, "By design: yes") {
-		t.Fatalf("expected 1 bug saying by design: yes, got %+v", filed)
+// Four findings file two bugs and one that lists the other two.
+func TestFoundAtCloseFilesTwoBugsAndOneListingTheRest(t *testing.T) {
+	filed, _ := aSingleLandingSaying(t, "Done.\nFound, not fixed:\nA is wrong (a.go:1)\nB is wrong (b.go:2)\nC is wrong (c.go:3)\nD is wrong (d.go:4)\nFor the rig memory: nothing")
+	if len(filed) != 3 {
+		t.Fatalf("expected 2 bugs and 1 listing the rest, got %d: %+v", len(filed), filed)
+	}
+	var titles []string
+	for _, d := range filed {
+		titles = append(titles, d.Story.Title)
+	}
+	slices.Sort(titles)
+	want := "[bug] mw-x.1: 2 more findings not fixed, past the first 2"
+	if !slices.Contains(titles, want) {
+		t.Errorf("expected a bead titled %q, got %q", want, titles)
+	}
+	last := filed[2]
+	if !strings.Contains(last.Description, "C is wrong") || !strings.Contains(last.Description, "D is wrong") {
+		t.Errorf("expected the third bug to quote C and D, got %q", last.Description)
+	}
+}
+
+// A finding the Builder says is by design files nothing, and the Landed mail
+// says so.
+func TestFoundNotFixedByDesignFilesNothingAndTheMailSaysSo(t *testing.T) {
+	filed, mail := aSingleLandingSaying(t, "Done.\nFound, not fixed:\nThe loader reads the file twice (application/load.go:40). AC: go test ./application -run TestLoadReadsOnce passes. By design? yes\nFor the rig memory: nothing")
+	if len(filed) != 0 {
+		t.Fatalf("expected no bug filed for a by-design finding, got %+v", filed)
+	}
+	if !strings.Contains(mail, "By design, not filed:") || !strings.Contains(mail, "The loader reads the file twice") {
+		t.Errorf("expected the mail to name the by-design finding as not filed, got %q", mail)
+	}
+}
+
+// A by-design finding does not use up a place of the cap.
+func TestFoundNotFixedByDesignFindingsDoNotCountPastTheCap(t *testing.T) {
+	filed, _ := aSingleLandingSaying(t, "Done.\nFound, not fixed:\nA is wrong (a.go:1). By design? yes\nB is wrong (b.go:2)\nC is wrong (c.go:3)\nFor the rig memory: nothing")
+	if len(filed) != 2 {
+		t.Fatalf("expected the 2 other findings filed as 2 bugs, got %+v", filed)
 	}
 }
 

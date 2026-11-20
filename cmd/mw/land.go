@@ -136,6 +136,14 @@ func newLandCmd() *cobra.Command {
 				return err
 			}
 			worktrees := rig.New()
+			changedSpecs, err := config.ChangedSpecs()
+			if err != nil {
+				return err
+			}
+			// A finding in a story's closing comment is read against main before its
+			// bug is filed, as mw next reads it: a rig that lands by batch files its
+			// bugs here, so it needs the same reader (mw-6ww.119.10.5).
+			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs, host)
 			// The gate commands are read when the gate runs, not now (mw-gq6.1006);
 			// what the builder's boot, the turn cap, the after-landing limits and
 			// the push tries are is read once, here.
@@ -166,6 +174,8 @@ func newLandCmd() *cobra.Command {
 				Slot:     hostSlots(),
 				GateLock: hostGateLock(),
 				Mailbox:  gateway,
+				// A finding main already fixes is not filed as a bug (mw-gq6.1245).
+				FindingChecks: recheckSuite,
 				// A batch's turns end once they waited this long for other gates (mw-gq6.1420).
 				GateTurnsLimit: gateTurnsLimit,
 				Memory:         gateway,
