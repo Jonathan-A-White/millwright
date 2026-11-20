@@ -1420,6 +1420,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 
 	for _, other := range report.Others {
 		report.Dampers.Alarms = append(report.Dampers.Alarms, other.DoctorAlarms()...)
+		report.Dampers.Alarms = append(report.Dampers.Alarms, other.TicksAlarms()...)
 	}
 
 	if err := report.markGuests(ctx, s.Rules); err != nil {
