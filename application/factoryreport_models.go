@@ -94,8 +94,8 @@ func (r FactoryReport) modelCompare(entries []reportEntry, escapedOf map[string]
 		switch {
 		case e.tester:
 			kind = e.rig + "/test"
-		case e.bugStory:
-			kind = e.rig + "/bug"
+		case e.kind != "" && !IsFeatureKind(e.kind):
+			kind = e.rig + "/" + e.kind
 		}
 		if byKind[kind] == nil {
 			byKind[kind] = map[string][]reportEntry{}

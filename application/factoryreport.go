@@ -260,6 +260,15 @@ type Quality struct {
 	SweepFinds         int     `json:"sweep_finds"`
 	Findings           int     `json:"tester_findings"`
 	FindingsPerLanding float64 `json:"findings_per_landing"`
+	// Express are the landings whose story was at P0 or P1 (ExpressPriority),
+	// whatever its kind; Features the rest that are features (StoryKind, content
+	// among them, Content counting those), Fixes the rest that are not, so
+	// Features + Fixes + Express = Landed. A story the tracker no longer knows
+	// is a feature.
+	Features int `json:"features"`
+	Fixes    int `json:"fixes"`
+	Express  int `json:"express"`
+	Content  int `json:"content"`
 }
 
 // EscapedOthers are the escaped bugs the Tester did not find.
@@ -385,9 +394,12 @@ type reportEntry struct {
 	tokens  int
 	costUSD float64
 	// ran is the model the ledger row names, the one the session ran on, else
-	// model; bugStory says the story is a bug. MODELS reads both.
-	ran      string
-	bugStory bool
+	// model; kind says what the story is. MODELS reads both.
+	ran string
+	// kind is StoryKind of the story, "" for one not in the tracker, and express
+	// says its priority is P0 or P1.
+	kind    string
+	express bool
 }
 
 // Run reads the ledger and the tracker and prints the report.
@@ -513,7 +525,8 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			e.exhausted = d.Exhausted
 			e.investment = hasLabel(d.Labels, LabelInvestment)
 			e.friction = d.EpicID == ContributeBackEpic
-			e.bugStory = domain.IsBugStory(d.Type, d.Story.Title)
+			e.kind = StoryKind(d)
+			e.express = d.Priority <= ExpressPriority
 			if d.Attempts > 1 {
 				e.attempts = d.Attempts
 				e.own, _ = OwnAttempts(d)
@@ -864,6 +877,17 @@ func sumQuality(entries []reportEntry) Quality {
 				q.Invested++
 				q.Friction++
 			}
+			switch {
+			case e.express:
+				q.Express++
+			case e.kind == "" || IsFeatureKind(e.kind):
+				q.Features++
+				if e.kind == KindContent {
+					q.Content++
+				}
+			default:
+				q.Fixes++
+			}
 			q.Attempts += e.attempts
 			q.Findings += e.findings
 		case e.refused:
@@ -950,6 +974,7 @@ func (r FactoryReportResult) writeHeadline(b *strings.Builder) {
 // writeRest prints everything after the window line.
 func (r FactoryReportResult) writeRest(b *strings.Builder) {
 	r.writeParts(b)
+	r.writeFeatures(b)
 	r.Review.write(b)
 	writeModels(b, r.ModelCompare)
 	writeChanges(b, r.Changes)
