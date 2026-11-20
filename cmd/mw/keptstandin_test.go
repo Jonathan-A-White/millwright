@@ -22,8 +22,11 @@ import (
 // answers every query with an error.
 type aStandInBeadsServer struct {
 	fail atomic.Bool
-	mu   sync.Mutex
-	seen []string
+	// empty makes the vault hold no bead and no dependency: a tick that reads it
+	// finds no mail, no stuck story, nothing to wake for.
+	empty atomic.Bool
+	mu    sync.Mutex
+	seen  []string
 }
 
 var standInSeq atomic.Int32
@@ -77,6 +80,9 @@ func (c standInConn) QueryContext(_ context.Context, query string, _ []driver.Na
 		return nil, errors.New("server went away")
 	}
 	q := strings.ToLower(query)
+	if c.s.empty.Load() && (strings.Contains(q, "from issues") || strings.Contains(q, "from dependencies")) {
+		return &standInRows{cols: standInColumns(q)}, nil
+	}
 	switch {
 	case strings.Contains(q, "from issues i") && strings.Contains(q, "leases"):
 		return &standInRows{cols: []string{"id", "title", "description", "acceptance_criteria", "status", "issue_type", "assignee",
@@ -162,4 +168,17 @@ func readAsked(t *testing.T, asked string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// standInColumns are the columns a query of the stand-in's beads or edges is
+// answered with when the vault holds none of either.
+func standInColumns(q string) []string {
+	switch {
+	case strings.Contains(q, "from dependencies"):
+		return []string{"issue_id", "depends_on_id", "type"}
+	case strings.Contains(q, "select i.id, i.title, i.status"):
+		return []string{"id", "title", "status", "issue_type", "priority", "created_at"}
+	}
+	return []string{"id", "title", "description", "acceptance_criteria", "status", "issue_type", "assignee",
+		"estimated_minutes", "created_at", "started_at", "updated_at", "closed_at", "priority", "metadata", "lease_expires_at", "comment_count"}
 }

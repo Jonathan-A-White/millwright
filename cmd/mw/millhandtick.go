@@ -193,6 +193,11 @@ func newMillhandTickCmd() *cobra.Command {
 			}
 			windows := seatWindows()
 			files := vault.New(dir)
+			// The tick reads the mail, the running stories, the notes and the
+			// rest, and each read started a bd, several new connections to the
+			// beads server every few minutes (mw-gq6.1514): they are read over
+			// one connection kept open for the run, as mw next's are.
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
 			gateway := mwGateway(dir, host)
 			sync, err := hostSync(application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host, Ticks: hostTickLogs(), Lock: hostSyncLock(dir)})
 			if err != nil {
