@@ -121,3 +121,156 @@ func TestStatusWithNoRetiredHostsIsAsItWas(t *testing.T) {
 		t.Fatalf("expected no retired host in the report, got:\n%s", report.String())
 	}
 }
+
+// mw-gq6.1515: a claim on a host that does not answer was told to wait for that
+// host's next dispatch tick, or to be retried on it, for 17 hours. A host that
+// is asleep (silent past the threshold, no newer sign of life) is one that does
+// not answer: the line names the cure that works from elsewhere.
+
+const fromElsewhereCure = "mw retry %s --force, then mw path set %s host=auto"
+
+func TestStatusSaysALapsedClaimOnAHostThatDoesNotAnswerIsGivenBackFromElsewhere(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.60", "desktop", "src/a.ts", false)
+	syncedAt(t, tracker, "desktop", 17*time.Hour)
+
+	block := flat(section(otherHostStatus(t, tracker)))
+	if !strings.Contains(block, "STRANDED: lease ran out") {
+		t.Fatalf("expected the claim listed as stranded, got:\n%s", block)
+	}
+	if strings.Contains(block, "gives the claim back on its next dispatch tick") {
+		t.Errorf("expected no word of the down host's next dispatch tick, got:\n%s", block)
+	}
+	for _, want := range []string{"desktop does not answer", "mw retry mw-gq6.60 --force, then mw path set mw-gq6.60 host=auto"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("expected %q, got:\n%s", want, block)
+		}
+	}
+}
+
+func TestStatusKeepsTheNextTickLineForALapsedClaimOnAHostThatAnswers(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.61", "desktop", "src/a.ts", false)
+	syncedAt(t, tracker, "desktop", 5*time.Minute)
+
+	block := flat(section(otherHostStatus(t, tracker)))
+	if !strings.Contains(block, "the host that holds it gives the claim back on its next dispatch tick") {
+		t.Errorf("expected today's line, got:\n%s", block)
+	}
+	for _, not := range []string{"does not answer", "--force"} {
+		if strings.Contains(block, not) {
+			t.Errorf("expected nothing of %q for a host that answers, got:\n%s", not, block)
+		}
+	}
+}
+
+func TestStatusSaysALandedClaimOnAHostThatDoesNotAnswerIsClosedFromElsewhere(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.62", "desktop", "src/a.ts", false)
+	if err := tracker.SetStoryState(context.Background(), "mw-gq6.62", application.RunState, application.RunLanded, "landed on main"); err != nil {
+		t.Fatal(err)
+	}
+	syncedAt(t, tracker, "desktop", 17*time.Hour)
+
+	block := flat(section(otherHostStatus(t, tracker)))
+	if strings.Contains(block, "closes the story on its next dispatch tick") || !strings.Contains(block, "desktop does not answer") || !strings.Contains(block, "mw next mw-gq6.62") {
+		t.Errorf("expected the landed claim closed from elsewhere, not on the down host's tick, got:\n%s", block)
+	}
+}
+
+func TestDampersNameTheFromElsewhereCureForARefusedClaimOnAHostThatDoesNotAnswer(t *testing.T) {
+	ctx := context.Background()
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.931", "desktop", "playwright.config.ts,src/a.ts", true)
+	syncedAt(t, tracker, "desktop", 17*time.Hour)
+	storyChanging(t, tracker.AddStory, "mw-gq6.936", "playwright.config.ts")
+	if err := tracker.SetStoryMetadata(ctx, "mw-gq6.931", map[string]string{application.CauseFixField: "mw-gq6.936"}); err != nil {
+		t.Fatalf("naming the fix: %v", err)
+	}
+
+	lines := damperLines(otherHostStatus(t, tracker), "mw-gq6.936")
+	if len(lines) != 1 {
+		t.Fatalf("expected one line naming the cycle, got %q", lines)
+	}
+	line := flat(lines[0])
+	if strings.Contains(line, "run on desktop") {
+		t.Errorf("expected no cure that runs on the down host, got %q", line)
+	}
+	for _, want := range []string{"desktop does not answer", "mw retry mw-gq6.931 --force, then mw path set mw-gq6.931 host=auto"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("expected %q, got %q", want, line)
+		}
+	}
+}
+
+func TestDampersKeepRunOnTheHostForARefusedClaimOnAHostThatAnswers(t *testing.T) {
+	ctx := context.Background()
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.931", "desktop", "playwright.config.ts,src/a.ts", true)
+	syncedAt(t, tracker, "desktop", 5*time.Minute)
+	storyChanging(t, tracker.AddStory, "mw-gq6.936", "playwright.config.ts")
+	if err := tracker.SetStoryMetadata(ctx, "mw-gq6.931", map[string]string{application.CauseFixField: "mw-gq6.936"}); err != nil {
+		t.Fatalf("naming the fix: %v", err)
+	}
+
+	lines := damperLines(otherHostStatus(t, tracker), "mw-gq6.936")
+	if len(lines) != 1 || !strings.Contains(lines[0], "cure, run on desktop: mw retry mw-gq6.931 --hold") || strings.Contains(lines[0], "does not answer") {
+		t.Errorf("expected today's cure, got %q", lines)
+	}
+}
+
+func statusWithDampers(t *testing.T, tracker *apptest.FakeTracker) application.StatusReport {
+	t.Helper()
+	report, err := application.Status{
+		Tracker:     tracker,
+		Notes:       tracker,
+		Host:        "vps",
+		Seat:        "builder",
+		HostSilence: 2 * time.Hour,
+		Dampers:     application.DamperSurvey{Tracker: tracker, Notes: tracker},
+		Now:         func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	return report
+}
+
+func TestDampersNameTheFromElsewhereCureForARefusedOpenClaimOnAHostThatDoesNotAnswer(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.1445", "desktop", "src/a.ts", true)
+	if err := tracker.SetUpdated("mw-gq6.1445", statusNow.Add(-17*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	syncedAt(t, tracker, "desktop", 17*time.Hour)
+
+	lines := damperLines(statusWithDampers(t, tracker), "mw-gq6.1445")
+	var open string
+	for _, l := range lines {
+		if strings.Contains(l, "refused open") {
+			open = flat(l)
+		}
+	}
+	if open == "" {
+		t.Fatalf("expected a refused-open line, got %q", lines)
+	}
+	for _, want := range []string{"desktop does not answer", "mw retry mw-gq6.1445 --force, then mw path set mw-gq6.1445 host=auto"} {
+		if !strings.Contains(open, want) {
+			t.Errorf("expected %q, got %q", want, open)
+		}
+	}
+}
+
+func TestStatusSaysAHandedBackClaimOnAHostThatDoesNotAnswerIsFreedFromElsewhere(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aClaimOn(t, tracker, "mw-gq6.63", "desktop", "src/a.ts", false)
+	if err := tracker.SetStoryState(context.Background(), "mw-gq6.63", application.RunState, application.RunCloseOutAgain, "handed back"); err != nil {
+		t.Fatal(err)
+	}
+	syncedAt(t, tracker, "desktop", 17*time.Hour)
+
+	block := flat(section(otherHostStatus(t, tracker)))
+	if strings.Contains(block, "the next dispatch tick runs its close-out") || !strings.Contains(block, "desktop does not answer") || !strings.Contains(block, "mw retry mw-gq6.63 --force") {
+		t.Errorf("expected the handed-back claim freed from elsewhere, got:\n%s", block)
+	}
+}

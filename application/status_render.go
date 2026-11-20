@@ -122,6 +122,59 @@ func strandedLine(since time.Time, run string) string {
 	return fmt.Sprintf("STRANDED: lease ran out %s with no heartbeat since, so no session is working it; the host that holds it gives the claim back on its next dispatch tick", since.UTC().Format(LastSyncFormat))
 }
 
+// fromElsewhereCure is what the Mayor runs, from any host, on a claim whose
+// holding host does not answer: the claim is given back by force and the story
+// re-pathed so that another host takes it (mw-gq6.1515).
+func fromElsewhereCure(id string) string {
+	return fmt.Sprintf("mw retry %s --force, then mw path set %s host=auto", id, id)
+}
+
+// notAnswering is how the report says a host does not answer, "" for a host
+// that does. A host does not answer when it has been silent past the threshold
+// with no newer sign of life and gives no way (HostWork.Asleep): the report has
+// no other probe of a host, and makes no ssh of its own for one.
+func (w HostWork) notAnswering() string {
+	switch {
+	case !w.Asleep || w.Retired:
+		return ""
+	case w.NeverSynced():
+		return w.Host + " does not answer (never synced)"
+	case w.Unreadable():
+		return w.Host + " does not answer (its last sync is unreadable)"
+	default:
+		return fmt.Sprintf("%s does not answer (silent %s)", w.Host, Clock(w.Silent))
+	}
+}
+
+// downHosts are the notAnswering words of each other host that does not answer,
+// by host.
+func downHosts(others []HostWork) map[string]string {
+	down := map[string]string{}
+	for _, w := range others {
+		if said := w.notAnswering(); said != "" {
+			down[w.Host] = said
+		}
+	}
+	return down
+}
+
+// strandedLineFor is strandedLine for a claim whose holding host may not
+// answer, down being what notAnswering says of it ("" when it does): such a host
+// runs no dispatch tick, so the line names the cure that works from elsewhere
+// in place of waiting for it (mw-gq6.1515). A landed claim is closed from
+// elsewhere by mw next, as OpenRefused.Command does; any other is retried by
+// force and re-pathed.
+func strandedLineFor(since time.Time, run, id, down string) string {
+	if down == "" {
+		return strandedLine(since, run)
+	}
+	lapsed := since.UTC().Format(LastSyncFormat)
+	if run == RunLanded {
+		return fmt.Sprintf("STRANDED: lease ran out %s with no heartbeat since, so no session is working it, and its last run landed; %s, so nothing there closes the story: from elsewhere, mw next %s", lapsed, down, id)
+	}
+	return fmt.Sprintf("STRANDED: lease ran out %s with no heartbeat since, so no session is working it; %s, so nothing there gives the claim back: from elsewhere, %s", lapsed, down, fromElsewhereCure(id))
+}
+
 // mainShort is main's commit as the report names it: its first seven characters.
 func mainShort(main string) string {
 	if len(main) > 7 {
@@ -736,9 +789,13 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		} else if w.Runs[d.Story.ID] == RunBlocked {
 			wrapInto(b, "      ", refusedLine)
 		} else if w.Runs[d.Story.ID] == RunCloseOutAgain {
-			wrapInto(b, "      ", handedBackLine)
+			if down := w.notAnswering(); down != "" {
+				wrapInto(b, "      ", "handed back at the merge slot's overall most; "+down+", so nothing there runs its close-out again: from elsewhere, "+fromElsewhereCure(d.Story.ID))
+			} else {
+				wrapInto(b, "      ", handedBackLine)
+			}
 		} else if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() && !w.GivesWay.Stands {
-			wrapInto(b, "      ", strandedLine(since, w.Runs[d.Story.ID]))
+			wrapInto(b, "      ", strandedLineFor(since, w.Runs[d.Story.ID], d.Story.ID, w.notAnswering()))
 		}
 	}
 }

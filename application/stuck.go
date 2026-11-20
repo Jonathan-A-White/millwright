@@ -310,11 +310,25 @@ func (o OpenRefused) Command() string {
 }
 
 // Alarm is the DAMPERS line for the story: its run state, its age and Command.
-func (o OpenRefused) Alarm() DamperAlarm {
+func (o OpenRefused) Alarm() DamperAlarm { return o.alarm("") }
+
+// AlarmDown is Alarm for a claim whose holding host does not answer, down being
+// what mw status says of it: any run state but landed is freed from elsewhere
+// by force and re-pathed, as a retry run on that host cannot be (mw-gq6.1515).
+func (o OpenRefused) AlarmDown(down string) DamperAlarm { return o.alarm(down) }
+
+func (o OpenRefused) alarm(down string) DamperAlarm {
+	command := o.Command()
+	if down != "" {
+		if o.Run != RunLanded {
+			command = fromElsewhereCure(o.Story.Story.ID)
+		}
+		command = down + ", so from elsewhere: " + command
+	}
 	return DamperAlarm{
 		Principle: DamperOpenRefused,
 		Text: fmt.Sprintf("open with %s:%s for %s and no dispatch tick takes it; to go on: %s",
-			RunState, o.Run, elapsed(o.Idle), o.Command()),
+			RunState, o.Run, elapsed(o.Idle), command),
 		Beads:    []string{o.Story.Story.ID},
 		Identity: DamperOpenRefused + ":" + o.Story.Story.ID,
 	}

@@ -1395,11 +1395,14 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
-	for _, hold := range s.refusedHolds(ctx, work, report.Running, away, awayRuns) {
+	down := downHosts(report.Others)
+	for _, hold := range s.refusedHolds(ctx, work, report.Running, away, awayRuns, down) {
 		if alarm, found := hold.Alarm(s.now()); found {
 			report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
 		}
 	}
+
+	report.Dampers.Alarms = openRefusedFromElsewhere(report.Dampers.Alarms, work, s.now(), down)
 
 	if s.Load != nil {
 		// A host whose dispatch refuses for its Windows drive says so here, with the
@@ -1499,7 +1502,7 @@ func (s Status) runStates(ctx context.Context, claims []StoryDetail) map[string]
 // this host or another, as mw dispatch finds it, each with the claim, the
 // file and when a dispatch first held it for its files (mw-gq6.941). A branch
 // whose changes cannot be read is said, as in sharing, and holds nothing back.
-func (s Status) refusedHolds(ctx context.Context, work WorkInHand, running []RunningStory, away []StoryDetail, awayRuns map[string]string) []RefusedHold {
+func (s Status) refusedHolds(ctx context.Context, work WorkInHand, running []RunningStory, away []StoryDetail, awayRuns map[string]string, down map[string]string) []RefusedHold {
 	type claim struct {
 		detail StoryDetail
 		host   string
@@ -1536,7 +1539,7 @@ func (s Status) refusedHolds(ctx context.Context, work WorkInHand, running []Run
 			if !ok || share.Unkeyed == NeedsFilesKey {
 				continue
 			}
-			holds = append(holds, RefusedHold{Refused: c.detail, Host: c.host, Ready: ready, File: share.File, Since: since(ready)})
+			holds = append(holds, RefusedHold{Refused: c.detail, Host: c.host, Down: down[c.host], Ready: ready, File: share.File, Since: since(ready)})
 		}
 		for _, note := range shares.notes {
 			s.print("mw status: " + note + "\n")

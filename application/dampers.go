@@ -328,6 +328,9 @@ type RefusedHold struct {
 	// Refused is the claim, and Host the host that holds it.
 	Refused StoryDetail
 	Host    string
+	// Down is what mw status says of Host when it does not answer ("" when it
+	// does): the cure then runs from elsewhere, not on it (mw-gq6.1515).
+	Down string
 	// Ready is the story passed over, and File the file it shares with Refused.
 	Ready StoryDetail
 	File  string
@@ -347,6 +350,9 @@ func (h RefusedHold) Cycle() bool {
 func (h RefusedHold) Alarm(now time.Time) (DamperAlarm, bool) {
 	refused, ready := h.Refused.Story.ID, h.Ready.Story.ID
 	cure := fmt.Sprintf("cure, run on %s: mw retry %s --hold", h.Host, refused)
+	if h.Down != "" {
+		cure = fmt.Sprintf("%s, so run from elsewhere: %s", h.Down, fromElsewhereCure(refused))
+	}
 	switch {
 	case h.Cycle():
 		return DamperAlarm{
