@@ -49,7 +49,11 @@ func newCheckCmd() *cobra.Command {
 			"waiting'. Run the same command again, in a fresh call, as often as the session allows: it takes up\n" +
 			"the same place, not the back of the queue (mw-gq6.939). --wait 40m (or --background, which gives it\n" +
 			"40 minutes) is the long wait for a call that is not cut off: a wait that outlasts it ends with one\n" +
-			"line saying the wait limit was reached and to hand back at once, with no place kept.\n" +
+			"line saying the wait limit was reached, with no place kept and nothing run. When the story's formula step\n" +
+			"'Run the full build, tests and vet' is still open, that line names it by its id and says to close it with\n" +
+			"bd -C <vault> close <id> --reason \"gate left to the close-out: <the check's log>\", to close the remaining steps\n" +
+			"your own runs prove, to write the closing comment and to end the turn: mw next runs the gate itself\n" +
+			"(mw-gq6.1557); with no such step open it says to comment naming the holder and hand back at once.\n" +
 			"A foreground check that gets the gate lock when the rig's usual gate on this host (the vault's gate\n" +
 			"times) would not end inside the call's budget (540 seconds of the default 600) does not start the gate: it gives the lock back,\n" +
 			"keeps its place for ten minutes and says the gate needs about so long and only so long is left in\n" +
@@ -204,6 +208,7 @@ func newCheckCmd() *cobra.Command {
 				GateLock:       gateLock,
 				Parts:          checks,
 				Records:        mwVault(dir, host),
+				Vault:          dir,
 				Part:           part,
 				PartSlotWait:   waitLimit,
 				HandBackAtOnce: handBackAtOnce,
@@ -258,7 +263,7 @@ func newCheckCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&gateWorker, "gate-worker", false, "run the whole check as the process a check kept to a call started for it, its rig's gate being longer than the call: keeps its verdict for that check to read and writes no check log of its own (set by mw check)")
 	_ = cmd.Flags().MarkHidden("gate-worker")
 	cmd.Flags().IntVar(&part, "part", 0, "run part N of the rig's gate alone, for a rig whose host names its gate as parts, and keep what it said; a check with no --part then reports the whole gate from the parts' records")
-	cmd.Flags().Duration("wait", CheckWait, "the most a check queues for the rig's merge slot, this host's gate lock and a calm host together: nine minutes in the foreground (the call's budget in a rig's longer call), ending with the place kept and a line to run it again; a whole check given this (or --background, 40m) ends with the wait limit reached and a line to hand back")
+	cmd.Flags().Duration("wait", CheckWait, "the most a check queues for the rig's merge slot, this host's gate lock and a calm host together: nine minutes in the foreground (the call's budget in a rig's longer call), ending with the place kept and a line to run it again; a whole check given this (or --background, 40m) ends with the wait limit reached and, while the formula step of the gate is open, a line to close it as left to the close-out and end the turn (mw next runs the gate), else a line to hand back")
 	cmd.Flags().BoolVar(&noSlot, "no-slot", false, "run the rig's tests without taking the rig's merge slot, so without waiting for a close-out's gate")
 	return cmd
 }

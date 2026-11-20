@@ -159,6 +159,11 @@ type Check struct {
 	// keeps none.
 	Logs CheckLogs
 
+	// Vault is the directory of the vault the story's beads are in: the -C of the
+	// bd command a check's wait-limit line gives for the gate's formula step
+	// (mw-gq6.1557). Empty names it <vault>.
+	Vault string
+
 	// Parts is how the rig's gate is named as parts on this host, and Records
 	// where what each part said is kept (mw-gq6.567). When the rig's gate has
 	// parts, Part N alone runs part N and nothing else of the check, and Part 0

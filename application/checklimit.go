@@ -36,7 +36,53 @@ const (
 // the holder's wait and not as the Builder's.
 func (k Check) limitReachedNoted(ctx context.Context, c *closeOut, label string, waited time.Duration, still, holder string) string {
 	k.noteLimit(ctx, c, still, holder)
+	if step, ok := k.gateStepLeft(ctx, c, label); ok {
+		return k.limitReachedLeavingTheGate(label, waited, still, holder, step, c)
+	}
 	return k.limitReached(label, waited, still, holder)
+}
+
+// GateStepTitle is the title of the formula step that asks the Builder for the
+// rig's whole build, tests and vet.
+const GateStepTitle = "Run the full build, tests and vet"
+
+// gateStepLeft is the open formula step of the rig's gate, when a whole check
+// that reached its wait limit ran none of the rig's tests: the Builder can close it,
+// the close-out running the gate itself (mw-gq6.1557). False for a part, the
+// changed specs' wait, a story with no poured formula or one whose gate step is
+// closed or cannot be read, which end as before.
+func (k Check) gateStepLeft(ctx context.Context, c *closeOut, label string) (FormulaStep, bool) {
+	root := c.detail.Molecule.RootID
+	if k.Part != 0 || k.SpecsWorker || root == "" || k.Tracker == nil || strings.Contains(label, "changed specs") {
+		return FormulaStep{}, false
+	}
+	open, err := k.Tracker.OpenSteps(ctx, root)
+	if err != nil {
+		return FormulaStep{}, false
+	}
+	for _, step := range open {
+		if strings.EqualFold(strings.TrimSpace(step.Title), GateStepTitle) {
+			return step, true
+		}
+	}
+	return FormulaStep{}, false
+}
+
+// limitReachedLeavingTheGate is limitReached for a whole check whose gate step is
+// open: it names the step by its id and says in one line to close it with the
+// check's log as the reason, close the steps the Builder's own runs prove, write
+// the closing comment and end the turn, because mw next runs the gate itself.
+func (k Check) limitReachedLeavingTheGate(label string, waited time.Duration, still, holder string, step FormulaStep, c *closeOut) string {
+	vault := "<vault>"
+	if k.Vault != "" {
+		vault = shellWord(k.Vault)
+	}
+	result := fmt.Sprintf("runs/%s/%s", c.id, CheckLogFileName(c.attempt()))
+	if k.Logs != nil {
+		result = k.Logs.RunFile(c.id, CheckLogFileName(c.attempt()))
+	}
+	return fmt.Sprintf("%s did not start: the wait limit of %s was reached after %s and %s, and nothing was run; that is the holder's (%s) wait and not a failure of the check, so do not run it again: close the formula step %s (%s) with `bd -C %s close %s --reason \"gate left to the close-out: %s\"`, close the remaining steps your own runs prove, write the closing comment and end the turn: mw next runs the gate",
+		label, gateWaited(k.partSlotWait()), gateWaited(waited), still, holder, step.ID, strings.TrimSpace(step.Title), vault, step.ID, result)
 }
 
 // noteLimit keeps in the attempt that a wait ended on its limit, who held what it
