@@ -97,21 +97,22 @@ type nextContext struct {
 	gitLog       string
 	checkCommand string // what this scenario's "rig tests" are
 	checkLog     string
-	checkLoad    *apptest.FakeHostLoad       // the host's load as mw check reads it; nil reads none
-	sessionModes application.TranscriptModes // the permission mode the session ran in, as its transcript shows; nil shows none
-	specCommands map[string]string           // the [changed_specs] table this scenario's host has
-	timingTests  map[string][]string         // the rigs' timing_tests globs, by rig
-	related      map[string]string           // the [related_tests] table this scenario's host has
-	mainRedBug   string                      // the open bug that names main's failing test, when a scenario filed one
-	named        map[string]string           // the [named_tests] table this scenario's host has
-	elsewhere    *apptest.FakeNamedElsewhere // the other hosts' runs of the named tests (mw-gq6.1395)
-	gateParts    []application.GatePart      // the parts this scenario's host names the rig's gate as
-	partToCheck  int                         // the --part of the check being run, 0 for none
-	callEnv      string                      // BASH_MAX_TIMEOUT_MS in the environment of the check being run
-	partRunsFor  time.Duration               // how long the part outlasts on the call's injected clock
-	background   *backgroundChecks           // the checks a scenario started with --background
-	racer        string                      // the other host, landing work mid-push
-	refusal      []string                    // what the origin's hook says when it refuses a push
+	checkLoad    *apptest.FakeHostLoad            // the host's load as mw check reads it; nil reads none
+	sessionModes application.TranscriptModes      // the permission mode the session ran in, as its transcript shows; nil shows none
+	specCommands map[string]string                // the [changed_specs] table this scenario's host has
+	timingTests  map[string][]string              // the rigs' timing_tests globs, by rig
+	related      map[string]string                // the [related_tests] table this scenario's host has
+	mainRedBug   string                           // the open bug that names main's failing test, when a scenario filed one
+	named        map[string]string                // the [named_tests] table this scenario's host has
+	elsewhere    *apptest.FakeNamedElsewhere      // the other hosts' runs of the named tests (mw-gq6.1395)
+	gateParts    []application.GatePart           // the parts this scenario's host names the rig's gate as
+	dataScope    map[string]application.DataScope // the [data_parts.<rig>] key this scenario's host has (mw-gq6.1589)
+	partToCheck  int                              // the --part of the check being run, 0 for none
+	callEnv      string                           // BASH_MAX_TIMEOUT_MS in the environment of the check being run
+	partRunsFor  time.Duration                    // how long the part outlasts on the call's injected clock
+	background   *backgroundChecks                // the checks a scenario started with --background
+	racer        string                           // the other host, landing work mid-push
+	refusal      []string                         // what the origin's hook says when it refuses a push
 
 	lastEpic     string
 	ledgerBefore []string
@@ -1159,7 +1160,7 @@ func (c *nextContext) nextUseCase() application.Next {
 		RigFacts:      files,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands), rig.WithTimingTests(c.timingTests)),
 		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands), rig.WithTimingTests(c.timingTests)),
-		GateParts:     rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithParts(map[string][]application.GatePart{c.rigKey(): c.gateParts})),
+		GateParts:     rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithParts(map[string][]application.GatePart{c.rigKey(): c.gateParts}), rig.WithDataScope(c.dataScope)),
 		GateRecords:   files,
 		Slot:          c.mergeSlot(),
 		CrossSlot:     c.crossSlot(),
