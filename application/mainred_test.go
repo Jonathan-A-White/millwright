@@ -36,6 +36,21 @@ func TestTestNamesOfNamesTheTopLevelTestsThatFailed(t *testing.T) {
 			"FAIL  src/a.test.ts > does a thing\nFAIL  src/a.test.ts > another > nested\nFAIL  src/b.test.tsx > b\n",
 			[]string{"src/a.test.ts", "src/b.test.tsx"},
 		},
+		// mw-gq6.1569: vitest's `×` line names the test by its title, which a
+		// re-run took as an argument; `--list` in a title was read as an option.
+		"vitest, the × line and the FAIL line of one test name the file only": {
+			"  × lists Genesis 27 with 'Peradventure', as lxx:align-choose --list --book gen --chapter 27 prints it 12ms\n" +
+				"FAIL  tests/unit/x.test.ts > lxx > lists Genesis 27 with 'Peradventure', as lxx:align-choose --list --book gen --chapter 27 prints it\n",
+			[]string{"tests/unit/x.test.ts"},
+		},
+		"a × or ✘ line alone is not a name a command can take": {
+			"  × lists --list 12ms\n  ✘ a title --x\n--- FAIL: TestKept (0.00s)\n",
+			[]string{"TestKept"},
+		},
+		"a name that starts with a dash is not one a command can take": {
+			"FAIL  --list\nFAIL  src/a.test.ts > one\n",
+			[]string{"src/a.test.ts"},
+		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
