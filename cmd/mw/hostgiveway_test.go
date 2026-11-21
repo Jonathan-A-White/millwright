@@ -396,13 +396,14 @@ func TestGiveWayInstallLineChecksElevationBeforeWritingAnything(t *testing.T) {
 // told the host to go on. It must refuse up front (mw-2891blf.28).
 func TestGiveWayUninstallLineChecksElevationBeforeRemovingAnything(t *testing.T) {
 	assertElevationFirst(t, "giveway uninstall", GiveWayUninstallLine())
-	if !strings.Contains(GiveWayUninstallLine(), windowsElevationCheck) {
-		t.Errorf("the giveway uninstall paste must use windowsElevationCheck")
+	if !strings.Contains(GiveWayUninstallLine(), windowsElevationCheckRemoval) {
+		t.Errorf("the giveway uninstall paste must use windowsElevationCheckRemoval")
 	}
 }
 
 // assertElevationFirst fails unless the paste checks for an elevated session,
-// throws 'run as administrator: nothing installed', and does so before its
+// throws 'run as administrator: nothing <installed|removed>' (a paste says what it
+// would not do: see TestElevationCheckSaysWhatTheirPasteWouldNotDo), and does so before its
 // first New-Item, Register-ScheduledTask or file write.
 func assertElevationFirst(t *testing.T, what, line string) {
 	t.Helper()
@@ -411,8 +412,8 @@ func assertElevationFirst(t *testing.T, what, line string) {
 		t.Errorf("%s: the paste must check for an elevated session", what)
 		return
 	}
-	if !strings.Contains(line, "run as administrator: nothing installed") {
-		t.Errorf("%s: the paste must throw '... run as administrator: nothing installed'", what)
+	if !strings.Contains(line, "run as administrator: nothing ") {
+		t.Errorf("%s: the paste must throw '... run as administrator: nothing ...'", what)
 	}
 	for _, first := range []string{"New-Item", "Register-ScheduledTask", "Unregister-ScheduledTask", "Remove-Item", "Set-Content", "WriteAllBytes", "Invoke-WebRequest", "Move-Item"} {
 		if i := strings.Index(line, first); i >= 0 && i < check {
@@ -450,5 +451,90 @@ func TestGiveWayScreenCheckHasABranchForAWindowsWithNoQuser(t *testing.T) {
 	}
 	if strings.Index(fn, "screen=quser") > strings.Index(fn, "screen=console") {
 		t.Errorf("quser stays the first choice where it exists")
+	}
+}
+
+// The elevation check's throw says what the paste would not have done: the install
+// pastes 'nothing installed', the way-back pastes 'nothing removed' (mw-2891blf.30).
+func TestElevationCheckSaysWhatItsPasteWouldNotDo(t *testing.T) {
+	giveWayPinned(t)
+	wslFlagPinned(t, wslFlagTestCommit)
+	install, err := GiveWayInstallLine("grace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wslInstall, err := WSLFlagInstallLine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const installed, removed = "run as administrator: nothing installed", "run as administrator: nothing removed"
+	for name, line := range map[string]string{"giveway install": install, "wsl-flag install": wslInstall} {
+		if !strings.Contains(line, installed) || strings.Contains(line, removed) {
+			t.Errorf("%s: the elevation throw must say 'nothing installed' and not 'nothing removed':\n%s", name, line)
+		}
+	}
+	for name, line := range map[string]string{"giveway way back": GiveWayUninstallLine(), "wsl-flag way back": WSLFlagWayBack()} {
+		if !strings.Contains(line, removed) || strings.Contains(line, installed) {
+			t.Errorf("%s: the elevation throw must say 'nothing removed' and not 'nothing installed':\n%s", name, line)
+		}
+	}
+}
+
+// A paste of several statements runs them as one block, so that a throw of the
+// elevation check, its first statement, stops all of them whether the console takes
+// the paste as one line or line by line: everything after the comment is one
+// `& { ... }` (mw-2891blf.30).
+func TestGiveWayPastesRunAsOneBlockThatStartsWithTheElevationCheck(t *testing.T) {
+	giveWayPinned(t)
+	install, err := GiveWayInstallLine("grace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode, err := GiveWayModeLine("freeze")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, paste := range map[string]string{"install": install, "uninstall": GiveWayUninstallLine(), "mode": mode} {
+		assertOneBlockAfterTheComment(t, "giveway "+name, paste)
+	}
+}
+
+// assertOneBlockAfterTheComment fails unless paste is a leading <# comment #>, then
+// one `& { ... }` whose first statement is windowsElevationCheck (or its removal form) and whose closing
+// brace is the paste's last character, so nothing runs outside it.
+func assertOneBlockAfterTheComment(t *testing.T, what, paste string) {
+	t.Helper()
+	end := strings.Index(paste, "#>")
+	if !strings.HasPrefix(paste, "<#") || end < 0 {
+		t.Errorf("%s: the paste must begin with a <# #> comment:\n%.200s", what, paste)
+		return
+	}
+	rest := strings.TrimSpace(paste[end+len("#>"):])
+	if !strings.HasPrefix(rest, "& { "+windowsElevationCheck) && !strings.HasPrefix(rest, "& { "+windowsElevationCheckRemoval) {
+		t.Errorf("%s: after its comment the paste must open '& { ' and the elevation check:\n%.300s", what, rest)
+		return
+	}
+	if !strings.HasSuffix(rest, " }") {
+		t.Errorf("%s: the paste must end with the block's closing brace:\n...%s", what, rest[max(0, len(rest)-200):])
+	}
+	depth := 0
+	for i, c := range rest {
+		switch c {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 && i != len(rest)-1 {
+				t.Errorf("%s: the block closes at %d of %d, so something runs outside it:\n%s", what, i, len(rest)-1, rest[i:])
+				return
+			}
+		}
+	}
+	if depth != 0 {
+		t.Errorf("%s: the braces are not balanced (%d left open)", what, depth)
+	}
+	// the throw that is in the block's first statement is the first one
+	if strings.Index(rest, "throw") < strings.Index(rest, "IsInRole") {
+		t.Errorf("%s: the first throw must be the elevation check's", what)
 	}
 }

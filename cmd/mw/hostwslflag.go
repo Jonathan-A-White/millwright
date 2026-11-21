@@ -143,7 +143,7 @@ func WSLFlagInstallLine() (string, error) {
 // install lines do: the task is at RunLevel Highest and its script is under
 // ProgramData.
 func WSLFlagWayBack() string {
-	return windowsElevationCheck + `; Unregister-ScheduledTask -TaskName ` + wslFlagTask + ` -Confirm:$false; Remove-Item "$env:ProgramData\millwright\wsl-flag-watch.ps1"`
+	return windowsElevationCheckRemoval + `; Unregister-ScheduledTask -TaskName ` + wslFlagTask + ` -Confirm:$false; Remove-Item "$env:ProgramData\millwright\wsl-flag-watch.ps1"`
 }
 
 // newHostWSLFlagCmd builds `mw host wsl-flag`.
