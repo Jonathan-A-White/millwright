@@ -1,7 +1,7 @@
 # One `mw host sweep` run, as the user, then it exits: no daemon. For
 # `systemctl --user`; see docs/host-sweep.md.
 #
-# Started by mw-host-sweep.timer, weekly and at boot, on every host. It frees
+# Started by mw-host-sweep.timer, daily and at boot, on every host. It frees
 # what no live story can need (worktrees and branches of closed stories, old
 # landing directories, old runs, dead worktrees' node_modules and Playwright
 # caches, old beads-*-aside-* directories) so a host's disk does not fill again.
@@ -28,7 +28,7 @@ Nice=19
 IOSchedulingClass=idle
 
 # Type=oneshot has no start timeout by default, and a hung read would then
-# block every later run. The timer fires weekly, so a long run is allowed:
+# block every later run. The timer fires daily, so a long run is allowed:
 # a worktree's node_modules is tens of thousands of files.
 TimeoutStartSec=30min
 

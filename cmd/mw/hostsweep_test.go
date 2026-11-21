@@ -59,9 +59,9 @@ func TestHostSweepTimerIsInstalledLikeTheDoctorsTimer(t *testing.T) {
 			t.Errorf("the doctor's timer and the sweep's do not both say %q", shared)
 		}
 	}
-	// Weekly and at boot, and no more often.
-	if !hasLine(sweepTimer, "OnCalendar=Sun *-*-* 04:40:00 UTC") || !hasLine(sweepTimer, "OnBootSec=15min") {
-		t.Errorf("the sweep's timer is not weekly and at boot: %v", sweepTimer)
+	// Daily and at boot, and no more often.
+	if !hasLine(sweepTimer, "OnCalendar=*-*-* 04:40:00 UTC") || !hasLine(sweepTimer, "OnBootSec=15min") {
+		t.Errorf("the sweep's timer is not daily and at boot: %v", sweepTimer)
 	}
 
 	// install-units.sh finds the pair by itself and links it like any other.

@@ -301,12 +301,12 @@ need "$NIGHTLY_SERVICE" "ExecStart=/bin/sh -c '%h/.local/bin/mw needs sweep --wr
 	fail "$NIGHTLY_SERVICE does not carry exactly one ExecStart="
 need "$NIGHTLY_TIMER" "OnCalendar=*-*-* 08:30:00 UTC"
 need "$NIGHTLY_TIMER" "Persistent=false"
-# The host sweep pair: `mw host sweep --timer` weekly and 15 minutes after boot,
+# The host sweep pair: `mw host sweep --timer` daily and 15 minutes after boot,
 # no catch-up; the first run on a host only lists (docs/host-sweep.md).
 need "$SWEEP_SERVICE" "Type=oneshot"
 need "$SWEEP_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw host sweep --timer"
 need "$SWEEP_SERVICE" "OnFailure=mw-unit-failed@%n.service"
-need "$SWEEP_TIMER" "OnCalendar=Sun *-*-* 04:40:00 UTC"
+need "$SWEEP_TIMER" "OnCalendar=*-*-* 04:40:00 UTC"
 need "$SWEEP_TIMER" "OnBootSec=15min"
 need "$SWEEP_TIMER" "Persistent=false"
 # The host tidy pair: `mw host tidy go-cache` and `mw host tidy tmp` daily and 20 minutes after boot, no

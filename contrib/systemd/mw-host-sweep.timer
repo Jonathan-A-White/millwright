@@ -1,17 +1,18 @@
-# Runs mw-host-sweep.service every Sunday at 04:40 UTC and 15 minutes after the
+# Runs mw-host-sweep.service every day at 04:40 UTC and 15 minutes after the
 # host boots. For `systemctl --user`; see docs/host-sweep.md.
 #
-# The cadence is a fuel knob (PROVISIONAL, for the Governor to confirm): change
-# it with a drop-in (`systemctl --user edit mw-host-sweep.timer`), never by
-# editing this file. The run frees disk and spends no fuel.
+# The cadence is PROVISIONAL, for the Governor to confirm: the sweep spends no
+# fuel and a host churns tens of GB a day (the desktop about 60), so it is daily.
+# Change it with a drop-in (`systemctl --user edit mw-host-sweep.timer`), never
+# by editing this file.
 [Unit]
-Description=Weekly and at boot, free the disk of what no live story can need (mw host sweep)
+Description=Daily and at boot, free the disk of what no live story can need (mw host sweep)
 
 [Timer]
-OnCalendar=Sun *-*-* 04:40:00 UTC
+OnCalendar=*-*-* 04:40:00 UTC
 OnBootSec=15min
 # No catch-up: a host that was asleep or off does not run the sweep it missed,
-# and it is not woken to run it. The boot run and the next Sunday are the next
+# and it is not woken to run it. The boot run and the next day are the next
 # runs.
 Persistent=false
 WakeSystem=false
