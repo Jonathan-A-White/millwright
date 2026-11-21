@@ -73,6 +73,15 @@ func (k Check) gateStepLeft(ctx context.Context, c *closeOut, label string) (For
 // check's log as the reason, close the steps the Builder's own runs prove, write
 // the closing comment and end the turn, because mw next runs the gate itself.
 func (k Check) limitReachedLeavingTheGate(label string, waited time.Duration, still, holder string, step FormulaStep, c *closeOut) string {
+	return fmt.Sprintf("%s did not start: the wait limit of %s was reached after %s and %s, and nothing was run; that is the holder's (%s) wait and not a failure of the check, so do not run it again: %s",
+		label, gateWaited(k.partSlotWait()), gateWaited(waited), still, holder, k.leaveTheGate(step, c))
+}
+
+// leaveTheGate is what a Builder whose gate cannot be run for another's wait is
+// told to do: close the gate's formula step as left to the close-out, with the
+// check's log as the reason, close the steps its own runs prove, write the closing
+// comment and end the turn.
+func (k Check) leaveTheGate(step FormulaStep, c *closeOut) string {
 	vault := "<vault>"
 	if k.Vault != "" {
 		vault = shellWord(k.Vault)
@@ -81,8 +90,24 @@ func (k Check) limitReachedLeavingTheGate(label string, waited time.Duration, st
 	if k.Logs != nil {
 		result = k.Logs.RunFile(c.id, CheckLogFileName(c.attempt()))
 	}
-	return fmt.Sprintf("%s did not start: the wait limit of %s was reached after %s and %s, and nothing was run; that is the holder's (%s) wait and not a failure of the check, so do not run it again: close the formula step %s (%s) with `bd -C %s close %s --reason \"gate left to the close-out: %s\"`, close the remaining steps your own runs prove, write the closing comment and end the turn: mw next runs the gate",
-		label, gateWaited(k.partSlotWait()), gateWaited(waited), still, holder, step.ID, strings.TrimSpace(step.Title), vault, step.ID, result)
+	return fmt.Sprintf("close the formula step %s (%s) with `bd -C %s close %s --reason \"gate left to the close-out: %s\"`, close the remaining steps your own runs prove, write the closing comment and end the turn: mw next runs the gate",
+		step.ID, strings.TrimSpace(step.Title), vault, step.ID, result)
+}
+
+// repeatedWaitEnd is how the line of a whole check handed back a second time on
+// the same wait in one attempt ends, after "which is counted once for this attempt
+// and is not a failure of the check": the command to run again and, with it, the
+// words to hand back if the wait is met once more (handBack, which begins with a
+// comma). With the gate's formula step open and nothing of the rig's tests run,
+// the hand-back is the one of limitReachedLeavingTheGate instead: the step is
+// named and closed as left to the close-out, so that the Builder does not end
+// with it open (mw-gq6.1562). A part, or a story with no gate step open, ends as
+// it always has.
+func (k Check) repeatedWaitEnd(ctx context.Context, c *closeOut, label, again, handBack string) string {
+	if step, ok := k.gateStepLeft(ctx, c, label); ok {
+		return ", so do not run it again: " + k.leaveTheGate(step, c)
+	}
+	return ": " + again + handBack
 }
 
 // noteLimit keeps in the attempt that a wait ended on its limit, who held what it

@@ -45,8 +45,9 @@ func (k Check) calmRefusal(ctx context.Context, c *closeOut, attempt int, readin
 	earlier := k.noteWait(ctx, c.id, CheckWholeCalmFileName(attempt), k.Host+" at "+load, since)
 	if earlier != "" {
 		k.noteLimit(ctx, c, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load")
-		return fmt.Errorf("the rig's tests did not start: after %s %s is still at %s, since %s, and nothing was run; it was busy when this check was tried at %s as well, which is counted once for this attempt and is not a failure of the check: %s, and if the host is busy again, comment on the story naming the load and hand back",
-			gateWaited(waited), k.Host, load, since.UTC().Format("15:04:05Z"), earlier, again)
+		return fmt.Errorf("the rig's tests did not start: after %s %s is still at %s, since %s, and nothing was run; it was busy when this check was tried at %s as well, which is counted once for this attempt and is not a failure of the check%s",
+			gateWaited(waited), k.Host, load, since.UTC().Format("15:04:05Z"), earlier,
+			k.repeatedWaitEnd(ctx, c, "the rig's tests", again, ", and if the host is busy again, comment on the story naming the load and hand back"))
 	}
 	return fmt.Errorf("the rig's tests did not start: after %s %s is still at %s, since %s, and nothing was run; that is the host's load and not a failure of the check: %s",
 		gateWaited(waited), k.Host, load, since.UTC().Format("15:04:05Z"), again)
@@ -77,8 +78,9 @@ func (k Check) calmRerunRefusal(ctx context.Context, c *closeOut, attempt int, l
 	earlier := k.noteWait(ctx, c.id, CheckWholeCalmAgainFileName(attempt), k.Host+" at "+load, since)
 	if earlier != "" {
 		k.noteLimit(ctx, c, fmt.Sprintf("%s is still at %s, since %s", k.Host, load, since.UTC().Format("15:04:05Z")), "the load")
-		return fmt.Errorf("the rig's tests failed once while %s was busy, and the run again that a failure on a busy host gets did not start: after %s %s is still at %s, since %s; it was busy when this check was tried at %s as well, which is counted once for this attempt and is not a failure of the check: %s, and if the host is busy again, comment on the story naming the load and hand back",
-			k.Host, gateWaited(waited), k.Host, load, since.UTC().Format("15:04:05Z"), earlier, again)
+		return fmt.Errorf("the rig's tests failed once while %s was busy, and the run again that a failure on a busy host gets did not start: after %s %s is still at %s, since %s; it was busy when this check was tried at %s as well, which is counted once for this attempt and is not a failure of the check%s",
+			k.Host, gateWaited(waited), k.Host, load, since.UTC().Format("15:04:05Z"), earlier,
+			k.repeatedWaitEnd(ctx, c, "the run again of the rig's tests", again, ", and if the host is busy again, comment on the story naming the load and hand back"))
 	}
 	return fmt.Errorf("the rig's tests failed once while %s was busy, and the run again that a failure on a busy host gets did not start: after %s %s is still at %s, since %s; the first failure is not counted and nothing has been run since, and that is the host's load and not a failure of the check: %s",
 		k.Host, gateWaited(waited), k.Host, load, since.UTC().Format("15:04:05Z"), again)
