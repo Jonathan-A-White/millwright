@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,15 +167,35 @@ func bootstrapPackagesLine(t *testing.T, rigs map[string]string) (line string, p
 	if err := os.WriteFile(filepath.Join(bin, "dpkg-query"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", script, "--dry-run")
-	cmd.Env = []string{
+	// a sudo that notes what it was asked and does nothing: a read of a root-only
+	// file on this host must never reach the real sudo (mw-gq6.1594).
+	sudoCalls := filepath.Join(dir, "sudo-calls")
+	stub := "#!/bin/sh\necho \"$*\" >>" + sudoCalls + "\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "root")
+	cmd, err := bootstrapScriptCmd(script, []string{
 		"PATH=" + bin + ":/usr/bin:/bin", "HOME=" + home, "BOOST_VAULT=" + vault,
 		"BOOST_HOST=cloud9", "BOOST_WG_ADDRESS=10.88.0.9", "BOOST_BEADS_HOST=10.88.0.1",
 		"BOOST_WG_HUB_PUBKEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"BOOST_ROOT=" + root,
+	}, "--dry-run")
+	if err != nil {
+		t.Fatal(err)
 	}
 	// the run stops at the vault step (the temp vault is no checkout); the
 	// packages step is printed first.
 	out, _ := cmd.CombinedOutput()
+	if calls, err := os.ReadFile(sudoCalls); err == nil {
+		for _, call := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
+			for _, arg := range strings.Fields(call) {
+				if strings.HasPrefix(arg, "/") && !strings.HasPrefix(arg, "//") && !strings.HasPrefix(arg, root+"/") { // "//p" is sed's own
+					t.Errorf("the dry run asked sudo to read a path of this host: %q (BOOST_ROOT is not the prefix of every read)", call)
+				}
+			}
+		}
+	}
 	for _, l := range strings.Split(string(out), "\n") {
 		if strings.Contains(l, "would: apt-get install") {
 			line = strings.TrimSpace(l)
@@ -233,6 +254,75 @@ func TestBootstrapPackagesAreMwsOwnWhenNoRigListsAny(t *testing.T) {
 		want := "would: apt-get install -y --no-install-recommends " + strings.Join(pkgs, " ")
 		if line != want {
 			t.Errorf("%s: line = %q, want %q", name, line, want)
+		}
+	}
+}
+
+// bootstrapScriptCmd is the one way a test runs contrib/boost-bootstrap.sh whole:
+// the script reads /etc/wireguard/wg0.conf and more with `sudo -n` under
+// BOOST_ROOT, and with it unset that is this host's own file, so env must name
+// BOOST_ROOT as a folder under the temp dir (mw-gq6.1594).
+func bootstrapScriptCmd(script string, env []string, args ...string) (*exec.Cmd, error) {
+	root := ""
+	for _, e := range env {
+		if v, ok := strings.CutPrefix(e, "BOOST_ROOT="); ok {
+			root = v
+		}
+	}
+	if root == "" {
+		return nil, errBootRootUnset
+	}
+	if !strings.HasPrefix(filepath.Clean(root), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		return nil, errBootRootNotTemp
+	}
+	cmd := exec.Command("bash", append([]string{script}, args...)...)
+	cmd.Env = env
+	return cmd, nil
+}
+
+var (
+	errBootRootUnset   = errors.New("BOOST_ROOT is unset: the script would read this host's real /etc and /root through sudo -n")
+	errBootRootNotTemp = errors.New("BOOST_ROOT is not under the temp dir: the script would read a real path of this host")
+)
+
+// TestBootstrapScriptCmdRefusesARunThatCouldReadTheHostsRoot: a run of the whole
+// script without BOOST_ROOT, or with one outside the temp dir, is refused.
+func TestBootstrapScriptCmdRefusesARunThatCouldReadTheHostsRoot(t *testing.T) {
+	temp := filepath.Join(t.TempDir(), "root")
+	for name, tc := range map[string]struct {
+		env  []string
+		want error
+	}{
+		"unset":     {[]string{"HOME=/h"}, errBootRootUnset},
+		"empty":     {[]string{"BOOST_ROOT="}, errBootRootUnset},
+		"the host":  {[]string{"BOOST_ROOT=/"}, errBootRootNotTemp},
+		"elsewhere": {[]string{"BOOST_ROOT=/etc"}, errBootRootNotTemp},
+		"a temp":    {[]string{"BOOST_ROOT=" + temp}, nil},
+	} {
+		if _, err := bootstrapScriptCmd("s.sh", tc.env); !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
+	}
+}
+
+// TestEveryTestThatRunsTheWholeBootstrapScriptGoesThroughBootstrapScriptCmd reads
+// the test sources of this package: none builds its own bash command on the
+// script, so none can leave BOOST_ROOT unset (mw-gq6.1594).
+func TestEveryTestThatRunsTheWholeBootstrapScriptGoesThroughBootstrapScriptCmd(t *testing.T) {
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	needle := "exec.Command(\"bash\", " + "script"
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, needle) && !strings.Contains(line, "append([]string{script}") {
+				t.Errorf("%s runs the bootstrap script itself: %s; use bootstrapScriptCmd", f, strings.TrimSpace(line))
+			}
 		}
 	}
 }
