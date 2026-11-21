@@ -11,7 +11,11 @@ import (
 // tests and pushes; in a wait it holds it shared, which keeps another landing
 // out and lets a Builder's `mw check --part N` start, and before its tests it
 // takes the slot alone again, which waits for those checks to end and keeps new
-// ones out, so a check never runs beside the batch's own run of the tests. A
+// ones out, so a check never runs beside the batch's own run of the tests. Once
+// the batch has taken the slot alone again after its fixer it keeps it alone until
+// it lets it go: the re-gate's waits for the gate lock and a calm host would let
+// new checks in, and the batch would wait for each of them before its tests, so a
+// re-gate waits at most for the checks that ran beside the fixer (mw-gq6.1263). A
 // holding that cannot be yielded (a fake, or a slot of another kind) is simply
 // kept: the batch waits as it always did. A close-out of one story yields its
 // slot the same way for the waits of its merge (mergeYielding, mw-gq6.1424).
@@ -29,6 +33,9 @@ type batchSlot struct {
 	// yielded says the batch is between a yield and its resume, so that a wait
 	// inside a wait gives the slot up once.
 	yielded bool
+	// kept says the slot was taken alone again after the batch's fixer, and is
+	// yielded no more.
+	kept bool
 	// lost is why the slot could not be taken alone again after a wait; the
 	// tests are not run on the word of a batch that no longer holds it.
 	lost error
@@ -41,7 +48,7 @@ type batchSlot struct {
 func (s *batchSlot) yield(ctx context.Context) func() {
 	nothing := func() {}
 	y, ok := s.holding.(YieldingHolding)
-	if !ok || s.yielded || s.lost != nil {
+	if !ok || s.yielded || s.kept || s.lost != nil {
 		return nothing
 	}
 	if err := y.Yield(ctx); err != nil {
@@ -55,6 +62,27 @@ func (s *batchSlot) yield(ctx context.Context) func() {
 			s.lost = err
 		}
 	}
+}
+
+// yieldForTheFixer is yield for the wait for the batch's fixer, after which the
+// slot is kept alone: the checks that ran beside the fixer have been waited for,
+// and the batch goes ahead of any that come after.
+func (s *batchSlot) yieldForTheFixer(ctx context.Context) func() {
+	resume := s.yield(ctx)
+	return func() {
+		resume()
+		s.kept = true
+	}
+}
+
+// yieldForTheFixer gives the slot up while the batch waits for its fixer
+// (batchSlot.yieldForTheFixer), or as the batch's SlotYield does when it holds no
+// slot of its own.
+func (b BatchLand) yieldForTheFixer(ctx context.Context) func() {
+	if b.slot == nil {
+		return b.Next.yieldSlot(ctx)
+	}
+	return b.slot.yieldForTheFixer(ctx)
 }
 
 // slotLost is why the batch no longer holds the slot alone, empty while it does.
