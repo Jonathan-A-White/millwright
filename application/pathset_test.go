@@ -718,3 +718,34 @@ func TestFileRefusesAStoryWhoseBranchTheRigsOriginDoesNotHave(t *testing.T) {
 		t.Errorf("expected nothing filed, got %v", epics)
 	}
 }
+
+func TestPathSetPinsAStoryNeedingServedBeadsToTheHome(t *testing.T) {
+	for name, acceptance := range map[string]string{
+		"the trace":     "1. it builds.\n2. go run ./contrib/dolt-beads/trace shows the read under 1 s",
+		"BEADS_DOLT":    "1. BEADS_DOLT_PORT=3307 go test ./infrastructure/beads passes",
+		"the port":      "1. a read against 127.0.0.1:3307 answers",
+		"in a test too": "1. a test in a_test.go run against 127.0.0.1:3307 passes",
+	} {
+		tracker, rules := aStoryWithAcceptance(t, acceptance)
+		var errOut strings.Builder
+		if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", []string{"host=auto"}); err != nil {
+			t.Fatalf("%s: nothing is refused for it, got %v", name, err)
+		}
+		got := errOut.String()
+		if strings.Count(got, "WARN") != 1 || !strings.Contains(got, "mw-gq6.2") || !strings.Contains(got, "host=auto") ||
+			!strings.Contains(got, "served beads") || !strings.Contains(got, "criterion ") {
+			t.Errorf("%s: expected one warning naming the story, the criterion and host=auto; got %q", name, got)
+		}
+	}
+}
+
+func TestPathSetSaysNothingOfServedBeadsToAStoryPinnedToAHomeHost(t *testing.T) {
+	tracker, rules := aStoryWithAcceptance(t, "1. go run ./contrib/dolt-beads/trace shows the read under 1 s")
+	var errOut strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", []string{"host=laptop"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errOut.String(), "served beads") {
+		t.Errorf("a story pinned to the laptop has its beads; got %q", errOut.String())
+	}
+}

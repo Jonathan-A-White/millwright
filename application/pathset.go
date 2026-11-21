@@ -284,6 +284,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		if line := s.notRunnableWarning(ctx, id, now.Rig, story.Acceptance); line != "" {
 			fmt.Fprintln(s.Err, line)
 		}
+		if line := servedBeadsWarning(id, now.Host, story.Acceptance); line != "" {
+			fmt.Fprintln(s.Err, line)
+		}
 	}
 	// Only a path written with a host or a rig (--from writes both) is judged: a
 	// model= set on a story already pinned is not this warning's to repeat.
