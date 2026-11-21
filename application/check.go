@@ -465,6 +465,9 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		return report, fmt.Errorf("checking %s: the rig %s is not checked out on %s: add it under [rigs] in the config file",
 			storyID, path.Rig, k.Host)
 	}
+	if why := branchNotHereWhy(ctx, k.Landing, "check", storyID, rigDir, k.Host, ClaimHost(detail.Assignee), path); why != "" {
+		return report, fmt.Errorf("checking %s: %s", storyID, why)
+	}
 
 	c := &closeOut{
 		id:       storyID,
