@@ -48,6 +48,18 @@ Feature: Closing out a finished story and carrying on
     And nothing is left of the worktree of "mw-gq6.1"
     And a fresh session is running for "mw-gq6.2"
 
+  # The close-out runs as `{ mw next; } | tee -a next-N.log`; what reads its output
+  # must not be ended with the worktree's writers, and a write that fails must not
+  # stop the dispatch between its claim and its session (mw-gq6.1580).
+  Scenario: A close-out whose output cannot be written still starts a session for the story its dispatch claims
+    Given the session of "mw-gq6.1" reported a plain success
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    And the close-out's output has lost its reader
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And a fresh session is running for "mw-gq6.2"
+    And no story of this host is left claimed with no session
+
   Scenario: The ledger is only ever appended to
     Given the ledger already holds a line from an earlier story
     And the session of "mw-gq6.1" reported a plain success

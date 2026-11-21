@@ -154,6 +154,8 @@ type nextContext struct {
 	printed bytes.Buffer // the report as the person running mw reads it
 	stderr  bytes.Buffer // what mw said on stderr
 
+	outputBroken bool // the close-out's output has lost its reader (mw-gq6.1580)
+
 	touchedBefore *touched // what a check scenario found before it ran mw check
 	touchedFor    string
 
@@ -314,6 +316,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^nothing is left of the worktree of "([^"]*)"$`, c.nothingIsLeftOfTheWorktree)
 	ctx.Then(`^the worktree of "([^"]*)" is still there$`, c.theWorktreeIsStillThere)
 	ctx.Then(`^a fresh session is running for "([^"]*)"$`, c.aFreshSessionIsRunningFor)
+	c.registerBrokenOutputSteps(ctx)
 	ctx.Then(`^no fresh session was started$`, c.noFreshSessionWasStarted)
 	ctx.Then(`^the story "([^"]*)" is recorded as stopped$`, c.theStoryIsRecordedAsStopped)
 	ctx.Then(`^the story "([^"]*)" is still recorded as blocked$`, c.theStoryIsStillRecordedAsBlocked)
@@ -1178,6 +1181,7 @@ func (c *nextContext) nextUseCase() application.Next {
 			Host:      nextHost,
 			Cap:       1,
 			Rigs:      rigs,
+			Out:       c.dispatchOut(),
 		},
 		Boot: boot,
 		Seat: nextSeat,
