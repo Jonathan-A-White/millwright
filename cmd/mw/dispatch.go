@@ -19,7 +19,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/synchalt"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticketq"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
-	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -459,16 +458,10 @@ func newDispatchCmd() *cobra.Command {
 			}
 			recheckSuite := hostRecheckSuite(cmd.Context(), worktrees, files, rigs, tests, changedSpecs, nice, jobs, host)
 			dispatch := withHostRoom(withHostRechecks(application.Dispatch{
-				Tracker:   gateway,
-				Worktrees: worktrees,
-				Landing:   worktrees,
-				Runner: application.HarnessReadyRunner{
-					Runner: tmux.New(), Host: host, Out: cmd.ErrOrStderr(),
-					Ready: func(ctx context.Context) error {
-						_, err := ownHarnessVersion(ctx)
-						return err
-					},
-				},
+				Tracker:       gateway,
+				Worktrees:     worktrees,
+				Landing:       worktrees,
+				Runner:        harnessReadyRunner(host, cmd.ErrOrStderr()),
 				Boot:          builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
 				Memory:        gateway,
 				Sync:          sync,
