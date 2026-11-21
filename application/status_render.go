@@ -151,7 +151,7 @@ func (w HostWork) notAnswering() string {
 func downHosts(others []HostWork) map[string]string {
 	down := map[string]string{}
 	for _, w := range others {
-		if said := w.notAnswering(); said != "" {
+		if said := w.downSaid(); said != "" {
 			down[w.Host] = said
 		}
 	}
@@ -335,6 +335,9 @@ func (r StatusReport) String() string {
 			wrapInto(&b, "    ", takes.String())
 		}
 		if line := r.HeldByPin[d.Story.ID]; line != "" {
+			wrapInto(&b, "    ", line)
+		}
+		if line := r.GivenBack[d.Story.ID]; line != "" {
 			wrapInto(&b, "    ", line)
 		}
 	}
@@ -780,6 +783,9 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		if line := w.Pins[d.Story.ID]; line != "" {
 			wrapInto(b, "      ", line)
 		}
+		if line := w.GivenBack[d.Story.ID]; line != "" {
+			wrapInto(b, "      ", line)
+		}
 		// A close-out running on a story says so wherever the story is pathed,
 		// as its tracker mark carries it (mw-gq6.1525).
 		if mark, closing := closingMark(nil, d, w.Now); closing {
@@ -794,13 +800,21 @@ func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 		} else if w.Runs[d.Story.ID] == RunBlocked {
 			wrapInto(b, "      ", refusedLine)
 		} else if w.Runs[d.Story.ID] == RunCloseOutAgain {
-			if down := w.notAnswering(); down != "" {
+			if down := w.downSaid(); down != "" {
 				wrapInto(b, "      ", "handed back at the merge slot's overall most; "+down+", so nothing there runs its close-out again: from elsewhere, "+fromElsewhereCure(d.Story.ID))
 			} else {
 				wrapInto(b, "      ", handedBackLine)
 			}
 		} else if since := lapsedLease(d, w.Now); !d.Hitl() && !since.IsZero() && !w.GivesWay.Stands {
-			wrapInto(b, "      ", strandedLineFor(since, w.Runs[d.Story.ID], d.Story.ID, w.notAnswering()))
+			stranded := strandedLineFor(since, w.Runs[d.Story.ID], d.Story.ID, w.notAnswering())
+			// Said only of a host that is down: one that answers again gives the claim
+			// back itself on its next tick, as the line already says.
+			if left := w.GaveBack.LeftLine(d.Story.ID); left != "" && w.notAnswering() != "" {
+				stranded += "; " + left
+			} else if said := w.GaveBack.Said(); said != "" && w.notAnswering() != "" {
+				stranded += "; " + said
+			}
+			wrapInto(b, "      ", stranded)
 		}
 	}
 }
