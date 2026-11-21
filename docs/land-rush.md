@@ -64,6 +64,19 @@ and dispatches the next story. `mw status`, the sweep, dispatch and the quiet
 alarm all call a queued story alive. The worktree stays until the story is
 landed or held. On a batch rig nothing but `mw land` pushes the target branch.
 
+The rig's tests are not run again for a story that was tested at the commit it is
+queued at (`application/nextparts.go`, mw-6ww.119.11.1.1). A whole `mw check` that
+ends "tip / passed" at that commit is trusted, and the ledger line says "tested by mw
+check at <commit>". Where it did not, and the rig's gate is named as parts on the
+host (`[test_parts.<rig>]`), the close-out reads the parts' records of the attempt
+(`check-<n>-part-<k>.log`: a record names a tip only when the worktree was clean at it).
+Every part passed at the tip: no part is run, and the changed specs are, unless their
+record is a pass at the tip; the line says "tested by mw check, parts at <commit>: pass;
+changed specs run at close-out". Some parts passed: the gate runs the others alone, and
+the line names both ("parts 2, 3 of 3 at <commit>: pass; part 1 (lint) run at
+close-out"). The batch's own gate still runs the whole suite and the specs on what is
+pushed, which is why only a batch rig does this.
+
 ## The batch
 
 The follower's `batch-land` job (home only, never on the Boost) runs

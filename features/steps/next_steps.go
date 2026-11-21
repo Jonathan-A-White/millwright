@@ -1156,6 +1156,8 @@ func (c *nextContext) nextUseCase() application.Next {
 		RigFacts:      files,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands), rig.WithTimingTests(c.timingTests)),
 		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands), rig.WithTimingTests(c.timingTests)),
+		GateParts:     rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithParts(map[string][]application.GatePart{c.rigKey(): c.gateParts})),
+		GateRecords:   files,
 		Slot:          c.mergeSlot(),
 		CrossSlot:     c.crossSlot(),
 		GateLock:      c.gateLock(),
