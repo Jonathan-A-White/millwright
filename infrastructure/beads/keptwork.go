@@ -18,22 +18,32 @@ import (
 // A Gateway given a database (WithHeadDB) reads them over the kept connection,
 // from the live beads only, and starts a bd only when that connection fails.
 
-// liveWhere is the beads the work is read from: every one that is not closed,
-// mail and events left out (there are thousands of each, and none is work), and
-// every epic, closed or not, for the defaults its stories inherit.
-const liveWhere = "(i.status <> 'closed' and i.issue_type not in ('mail', 'event')) or i.issue_type = 'epic'"
+// liveIDs are the ids of the beads the work is read from: every one that is not
+// closed, mail and events left out (there are thousands of each, and none is
+// work), and every epic, closed or not, for the defaults its stories inherit.
+// "Not closed" is two ranges of the status on either side of 'closed', never
+// `status <> 'closed'`: the server cannot use the status index for a not-equal
+// joined with an or, and read every bead, 760 to 850 ms at load 12 to 13 for
+// 1,160 beads, where the three reads of ranges and the join by id take about a
+// quarter of that (mw-gq6.1446). A list of the statuses mw knows would be as
+// quick, but would leave out one it does not. The three are disjoint (a
+// closed epic is neither below nor above 'closed'), so no bead is read twice.
+const liveIDs = "(select id from issues where status < 'closed' and issue_type not in ('mail', 'event')" +
+	" union all select id from issues where status > 'closed' and issue_type not in ('mail', 'event')" +
+	" union all select id from issues where status = 'closed' and issue_type = 'epic') live"
 
 // liveBeadsQuery, liveLabelsQuery and liveEdgesQuery are the live beads with
 // their labels and their edges, as beadsListQuery and its two lists read every
 // bead; an edge carries the status of the bead it names, so that a wait on a
 // bead closed long ago is known to be over without reading that bead.
-const (
-	liveBeadsQuery  = beadColumns + " where " + liveWhere + " order by i.created_at, i.id"
-	liveLabelsQuery = "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + liveWhere +
+var (
+	liveBeadsQuery = strings.Replace(beadColumns, " from issues i left join leases",
+		" from "+liveIDs+" join issues i on i.id = live.id left join leases", 1) + " order by i.created_at, i.id"
+	liveLabelsQuery = "select l.issue_id, l.label from labels l join " + liveIDs + " on live.id = l.issue_id" +
 		" order by l.issue_id, l.label"
 	liveEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id," +
-		" d.type, t.status as target_status from dependencies d join issues i on i.id = d.issue_id" +
-		" left join issues t on t.id = d.depends_on_issue_id where " + liveWhere + " order by d.issue_id, d.created_at"
+		" d.type, t.status as target_status from dependencies d join " + liveIDs + " on live.id = d.issue_id" +
+		" left join issues t on t.id = d.depends_on_issue_id order by d.issue_id, d.created_at"
 )
 
 // liveEdgesOf is liveEdgesQuery for the beads ids names: the server reads each
