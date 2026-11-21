@@ -148,7 +148,7 @@ func (s PathSet) holdOnPathSet(ctx context.Context, id string) error {
 		return fmt.Errorf("writing the reason %s is held: %w", id, err)
 	}
 	if s.Out != nil {
-		fmt.Fprintf(s.Out, "held: %s: %s\n", id, why)
+		fmt.Fprintf(s.Out, "held: %s: %s; release it with: mw release %s\n", id, why, id)
 	}
 	return nil
 }
@@ -160,7 +160,10 @@ func (s PathSet) holdOnPathSet(ctx context.Context, id string) error {
 func (s PathSet) whyStayHeld(ctx context.Context, id string, story, written StoryDetail) (string, error) {
 	for _, label := range story.Labels {
 		if hasHoldLabel([]string{label}) {
-			return fmt.Sprintf("it has the label %s", label), nil
+			if strings.EqualFold(label, LabelIcebox) {
+				return fmt.Sprintf("it has the label %s; thaw it with: mw thaw %s", label, id), nil
+			}
+			return fmt.Sprintf("it has the label %s; release it with: mw release %s", label, id), nil
 		}
 	}
 	ids := []string{id}
@@ -172,16 +175,16 @@ func (s PathSet) whyStayHeld(ctx context.Context, id string, story, written Stor
 		return "", fmt.Errorf("reading the comments of %s to look for a hold: %w", strings.Join(ids, ", "), err)
 	}
 	if hold, on, ok := wordHold(id, comments[id], comments[story.EpicID], story.EpicID); ok {
-		return fmt.Sprintf("it is held on the Governor's word, by this comment on %s: %s", on, heldLine(hold.Text)), nil
+		return fmt.Sprintf("it is held on the Governor's word, by this comment on %s: %s; release it with: mw release %s --over-hold \"<why>\"", on, heldLine(hold.Text), id), nil
 	}
 	for _, c := range comments[id] {
 		if holdsAReason([]Comment{c}) && !isCallersHold(c.Text) {
-			return fmt.Sprintf("it has a HELD: comment: %s", heldLine(c.Text)), nil
+			return fmt.Sprintf("it has a HELD: comment: %s; release it with: mw release %s", heldLine(c.Text), id), nil
 		}
 	}
 	merged := written.Merged()
 	if strings.TrimSpace(merged.Rig) == "" || strings.TrimSpace(merged.Branch) == "" {
-		return "it has no path yet (no rig or no target branch)", nil
+		return fmt.Sprintf("it has no path yet (no rig or no target branch); give it one with: mw path set %s rig=<rig> branch=<branch>", id), nil
 	}
 	lacking, err := (&filesExpected{rules: s.Rules}).lacking(ctx, written)
 	if err != nil {
@@ -191,7 +194,7 @@ func (s PathSet) whyStayHeld(ctx context.Context, id string, story, written Stor
 		return fmt.Sprintf("no files key, and %s expects one: %s", lacking[0].Rig, FilesKeyCommand(id)), nil
 	}
 	if lines := dispatchRefusals(written); len(lines) > 0 {
-		return lines[0], nil
+		return lines[0] + "; put that right in the story, then run mw path set " + id + " again", nil
 	}
 	return s.whyOverThePace(ctx, id, story)
 }
