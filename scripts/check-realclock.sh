@@ -13,6 +13,14 @@
 # line or on the comment lines directly above it. Lines that are only a comment,
 # and _test.go files, are not read.
 #
+# One shape is refused whatever the baseline or an allow comment says
+# (mw-gq6.1267): read-then-replace, a variable that takes time.Now() and is
+# assigned again from the injected clock a few lines on (now := time.Now(), then
+# if x.Now != nil { now = x.Now() }). It reads the real clock for nothing, and
+# a margin that rests on it fails under load. The only time.Now() meant for
+# that clock lies in a now() default method that returns x.Now() when it is set
+# and time.Now() when it is not. Each refused file and line is named.
+#
 # A file below its baseline count passes with a note: lower its line in the
 # baseline (scripts/check-realclock.sh --print writes the whole file anew) so
 # the room it left is not taken by a new use.
@@ -83,6 +91,49 @@ if [ ! -f "$BASELINE" ]; then
 	exit 1
 fi
 
+# The read-then-replace shape: a line that assigns time.Now() to a name, and in
+# the next few code lines an "if ... Now != nil" and a new assignment to that
+# name. Printed as "<path>:<line>: <code>" of the time.Now() line.
+shape=$(mktemp)
+trap 'rm -f "$uses" "$shape"' EXIT
+if [ -d application ]; then
+	find application -type f -name '*.go' ! -name '*_test.go' | LC_ALL=C sort |
+		xargs -r awk '
+			FNR == 1 { name = ""; left = 0 }
+			{
+				code = $0
+				sub(/^[ \t]+/, "", code)
+				if (code ~ /^\/\// || code == "") next
+				if (left > 0) {
+					if (code ~ /[nN]ow != nil/) sawif = 1
+					if (sawif && match(code, /^[A-Za-z_][A-Za-z0-9_]*[ \t]*=[^=]/)) {
+						assigned = code
+						sub(/[ \t]*=.*/, "", assigned)
+						if (assigned == name) {
+							print FILENAME ":" at ": " atcode
+							name = ""; left = 0
+							next
+						}
+					}
+					left--
+				}
+				if (match(code, /^(var[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*:?=[ \t]*time\.Now\(\)/)) {
+					name = code
+					sub(/^var[ \t]+/, "", name)
+					sub(/[ \t]*:?=.*/, "", name)
+					at = FNR; atcode = code; sawif = 0; left = 4
+				}
+			}
+		' >"$shape"
+fi
+
+shapebad=0
+if [ -s "$shape" ]; then
+	shapebad=1
+	echo "check-realclock: a time.Now() read and then replaced by the injected clock; read the clock in a now() default method that returns x.Now() when it is set and time.Now() when it is not (//mw:realclock does not exempt this shape):" >&2
+	sed 's/^/  /' "$shape" >&2
+fi
+
 # The baseline first, then the uses: refuse each file over its count, and note
 # each under it.
 awk -v baseline="$BASELINE" '
@@ -112,6 +163,10 @@ awk -v baseline="$BASELINE" '
 			}
 		}
 		if (bad) exit 1
-		print "check-realclock: ok"
 	}
-' "$BASELINE" "$uses"
+' "$BASELINE" "$uses" || shapebad=1
+
+if [ "$shapebad" = 1 ]; then
+	exit 1
+fi
+echo "check-realclock: ok"
