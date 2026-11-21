@@ -10,7 +10,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
-	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -200,7 +199,7 @@ func newLandCmd() *cobra.Command {
 				// A batch's turns end once they waited this long for other gates (mw-gq6.1420).
 				GateTurnsLimit: gateTurnsLimit,
 				Memory:         gateway,
-				Runner:         tmux.New(),
+				Runner:         harnessReadyRunner(host, cmd.ErrOrStderr()),
 				Boot:           builderBoot(files, host, tests, nice, jobs, turns, turnsSaid),
 				GiveWay:        hostGiveWayGate(host), // no fixer and no part of the gate starts once the host gives way (mw-2891blf.19)
 				Events:         homeEventLog(),

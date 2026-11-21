@@ -113,7 +113,7 @@ func newNextCmd() *cobra.Command {
 			if heartbeat {
 				return application.Next{
 					Tracker: mwGateway(dir, host),
-					Runner:  tmux.New(),
+					Runner:  tmux.New(), //mw:statusonly: Heartbeat reads a session's status and starts none
 					Changes: rig.New(),
 					Rigs:    rigs,
 				}.Heartbeat(cmd.Context(), args[0])
@@ -214,7 +214,7 @@ func newNextCmd() *cobra.Command {
 			}
 			files := mwVault(dir, host)
 			worktrees := rig.New()
-			runner := tmux.New()
+			runner := harnessReadyRunner(host, cmd.ErrOrStderr())
 			sync, err := hostSync(application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: hostTickLogs(), Lock: hostSyncLock(dir)})
 			if err != nil {
 				return err

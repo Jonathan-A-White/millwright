@@ -11,7 +11,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/peekremote"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
-	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 
 	"github.com/spf13/cobra"
 )
@@ -122,7 +121,7 @@ func newRetryCmd() *cobra.Command {
 				Tracker:     gateway,
 				Worktrees:   worktrees,
 				Landing:     worktrees,
-				Runner:      tmux.New(),
+				Runner:      harnessReadyRunner(host, cmd.ErrOrStderr()),
 				Files:       files,
 				Vault:       files,
 				Host:        host,
