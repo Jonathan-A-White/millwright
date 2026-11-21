@@ -2378,6 +2378,16 @@ func TestGristRoomIsReadFromTheDispatchTable(t *testing.T) {
 	}
 }
 
+// Measured makes took 24 to 61 minutes (median about 45), so a make is slow
+// only past 75 (mw-gq6.1148).
+func TestCloudSlowMakeMinutesDefaultsToSeventyFive(t *testing.T) {
+	writeConfig(t, "[cloud]\ncommand = \"/x/vultr-boost\"\n")
+	got, ok, err := config.Cloud()
+	if err != nil || !ok || got.SlowMakeMinutes != 75 || config.DefaultCloudSlowMakeMinutes != 75 {
+		t.Errorf("expected a config with no slow_make_minutes to read 75, got %+v, %v, %v", got, ok, err)
+	}
+}
+
 func TestCloudReadsTheTableWithItsDefaultsAndRefusesABadOne(t *testing.T) {
 	writeConfig(t, "host = \"desktop\"\n\n[rigs]\nmillwright = \"/home/m/millwright\"\n\n[cloud]\nsnapshot = \"snap-1\"  # made by contrib/vultr-boost snapshot\nmonthly_cap_usd = 40.5\n\n[cloud.caps]\ndesktop = 2\nlaptop = 1\n")
 	cloud, ok, err := config.Cloud()
@@ -2385,7 +2395,7 @@ func TestCloudReadsTheTableWithItsDefaultsAndRefusesABadOne(t *testing.T) {
 		t.Fatalf("reading [cloud]: %v, %v", ok, err)
 	}
 	if cloud.Provider != "vultr" || cloud.MaxBoxes != 2 || cloud.MonthlyCapUSD != 40.5 || cloud.IdleMinutes != 30 ||
-		cloud.HourlyUSD != config.DefaultCloudHourlyUSD || cloud.BoxCap != 2 || cloud.UpMinutes != 60 || cloud.SlowMakeMinutes != 30 || cloud.NoDispatchMinutes != 30 || cloud.Snapshot != "snap-1" ||
+		cloud.HourlyUSD != config.DefaultCloudHourlyUSD || cloud.BoxCap != 2 || cloud.UpMinutes != 60 || cloud.SlowMakeMinutes != 75 || cloud.NoDispatchMinutes != 30 || cloud.Snapshot != "snap-1" ||
 		cloud.Command != "/home/m/millwright/contrib/vultr-boost" || cloud.HostCaps["desktop"] != 2 || cloud.HostCaps["laptop"] != 1 {
 		t.Errorf("expected the defaults beside what the table says, got %+v", cloud)
 	}

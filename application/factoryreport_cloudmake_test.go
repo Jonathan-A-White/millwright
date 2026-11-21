@@ -13,7 +13,7 @@ import (
 )
 
 // slowMakingSurvey is a DamperSurvey whose fake book holds a box made for 56
-// minutes against the default 30 minute limit, as mw report builds it.
+// minutes against the default 75 minute limit, as mw report builds it.
 func slowMakingSurvey() application.DamperSurvey {
 	tracker := apptest.NewFakeTracker()
 	up := time.Now().Add(-56 * time.Minute)

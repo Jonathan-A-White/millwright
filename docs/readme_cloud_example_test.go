@@ -39,7 +39,7 @@ func cloudKeys(t *testing.T) []string {
 	return keys
 }
 
-func TestTheReadmeCloudExampleListsEveryCloudKeyWithSlowMakeMinutesAtThirty(t *testing.T) {
+func TestTheReadmeCloudExampleListsEveryCloudKeyWithSlowMakeMinutesAtSeventyFive(t *testing.T) {
 	raw, err := os.ReadFile("../README.md")
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +58,7 @@ func TestTheReadmeCloudExampleListsEveryCloudKeyWithSlowMakeMinutesAtThirty(t *t
 			t.Errorf("the README [cloud] example does not list %s", key)
 		}
 	}
-	if !regexp.MustCompile(`(?m)^slow_make_minutes\s*=\s*30\s+#\s*\S`).MatchString(example) {
-		t.Error("the README [cloud] example does not give slow_make_minutes = 30 with a one-line meaning")
+	if !regexp.MustCompile(`(?m)^slow_make_minutes\s*=\s*75\s+#\s*\S`).MatchString(example) {
+		t.Error("the README [cloud] example does not give slow_make_minutes = 75 with a one-line meaning")
 	}
 }

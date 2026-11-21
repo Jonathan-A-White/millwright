@@ -131,7 +131,7 @@
 //	hourly_usd      = 0.132
 //	box_cap         = 2
 //	up_minutes      = 60                    # how long a make may run before it reads the box back from Vultr
-//	slow_make_minutes = 30                  # how long a make may run before it is a cloud event and a DAMPERS line
+//	slow_make_minutes = 75                  # how long a make may run before it is a cloud event and a DAMPERS line
 //	no_dispatch_minutes = 30                # how long after its make a box may go with no dispatch before it is destroyed
 //	snapshot        = "<a Vultr snapshot id>"   # contrib/vultr-boost snapshot makes one
 //	command         = "/home/jwhite/millwright/contrib/vultr-boost"
