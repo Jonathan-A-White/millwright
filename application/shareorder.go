@@ -168,7 +168,7 @@ func inShareOrder(ctx context.Context, sorted, running []StoryDetail, rules Epic
 // inShareOrder keeps, given what is running on every host. What a feature waits
 // on is read from the tracker's blocked stories, once, and only when a rig has
 // a share; a tracker that cannot say leaves it to the features themselves.
-func (d Dispatch) shareOrder(ctx context.Context, ready, running []StoryDetail) ([]StoryDetail, []string) {
+func (d Dispatch) shareOrder(ctx context.Context, ready, running []StoryDetail, report *DispatchReport) []StoryDetail {
 	ordered, _, notes := inShareOrder(ctx, ready, running, d.Rules, func() map[string]bool {
 		blocked, err := d.Tracker.BlockedForHost(ctx, d.Host)
 		if err != nil {
@@ -176,7 +176,8 @@ func (d Dispatch) shareOrder(ctx context.Context, ready, running []StoryDetail) 
 		}
 		return featureWaits(blocked)
 	})
-	return ordered, notes
+	report.Notes = append(report.Notes, notes...)
+	return ordered
 }
 
 // inShareOrderOfView is ordered with each rig's share kept, from the beads the
