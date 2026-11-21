@@ -4498,11 +4498,13 @@ wsl -d Ubuntu-24.04 -u root -- sh -c '<writes /etc/systemd/system/fstrim.timer.d
 Paste the printed line, not this one. It needs root, which a Builder does not have,
 so it is the Governor's hands. `mw host trim-setup --bead <bead>` also asks this
 host and each host of `[hands_hosts]` (over its ssh line; `--host <name>` limits
-it) whether it is WSL and has both drop-ins, and files one `mw hands add` step as
+it) whether it is WSL and has both drop-ins, the timer's holding `OnCalendar=daily`
+(a host with the old drop-in, `ConditionVirtualization=` only, is not done: its timer
+stays weekly), and files one `mw hands add` step as
 root (`wsl-fstrim-<host>`, with its way back) on the bead for each that lacks
-them; a host it cannot ask is said and skipped. The `wsl-trim` check of `mw
-doctor` is faulty on a WSL host whose `fstrim.timer` never ran or last ran over
-8 days ago, and names this command. `mw host trim-setup --check` prints no line and
+them or has the old one; a host it cannot ask is said and skipped. The `wsl-trim` check of `mw
+doctor` is faulty on a WSL host whose `fstrim.timer` never ran, last ran over
+8 days ago, or is not daily (systemd's `TimersCalendar` holds no `OnCalendar=daily`), and names this command and the root line. `mw host trim-setup --check` prints no line and
 files nothing: it lists `pending trim step: <host>` for every WSL host (this one and
 each of `[hands_hosts]`) that lacks the drop-ins and exits non-zero while any is
 listed, so a host that never got its step is found by running it (the desktop's

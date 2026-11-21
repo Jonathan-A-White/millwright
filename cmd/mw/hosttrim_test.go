@@ -211,3 +211,29 @@ func TestTheOtherHostPastesCarryNoPromptAndWslFlagsIsOneLine(t *testing.T) {
 		}
 	}
 }
+
+// mw-6ww.185.17: a host whose timer drop-in is the old weekly one is not done:
+// --bead files its step, --check lists it as pending, and each says why.
+func TestHostTrimSetupTreatsTheOldWeeklyDropInAsNotDone(t *testing.T) {
+	posternHome(t, "http://unused", "", "")
+	fakeHandsPush(t, nil)
+	log := bdRecording(t, `[{"id": "mw-gq6.1020", "title": "Trim", "status": "open", "issue_type": "task"}]`)
+	hostTrimStates(t, "laptop", map[string]string{"laptop": doctor.WSLTrimOldDropIn, "done": doctor.WSLTrimHasDropIn})
+
+	out, err := runMw(t, "host", "trim-setup", "--check")
+	if err == nil || !strings.Contains(out, "pending trim step: laptop\n") || strings.Contains(out, "pending trim step: done") {
+		t.Errorf("expected --check to fail listing laptop only, got %v %q", err, out)
+	}
+
+	out, err = runMw(t, "host", "trim-setup", "--bead", "mw-gq6.1020")
+	if err != nil {
+		t.Fatalf("mw host trim-setup --bead failed: %v\n%s", err, out)
+	}
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls), "HANDS STEP wsl-fstrim-laptop on laptop as root:") {
+		t.Errorf("expected a step for the host with the old drop-in, got:\n%s", calls)
+	}
+	if !strings.Contains(out, "laptop: WSL, has the old weekly drop-in") || !strings.Contains(out, doctor.WSLTrimPowerShellLine()) {
+		t.Errorf("expected the old drop-in said and the root line printed, got %q", out)
+	}
+}

@@ -82,8 +82,8 @@ func newHostTrimSetupCmd() *cobra.Command {
 			"weekly trim never runs and the vhdx only grows until the Windows drive fills (the desktop's D:,\n" +
 			"mw-6ww.156). trim-setup prints the one Windows PowerShell line that, pasted once per WSL host,\n" +
 			"writes the two drop-ins that reset the conditions (the timer's also runs it daily, not weekly), reloads systemd, restarts fstrim.timer and runs one trim at once.\n\n" +
-			"It then asks this host, and each host of [hands_hosts], whether it is WSL and has the drop-ins\n" +
-			"(--host limits it to the hosts named). With --bead it files, for each WSL host that lacks them,\n" +
+			"It then asks this host, and each host of [hands_hosts], whether it is WSL and has the drop-ins, the\n" +
+			"timer's holding OnCalendar=daily (a host with the old weekly one is set up again; --host limits it to the hosts named). With --bead it files, for each WSL host that lacks them,\n" +
 			"one `mw hands add` step as root on that bead (id " + hostTrimStepPrefix + "<host>), which the\n" +
 			"Governor approves in Postern. A host that cannot be asked is said, not failed. The wsl-trim check\n" +
 			"of mw doctor names this command when fstrim.timer has not run in 8 days.\n\n" +
@@ -132,17 +132,21 @@ func newHostTrimSetupCmd() *cobra.Command {
 					fmt.Fprintf(out, "%s: not WSL, nothing to do\n", name)
 				case doctor.WSLTrimHasDropIn:
 					fmt.Fprintf(out, "%s: already has the drop-in\n", name)
-				case doctor.WSLTrimLacksDropIn:
+				case doctor.WSLTrimLacksDropIn, doctor.WSLTrimOldDropIn:
+					lacks := "lacks the drop-in"
+					if state == doctor.WSLTrimOldDropIn {
+						lacks = "has the old weekly drop-in (no OnCalendar=daily)"
+					}
 					if check {
 						fmt.Fprintf(out, "pending trim step: %s\n", name)
 						pending = append(pending, name)
 						continue
 					}
 					if bead == "" {
-						fmt.Fprintf(out, "%s: WSL, lacks the drop-in; run again with --bead <bead> to file its step\n", name)
+						fmt.Fprintf(out, "%s: WSL, %s; run again with --bead <bead> to file its step\n", name, lacks)
 						continue
 					}
-					fmt.Fprintf(out, "%s: WSL, lacks the drop-in; filing step %s%s on %s\n", name, hostTrimStepPrefix, name, bead)
+					fmt.Fprintf(out, "%s: WSL, %s; filing step %s%s on %s\n", name, lacks, hostTrimStepPrefix, name, bead)
 					if err := fileHostTrimStep(cmd, bead, name); err != nil {
 						fmt.Fprintf(out, "%s: the step was not filed: %v\n", name, err)
 						failed = append(failed, name)

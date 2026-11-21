@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -229,6 +230,112 @@ func TestWSLTrimProbeScriptSaysWSLAndDropIn(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Errorf("expected the probe to hold %q", want)
 		}
+	}
+}
+
+// runTrimProbe runs the probe script as a shell does, with its two drop-in
+// paths pointed at a temp dir (where the timer's holds timerText and the
+// service's serviceText, a file absent when its text is empty) and a
+// systemd-detect-virt that says virt.
+func runTrimProbe(t *testing.T, virt, timerText, serviceText string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the probe is a shell script")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/bin/sh\necho " + virt + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "systemd-detect-virt"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := doctor.WSLTrimProbeScript()
+	for i, text := range []string{timerText, serviceText} {
+		path := filepath.Join(dir, fmt.Sprintf("dropin%d.conf", i))
+		if text != "" {
+			if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		script = strings.ReplaceAll(script, doctor.WSLTrimDropIns[i], path)
+	}
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("the probe script failed: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// mw-6ww.185.17: the probe said has-dropin for any host holding both files, so
+// the daily calendar of mw-gq6.1614 reached no host already set up (the desktop,
+// the Laptop, whose timer drop-in holds [Unit] ConditionVirtualization= only).
+func TestWSLTrimProbeReadsTheOldWeeklyDropInAsNotDone(t *testing.T) {
+	const old = "[Unit]\nConditionVirtualization=\n"
+	const service = "[Unit]\nConditionVirtualization=\n"
+	daily := old + "[Timer]\nOnCalendar=\nOnCalendar=daily\n"
+	for _, tt := range []struct{ name, virt, timer, service, want string }{
+		{"the old drop-in", "wsl", old, service, doctor.WSLTrimOldDropIn},
+		{"the daily drop-in", "wsl", daily, service, doctor.WSLTrimHasDropIn},
+		{"no timer drop-in", "wsl", "", service, doctor.WSLTrimLacksDropIn},
+		{"no service drop-in", "wsl", daily, "", doctor.WSLTrimLacksDropIn},
+		{"a weekly calendar set by hand", "wsl", old + "[Timer]\nOnCalendar=weekly\n", service, doctor.WSLTrimOldDropIn},
+		{"not WSL", "none", old, service, doctor.WSLTrimNotWSL},
+	} {
+		if got := runTrimProbe(t, tt.virt, tt.timer, tt.service); got != tt.want {
+			t.Errorf("%s: the probe printed %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+// fakeTrimSystemctlCalendar is a stand-in for systemctl whose fstrim.timer ran at
+// ranAt and whose calendar systemd lists as calendar (TimersCalendar, as `systemctl
+// show` prints it).
+func fakeTrimSystemctlCalendar(t *testing.T, ranAt time.Time, calendar string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for systemctl is a shell script")
+	}
+	program := filepath.Join(t.TempDir(), "systemctl-stand-in")
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = show ] && [ "$2" = fstrim.timer ]; then
+  echo "LastTriggerUSec=@%d"
+  echo "LoadState=loaded"
+  echo "TimersCalendar={ OnCalendar=%s ; next_elapse=Mon 2026-11-09 00:00:00 UTC }"
+  exit 0
+fi
+exit 1
+`, ranAt.Unix(), calendar)
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return program
+}
+
+// mw-6ww.185.17: a host whose fstrim timer is weekly is faulty even when the
+// weekly trim ran lately, and the doctor names the root line that makes it daily.
+func TestWSLTrimIsFaultyWhenFstrimTimerIsWeekly(t *testing.T) {
+	program := fakeTrimSystemctlCalendar(t, trimNow.Add(-time.Hour), "weekly")
+	check := &doctor.WSLTrim{Program: program, DetectVirt: detectVirt("wsl"), DropIns: []string{}, Now: func() time.Time { return trimNow }}
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty for a weekly timer that ran an hour ago, got %v %q", verdict, reason)
+	}
+	for _, want := range []string{"weekly", "daily", "mw host trim-setup", doctor.WSLTrimRootScript()} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("expected the reason to name %q, got %q", want, reason)
+		}
+	}
+}
+
+func TestWSLTrimIsOkWhenFstrimTimerIsDaily(t *testing.T) {
+	program := fakeTrimSystemctlCalendar(t, trimNow.Add(-time.Hour), "daily")
+	check := &doctor.WSLTrim{Program: program, DetectVirt: detectVirt("wsl"), DropIns: []string{}, Now: func() time.Time { return trimNow }}
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok for a daily timer that ran an hour ago, got %v %q", verdict, reason)
 	}
 }
 

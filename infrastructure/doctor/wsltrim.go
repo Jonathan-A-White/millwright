@@ -31,7 +31,7 @@ const WSLTrimName = "wsl-trim"
 const WSLTrimCureCommand = "mw host trim-setup"
 
 // WSLTrimMaxAge is how long fstrim.timer may go without running before the
-// check is faulty: the timer is weekly, so a day's slack.
+// check is faulty: the timer was weekly, so a day's slack.
 const WSLTrimMaxAge = 8 * 24 * time.Hour
 
 // The wsl-trim check's damper: its cure is one note to the Mayor and nothing
@@ -101,19 +101,28 @@ func WSLTrimPowerShellLine() string {
 	return "wsl -d " + WSLTrimDistro + " -u root -- sh -c '" + WSLTrimRootScript() + "'"
 }
 
-// What WSLTrimProbeScript prints.
+// What WSLTrimProbeScript prints. WSLTrimOldDropIn is a host that has both
+// files but whose timer's holds no OnCalendar=daily: the drop-in as it was
+// before mw-gq6.1614, which leaves the timer weekly (mw-6ww.185.17).
 const (
 	WSLTrimNotWSL      = "not-wsl"
 	WSLTrimHasDropIn   = "has-dropin"
 	WSLTrimLacksDropIn = "lacks-dropin"
+	WSLTrimOldDropIn   = "old-dropin"
 )
+
+// wslTrimDailyLine is the line of the timer's drop-in that makes it daily.
+const wslTrimDailyLine = "OnCalendar=daily"
 
 // WSLTrimProbeScript is the shell script that says, on whatever host runs it
 // and with no root, whether that host is WSL and whether both drop-ins are
-// there: it prints one of WSLTrimNotWSL, WSLTrimHasDropIn, WSLTrimLacksDropIn.
+// there and the timer's makes it daily: it prints one of WSLTrimNotWSL,
+// WSLTrimHasDropIn, WSLTrimOldDropIn, WSLTrimLacksDropIn. It holds no quote, so
+// it passes through `ssh <host> sh -c '<script>'`.
 func WSLTrimProbeScript() string {
 	return `[ "$(systemd-detect-virt 2>/dev/null)" = wsl ] || { echo ` + WSLTrimNotWSL + `; exit 0; }; ` +
-		`if [ -f ` + WSLTrimDropIns[0] + ` ] && [ -f ` + WSLTrimDropIns[1] + ` ]; then echo ` + WSLTrimHasDropIn +
+		`if [ -f ` + WSLTrimDropIns[0] + ` ] && [ -f ` + WSLTrimDropIns[1] + ` ]; then ` +
+		`if grep -qx ` + wslTrimDailyLine + ` ` + WSLTrimDropIns[0] + `; then echo ` + WSLTrimHasDropIn + `; else echo ` + WSLTrimOldDropIn + `; fi` +
 		`; else echo ` + WSLTrimLacksDropIn + `; fi`
 }
 
@@ -122,7 +131,8 @@ func WSLTrimProbeScript() string {
 // so the vhdx only grows until the Windows drive fills; the root-disk-budget
 // check reads ext4 used bytes, which trimming does not change, and so cannot
 // see it. This check asks systemd when fstrim.timer last ran: faulty when it
-// never did or last did over WSLTrimMaxAge ago, naming WSLTrimCureCommand. On
+// never did or last did over WSLTrimMaxAge ago, or when its calendar is not
+// daily (systemd's TimersCalendar), naming WSLTrimCureCommand. On
 // a host that is not WSL (systemd-detect-virt) it is inert. It changes nothing
 // on the host: the cure needs root, which only the Governor's hands have, so
 // its cure is one note to the Mayor.
@@ -155,7 +165,7 @@ func (w *WSLTrim) Probe(ctx context.Context) (application.Verdict, string) {
 	if virt != "wsl" {
 		return application.DoctorOK, "n/a: not a WSL host (systemd-detect-virt says " + virt + ")"
 	}
-	out, err := w.systemctl(ctx, "show", "fstrim.timer", "-p", "LoadState", "-p", "LastTriggerUSec", "--timestamp=unix")
+	out, err := w.systemctl(ctx, "show", "fstrim.timer", "-p", "LoadState", "-p", "LastTriggerUSec", "-p", "TimersCalendar", "--timestamp=unix")
 	if err != nil {
 		return application.DoctorCannotTell, fmt.Sprintf("systemctl show fstrim.timer: %v", err)
 	}
@@ -170,6 +180,10 @@ func (w *WSLTrim) Probe(ctx context.Context) (application.Verdict, string) {
 	age := w.now().Sub(last)
 	if age > WSLTrimMaxAge {
 		return application.DoctorFaulty, fmt.Sprintf("fstrim.timer last ran %d days ago on this WSL host%s; cure: %s", int(age/(24*time.Hour)), w.installSaid(), WSLTrimCureCommand)
+	}
+	if cal := props["TimersCalendar"]; cal != "" && !strings.Contains(cal, wslTrimDailyLine) {
+		return application.DoctorFaulty, fmt.Sprintf("fstrim.timer last ran %d days ago but is not daily (systemd lists %s), so a weekly trim is slower than the vhdx grows%s; cure: %s, or as root on this host: %s",
+			int(age/(24*time.Hour)), cal, w.installSaid(), WSLTrimCureCommand, WSLTrimRootScript())
 	}
 	return application.DoctorOK, fmt.Sprintf("fstrim.timer last ran %d days ago", int(age/(24*time.Hour)))
 }
@@ -189,9 +203,24 @@ func (w *WSLTrim) installSaid() string {
 		}
 	}
 	if len(missing) == 0 {
-		return ""
+		return w.oldDropInSaid(dropIns)
 	}
 	return fmt.Sprintf(" (the fstrim drop-ins are not installed: %s missing)", strings.Join(missing, ", "))
+}
+
+// oldDropInSaid says, when the timer's drop-in is there but holds no
+// OnCalendar=daily, that it is the old one that leaves the timer weekly; it is
+// empty when the drop-in is daily or is not among dropIns.
+func (w *WSLTrim) oldDropInSaid(dropIns []string) string {
+	for _, path := range dropIns {
+		if path != WSLTrimDropIns[0] {
+			continue
+		}
+		if text, err := os.ReadFile(path); err == nil && !strings.Contains(string(text), wslTrimDailyLine) {
+			return " (the timer's drop-in " + path + " is the old one with no " + wslTrimDailyLine + ")"
+		}
+	}
+	return ""
 }
 
 // CureLeavesFault implements application.DoctorStandsAfterCure: the cure is a
@@ -205,7 +234,7 @@ func (w *WSLTrim) Cure(ctx context.Context) error {
 	if w.Note == nil {
 		return nil
 	}
-	return w.Note(ctx, "wsl-trim: fstrim.timer on this WSL host has not run in over 8 days (or never), so the vhdx only grows until the Windows drive fills. "+
+	return w.Note(ctx, "wsl-trim: fstrim.timer on this WSL host has not run in over 8 days (or never), or is still weekly (its drop-in has no OnCalendar=daily), so the vhdx only grows until the Windows drive fills. "+
 		"Run `"+WSLTrimCureCommand+" --bead <bead>` to file the root step for the Governor's hands on every WSL host that lacks it, "+
 		"or run `"+WSLTrimCureCommand+"` alone for the one Windows PowerShell line to paste once.")
 }
