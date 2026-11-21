@@ -80,7 +80,7 @@ func aFixerThatEnded(t *testing.T, ended application.SessionStatus, result strin
 	land := application.BatchLand{
 		Next: application.Next{
 			Landing: landing, Runner: endedRunner{apptest.NewFakeRunner(), ended},
-			Boot: application.SeatBoot{Vault: vault, Harness: claude.New(), Seat: "builder", Host: "laptop"},
+			Boot:  application.SeatBoot{Vault: vault, Harness: claude.New(), Seat: "builder", Host: "laptop"},
 			Vault: vault, Host: "laptop", Seat: "builder", Out: io.Discard, Err: io.Discard,
 		},
 		Records: diffRecords{}, Fix: true,
