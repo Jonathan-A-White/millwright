@@ -518,3 +518,185 @@ func TestGristGrindANewVersionIsRefusedUnlessTheTestKeyBringsItInAnEvalTalk(t *t
 		})
 	}
 }
+
+// millSender is both ends of the wire for an eval: each send is sealed and
+// posted by the real GristSend as the factory's test key, put before the real
+// mill as the backend would, ground in one pass of it, and its answer brought
+// back as GristSend reports one.
+type millSender struct {
+	t     *testing.T
+	mill  application.GristGrind
+	inbox *apptest.FakePostern
+	sent  []application.GristSendRequest
+}
+
+func (m *millSender) Run(ctx context.Context, req application.GristSendRequest) (application.GristSendReport, error) {
+	m.t.Helper()
+	m.sent = append(m.sent, req)
+	millKey, _, _ := (&fakeMillKey{made: true}).PublicKey()
+	outbox := apptest.NewFakePostern()
+	outbox.Mine = application.PosternMe{Mill: millKey}
+	send := application.GristSend{Postern: outbox, Cipher: &apptest.FakeCipher{From: blobFactoryKey}, Keys: &fakeMillKey{made: true}}
+	wait := req.Wait
+	req.Wait = 0
+	if _, err := send.Run(ctx, req); err != nil {
+		return application.GristSendReport{}, err
+	}
+	var payload application.PosternPayload
+	if err := json.Unmarshal(outbox.Delivered()[0], &payload); err != nil {
+		m.t.Fatal(err)
+	}
+	for _, blob := range outbox.Uploaded() {
+		m.inbox.SetBlob(sha(blob), blob)
+	}
+	txid, before := "direct:e"+string(rune('0'+len(m.sent))), len(m.inbox.Delivered())
+	m.inbox.AddRecord(application.PosternRecord{Txid: txid, Class: application.GristClass, From: blobFactoryKey, To: millKey,
+		Signer: blobFactoryKey, SignerApps: []string{"lampas"}, Ciphertext: payload.Ct})
+	if _, err := m.mill.Run(ctx); err != nil {
+		m.t.Fatal(err)
+	}
+	delivered := m.inbox.Delivered()
+	if len(delivered) != before+1 {
+		m.t.Fatalf("expected the mill to answer %s, got %d answers more", txid, len(delivered)-before)
+	}
+	answer := openFakeAnswer(m.t, delivered[before])
+	report := application.GristSendReport{Txid: txid, Answer: &answer}
+	if answer.Status != application.GristAnswered {
+		return report, &application.GristUnanswered{Txid: txid, Answer: &answer, Wait: wait}
+	}
+	return report, nil
+}
+
+// The schemas of the versioned rig: 1.1's answer is an answer, 1.2's an answer
+// and its source.
+const (
+	answerSchema11 = `{"type": "object", "required": ["answer"], "properties": {"answer": {"type": "string"}}}`
+	answerSchema12 = `{"type": "object", "required": ["answer", "source"], "properties": {"answer": {"type": "string"}, "source": {"type": "string"}}}`
+)
+
+// versionedRig is a lampas rig whose schemas are named by version, with the real
+// send and the real mill behind its eval. Main's tutor grind takes version 1.1,
+// with schemas/tutor/1.1/input.json and schemas/tutor/1.1/answer.json; the
+// branch mw/story adds version 1.2 with the schemas of that name, the grind file
+// naming 1.2's answer schema and more written into it (fields as JSON), and the
+// example asks, which is a request of version 1.2. The session answers answer.
+func versionedRig(t *testing.T, answer string, more ...string) (application.GristSmoke, *millSender, *apptest.FakeGrinder, *apptest.FakeGrinds) {
+	t.Helper()
+	const checkout, commit, refCommit = "/rigs/lampas", "c1", "c2"
+	grind := func(versions, schema string, more ...string) string {
+		fields := append([]string{`"grind": 1, "app": "lampas", "kind": "tutor", "versions": ` + versions,
+			`"model": "sonnet", "effort": "low", "instructions": "grinds/tutor.md", "answerSchema": "` + schema + `"`}, more...)
+		return "{" + strings.Join(fields, ", ") + "}"
+	}
+	grinds := apptest.NewFakeGrinds()
+	for path, text := range map[string]string{
+		"grinds/tutor.json":             grind(`["1.1"]`, "schemas/tutor/1.1/answer.json"),
+		"grinds/tutor.md":               "SAY MAIN",
+		"schemas/tutor/1.1/input.json":  `{"type": "object", "required": ["question"]}`,
+		"schemas/tutor/1.1/answer.json": answerSchema11,
+	} {
+		grinds.SetFile(checkout, commit, path, []byte(text))
+		grinds.SetRefFile(checkout, "mw/story", refCommit, path, []byte(text))
+	}
+	for path, text := range map[string]string{
+		"grinds/tutor.json":               grind(`["1.1", "1.2"]`, "schemas/tutor/1.2/answer.json", more...),
+		"grinds/tutor.md":                 "SAY REF",
+		"schemas/tutor/1.2/input.json":    `{"type": "object", "required": ["question", "passage"]}`,
+		"schemas/tutor/1.2/answer.json":   answerSchema12,
+		"grinds/examples/tutor/asks.json": `{"schemaVersion": "1.2", "request": {"question": "hi", "passage": "John 3"}, "expect": {"answer": {"matches": "ref"}}}`,
+	} {
+		grinds.SetRefFile(checkout, "mw/story", refCommit, path, []byte(text))
+	}
+	grinder := &apptest.FakeGrinder{Result: application.SessionResult{Subtype: "success", Answer: json.RawMessage(answer)}}
+	inbox := apptest.NewFakePostern()
+	keys := &fakeMillKey{made: true}
+	millKey, _, _ := keys.PublicKey()
+	sender := &millSender{t: t, inbox: inbox, mill: application.GristGrind{
+		Postern: inbox, Cipher: &apptest.FakeCipher{From: millKey}, Keys: keys, TestKey: blobFactoryKey,
+		State: apptest.NewFakeGristState(), Grinds: grinds, Grinder: grinder,
+		Pass: &apptest.FakeGristLock{}, Grinding: &apptest.FakeGristLock{}, Host: "laptop",
+		Apps: map[string]string{"lampas": checkout}, TempDir: t.TempDir(),
+		Credits: apptest.UsableCredits(),
+		Now:     func() time.Time { return time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC) },
+	}}
+	return application.GristSmoke{
+		Grinds: grinds, Send: sender, Apps: map[string]string{"lampas": checkout}, TempDir: t.TempDir(),
+		Sleep: func(context.Context, time.Duration) error { return nil },
+	}, sender, grinder, grinds
+}
+
+// compacted is JSON text as the mill gives it to a session.
+func compacted(t *testing.T, text string) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := json.Compact(&b, []byte(text)); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+// A grind whose input and answer schemas are named by version, end to end: an
+// --ref eval of an example of the version the ref adds sends that version's
+// answer schema, as the ref's grind file names it, and the mill's session is
+// given it, with the ref's instructions and the example's own request
+// (mw-gq6.1109).
+func TestEvalWithARefSendsAndGrindsWithTheRefsSchemaOfTheExamplesVersion(t *testing.T) {
+	smoke, sender, grinder, _ := versionedRig(t, `{"answer": "ref", "source": "John 3"}`)
+	var out bytes.Buffer
+	if err := (application.GristEvalExamples{Smoke: smoke, Ref: "mw/story", Out: &out}).Run(context.Background(), "lampas", "tutor", []string{"asks"}); err != nil {
+		t.Fatalf("expected the example of version 1.2 to pass at the ref: %v\n%s", err, out.String())
+	}
+	if len(sender.sent) != 1 || sender.sent[0].Version != "1.2" || sender.sent[0].GrindOverride == nil ||
+		sender.sent[0].GrindOverride.Schema != answerSchema12 || sender.sent[0].GrindOverride.Instructions != "SAY REF" {
+		t.Fatalf("expected one send of version 1.2 bringing the ref's 1.2 answer schema and instructions, got %+v", sender.sent)
+	}
+	calls := grinder.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected one grind, got %d", len(calls))
+	}
+	call := calls[0].Call
+	if call.Schema != compacted(t, answerSchema12) || !strings.HasSuffix(call.System, "SAY REF") {
+		t.Errorf("expected the session given the ref's 1.2 answer schema and instructions, got schema %s and system %q", call.Schema, call.System)
+	}
+	if !strings.Contains(call.Prompt, `"passage":"John 3"`) {
+		t.Errorf("expected the session given the example's request of version 1.2, got %q", call.Prompt)
+	}
+}
+
+// The answer of that eval is held to the ref's schema of the version, by the
+// mill and by the eval: one that fits only main's 1.1 schema does not pass.
+func TestEvalWithARefHoldsTheAnswerToTheRefsSchemaOfTheExamplesVersion(t *testing.T) {
+	smoke, _, grinder, _ := versionedRig(t, `{"answer": "ref"}`)
+	var out bytes.Buffer
+	err := (application.GristEvalExamples{Smoke: smoke, Ref: "mw/story", Out: &out}).Run(context.Background(), "lampas", "tutor", []string{"asks"})
+	if !errors.Is(err, application.ErrGristEvalFailed) {
+		t.Fatalf("expected an answer with no source to fail the example of version 1.2, got %v\n%s", err, out.String())
+	}
+	if len(grinder.Calls()) == 0 {
+		t.Errorf("expected the grist ground and its answer refused, not the grist refused unground\n%s", out.String())
+	}
+}
+
+// What the ref's grind file changes besides its versions is proved by the eval
+// too, end to end: an example with a photo passes at a ref whose grind takes a
+// photo, in a session cut at the ref's timeout and turns, though main's grind
+// takes no photo and sets neither (mw-gq6.1108).
+func TestEvalWithARefIsJudgedByTheRefsGrindFile(t *testing.T) {
+	smoke, sender, grinder, grinds := versionedRig(t, `{"answer": "ref", "source": "John 3"}`,
+		`"attachments": {"min": 1, "max": 1, "mime": ["image/png"]}`, `"timeoutSeconds": 45`, `"maxTurns": 2`)
+	grinds.SetRefFile("/rigs/lampas", "mw/story", "c2", "grinds/examples/tutor/shows.json",
+		[]byte(`{"schemaVersion": "1.2", "request": {"question": "what is this?", "passage": "John 3"}, "photos": ["page.png"], "expect": {"answer": {"matches": "ref"}}}`))
+	grinds.SetRefFile("/rigs/lampas", "mw/story", "c2", "grinds/examples/tutor/page.png", []byte("png bytes"))
+	var out bytes.Buffer
+	if err := (application.GristEvalExamples{Smoke: smoke, Ref: "mw/story", Out: &out}).Run(context.Background(), "lampas", "tutor", []string{"shows"}); err != nil {
+		t.Fatalf("expected the example with a photo to pass at the ref, whose grind takes one: %v\n%s", err, out.String())
+	}
+	calls := grinder.Calls()
+	if len(sender.sent) != 1 || len(calls) != 1 {
+		t.Fatalf("expected one send and one grind, got %d and %d", len(sender.sent), len(calls))
+	}
+	if got := calls[0]; len(got.Files) != 1 || got.Call.Timeout != 45*time.Second || got.Call.MaxTurns != 2 || got.Call.Model != "sonnet" {
+		t.Errorf("expected the session given the photo, cut at the ref's 45s and 2 turns, on main's model, got %d files, %s, %d turns and %s",
+			len(got.Files), got.Call.Timeout, got.Call.MaxTurns, got.Call.Model)
+	}
+}

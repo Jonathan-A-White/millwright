@@ -797,8 +797,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		w.settle(GristRefused, GristReasonNoGrind)
 		return
 	}
-	if err := json.Unmarshal(raw, &w.grind); err != nil || w.grind.Grind != GrindFileFormat ||
-		w.grind.App != name.App || w.grind.Kind != name.Kind ||
+	if err := json.Unmarshal(raw, &w.grind); err != nil || !w.grind.isGrindOf(name) || (found && !w.takeBroughtGrind(name)) ||
 		!(w.grind.Forward != "" || slices.Contains(GrindEfforts, w.grind.Effort)) ||
 		!w.grind.Scoring.langsKnown() {
 		w.settle(GristRefused, GristReasonBrokenGrind)
@@ -816,7 +815,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	if name.Effort != "" {
 		w.effort, w.effortFrom = name.Effort, gristFromGrist
 	}
-	if !slices.Contains(w.grind.Versions, name.V) && !w.overrideTakesVersion(name) {
+	if !slices.Contains(w.grind.Versions, name.V) {
 		w.settle(GristRefused, GristReasonVersion)
 		return
 	}
@@ -850,23 +849,38 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	w.system, w.schema = g.readGrindText(ctx, w, checkout)
 }
 
-// overrideTakesVersion says the grind file the grist brings lists name's
-// version, for the grind of that app and kind: a new version of a kind main has
-// is proved on its branch before it lands. judgeOverride has let only the
-// factory's test key bring a grind file, in an eval or smoke talk, so a live
-// grist's version is main's alone; the model, effort and the rest stay main's
-// (mw-gq6.1104).
-func (w *gristWork) overrideTakesVersion(name GristName) bool {
+// isGrindOf says f is a grind file the mill reads, for the grind name asks for.
+func (f GrindFile) isGrindOf(name GristName) bool {
+	return f.Grind == GrindFileFormat && f.App == name.App && f.Kind == name.Kind
+}
+
+// takeBroughtGrind makes the grind file the grist brings, for a kind main has,
+// the one the grist is judged and ground by, so that what a ref changes in it is
+// proved on its branch before it lands: its versions (mw-gq6.1104), and its
+// attachments, scoring, maxTurns, timeoutSeconds and forward (mw-gq6.1108). Its
+// instructions and answerSchema are paths the mill does not read, for the grist
+// brings their text. The model and effort stay main's, which w.grind holds as it
+// comes in, unless main's grind forwards and so has none: then they are the
+// ref's, as for a kind new to main. judgeOverride has let only the factory's test
+// key bring a grind file, in an eval or smoke talk, so a live grist is judged by
+// main's alone. It reports false, with w.grind as it was, when the file brought
+// is not a grind of name's app and kind: the grist is then refused, for main's
+// grind would prove nothing of the ref. A grist that brings no grind file is
+// judged by main's, as before.
+func (w *gristWork) takeBroughtGrind(name GristName) bool {
 	o := w.plain.GrindOverride
 	if o == nil || len(o.Grind) == 0 {
-		return false
+		return true
 	}
 	var brought GrindFile
-	if json.Unmarshal(o.Grind, &brought) != nil || brought.Grind != GrindFileFormat ||
-		brought.App != name.App || brought.Kind != name.Kind {
+	if json.Unmarshal(o.Grind, &brought) != nil || !brought.isGrindOf(name) {
 		return false
 	}
-	return slices.Contains(brought.Versions, name.V)
+	if w.grind.Forward == "" {
+		brought.Model, brought.Effort = w.grind.Model, w.grind.Effort
+	}
+	w.grind = brought
+	return true
 }
 
 // judgeOverride is why the grind text a grist brings is not taken, or "": a
