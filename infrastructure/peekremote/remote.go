@@ -105,6 +105,19 @@ func (r Remote) LandArgv(host, rig string, scope application.LandScope) ([]strin
 	return r.argv(host, command)
 }
 
+// NightlyArgv is the command that runs the nightly kind of rig on host over its
+// ssh line ("suite": mw suite <rig> --file; "timing": mw timing <rig>), for a run
+// begun apart from the follower (apartproc.Processes.BeginOn).
+func (r Remote) NightlyArgv(host, kind, rig string) ([]string, error) {
+	switch kind {
+	case application.NightlySuiteKind:
+		return r.argv(host, "mw suite "+quote(rig)+" --file")
+	case application.NightlyTimingKind:
+		return r.argv(host, "mw timing "+quote(rig))
+	}
+	return nil, fmt.Errorf("no nightly run of the kind %q to run on %s", kind, host)
+}
+
 // argv is the ssh command that runs command on host, in a login shell.
 func (r Remote) argv(host, command string) ([]string, error) {
 	prefix := strings.Fields(r.Reach[host])

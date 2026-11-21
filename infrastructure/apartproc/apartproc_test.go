@@ -277,3 +277,37 @@ func TestALandingBegunOnAnotherHostIsPendingAndWaitedForAndNotBegunTwice(t *test
 		t.Errorf("expected one landing begun, on cloud14, got %d (%q)", got, args)
 	}
 }
+
+func TestASuiteBegunOnAnotherHostIsTheSuiteAFollowerThatComesBackFindsAndWaitsFor(t *testing.T) {
+	prog := heldStandIn(t) // stands for ssh: it runs until released
+	p := &apartproc.Processes{Dir: t.TempDir(), Program: "unused", Scope: noScope(t), Poll: 20 * time.Millisecond}
+	if err := p.BeginOn(context.Background(), "lampas", "cloud9", []string{prog, "mw@10.0.0.9", "bash -lc 'mw suite lampas --file'"}); err != nil {
+		t.Fatal(err)
+	}
+	// The follower that comes back begins the rig's suite here: it finds the one on cloud9.
+	if err := p.Begin(context.Background(), "lampas"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prog+".go", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Wait(context.Background(), "lampas"); err != nil {
+		t.Fatalf("expected the suite that passed to be told so, got %v", err)
+	}
+	args, _ := os.ReadFile(prog + ".args")
+	if got := strings.Count(string(args), "mw@10.0.0.9 bash -lc"); got != 1 {
+		t.Errorf("expected one suite begun, on cloud9, got %d (%q)", got, args)
+	}
+}
+
+func TestATimingRunOnAnotherHostThatFailsIsToldInItsOwnWords(t *testing.T) {
+	prog := standIn(t, "0", 1)
+	p := &apartproc.Processes{Dir: t.TempDir(), Program: "unused", Scope: noScope(t), Poll: 20 * time.Millisecond, Label: "the timing run of "}
+	if err := p.BeginOn(context.Background(), "lampas", "cloud9", []string{prog, "mw@10.0.0.9", "bash -lc 'mw timing lampas'"}); err != nil {
+		t.Fatal(err)
+	}
+	err := p.Wait(context.Background(), "lampas")
+	if err == nil || !strings.Contains(err.Error(), "the timing run of lampas failed (exit status 1") {
+		t.Fatalf("expected the timing run's failure in its own words, got %v", err)
+	}
+}

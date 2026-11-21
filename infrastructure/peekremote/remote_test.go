@@ -173,3 +173,27 @@ func TestLandArgvCarriesTheScopeOfTheLanding(t *testing.T) {
 		}
 	}
 }
+
+// A nightly run handed to a host with room runs mw suite <rig> --file or mw
+// timing <rig> there (mw-gq6.1617).
+func TestNightlyArgvIsTheSshCommandThatRunsTheNightlyRunOnTheHost(t *testing.T) {
+	r := Remote{Reach: map[string]string{"cloud9": "ssh mw@10.0.0.9"}}
+	for _, c := range []struct{ kind, want string }{
+		{application.NightlySuiteKind, "bash -lc 'mw suite '\\''lampas'\\'' --file'"},
+		{application.NightlyTimingKind, "bash -lc 'mw timing '\\''lampas'\\'''"},
+	} {
+		argv, err := r.NightlyArgv("cloud9", c.kind, "lampas")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := argv[len(argv)-1]; got != c.want {
+			t.Errorf("%s: got %q, want %q", c.kind, got, c.want)
+		}
+	}
+	if _, err := r.NightlyArgv("cloud9", "todo", "lampas"); err == nil {
+		t.Fatal("expected a kind of run it does not know to be an error")
+	}
+	if _, err := (Remote{}).NightlyArgv("cloud9", application.NightlySuiteKind, "lampas"); err == nil {
+		t.Fatal("expected a host with no way to be reached to be an error")
+	}
+}

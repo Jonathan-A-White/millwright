@@ -36,9 +36,20 @@ type Processes struct {
 	Poll time.Duration
 	// BeginWait is how long Begin waits to see the suite's pid; zero is 10 s.
 	BeginWait time.Duration
+	// Label is what the run is called in what is said of it, before the rig's
+	// name: "the suite of " when empty. The nightly timing run's state is kept by
+	// a Processes of its own, labelled "the timing run of ".
+	Label string
 }
 
 var _ application.SuiteProcesses = (*Processes)(nil)
+
+func (p *Processes) label(rig string) string {
+	if p.Label != "" {
+		return p.Label + rig
+	}
+	return "the suite of " + rig
+}
 
 func (p *Processes) apart() apart {
 	return apart{Dir: p.Dir, Scope: p.Scope, Poll: p.Poll, BeginWait: p.BeginWait}
@@ -49,9 +60,22 @@ func (p *Processes) Begin(ctx context.Context, rig string) error {
 	return p.apart().begin(ctx, rig, "the suite of "+rig, p.Program, "suite", rig, "--file")
 }
 
+// BeginOn is Begin for a run on another host: remote is the ssh command that runs
+// it there (peekremote.Remote.NightlyArgv), run apart from the follower in the
+// state of the rig's run here, so that a run begun on another host is found,
+// waited for and told as one begun here (mw-gq6.1617). As Begin, a run of rig
+// still running or owed is the run.
+func (p *Processes) BeginOn(ctx context.Context, rig, host string, remote []string) error {
+	return p.apart().begin(ctx, rig, p.label(rig)+" on "+host, remote...)
+}
+
 // Wait implements application.SuiteProcesses.
 func (p *Processes) Wait(ctx context.Context, rig string) error {
-	return p.apart().wait(ctx, rig, "the suite of "+rig, "failed on its main")
+	failed := "failed on its main"
+	if p.Label != "" {
+		failed = "failed"
+	}
+	return p.apart().wait(ctx, rig, p.label(rig), failed)
 }
 
 // Landings implements application.LandProcesses: the follower's landings, each

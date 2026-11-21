@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -19,7 +17,9 @@ import (
 // of this host's rigs whose file says nightly_suite = true, one at a time. A rig
 // whose file names suite_every and suite_host is run on that host whenever main
 // has moved and suite_every has passed, and by the home only when its newest
-// result is over 26 hours old. Each suite is a process of this binary of its
+// result is over 26 hours old; while the home is busy, or holds its gate lock for a
+// gate, the home's own nightly runs on another host with room instead
+// (mw-gq6.1617). Each suite is a process of this binary of its
 // own, apart from the follower (in a systemd scope where there is one): a follower restarted by a self-update leaves a suite
 // running, and the one that comes back adopts it and tells its real outcome
 // (mw-gq6.395). Its output goes to a log beside its state, under
@@ -41,9 +41,11 @@ func nightlySuiteSpringJob(host string, suiteHour int, out io.Writer) (applicati
 	if err != nil {
 		return application.SpringJob{}, fmt.Errorf("finding the home directory to keep the suite's state in: %w", err)
 	}
-	detached := application.DetachedSuite{Processes: &apartproc.Processes{
-		Dir: filepath.Join(home, ".local", "state", "mw", "suite"), Program: self,
-	}}
+	detached := application.DetachedSuite{Processes: nightlyApart(self, home, application.NightlySuiteKind)}
+	where, err := nightlyPlace(host, dir, out)
+	if err != nil {
+		return application.SpringJob{}, err
+	}
 	files := vault.New(dir)
 	suite := &application.NightlySuite{
 		Hour: suiteHour, Rigs: rigs, ReadRigs: config.Rigs, Rules: files, History: files,
@@ -51,7 +53,7 @@ func nightlySuiteSpringJob(host string, suiteHour int, out io.Writer) (applicati
 		Home: func(ctx context.Context) (bool, error) {
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},
-		Run: detached.Run,
+		Run: detached.Run, Where: where,
 	}
 	return suite.Job(), nil
 }
