@@ -116,6 +116,41 @@ func TestVoiceKeepAliveWithNoAppPasswordAlertsOnceAndSendsNothing(t *testing.T) 
 	}
 }
 
+func TestVoiceKeepAliveWithNoEnvFileIsOffAndPostsNothing(t *testing.T) {
+	v := newVoiceKeep()
+	v.credEr = application.ErrNoVoiceEnvFile
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		err := v.keep.Run(ctx, false)
+		var skipped *application.SkippedPassError
+		if !errors.As(err, &skipped) || !strings.Contains(skipped.Why, "off: no church-voice.env") {
+			t.Fatalf("expected a skipped pass saying 'off: no church-voice.env', got %v", err)
+		}
+	}
+	if len(v.sender.Sent()) != 0 || len(v.mails) != 0 {
+		t.Errorf("an off job posted %d alerts and sent %d mails", len(v.sender.Sent()), len(v.mails))
+	}
+	// The file arrives: the job is on again.
+	v.credEr = nil
+	if err := v.keep.Run(ctx, false); err != nil || len(v.mails) != 1 {
+		t.Errorf("after the file came: %v, %d mails", err, len(v.mails))
+	}
+}
+
+func TestVoiceKeepAliveDryRunWithNoEnvFileSaysTheJobIsOff(t *testing.T) {
+	v := newVoiceKeep()
+	v.credEr = application.ErrNoVoiceEnvFile
+	if err := v.keep.Run(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(v.out.String(), "off: no church-voice.env") || !strings.Contains(v.out.String(), "would post nothing") {
+		t.Errorf("the dry run did not say the job is off:\n%s", v.out.String())
+	}
+	if len(v.sender.Sent()) != 0 || len(v.mails) != 0 {
+		t.Errorf("a dry run posted %d alerts and sent %d mails", len(v.sender.Sent()), len(v.mails))
+	}
+}
+
 func TestVoiceKeepAliveWithNoTextAddressAlertsAndSaysSo(t *testing.T) {
 	v := newVoiceKeep()
 	v.creds.TextAddress = ""

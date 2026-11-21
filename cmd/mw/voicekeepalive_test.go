@@ -11,10 +11,10 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-func TestVoiceKeepAliveEnvMissingFileIsNoAppPassword(t *testing.T) {
+func TestVoiceKeepAliveEnvMissingFileIsNoEnvFile(t *testing.T) {
 	_, err := readVoiceKeepAliveEnv(filepath.Join(t.TempDir(), "church-voice.env"))
-	if !errors.Is(err, application.ErrNoVoiceAppPassword) {
-		t.Fatalf("expected ErrNoVoiceAppPassword, got %v", err)
+	if !errors.Is(err, application.ErrNoVoiceEnvFile) {
+		t.Fatalf("expected ErrNoVoiceEnvFile, got %v", err)
 	}
 }
 
@@ -52,7 +52,7 @@ func TestVoiceKeepAliveDryRunCommandPrintsTheMailAndNeverTheSecret(t *testing.T)
 	}
 }
 
-func TestVoiceKeepAliveDryRunWithNoFileSaysItWouldAlert(t *testing.T) {
+func TestVoiceKeepAliveDryRunWithNoFileSaysTheJobIsOff(t *testing.T) {
 	cmd := newVoiceKeepAliveCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -60,7 +60,13 @@ func TestVoiceKeepAliveDryRunWithNoFileSaysItWouldAlert(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "no app password yet") || !strings.Contains(out.String(), "sent nothing") {
+	if !strings.Contains(out.String(), "off: no church-voice.env") || !strings.Contains(out.String(), "would post nothing") {
 		t.Errorf("got:\n%s", out.String())
+	}
+}
+
+func TestVoiceKeepAliveHelpSaysTheFileTurnsItOn(t *testing.T) {
+	if !strings.Contains(newVoiceKeepAliveCmd().Long, "turns the job on") {
+		t.Errorf("the help does not say the file turns the job on:\n%s", newVoiceKeepAliveCmd().Long)
 	}
 }
