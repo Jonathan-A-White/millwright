@@ -233,6 +233,10 @@ type Dispatch struct {
 	Network  NetworkReader
 	HeavyNet map[string]bool
 
+	// SkipRigs are the rigs this host declines at dispatch: a ready auto story of
+	// one waits at the skip-rigs gate for another host, until its way out comes.
+	SkipRigs SkipRigs
+
 	// HasGristTestKey says whether this host holds the factory's grist test key,
 	// which a story's checks need when they run mw grist eval or mw grist smoke
 	// (mw-gq6.741). A story that names such a check is passed over on a host
@@ -1258,6 +1262,15 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if !checkedOut {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "rig-not-checked-out", Why: fmt.Sprintf(
 				"the rig %s is not checked out on %s: add it under [rigs] in the config file", path.Rig, d.Host)})
+			continue
+		}
+
+		// gate: skip-rigs
+		// A host that declines the rig leaves its auto stories to the other hosts,
+		// until none has taken one for the way-out wait (mw-6ww.119.11.1.3). A story
+		// pathed to this host by name is taken.
+		if why := d.skipRigsWhy(ctx, id, path.Rig, auto); why != "" {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: SkipRigsGate, Why: why, Waiting: true})
 			continue
 		}
 
@@ -3402,46 +3415,4 @@ func (r DispatchReport) String() string {
 		b.WriteString("  nothing is ready here\n")
 	}
 	return b.String()
-}
-
-// failures is the one sentence a dispatch with failures in it ends with.
-func (r DispatchReport) failures() string {
-	said := make([]string, 0, len(r.Failed))
-	for _, failed := range r.Failed {
-		said = append(said, failed.StoryID+": "+failed.line())
-	}
-	return strings.Join(said, "; ")
-}
-
-// line is one failure as a person reads it, saying plainly whether the story is
-// ready for somebody else again.
-func (f Failed) line() string {
-	if f.Released {
-		return fmt.Sprintf("%v (the claim was given back)", f.Err)
-	}
-	return fmt.Sprintf("%v", f.Err)
-}
-
-// pausedHere reports whether this host is paused: its own log says so, or the
-// note the home's follower mirrored does. A read that fails is said in the
-// report's notes and does not stop the pass, as a log read that fails never has.
-func (d Dispatch) pausedHere(ctx context.Context) (HostPause, bool, error) {
-	var failed error
-	if d.Events != nil {
-		pause, paused, err := PausedHost(ctx, d.Events, d.Host)
-		if paused {
-			return pause, true, nil
-		}
-		failed = err
-	}
-	if d.Memory != nil {
-		pause, paused, err := PausedByNote(ctx, d.Memory, d.Host)
-		if paused {
-			return pause, true, nil
-		}
-		if failed == nil {
-			failed = err
-		}
-	}
-	return HostPause{}, false, failed
 }

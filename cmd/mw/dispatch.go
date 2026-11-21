@@ -571,14 +571,15 @@ func newDispatchCmd() *cobra.Command {
 }
 
 // withHostRoom gives a dispatch what it judges the host's room by: the load and
-// memory limits, the WSL drive floor and the grist room, all from one config's
-// room. The timer's dispatch and the one that ends a close-out are both built
+// memory limits, the WSL drive floor and the grist room, and the rigs the host
+// declines (skip_rigs), all from one config's room. The timer's dispatch and the one that ends a close-out are both built
 // through it, so a Builder started straight after a close-out meets the same room
 // as one the timer starts (mw-gq6.1469;
 // TestEveryDispatchCmdMwBuildsIsGivenTheHostRoom).
 func withHostRoom(d application.Dispatch, room config.RoomSettings) application.Dispatch {
 	d.Room = roomLimits(room)
 	d.Grist = hostGristRoom(room)
+	d.SkipRigs = application.SkipRigs{Rigs: room.Skip.Rigs, Wait: time.Duration(room.Skip.WaitMinutes) * time.Minute}
 	return d
 }
 

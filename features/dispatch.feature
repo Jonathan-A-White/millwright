@@ -594,6 +594,23 @@ Feature: Dispatching the stories this host is ready to work
     And the story "mw-gq6.1" is not claimed
     And dispatch passed over "mw-gq6.1", saying: vps has taken 1 of the 1 sessions it may run at once
 
+  # A host that declines a rig ([dispatch] skip_rigs, mw-6ww.119.11.1.3) leaves the
+  # rig's host=auto stories to the other hosts, with a way out after a wait; a story
+  # that names the host is still taken.
+  Scenario: A story of a declined rig that may run on any host is passed over at the skip-rigs gate
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
+    And this host declines the rig "millwright"
+    When dispatch runs on "vps" with a cap of 4 as a dry run
+    Then no session was started
+    And dispatch passed over "mw-gq6.1" at the gate "skip-rigs"
+    And dispatch passed over "mw-gq6.1", saying: skip-rigs: vps declines the rig millwright
+
+  Scenario: A story of a declined rig that names this host is still taken
+    Given a ready story "mw-gq6.1" of that epic
+    And this host declines the rig "millwright"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+
   # Room (mw-t0z3fu.1): a host takes on a story only while its load is under its
   # core count and its available memory over a floor, for a story that names the
   # host as much as for host=auto. The cap stays the ceiling. A story held back

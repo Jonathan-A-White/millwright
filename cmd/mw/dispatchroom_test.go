@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -56,6 +57,11 @@ func TestWithHostRoomGivesADispatchTheConfigsRoomLimits(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Grist, hostGristRoom(room)) {
 		t.Errorf("Grist = %+v, want what the timer reads: %+v", got.Grist, hostGristRoom(room))
+	}
+
+	skipping := withHostRoom(application.Dispatch{Host: "laptop"}, config.RoomSettings{Skip: config.SkipRigsSettings{Rigs: []string{"millwright"}, WaitMinutes: 30}})
+	if !reflect.DeepEqual(skipping.SkipRigs, application.SkipRigs{Rigs: []string{"millwright"}, Wait: 30 * time.Minute}) {
+		t.Errorf("SkipRigs = %+v, want millwright declined with a way out of 30 minutes", skipping.SkipRigs)
 	}
 
 	off := withHostRoom(application.Dispatch{Host: "laptop"}, config.RoomSettings{LoadPerCore: 1, MinFreeMB: 500})

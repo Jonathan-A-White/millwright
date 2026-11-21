@@ -34,6 +34,7 @@ var hostPassedGates = map[string]bool{
 	"rig-not-checked-out": true,
 	"metered-network":     true,
 	"no-grist-key":        true,
+	SkipRigsGate:          true,
 }
 
 // HostPassedKey is the note a host's dispatch keeps of the ready stories it
@@ -113,6 +114,16 @@ func (d Dispatch) keepHostPassed(ctx context.Context, ready []StoryDetail, repor
 		}
 		kept = append(kept, found)
 	}
+	// A story the way out of skip_rigs let through keeps the time it was first
+	// passed while it is still ready and was not started: passed over again by
+	// no room or the cap, it must not wait the whole way out once more.
+	for _, p := range before {
+		if p.Gate == SkipRigsGate && stillReady[p.Story] && !slices.ContainsFunc(kept, func(k HostPassed) bool { return k.Story == p.Story }) &&
+			!slices.ContainsFunc(report.Started, func(s Started) bool { return s.StoryID == p.Story }) &&
+			!slices.ContainsFunc(report.Failed, func(f Failed) bool { return f.StoryID == p.Story }) {
+			kept = append(kept, p)
+		}
+	}
 	value := FormatHostPassed(kept)
 	if value == FormatHostPassed(ParseHostPassed(was)) {
 		return
@@ -162,6 +173,8 @@ func (p PassedByHost) fix(rig string) string {
 		return fmt.Sprintf("clone %s on %s and mw config set rigs.%s", rig, p.Host, rig)
 	case "metered-network":
 		return fmt.Sprintf("wait for an unmetered network on %s, or set the story's host to one the rig is checked out on", p.Host)
+	case SkipRigsGate:
+		return fmt.Sprintf("take %s out of skip_rigs on %s, or bring up a host that takes it: %s takes it itself after the way out", rig, p.Host, p.Host)
 	case "no-grist-key":
 		return fmt.Sprintf("set grist_test_key_file in the config file on %s, or set the story's host to one that has a grist test key", p.Host)
 	}

@@ -481,7 +481,7 @@ file's `[dispatch]` table. A WSL host also needs `min_drive_free_gb` (default 15
 the Windows task writes into WSL (`~/.local/state/mw/windows-drive-free`; a host
 with no current report is not held back, but `mw doctor wsl-drive-free` is faulty naming the line that installs
 the task). `mw status` names a refusal for the drive under DAMPERS, with the free space and the floor, and
-`mw doctor wsl-drive-free` warns, 'low, not yet refusing', under `drive_warn_gb` (default 30, `0` is off). The cap on sessions is still the ceiling: room only holds
+`mw doctor wsl-drive-free` warns, 'low, not yet refusing', under `drive_warn_gb` (default 30, `0` is off). A host can also decline rigs: `skip_rigs = ["millwright"]` in the same table leaves that rig's `host=auto` stories to the other hosts (gate `skip-rigs`, docs/dispatch-gates.md), taking one itself once none has in `skip_rigs_wait_min` minutes (default 20); a story pathed to the host by name is still taken. The cap on sessions is still the ceiling: room only holds
 back a story the cap would have let through, which stays ready and claimed by
 nobody. A load or memory that cannot be read holds nothing back. A host that loses
 its room, and one that has it back, are each one `job` event (`dispatch-room@<host>`,

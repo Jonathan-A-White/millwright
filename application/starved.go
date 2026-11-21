@@ -79,6 +79,7 @@ var StarvedHolds = map[string]string{
 	"landed":                 "lost close",
 	"blocked":                "blocked",
 	"rig-not-checked-out":    "rig not checked out",
+	"skip-rigs":              "host declines the rig",
 	"smoke-hold":             "smoke hold",
 	"metered-network":        "metered network",
 	"no-grist-key":           "no grist key",

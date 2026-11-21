@@ -24,7 +24,7 @@ MAX_LISTED=5
 # LISTED: one "path ceiling" per line, the path from the tree's root.
 LISTED='
 application/next.go 4166
-application/dispatch.go 3447
+application/dispatch.go 3418
 application/postern.go 2680
 application/apptest/faketracker.go 2837
 infrastructure/config/config.go 4317

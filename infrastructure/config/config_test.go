@@ -3334,3 +3334,24 @@ func TestPaceUsageLineIsSixtyUntilTheTableSaysOtherwise(t *testing.T) {
 		}
 	}
 }
+
+// mw-6ww.119.11.1.3: the [dispatch] table's skip_rigs names the rigs a host
+// declines, skip_rigs_wait_min the way out (default 20).
+func TestSkipRigsKeys(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Room()
+	if err != nil || len(got.Skip.Rigs) != 0 || got.Skip.WaitMinutes != 20 {
+		t.Fatalf("expected no rigs skipped and a way out of 20 minutes by default, got %+v, %v", got.Skip, err)
+	}
+	writeConfig(t, "[dispatch]\nskip_rigs = [\"millwright\", \"fellowship\"]\nskip_rigs_wait_min = 45\n")
+	got, err = config.Room()
+	if err != nil || strings.Join(got.Skip.Rigs, ",") != "millwright,fellowship" || got.Skip.WaitMinutes != 45 {
+		t.Fatalf("expected the two rigs and 45 minutes, got %+v, %v", got.Skip, err)
+	}
+	for _, bad := range []string{"skip_rigs_wait_min = 0\n", "skip_rigs_wait_min = soon\n", "skip_rigs_wait_min = -5\n"} {
+		writeConfig(t, "[dispatch]\n"+bad)
+		if _, err := config.Room(); err == nil || !strings.Contains(err.Error(), "skip_rigs_wait_min") {
+			t.Errorf("expected %q to be refused naming the key, got %v", bad, err)
+		}
+	}
+}

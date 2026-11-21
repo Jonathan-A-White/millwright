@@ -46,6 +46,7 @@
 //	room_min_free_mb   = 2048          # none while less memory than this is available
 //	min_drive_free_gb  = 15            # none while a WSL host's Windows drive has less free than this; 0 is off (mw-gq6.1381, mw-gq6.1428)
 //	drive_warn_gb      = 30            # mw doctor warns, before dispatch stops, under this much free on that drive; 0 is off (mw-gq6.1428)
+//	skip_rigs          = ["millwright"] # this host leaves these rigs' auto stories to the others, taking one itself after skip_rigs_wait_min (20) minutes of none doing so (mw-6ww.119.11.1.3)
 //	grist_cap          = 4             # stories at once while a tutor is in use (default: cap less 2)
 //	grist_recent_s     = 600           # a tutor is in use this long after its last answer
 //	grist_slow_factor  = 1.5           # none while tutor answers take over this times their par
@@ -1516,6 +1517,7 @@ type RoomSettings struct {
 	GristCap           int
 	GristRecentSeconds int
 	GristSlowFactor    float64
+	Skip               SkipRigsSettings // the rigs the host declines, skip_rigs
 }
 
 // Room reports the `[dispatch]` table of ~/.config/mw/config.toml:
@@ -1578,6 +1580,10 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says drive_warn_gb = %q: it must be a whole number of gigabytes, 0 (the warning off) or more", DispatchTable, path, said)
 		}
 		settings.DriveWarnGB = n
+	}
+	var skipErr error
+	if settings.Skip, skipErr = skipRigsIn(path, table); skipErr != nil {
+		return RoomSettings{}, skipErr
 	}
 	settings.GristRecentSeconds, settings.GristSlowFactor = DefaultGristRecentSeconds, DefaultGristSlowFactor
 	for _, key := range []string{"grist_cap", "grist_recent_s"} {
