@@ -139,15 +139,18 @@ func (g *Gateway) Read(ctx context.Context, id, reader string) (application.Mess
 // whoever it is assigned to. A message is read by closing it, so an open
 // message is never one the mailbox holds read: Read is false for all of them,
 // and mw tidy's read row has nothing here to act on until mail carries a read
-// state of its own.
+// state of its own. It is read over the kept connection when there is one, and
+// by bd when there is not or it fails.
 func (g *Gateway) OpenMail(ctx context.Context) ([]application.TidyMail, error) {
-	out, err := g.call(ctx, "list", "--type", TypeMail, "--status", StatusOpen, "--limit", "0", "--json")
-	if err != nil {
-		return nil, err
-	}
-	found, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading the open mail: %w", err)
+	found, ok := g.openMailOverConnection(ctx)
+	if !ok {
+		out, err := g.call(ctx, "list", "--type", TypeMail, "--status", StatusOpen, "--limit", "0", "--json")
+		if err != nil {
+			return nil, err
+		}
+		if found, err = decodeBeads(out); err != nil {
+			return nil, fmt.Errorf("reading the open mail: %w", err)
+		}
 	}
 	open := make([]application.TidyMail, 0, len(found))
 	for _, mail := range inFiledOrder(found) {

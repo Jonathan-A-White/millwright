@@ -22,13 +22,15 @@ func isFormula(b bead) bool {
 // story records the formula as its own, its steps are read again, closed ones
 // too, for the one that does.
 func (g *Gateway) OpenFormulas(ctx context.Context) ([]application.PouredFormula, error) {
-	out, err := g.call(ctx, "list", "--limit", "0", "--brief", "--exclude-type", "mail,event", "--json")
-	if err != nil {
-		return nil, err
-	}
-	open, err := decodeBeads(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading the open beads: %w", err)
+	open, ok := g.openBeadsOverConnection(ctx)
+	if !ok {
+		out, err := g.call(ctx, "list", "--limit", "0", "--brief", "--exclude-type", "mail,event", "--json")
+		if err != nil {
+			return nil, err
+		}
+		if open, err = decodeBeads(out); err != nil {
+			return nil, fmt.Errorf("reading the open beads: %w", err)
+		}
 	}
 
 	live := map[string]string{}
@@ -68,9 +70,11 @@ func (g *Gateway) OpenFormulas(ctx context.Context) ([]application.PouredFormula
 			}
 		}
 		if formula.Story == "" && formula.LiveStory == "" {
-			if formula.Story, err = g.formulaStory(ctx, id); err != nil {
+			story, err := g.formulaStory(ctx, id)
+			if err != nil {
 				return nil, err
 			}
+			formula.Story = story
 		}
 		poured = append(poured, formula)
 	}
@@ -80,13 +84,15 @@ func (g *Gateway) OpenFormulas(ctx context.Context) ([]application.PouredFormula
 // formulaStory reads every step of a formula, closed ones too, for the story
 // one of their titles names.
 func (g *Gateway) formulaStory(ctx context.Context, root string) (string, error) {
-	out, err := g.call(ctx, "list", "--parent", root, "--all", "--limit", "0", "--brief", "--json")
-	if err != nil {
-		return "", err
-	}
-	all, err := decodeBeads(out)
-	if err != nil {
-		return "", fmt.Errorf("reading the steps of %s: %w", root, err)
+	all, ok := g.stepsOverConnection(ctx, root)
+	if !ok {
+		out, err := g.call(ctx, "list", "--parent", root, "--all", "--limit", "0", "--brief", "--json")
+		if err != nil {
+			return "", err
+		}
+		if all, err = decodeBeads(out); err != nil {
+			return "", fmt.Errorf("reading the steps of %s: %w", root, err)
+		}
 	}
 	for _, step := range inWorkedOrder(all) {
 		if story := application.FormulaStoryOf(step.Title); story != "" {
