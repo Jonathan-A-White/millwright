@@ -84,7 +84,7 @@ func (c standInConn) QueryContext(_ context.Context, query string, _ []driver.Na
 		return &standInRows{cols: standInColumns(q)}, nil
 	}
 	switch {
-	case strings.Contains(q, "from issues i") && strings.Contains(q, "leases"):
+	case (strings.Contains(q, "from issues i") || strings.Contains(q, "live join issues i on i.id = live.id")) && strings.Contains(q, "leases"):
 		return &standInRows{cols: []string{"id", "title", "description", "acceptance_criteria", "status", "issue_type", "assignee",
 			"estimated_minutes", "created_at", "started_at", "updated_at", "closed_at", "priority", "metadata", "lease_expires_at", "comment_count"},
 			rows: [][]driver.Value{
