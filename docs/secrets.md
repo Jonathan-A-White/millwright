@@ -37,6 +37,7 @@ token gets its row here before it is put.
 | `boost_beads_password` | the beads server's password, if it has one (optional) | `contrib/vultr-boost`, into the box's cloud-init | change it on the beads server |
 | `ghost_admin_key` | the blog's Ghost Admin API key, `id:secret`, from the custom integration named `millwright` (Ghost admin, Settings, Integrations). **It could publish, schedule, send and delete posts**: the key itself does not stop that. Only `mw ghost draft` holds the rule: it makes and updates drafts, sends no status but draft, and has no call that publishes, schedules, sends or deletes | `mw ghost draft` on a host that holds the age key; the blog's address is `ghost_url` in the config file | Ghost admin, Settings, Integrations: delete the `millwright` custom integration, then make a new one and put its key |
 | `gemini_api_key` | a Google AI Studio API key for Gemini | `mw image` (the key goes in the `x-goog-api-key` header, one request a run; the model is `gemini_model` in the config file) | aistudio.google.com, API keys: delete the key |
+| `ynab_token` | his YNAB personal access token | `mw ynab` and `mw budget sync` (the token goes in the `Authorization` header, never printed or logged; it can read and change his whole budget, and the commands set category targets only) | YNAB, Account Settings, Developer Settings: revoke the token, then make a new one |
 
 `claude.env` is the one row that is not in `secrets.enc.yaml`: it is
 `~/.config/mw/claude.env`, mode 600, on each host that should keep working after

@@ -279,14 +279,14 @@ func (c *ConfigTOML) Set(table, key, literal string) string {
 // reads, which `mw config get` and `mw config set` take without a table.
 var KnownRootConfigKeys = []string{
 	"age_key_file", "beads_backup_minutes", "beads_budget_bytes", "beads_flush_file", "beads_server_host", "beads_sync",
-	"blog_script_hosts", "builder_jobs", "builder_nice", "builder_test_runs", "cap", "deputy_model", "dispatch_sync_tries", "dispatch_sync_wait",
+	"blog_script_hosts", "budget_sheet_id", "budget_sheet_tab", "builder_jobs", "builder_nice", "builder_test_runs", "cap", "deputy_model", "dispatch_sync_tries", "dispatch_sync_wait",
 	"events_log_path", "gate_turns_limit_minutes", "gemini_model", "ghost_url", "giveway_stale", "giveway_tmux_sockets", "google_client_file", "grist_key_file", "grist_state_dir",
 	"grist_test_key_file", "handoff_at", "hands_root_helper", "home_move_bead", "host", "host_silent_hours", "host_sweep_aside_days", "host_sweep_runs_days", "max_attempts", "metered",
 	"millhand_review_model", "millhand_routine_model", "nudge_after_minutes", "nudge_sync_stale_minutes",
 	"postern_backend", "postern_channel", "postern_data", "postern_float_sats", "postern_governor_key",
 	"postern_key_file", "postern_local_url", "postern_snapshot_path", "postern_transcribe_cmd",
 	"postern_view_path", "postern_watchdog_target", "push_tries", "push_wait_seconds", "repath_no_room_minutes", "retired_hosts", "rig_memory_bytes",
-	"stamps_dir", "tick_recheck_seconds", "vault",
+	"stamps_dir", "tick_recheck_seconds", "vault", "ynab_budget_id",
 }
 
 // SplitConfigKey splits "table.key" at its last dot. The table may itself be
