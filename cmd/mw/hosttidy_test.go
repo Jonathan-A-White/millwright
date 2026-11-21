@@ -31,6 +31,8 @@ func exists(path string) bool { _, err := os.Stat(path); return err == nil }
 func TestGoCacheTidyRemovesFilesUnusedForOverADayAndKeepsTheRest(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GOCACHE", dir)
+	home := t.TempDir() // a real run leaves its mark under the home: never the real one
+	t.Setenv("HOME", home)
 	oldAction := goCacheFile(t, dir, "ab", "abcdef01-a", 36*time.Hour)
 	oldData := goCacheFile(t, dir, "ab", "abcdef01-d", 3*24*time.Hour)
 	fresh := goCacheFile(t, dir, "cd", "cd012345-a", 2*time.Hour)
@@ -56,15 +58,24 @@ func TestGoCacheTidyRemovesFilesUnusedForOverADayAndKeepsTheRest(t *testing.T) {
 	if !strings.Contains(out, "removed 2 files") || !strings.Contains(out, "kept 2 files") {
 		t.Errorf("the run does not say what it did: %q", out)
 	}
+	// mw doctor host-upkeep reads the mark of the run that acted (mw-6ww.185.8).
+	if !exists(filepath.Join(home, hostUpkeepStateDir, "host-tidy-go-cache-ran")) {
+		t.Errorf("a real run left no mark under %s", home)
+	}
 }
 
 func TestGoCacheTidyDryRunDeletesNothing(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GOCACHE", dir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	old := goCacheFile(t, dir, "ab", "abcdef01-a", 36*time.Hour)
 	out, err := runMw(t, "host", "tidy", "go-cache", "--dry-run")
 	if err != nil {
 		t.Fatalf("failed: %v\n%s", err, out)
+	}
+	if exists(filepath.Join(home, hostUpkeepStateDir, "host-tidy-go-cache-ran")) {
+		t.Errorf("--dry-run left a mark: it is no run of the tidy")
 	}
 	if !exists(old) {
 		t.Errorf("--dry-run removed %s", old)
@@ -76,6 +87,7 @@ func TestGoCacheTidyDryRunDeletesNothing(t *testing.T) {
 
 func TestGoCacheTidyOfACacheThatIsNotThereIsNoError(t *testing.T) {
 	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "absent"))
+	t.Setenv("HOME", t.TempDir())
 	if out, err := runMw(t, "host", "tidy", "go-cache"); err != nil {
 		t.Fatalf("failed: %v\n%s", err, out)
 	}
