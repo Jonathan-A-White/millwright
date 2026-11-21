@@ -113,6 +113,34 @@ What keeps them from colliding is the locks, not the order: the rig's merge
 slot is per rig, and the host's gate lock stays one for all rigs, so the rigs'
 tests still run one after another (and under `contrib/mw-heavy`, as always).
 
+### After a batch is held red
+
+A batch of several stories held red after its tests ran is landed again by the
+follower at once, not after `batch_every`, and in parts, not one story a batch
+(28 one-story batches cost 26 gate-hours in 4.3 days, mw-6ww.119.11.1.2). The
+parts are read from the batch's line in `metrics/factory.jsonl`:
+
+- The line names a `suspect` when the batch's fixer named one story as the
+  cause (its `CAUSE <story>:` lines; else the one story of its `TOUCHED`
+  lines), or when one story's branch alone changed the files of the failing
+  tests (read from the gate's output). The suspect is left out: the others land
+  as one batch (`mw land <rig> --only <ids>`), then it lands alone.
+- With no suspect the stories land as two halves, oldest first.
+- A part of several held red again goes one story at a time, stopping at the
+  first held red alone; that story is left out of later batches until the rig
+  lands again (as `mw-gq6.1246` made it). A part held does not stop the next.
+
+Every part is a whole gate on the batch as merged, so what is pushed has passed
+as always; a wrong suspect costs one more gate, never a landing. A story the
+fixer named is a guess, never recorded as the cause.
+
+By hand: `mw land <rig> --without <story>` makes one batch of the rest of the
+queue, `--only <story>[,<story>]` of just those, and `mw land <rig> --set-aside
+<story> --why "..."` takes a story out of the queue and lands nothing: its
+branch is kept, its claim is given back held, and a `SET-ASIDE` comment carries
+the why. The next `mw land` takes the rest as one batch; `mw release <story>`
+puts it back.
+
 ## The fixer
 
 A batch with a branch set aside, or whose tests are red, is given one fixer: a
