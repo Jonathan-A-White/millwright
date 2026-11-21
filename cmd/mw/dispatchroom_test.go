@@ -115,3 +115,27 @@ func TestEveryNextCmdMwRunsAfterALandingIsGivenTheHostRoom(t *testing.T) {
 		t.Errorf("Room = %+v, want %+v", got.Room, want)
 	}
 }
+
+// mw-gq6.1412: the Next mw next builds carries the [dispatch] table's room keys, so
+// the wait for room before the run on main alone judges the host as dispatch does:
+// min_drive_free_gb = 0 turns its drive guard off.
+func TestNextCarriesTheRoomLimits(t *testing.T) {
+	for _, tc := range []struct {
+		said    string
+		wantGB  int64
+		noGuard bool
+	}{{"15", 15, false}, {"0", 0, true}} {
+		mwConfig(t, "[dispatch]\nroom_load_per_core = 0.6\nroom_min_free_mb = 700\nmin_drive_free_gb = "+tc.said+"\n")
+		room, err := config.Room()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := withHostNextRoom(application.Next{Host: "laptop"}, room)
+		if int64(got.Room.MinDriveFreeGB) != tc.wantGB || got.Room.NoDriveGuard != tc.noGuard {
+			t.Errorf("min_drive_free_gb = %s: Next.Room = %+v, want MinDriveFreeGB %d, NoDriveGuard %v", tc.said, got.Room, tc.wantGB, tc.noGuard)
+		}
+		if got.Room.LoadPerCore != 0.6 || got.Room.MinFreeMB != 700 {
+			t.Errorf("Next.Room = %+v, want the [dispatch] table's load and memory keys", got.Room)
+		}
+	}
+}
