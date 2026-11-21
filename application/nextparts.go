@@ -104,11 +104,14 @@ func (n Next) trustedPartsRefusal(ctx context.Context, c *closeOut, report *Next
 }
 
 // tested is what a queued story's ledger line says of how it was tested when the
-// gate trusted the parts that passed at the tip: empty when it trusted none.
-func (p *partsAtTip) tested(short string) string {
+// gate trusted the parts that passed at the tip: empty when it trusted none. It
+// names the tip the parts passed at, which is not the branch's once the queue has
+// merged origin's copy of it in.
+func (p *partsAtTip) tested() string {
 	if p == nil || len(p.skipped) == 0 {
 		return ""
 	}
+	short := shortCommit(p.tip)
 	if len(p.skipped) == len(p.names) {
 		specs := "changed specs run at close-out"
 		if p.specs {

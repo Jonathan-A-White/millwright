@@ -162,7 +162,7 @@ func (n Next) queue(ctx context.Context, c *closeOut, report *NextReport) (NextR
 	tested := "mw next re-ran the rig's tests: pass"
 	if c.trusted != "" {
 		tested = fmt.Sprintf("tested by mw check at %s: pass", shortCommit(c.trusted))
-	} else if said := c.parts.tested(shortCommit(c.tip)); said != "" {
+	} else if said := c.parts.tested(); said != "" {
 		tested, report.TestedParts = said, said
 	}
 	outcome := fmt.Sprintf("queued for batch landing as %s at %s (%s), %d commits, %s",

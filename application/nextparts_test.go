@@ -77,7 +77,7 @@ func TestEveryPartPassedAtTheTipRunsNoPart(t *testing.T) {
 		t.Errorf("expected no part run, got %v", gate.ran)
 	}
 	want := "tested by mw check, parts at abc: pass; changed specs run at close-out"
-	if got := c.parts.tested("abc"); got != want {
+	if got := c.parts.tested(); got != want {
 		t.Errorf("expected the ledger to say %q, got %q", want, got)
 	}
 }
@@ -107,7 +107,7 @@ func TestAPartAtAnOlderTipIsTheOnlyPartRun(t *testing.T) {
 		t.Errorf("expected part 4 alone to run, got %v", gate.ran)
 	}
 	want := "tested by mw check, parts 1, 2, 3, 5, 6, 7, 8, 9, 10, 11 of 11 at abc: pass; part 4 (p4) run at close-out: pass"
-	if got := c.parts.tested("abc"); got != want {
+	if got := c.parts.tested(); got != want {
 		t.Errorf("expected the ledger to say %q, got %q", want, got)
 	}
 }
@@ -134,7 +134,7 @@ func TestNoPartPassedAtTheTipReadsNothing(t *testing.T) {
 	if p := n.readPartsAtTip(context.Background(), c, "abc"); p != nil {
 		t.Errorf("expected nothing read, got %+v", p)
 	}
-	if got := (*partsAtTip)(nil).tested("abc"); got != "" {
+	if got := (*partsAtTip)(nil).tested(); got != "" {
 		t.Errorf("expected no ledger words for no trusted part, got %q", got)
 	}
 	if (*partsAtTip)(nil).all() {
@@ -156,7 +156,7 @@ func TestAPassedSpecsRecordAtTheTipIsNotRunAgain(t *testing.T) {
 	if !c.parts.specsPassed() {
 		t.Fatalf("expected the specs read as passed at the tip, got %+v", c.parts)
 	}
-	if got, want := c.parts.tested("abc"), "changed specs passed at abc"; !strings.Contains(got, want) {
+	if got, want := c.parts.tested(), "changed specs passed at abc"; !strings.Contains(got, want) {
 		t.Errorf("expected the ledger to say %q, got %q", want, got)
 	}
 
