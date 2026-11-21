@@ -35,21 +35,26 @@ func targetMonths(c YNABCategory) (months int64, label string, ok bool, why stri
 // sameTarget says the YNAB target already is the sheet's monthly amount: for a
 // target covering several months, when it is within two cents a month of it
 // (his Life Insurance, 4478.20 a year, is 373.20 a month on the sheet, 1.7
-// cents a month from 373.18).
+// cents a month from 373.18). A monthly target one cent off is the same too:
+// YNAB keeps a monthly target a cent from the sheet's (Giving 2158.34 against
+// 2158.33), which is rounding, not a change; two cents off is a change.
 func sameTarget(c YNABCategory, months, sheetMilli int64) bool {
 	if !c.HasTarget {
 		return false
 	}
 	want := sheetMilli * months
-	if months == 1 {
-		return c.GoalTarget == want
-	}
 	diff := c.GoalTarget - want
 	if diff < 0 {
 		diff = -diff
 	}
+	if months == 1 {
+		return diff <= oneCent
+	}
 	return diff <= 20*months
 }
+
+// oneCent is a cent in YNAB's milliunits.
+const oneCent = 10
 
 // TargetText is a category's target as a line shows it, its cadence named when
 // it is not monthly.
