@@ -204,12 +204,50 @@ func suiteStarted(day string, result SuiteResult) time.Time {
 // writeSuite prints the SUITE section: a line for each rig, left out when the
 // report holds none.
 func (r StatusReport) writeSuite(b *strings.Builder) {
-	if len(r.Suites) == 0 {
+	if len(r.Suites) == 0 && len(r.NightlyOn) == 0 {
 		return
 	}
 	clip(b, SuiteHeading)
+	for _, run := range r.NightlyOn {
+		wrapInto(b, "  ", run.Line())
+	}
 	for _, one := range r.Suites {
 		wrapInto(b, "  ", one.Line())
 	}
 	b.WriteString("\n")
+}
+
+// Line is the line printed for a nightly run handed to another host: "suite
+// lampas on cloud9".
+func (r NightlyRun) Line() string { return fmt.Sprintf("%s %s on %s", r.Kind, r.Rig, r.Host) }
+
+// nightlyRuns reads, for each of this host's rigs whose file says nightly_suite
+// or timing_tests, whether the home handed that nightly run to another host and
+// it is still under way (mw-gq6.1617). A rig whose rules or claim cannot be read
+// is left out. Nothing is written.
+func (s Status) nightlyRuns(ctx context.Context) []NightlyRun {
+	if s.Notes == nil || s.Rules == nil {
+		return nil
+	}
+	names := make([]string, 0, len(s.Rigs))
+	for name := range s.Rigs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out []NightlyRun
+	for _, name := range names {
+		rules, err := s.Rules.EpicRequirements(ctx, name)
+		if err != nil {
+			continue
+		}
+		for _, kind := range []string{NightlySuiteKind, NightlyTimingKind} {
+			if kind == NightlySuiteKind && !rules.NightlySuite || kind == NightlyTimingKind && len(rules.TimingTests) == 0 {
+				continue
+			}
+			if host, running := NightlyRunsOn(ctx, s.Notes, kind, name, s.now()); running {
+				out = append(out, NightlyRun{Kind: kind, Rig: name, Host: host})
+			}
+		}
+	}
+	return out
 }

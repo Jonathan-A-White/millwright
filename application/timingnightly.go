@@ -377,6 +377,9 @@ type NightlyTiming struct {
 	// Home says whether this host is the home: only the home runs it.
 	Home func(ctx context.Context) (bool, error)
 	Host string
+	// Where is where a due rig's run is made: on the home, or, while the home is
+	// busy and another host has room, on that host (mw-gq6.1617).
+	Where NightlyPlace
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 	// Out is where the log lines are said.
@@ -614,7 +617,7 @@ func (n *NightlyTiming) run(ctx context.Context) error {
 			errs = append(errs, ctx.Err())
 			break
 		}
-		skipped, err := n.runRig(ctx, one)
+		skipped, err := n.runHere(ctx, one)
 		switch {
 		case err != nil:
 			errs = append(errs, fmt.Errorf("the timing run of %s: %w", one.Rig, err))
@@ -631,6 +634,43 @@ func (n *NightlyTiming) run(ctx context.Context) error {
 		return SkippedPass(strings.Join(skips, "; "))
 	}
 	return nil
+}
+
+// runHere makes one rig's timing run on the home, or, while the home is busy and
+// another host has room, on that host (mw-gq6.1617): its result is kept there,
+// and its bugs filed there, as mw timing <rig> does.
+func (n *NightlyTiming) runHere(ctx context.Context, due TimingDue) (skipped string, err error) {
+	if host, elsewhere := n.Where.Choose(ctx, NightlyTimingKind, due.Rig); elsewhere {
+		return "", n.Where.RunOn(ctx, host, NightlyTimingKind, due.Rig)
+	}
+	return n.runRig(ctx, due)
+}
+
+// RunNow makes the timing run of rig now, on this host, whether or not it is due:
+// mw timing <rig>, which the home runs over ssh on a host with room. The tests are
+// read from the rig's own file, the covered files from what changed since the
+// last passing night, when that can be told.
+func (n *NightlyTiming) RunNow(ctx context.Context, rig string) (skipped string, err error) {
+	rigs, _ := n.config()
+	dir, ok := rigs[rig]
+	if !ok {
+		return "", fmt.Errorf("the rig %s is not one this host has checked out", rig)
+	}
+	rules, err := n.Rules.EpicRequirements(ctx, rig)
+	if err != nil {
+		return "", fmt.Errorf("reading the rules of %s: %w", rig, err)
+	}
+	if len(rules.TimingTests) == 0 {
+		return "", fmt.Errorf("the rig %s has no timing_tests in its rules file in the vault", rig)
+	}
+	due, _, err := n.assess(ctx, dir, rig, rules.TimingTests)
+	if err != nil {
+		return "", err
+	}
+	if due == nil {
+		due = &TimingDue{Rig: rig, RigDir: dir, Globs: rules.TimingTests}
+	}
+	return n.runRig(ctx, *due)
 }
 
 // runRig makes one rig's timing run. A host that never calmed within the bound

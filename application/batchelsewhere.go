@@ -118,18 +118,23 @@ type BatchElsewhere interface {
 	Land(ctx context.Context, host, rig string, scope LandScope) error
 }
 
-// homeBusy says why the home's own landing would wait: its load has reached its
+// homeBusy says why the home's own landing would wait (homeBusyWhy).
+func (b *BatchLandings) homeBusy(ctx context.Context) string {
+	return homeBusyWhy(ctx, b.Load, b.GateHolder)
+}
+
+// homeBusyWhy says why a run on the home would wait: its load has reached its
 // cores (LoadReading.Busy), or its one gate lock is held by another's gate. Empty
 // when neither, and when neither can be read: a home that cannot say it is
-// busy lands as it did.
-func (b *BatchLandings) homeBusy(ctx context.Context) string {
-	if b.Load != nil {
-		if reading, err := b.Load.Load(ctx); err == nil && reading.Busy() {
+// busy runs as it did.
+func homeBusyWhy(ctx context.Context, load HostLoad, gateHolder func() string) string {
+	if load != nil {
+		if reading, err := load.Load(ctx); err == nil && reading.Busy() {
 			return "its " + reading.loadSaid()
 		}
 	}
-	if b.GateHolder != nil {
-		if holder := b.GateHolder(); holder != "" {
+	if gateHolder != nil {
+		if holder := gateHolder(); holder != "" {
 			return "its gate lock is held by " + holder
 		}
 	}
@@ -150,9 +155,15 @@ func (b *BatchLandings) freeHost(ctx context.Context, d batchDue) (string, bool)
 	if err != nil {
 		return "", false
 	}
+	return freestHost(rooms, b.Host)
+}
+
+// freestHost is the host of rooms, but self, that has room and the lowest load
+// for its cores.
+func freestHost(rooms []BatchRoom, self string) (string, bool) {
 	var room []BatchRoom
 	for _, r := range rooms {
-		if r.Host != "" && r.Host != b.Host && r.Free() {
+		if r.Host != "" && r.Host != self && r.Free() {
 			room = append(room, r)
 		}
 	}

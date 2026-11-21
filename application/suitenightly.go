@@ -107,6 +107,10 @@ type NightlySuite struct {
 	Heads RigHeads
 	// Run does mw suite <rig> --file.
 	Run func(ctx context.Context, rig string) error
+	// Where is where the home's nightly is run: on the home, or, while the home is
+	// busy and another host has room, on that host (mw-gq6.1617). A suite a rig's
+	// suite host runs is never handed on.
+	Where NightlyPlace
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 
@@ -148,6 +152,13 @@ func (n *NightlySuite) Job() SpringJob {
 // rules cannot be read, or whose results cannot be, is left out and the error
 // comes back beside the rest.
 func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
+	due, _, err := n.dueAt(ctx)
+	return due, err
+}
+
+// dueAt is due, and which of the rigs are the home's own nightly: those a rig's
+// suite host does not run, and which a busy home may hand to another host.
+func (n *NightlySuite) dueAt(ctx context.Context) (due []string, home map[string]bool, err error) {
 	now := n.now()
 	day := now.Format("2006-01-02")
 	rigs := n.Rigs
@@ -164,7 +175,7 @@ func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	var due, atHome []string
+	var atHome []string
 	var errs []error
 	for _, name := range names {
 		rules, err := n.Rules.EpicRequirements(ctx, name)
@@ -213,14 +224,18 @@ func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
 		if at, err := n.Home(ctx); err != nil {
 			errs = append(errs, err)
 		} else if at {
+			home = map[string]bool{}
+			for _, name := range atHome {
+				home[name] = true
+			}
 			due = append(due, atHome...)
 			sort.Strings(due)
 		}
 	}
 	if len(due) == 0 {
-		return nil, errors.Join(errs...)
+		return nil, nil, errors.Join(errs...)
 	}
-	return due, errors.Join(errs...)
+	return due, home, errors.Join(errs...)
 }
 
 // movedSince says whether the suite host is to run the suite of rig now: no
@@ -252,7 +267,7 @@ func (n *NightlySuite) movedSince(ctx context.Context, rig, dir string, rules do
 // finds nothing more to do. A rig whose suite failed does not stop the next;
 // the pass then fails, naming each.
 func (n *NightlySuite) run(ctx context.Context) error {
-	due, err := n.due(ctx)
+	due, home, err := n.dueAt(ctx)
 	if len(due) == 0 {
 		if err != nil {
 			return err
@@ -280,11 +295,22 @@ func (n *NightlySuite) run(ctx context.Context) error {
 			errs = append(errs, ctx.Err())
 			break
 		}
-		if err := n.Run(ctx, name); err != nil {
+		if err := n.runOne(ctx, name, home[name]); err != nil {
 			errs = append(errs, fmt.Errorf("the suite of %s: %w", name, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// runOne runs the suite of rig: on the home, or, when it is the home's own
+// nightly and the home is busy, on another host with room (mw-gq6.1617).
+func (n *NightlySuite) runOne(ctx context.Context, rig string, homes bool) error {
+	if homes {
+		if host, elsewhere := n.Where.Choose(ctx, NightlySuiteKind, rig); elsewhere {
+			return n.Where.RunOn(ctx, host, NightlySuiteKind, rig)
+		}
+	}
+	return n.Run(ctx, rig)
 }
 
 // SuiteProcesses is the port a nightly suite's process is begun and waited for

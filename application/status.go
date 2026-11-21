@@ -755,6 +755,9 @@ type StatusReport struct {
 	// Suites is how the last whole suite of each rig that runs one nightly went
 	// (mw-8w7xb7.3), in rig order.
 	Suites []SuiteStatus
+	// NightlyOn are the nightly runs the home handed to another host that are
+	// under way, each with the host (mw-gq6.1617).
+	NightlyOn []NightlyRun
 	// LandRush are the rigs that land in batches, one line each, in rig order:
 	// what is queued, the oldest wait, the last batch and the batches held
 	// (plans/0117, Land Rush 6).
@@ -937,6 +940,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		iceboxRead = later(func() (IceboxSummary, error) { return s.Icebox.Icebox(ctx) })
 	}
 	suitesRead := later(func() ([]SuiteStatus, error) { return s.suiteStatuses(ctx), nil })
+	nightlyRead := later(func() ([]NightlyRun, error) { return s.nightlyRuns(ctx), nil })
 	var graphRead func() ([]domain.GraphBead, error)
 	if s.Graph != nil {
 		graphRead = later(func() ([]domain.GraphBead, error) { return s.Graph.BeadGraph(ctx) })
@@ -1179,6 +1183,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.UncheckedErrors, report.UncheckedErrorsUnread = s.uncheckedErrors(ctx)
 
 	report.Suites, _ = suitesRead()
+	report.NightlyOn, _ = nightlyRead()
 	report.LandRush = s.landRushStatuses(ctx, work)
 
 	if graphRead != nil {
