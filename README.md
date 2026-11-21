@@ -478,9 +478,11 @@ so under its core count) and at least `room_min_free_mb` of memory is available
 (default 2048, from `MemAvailable` in `/proc/meminfo`); both are in the config
 file's `[dispatch]` table. A WSL host also needs `min_drive_free_gb` (default 15,
 `0` turns it off) free on the Windows drive holding its vhdx, read from the report
-the Windows task writes into WSL (`~/.local/state/mw/windows-drive-free`; a host
-with no current report is not held back, but `mw doctor wsl-drive-free` is faulty naming the line that installs
-the task). `mw status` names a refusal for the drive under DAMPERS, with the free space and the floor, and
+the Windows task writes into WSL (`~/.local/state/mw/windows-drive-free`). A host
+whose kernel says it is WSL (`/proc/version`) and has no current report starts nothing,
+and says so under DAMPERS: the desktop filled its D: that way (mw-gq6.1527);
+`mw host wsl-flag --install-line` prints the line that installs the task, and
+`min_drive_free_gb = 0` turns this off too. `mw status` names a refusal for the drive under DAMPERS, with the free space and the floor, and
 `mw doctor wsl-drive-free` warns, 'low, not yet refusing', under `drive_warn_gb` (default 30, `0` is off). A host can also decline rigs: `skip_rigs = ["millwright"]` in the same table leaves that rig's `host=auto` stories to the other hosts (gate `skip-rigs`, docs/dispatch-gates.md), taking one itself once none has in `skip_rigs_wait_min` minutes (default 20); a story pathed to the host by name is still taken. The cap on sessions is still the ceiling: room only holds
 back a story the cap would have let through, which stays ready and claimed by
 nobody. A load or memory that cannot be read holds nothing back. A host that loses
@@ -4489,7 +4491,7 @@ every deleted file stay in the vhdx, and the Windows drive fills: the desktop's
 trim-setup` prints the one Windows PowerShell line that fixes it:
 
 ```
-wsl -d Ubuntu-24.04 -u root -- sh -c '<writes /etc/systemd/system/fstrim.timer.d/wsl.conf and fstrim.service.d/wsl.conf, each "[Unit]" then an empty "ConditionVirtualization=", then systemctl daemon-reload and systemctl restart fstrim.timer>'
+wsl -d Ubuntu-24.04 -u root -- sh -c '<writes /etc/systemd/system/fstrim.timer.d/wsl.conf and fstrim.service.d/wsl.conf, each "[Unit]" then an empty "ConditionVirtualization=", then systemctl daemon-reload, systemctl restart fstrim.timer and systemctl start fstrim.service>'
 ```
 
 Paste the printed line, not this one. It needs root, which a Builder does not have,

@@ -49,6 +49,9 @@ type Proc struct {
 	// ProcDir is where the kernel lists the host's processes, read for the part
 	// workers running their part (LoadReading.PartWorkers); empty is /proc.
 	ProcDir string
+	// VersionFile is the kernel's version line, read to know a WSL host
+	// (LoadReading.WSL, mw-gq6.1527); empty is /proc/version.
+	VersionFile string
 }
 
 var _ application.HostLoad = Proc{}
@@ -80,7 +83,20 @@ func (p Proc) Load(_ context.Context) (application.LoadReading, error) {
 	reading.DriveName, reading.DriveFreeBytes, reading.DriveKnown = p.driveFree()
 	reading.SwapInKBPerS, reading.SwapOutKBPerS, reading.SwapKnown = p.swapRate()
 	reading.PartWorkers = p.partWorkers()
+	reading.WSL = p.wsl()
 	return reading, nil
+}
+
+// wsl is whether the kernel's version line names Microsoft's WSL kernel
+// ('6.6.87.2-microsoft-standard-WSL2', or WSL 1's '-Microsoft'); a file that
+// cannot be read says it is not.
+func (p Proc) wsl() bool {
+	file := p.VersionFile
+	if file == "" {
+		file = "/proc/version"
+	}
+	raw, err := os.ReadFile(file)
+	return err == nil && strings.Contains(strings.ToLower(string(raw)), "microsoft")
 }
 
 // swapRate is how many kilobytes a second the host swapped in and out over

@@ -34,10 +34,15 @@ type LoadReading struct {
 	// DriveName and DriveFreeBytes are the Windows drive holding a WSL host's
 	// vhdx and the space it has left, from the report the Windows task writes
 	// into WSL, when DriveKnown. A host that is not WSL, or has no current
-	// report, leaves DriveKnown false, and no floor applies (mw-gq6.1381).
+	// report, leaves DriveKnown false, and no floor applies (mw-gq6.1381),
+	// unless the host is known to be WSL (WSL): then it has no room.
 	DriveName      string
 	DriveFreeBytes int64
 	DriveKnown     bool
+	// WSL is whether the host is known to be WSL (its kernel says so), so that
+	// its vhdx lives on a Windows drive the host must see to keep from filling
+	// it: a WSL host with no current drive report has no room (mw-gq6.1527).
+	WSL bool
 	// PartWorkers is how many of the factory's own part workers were running
 	// their part when the load was read: the processes mw check --part N starts
 	// as mw check <story> --part N --part-worker --no-slot, outside the gate lock
@@ -184,15 +189,26 @@ func (r LoadReading) NoRoom(limits RoomLimits) string {
 	if floor := limits.minDriveFreeGB(); !limits.NoDriveGuard && r.DriveKnown && r.DriveFreeBytes < floor<<30 {
 		why = append(why, fmt.Sprintf("%s has %.1f GB free, under %d GB: the WSL disk cannot grow", r.DriveName, float64(r.DriveFreeBytes)/(1<<30), floor))
 	}
+	if r.blindToItsDrive(limits) {
+		why = append(why, blindDriveSaid)
+	}
 	return strings.Join(why, "; ")
 }
 
 // DriveFloorAlarm is the DAMPERS line for a host whose dispatch starts no new
 // Builder because the Windows drive's free space is under the floor: the host,
 // the drive, what it has free and the floor (mw-gq6.1428). It is the same test
-// NoRoom makes, so the line is there exactly while dispatch is refusing for it;
-// false for a host with no current report, one that is not WSL, or the guard off.
+// NoRoom makes, so the line is there exactly while dispatch is refusing for it,
+// a WSL host that cannot see its drive too (mw-gq6.1527); false for a host not
+// known to be WSL with no current report, or the guard off.
 func (r LoadReading) DriveFloorAlarm(host string, limits RoomLimits) (DamperAlarm, bool) {
+	if r.blindToItsDrive(limits) {
+		return DamperAlarm{
+			Principle: DamperDriveFloor,
+			Text:      fmt.Sprintf("%s: %s: dispatch starts no new Builder on %s until the report is written (`mw doctor wsl-drive-free`)", host, blindDriveSaid, host),
+			Identity:  "drive-floor:" + host,
+		}, true
+	}
 	floor := limits.minDriveFreeGB()
 	if limits.NoDriveGuard || !r.DriveKnown || r.DriveFreeBytes >= floor<<30 {
 		return DamperAlarm{}, false
@@ -203,6 +219,20 @@ func (r LoadReading) DriveFloorAlarm(host string, limits RoomLimits) (DamperAlar
 			host, r.DriveName, float64(r.DriveFreeBytes)/(1<<30), floor, host),
 		Identity: "drive-floor:" + host,
 	}, true
+}
+
+// blindDriveSaid is why a WSL host that cannot see its Windows drive has no room.
+const blindDriveSaid = "this WSL host cannot see its Windows drive (no current windows-drive-free report), so nothing would stop its vhdx filling it; " +
+	"`mw host wsl-flag --install-line` prints the line that installs the Windows task that writes it"
+
+// blindToItsDrive is whether the host is known to be WSL and no current report
+// shows its Windows drive, with the guard on. The desktop's WSL is sealed from
+// Windows and the task that reports its D: was never installed there, so its
+// reading had no drive and dispatch went on starting Builders until D: had 3 MB
+// free and WSL would not start (mw-gq6.1527). A host not known to be WSL with no
+// report is held to nothing, as mw-gq6.1381 had it.
+func (r LoadReading) blindToItsDrive(limits RoomLimits) bool {
+	return r.WSL && !r.DriveKnown && !limits.NoDriveGuard
 }
 
 // NoRoomBesidesPartWorkers is NoRoom with the load less the share of the
