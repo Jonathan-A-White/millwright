@@ -50,7 +50,7 @@ func (s *factoryServer) listingReads() int {
 	defer s.mu.Unlock()
 	n := 0
 	for _, q := range s.seen {
-		if l := strings.ToLower(q); strings.Contains(l, "from issues i left join leases") {
+		if l := strings.ToLower(q); strings.Contains(l, "from issues i left join leases") || strings.Contains(l, "live join issues i on i.id = live.id left join leases") {
 			n++
 		}
 	}
@@ -87,7 +87,7 @@ func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.Na
 	s.seen = append(s.seen, query)
 	s.mu.Unlock()
 	switch {
-	case strings.Contains(q, "from issues i left join leases"):
+	case strings.Contains(q, "from issues i left join leases"), strings.Contains(q, "live join issues i on i.id = live.id left join leases"):
 		rows := [][]driver.Value{}
 		for _, b := range s.beads {
 			if s.listed(q, b[0].(string)) {
@@ -209,7 +209,7 @@ func (s *factoryServer) listed(q, id string) bool {
 		return false
 	}
 	openMail := strings.Contains(q, "i.issue_type = 'mail' and i.status = 'open'")
-	if !openMail && !strings.Contains(q, "i.status <> 'closed'") {
+	if !openMail && !strings.Contains(q, "i.status <> 'closed'") && !strings.Contains(q, "status < 'closed'") {
 		return true
 	}
 	for _, b := range s.beads {
@@ -879,5 +879,46 @@ func TestMwQueueReadsTheLiveBeadsOnce(t *testing.T) {
 	}
 	if calls := bdCallsSince(t, asked, 0); len(calls) != 0 {
 		t.Errorf("expected no bd started, got %d:\n%s", len(calls), strings.Join(calls, "\n"))
+	}
+}
+
+// The live beads of a queue are found by ranges of the status on either side
+// of 'closed', never by 'status <> closed': the server cannot read the status
+// index for a not-equal joined with an or, and took 760 to 850 ms at load 12 to
+// 13 where the ranges take about half; a list of the statuses it knows would
+// leave out one it does not (mw-gq6.1446).
+func TestTheLiveBeadsAreFoundByStatusRangesNotByANotEqual(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	server.beads = append(server.beads, []driver.Value{"mw-e.7", "The bead mw-e.7", "", "", "someday", "task", nil, nil,
+		"2026-10-18 09:00:00", nil, "2026-10-18 09:00:00", nil, int64(2), `{}`, nil, int64(0)})
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard),
+		beads.WithRunCache(), beads.WithoutStoryTexts())
+
+	if _, err := g.ReadyForHost(ctx, "desktop"); err != nil {
+		t.Fatal(err)
+	}
+	server.mu.Lock()
+	seen := append([]string(nil), server.seen...)
+	server.mu.Unlock()
+	reads := 0
+	for _, q := range seen {
+		l := strings.ToLower(q)
+		if !strings.Contains(l, "live join issues i on i.id = live.id left join leases") && !strings.Contains(l, "label from labels l join (select id from issues") {
+			continue
+		}
+		reads++
+		if strings.Contains(l, "status <>") || strings.Contains(l, "status !=") {
+			t.Errorf("expected no not-equal on the status in a live read, got %s", q)
+		}
+		for _, want := range []string{"status < 'closed'", "status > 'closed'"} {
+			if !strings.Contains(l, want) {
+				t.Errorf("expected the live read to hold %q, got %s", want, q)
+			}
+		}
+	}
+	if reads != 2 {
+		t.Errorf("expected the beads and the labels read, got %d reads:\n%s", reads, strings.Join(seen, "\n"))
 	}
 }
