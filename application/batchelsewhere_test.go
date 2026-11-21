@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,6 +27,9 @@ type aBatchWithRoomElsewhere struct {
 	load      *apptest.FakeHostLoad
 	holder    string
 	local     []string
+	tracker   *apptest.FakeTracker
+	landings  *application.BatchLandings
+	now       time.Time
 }
 
 func newBatchWithRoomElsewhere(t *testing.T) *aBatchWithRoomElsewhere {
@@ -49,6 +53,8 @@ func newBatchWithRoomElsewhere(t *testing.T) *aBatchWithRoomElsewhere {
 		t:         t,
 		elsewhere: &apptest.FakeBatchElsewhere{},
 		load:      &apptest.FakeHostLoad{Reading: application.LoadReading{Load: 3, Cores: 20}},
+		tracker:   tracker,
+		now:       now,
 	}
 	landings := &application.BatchLandings{
 		Rigs:    map[string]string{"lampas": "/rigs/lampas"},
@@ -66,6 +72,7 @@ func newBatchWithRoomElsewhere(t *testing.T) *aBatchWithRoomElsewhere {
 		Load:       a.load,
 		GateHolder: func() string { return a.holder },
 	}
+	a.landings = landings
 	a.job = landings.Job()
 	return a
 }
@@ -195,5 +202,143 @@ func TestABatchRoomIsReadBackFromWhatTheFarEndPrints(t *testing.T) {
 	}
 	if _, err := application.ParseBatchRoom("cloud14", "Welcome to Ubuntu\n"); err == nil {
 		t.Fatal("expected a banner that says nothing of a room to be an error, not a free host")
+	}
+}
+
+// mw-gq6.1618: a drain (landing = each, mw land <rig> --one) and a held batch
+// landed again in parts (mw land <rig> --only <ids>) are handed to a host with
+// room as a whole-queue batch is, each landing of them on its own.
+
+// landsThe is what mw land does on the far end: the stories its scope takes are
+// landed, the oldest alone for --one.
+func (a *aBatchWithRoomElsewhere) landsThe(scope application.LandScope) {
+	ctx := context.Background()
+	work, err := a.tracker.WorkInHand(ctx)
+	mustDo(a.t, err)
+	for _, d := range work.Running {
+		if !application.QueuedForBatch(d) {
+			continue
+		}
+		if len(scope.Only) > 0 && !containsString(scope.Only, d.Story.ID) {
+			continue
+		}
+		mustDo(a.t, a.tracker.SetStoryState(ctx, d.Story.ID, application.RunState, application.RunLanded, "landed"))
+		if scope.One {
+			return
+		}
+	}
+}
+
+// aDrainOnABusyHome is a follower of lampas, which lands each story by itself,
+// with lp-1 and lp-2 queued: the home is the Laptop at load 26 of 20.
+func aDrainOnABusyHome(t *testing.T) *aBatchWithRoomElsewhere {
+	a := newBatchWithRoomElsewhere(t)
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("lampas", domain.EpicRequirements{Landing: domain.LandingSettings{Mode: domain.LandingEach}})
+	a.landings.Rules = rules
+	a.landings.Land = func(ctx context.Context, rig string, one bool) error {
+		a.local = append(a.local, fmt.Sprintf("%s one=%v", rig, one))
+		a.landsThe(application.LandScope{One: one})
+		return nil
+	}
+	a.job = a.landings.Job()
+	a.load.Reading = application.LoadReading{Load: 26, Cores: 20}
+	a.elsewhere.OnLand = func(_, _ string, scope application.LandScope) { a.landsThe(scope) }
+	return a
+}
+
+func TestBatchRoomADrainOfABusyHomeLandsEachStoryOnAFreeHost(t *testing.T) {
+	a := aDrainOnABusyHome(t)
+	a.elsewhere.Hosts = []application.BatchRoom{free("cloud14", 0.5)}
+	a.run()
+	if got, want := a.elsewhere.Landed(), []string{"cloud14 lampas --one", "cloud14 lampas --one"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected each story of the drain landed by itself on cloud14, got %v", got)
+	}
+	if len(a.local) != 0 {
+		t.Fatalf("expected the home to land none of them, got %v", a.local)
+	}
+}
+
+// The home may calm down between two landings of a drain: the next is its own.
+func TestBatchRoomADrainWhoseHomeCalmsDownLandsTheRestAtHome(t *testing.T) {
+	a := aDrainOnABusyHome(t)
+	a.elsewhere.Hosts = []application.BatchRoom{free("cloud14", 0.5)}
+	a.elsewhere.OnLand = func(_, _ string, scope application.LandScope) {
+		a.landsThe(scope)
+		a.load.Reading = application.LoadReading{Load: 3, Cores: 20}
+	}
+	a.run()
+	if got, want := a.elsewhere.Landed(), []string{"cloud14 lampas --one"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected the first story landed on cloud14, got %v", got)
+	}
+	if want := []string{"lampas one=true"}; !reflect.DeepEqual(a.local, want) {
+		t.Fatalf("expected the second landed at home, got %v", a.local)
+	}
+}
+
+func TestBatchRoomADrainOfABusyHomeWithNoFreeHostKeepsTodaysWaitOnTheHome(t *testing.T) {
+	a := aDrainOnABusyHome(t)
+	a.elsewhere.Hosts = []application.BatchRoom{free("cloud14", 9)} // over its cores
+	a.run()
+	if got := a.elsewhere.Landed(); len(got) != 0 {
+		t.Fatalf("expected no landing on a host with no room, got %v", got)
+	}
+	if want := []string{"lampas one=true", "lampas one=true"}; !reflect.DeepEqual(a.local, want) {
+		t.Fatalf("expected the home to land each story itself, got %v", a.local)
+	}
+}
+
+// aHeldBatchOnABusyHome is a follower of lampas with lp-1 to lp-4 queued whose
+// batch 600 was held red with lp-3 as its suspect; the home is busy.
+func aHeldBatchOnABusyHome(t *testing.T) (*aBatchWithRoomElsewhere, *[]string) {
+	a := newBatchWithRoomElsewhere(t)
+	ids := []string{"lp-1", "lp-2", "lp-3", "lp-4"}
+	for _, id := range ids[2:] {
+		a.tracker.AddStory("e-lampas", domain.Story{ID: id, Title: "The story " + id})
+		mustDo(t, a.tracker.ClaimStory(context.Background(), id))
+		queue(t, a.tracker, id)
+		mustDo(t, a.tracker.SetStoryMetadata(context.Background(), id, map[string]string{
+			application.QueuedAtField: a.now.Add(-2 * time.Hour).Format(time.RFC3339),
+		}))
+	}
+	history := &apptest.FakeBatchMetrics{}
+	line := heldBatch(a.now.Add(-10*time.Minute), 600, ids...)
+	line.Suspect = "lp-3"
+	mustDo(t, history.AppendBatch(context.Background(), line))
+	a.landings.History = history
+	var home []string
+	a.landings.LandScoped = func(_ context.Context, rig string, scope application.LandScope) error {
+		home = append(home, fmt.Sprintf("%s only=%s", rig, strings.Join(scope.Only, ",")))
+		a.landsThe(scope)
+		return nil
+	}
+	a.job = a.landings.Job()
+	a.load.Reading = application.LoadReading{Load: 26, Cores: 20}
+	a.elsewhere.OnLand = func(_, _ string, scope application.LandScope) { a.landsThe(scope) }
+	return a, &home
+}
+
+func TestBatchRoomAHeldBatchInPartsOfABusyHomeLandsEachPartOnAFreeHost(t *testing.T) {
+	a, home := aHeldBatchOnABusyHome(t)
+	a.elsewhere.Hosts = []application.BatchRoom{free("cloud14", 0.5)}
+	a.run()
+	want := []string{"cloud14 lampas --only lp-1,lp-2,lp-4", "cloud14 lampas --only lp-3"}
+	if got := a.elsewhere.Landed(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected the batch of three and then the suspect landed on cloud14, got %v", got)
+	}
+	if len(*home) != 0 {
+		t.Fatalf("expected the home to land none of them, got %v", *home)
+	}
+}
+
+func TestBatchRoomAHeldBatchInPartsOfABusyHomeWithNoFreeHostKeepsTodaysWaitOnTheHome(t *testing.T) {
+	a, home := aHeldBatchOnABusyHome(t)
+	a.elsewhere.Hosts = []application.BatchRoom{{Host: "cloud14", HasRig: true, GateHeldBy: "mw-x.1 check", Load: application.LoadReading{Load: 1, Cores: 8}}}
+	a.run()
+	if got := a.elsewhere.Landed(); len(got) != 0 {
+		t.Fatalf("expected no landing on a host with no room, got %v", got)
+	}
+	if want := []string{"lampas only=lp-1,lp-2,lp-4", "lampas only=lp-3"}; !reflect.DeepEqual(*home, want) {
+		t.Fatalf("expected the home to land the parts, got %v", *home)
 	}
 }

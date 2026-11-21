@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Jonathan-A-White/millwright/application"
 )
 
 // standIn puts an ssh on PATH that records its arguments and prints one line.
@@ -137,7 +139,7 @@ func TestLandRoomIsAnErrorWhenTheHostSaysNothingOfItsRoom(t *testing.T) {
 }
 
 func TestLandArgvIsTheSshCommandThatRunsMwLandOnTheHost(t *testing.T) {
-	argv, err := Remote{Reach: map[string]string{"cloud14": "ssh mw@10.0.0.14"}}.LandArgv("cloud14", "lampas")
+	argv, err := Remote{Reach: map[string]string{"cloud14": "ssh mw@10.0.0.14"}}.LandArgv("cloud14", "lampas", application.LandScope{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +147,29 @@ func TestLandArgvIsTheSshCommandThatRunsMwLandOnTheHost(t *testing.T) {
 	if strings.Join(argv, "|") != strings.Join(want, "|") {
 		t.Fatalf("got %q, want %q", argv, want)
 	}
-	if _, err := (Remote{}).LandArgv("cloud14", "lampas"); err == nil {
+	if _, err := (Remote{}).LandArgv("cloud14", "lampas", application.LandScope{}); err == nil {
 		t.Fatal("expected a host with no way to be reached to be an error")
+	}
+}
+
+// A drain's landing (--one) and a held batch's parts (--only) run on the host
+// with the scope they have here (mw-gq6.1618).
+func TestLandArgvCarriesTheScopeOfTheLanding(t *testing.T) {
+	r := Remote{Reach: map[string]string{"cloud14": "ssh mw@10.0.0.14"}}
+	for _, c := range []struct {
+		scope application.LandScope
+		want  string
+	}{
+		{application.LandScope{One: true}, "mw land '\\''lampas'\\'' --one"},
+		{application.LandScope{Only: []string{"a-1", "a-2"}}, "mw land '\\''lampas'\\'' --only '\\''a-1,a-2'\\''"},
+		{application.LandScope{Without: []string{"a-3"}}, "mw land '\\''lampas'\\'' --without '\\''a-3'\\''"},
+	} {
+		argv, err := r.LandArgv("cloud14", "lampas", c.scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := argv[len(argv)-1]; got != "bash -lc '"+c.want+"'" {
+			t.Errorf("scope %+v: got %q", c.scope, got)
+		}
 	}
 }

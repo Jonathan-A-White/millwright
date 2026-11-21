@@ -112,9 +112,10 @@ type BatchElsewhere interface {
 	// Rooms is what each host but this one that can be reached says of its room to
 	// land rig's batch. A host that could not be asked is a room with its Trouble.
 	Rooms(ctx context.Context, rig string) ([]BatchRoom, error)
-	// Land runs mw land <rig> on host over ssh, apart from the follower as a
-	// landing here is (DetachedLand), and waits for it.
-	Land(ctx context.Context, host, rig string) error
+	// Land runs mw land <rig> on host over ssh, with --one, --only and --without
+	// as the scope names them (the zero scope is the whole queue), apart from the
+	// follower as a landing here is (DetachedLand), and waits for it.
+	Land(ctx context.Context, host, rig string, scope LandScope) error
 }
 
 // homeBusy says why the home's own landing would wait: its load has reached its

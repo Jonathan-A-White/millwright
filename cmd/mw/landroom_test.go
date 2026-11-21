@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
 )
 
@@ -74,14 +75,14 @@ func TestTheHostBookAsksEveryOtherHostForItsRoomAndNamesWhoCouldNotBeAsked(t *te
 func TestTheHostBookLandsABatchOnAHostOverSSHAndWaitsForIt(t *testing.T) {
 	log := aBookOfHostsOverSSH(t)
 	h := testBatchHosts(t)
-	if err := h.Land(context.Background(), "cloud14", "lampas"); err != nil {
+	if err := h.Land(context.Background(), "cloud14", "lampas", application.LandScope{}); err != nil {
 		t.Fatal(err)
 	}
 	calls, _ := os.ReadFile(log)
 	if !strings.Contains(string(calls), "mw@cloud14 bash -lc 'mw land '\\''lampas'\\'''") {
 		t.Fatalf("expected mw land lampas run on cloud14 over ssh, got %q", calls)
 	}
-	if err := h.Land(context.Background(), "cloud99", "lampas"); err == nil || !strings.Contains(err.Error(), "no way to reach cloud99") {
+	if err := h.Land(context.Background(), "cloud99", "lampas", application.LandScope{}); err == nil || !strings.Contains(err.Error(), "no way to reach cloud99") {
 		t.Fatalf("expected a host that is not in the book refused, got %v", err)
 	}
 }

@@ -97,12 +97,12 @@ func (h sshBatchHosts) Rooms(ctx context.Context, rig string) ([]application.Bat
 
 // Land implements application.BatchElsewhere: mw land <rig> on host, begun apart
 // from the follower and waited for as a landing here is.
-func (h sshBatchHosts) Land(ctx context.Context, host, rig string) error {
+func (h sshBatchHosts) Land(ctx context.Context, host, rig string, scope application.LandScope) error {
 	reach, gaps, err := h.reach(ctx)
 	if err != nil {
 		return application.LeftRunning(ctx, fmt.Errorf("reading where %s is reached: %w", host, err))
 	}
-	argv, err := peekremote.Remote{Reach: reach, Gaps: gaps}.LandArgv(host, rig)
+	argv, err := peekremote.Remote{Reach: reach, Gaps: gaps}.LandArgv(host, rig, scope)
 	if err != nil {
 		return application.LeftRunning(ctx, err)
 	}

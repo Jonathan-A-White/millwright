@@ -89,9 +89,20 @@ func (r Remote) LandRoom(ctx context.Context, host, rig string) (application.Bat
 }
 
 // LandArgv is the command that runs mw land <rig> on host over its ssh line, for
-// a landing begun apart from the follower (apartproc.Landings.BeginOn).
-func (r Remote) LandArgv(host, rig string) ([]string, error) {
-	return r.argv(host, "mw land "+quote(rig))
+// a landing begun apart from the follower (apartproc.Landings.BeginOn), with
+// --one, --only and --without as the scope names them.
+func (r Remote) LandArgv(host, rig string, scope application.LandScope) ([]string, error) {
+	command := "mw land " + quote(rig)
+	if scope.One {
+		command += " --one"
+	}
+	if len(scope.Only) > 0 {
+		command += " --only " + quote(strings.Join(scope.Only, ","))
+	}
+	if len(scope.Without) > 0 {
+		command += " --without " + quote(strings.Join(scope.Without, ","))
+	}
+	return r.argv(host, command)
 }
 
 // argv is the ssh command that runs command on host, in a login shell.

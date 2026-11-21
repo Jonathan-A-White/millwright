@@ -1614,6 +1614,8 @@ type QueuedStoryReader interface {
 // runs mw land <rig> there over ssh (BatchElsewhere), and the fixer of that batch
 // is a session of that host. A rig has one batch at a time across all hosts, by
 // its batch claim (BatchClaim), which mw land itself takes (mw-gq6.1616).
+// Each landing of a drain (--one) and each part of a held batch (--only) is
+// handed on the same way, deciding for itself (mw-gq6.1618).
 //
 // A rig whose landing failed (a held batch, which the Mayor is mailed, or a
 // story landed that left the queue as it was) is not tried again until
@@ -2067,19 +2069,13 @@ func (b *BatchLandings) pending(ctx context.Context, due []batchDue) ([]batchDue
 // for ever.
 func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 	if !d.each {
-		// A busy home does not make a rig wait for its load and its gate lock
-		// while another host sits idle: it has the batch landed there (the batch
-		// claim keeps it one batch at a time, mw-gq6.1616).
-		if host, elsewhere := b.freeHost(ctx, d); elsewhere {
-			return b.Elsewhere.Land(ctx, host, d.rig)
-		}
-		return b.Land(ctx, d.rig, false)
+		return b.landWhole(ctx, d)
 	}
 	if d.heldRed > 0 {
 		return b.landHeld(ctx, d)
 	}
 	for left := d.queued; left > 0; {
-		if err := b.Land(ctx, d.rig, true); err != nil {
+		if err := b.landOne(ctx, d); err != nil {
 			return err
 		}
 		queues, err := b.queues(ctx)
@@ -2100,6 +2096,36 @@ func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 		}
 	}
 	return nil
+}
+
+// landWhole lands the whole queue of a rig. A busy home does not make a rig
+// wait for its load and its gate lock while another host sits idle: it has the
+// batch landed there (the batch claim keeps it one batch at a time,
+// mw-gq6.1616). So do the landings of a drain (landOne) and of a held batch in
+// parts (landPart), each deciding for itself (mw-gq6.1618).
+func (b *BatchLandings) landWhole(ctx context.Context, d batchDue) error {
+	if host, elsewhere := b.freeHost(ctx, d); elsewhere {
+		return b.Elsewhere.Land(ctx, host, d.rig, LandScope{})
+	}
+	return b.Land(ctx, d.rig, false)
+}
+
+// landOne lands the oldest queued story of a rig by itself, on a host with room
+// when the home is busy, as mw land <rig> --one there.
+func (b *BatchLandings) landOne(ctx context.Context, d batchDue) error {
+	if host, elsewhere := b.freeHost(ctx, d); elsewhere {
+		return b.Elsewhere.Land(ctx, host, d.rig, LandScope{One: true})
+	}
+	return b.Land(ctx, d.rig, true)
+}
+
+// landScoped lands the stories a scope names (mw land <rig> --only), on a host
+// with room when the home is busy.
+func (b *BatchLandings) landScoped(ctx context.Context, d batchDue, scope LandScope) error {
+	if host, elsewhere := b.freeHost(ctx, d); elsewhere {
+		return b.Elsewhere.Land(ctx, host, d.rig, scope)
+	}
+	return b.LandScoped(ctx, d.rig, scope)
 }
 
 // LandScope is which of a rig's queued stories an mw land takes: Only, when set,
@@ -2125,7 +2151,7 @@ func (b *BatchLandings) landHeld(ctx context.Context, d batchDue) error {
 	b.drained[d.rig] = d.heldRed
 	b.mu.Unlock()
 	if b.LandScoped == nil {
-		return b.Land(ctx, d.rig, false)
+		return b.landWhole(ctx, d)
 	}
 	var errs []error
 	for i, part := range heldParts(d.held, d.suspect) {
@@ -2134,7 +2160,7 @@ func (b *BatchLandings) landHeld(ctx context.Context, d batchDue) error {
 				return errors.Join(append(errs, err)...)
 			}
 		}
-		if err := b.landPart(ctx, d.rig, part); err != nil {
+		if err := b.landPart(ctx, d, part); err != nil {
 			if errors.Is(err, ErrLeftRunning) || ctx.Err() != nil {
 				return err
 			}
@@ -2168,13 +2194,13 @@ func heldParts(ids []string, suspect string) [][]string {
 
 // landPart lands ids as one batch. A batch of several that ends held red, as
 // the rig's last batch line says, is landed again one story at a time.
-func (b *BatchLandings) landPart(ctx context.Context, rig string, ids []string) error {
-	err := b.LandScoped(ctx, rig, LandScope{Only: ids})
-	if err == nil || len(ids) < 2 || errors.Is(err, ErrLeftRunning) || !b.heldRedAgain(ctx, rig, ids) {
+func (b *BatchLandings) landPart(ctx context.Context, d batchDue, ids []string) error {
+	err := b.landScoped(ctx, d, LandScope{Only: ids})
+	if err == nil || len(ids) < 2 || errors.Is(err, ErrLeftRunning) || !b.heldRedAgain(ctx, d.rig, ids) {
 		return err
 	}
 	for _, id := range ids {
-		if err := b.LandScoped(ctx, rig, LandScope{Only: []string{id}}); err != nil {
+		if err := b.landScoped(ctx, d, LandScope{Only: []string{id}}); err != nil {
 			return err
 		}
 	}
