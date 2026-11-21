@@ -66,6 +66,9 @@ func newFileCmd() *cobra.Command {
 			"A story of size L or XL whose acceptance criteria ask for more than one of a new setting, a new\n" +
 			"component and a removal is warned of on stderr, naming the criteria of each (mw-gq6.852): it is\n" +
 			"more than one session finishes. Never a refusal.\n\n" +
+			"A story whose acceptance has a criterion that says it is the landing check 'from his use' or 'not the Builder's'\n" +
+			"is warned of on stderr, as mw path set warns: a Builder is held to every acceptance line, so that check\n" +
+			"belongs on a VERIFY AFTER LANDING line of the description (mw-gq6.1567). Never a refusal.\n\n" +
 			"--check runs every one of these checks and files nothing: it prints every refusal across\n" +
 			"every story of the plan at once, exits non-zero if there is any, and otherwise prints\n" +
 			"the priority each story would be filed at (P0 to P4) and 'ok: <n> stories would be filed'.\n" +

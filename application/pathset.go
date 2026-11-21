@@ -594,7 +594,14 @@ var (
 // lands, after landing or once it is live: a Builder cannot run that before
 // landing, and it is the Mayor's after-landing check (Verify strings, mw verify).
 // A criterion that names a test or a fixture is not warned of. A warning only.
+// notRunnableWarning adds to it what landingCheckWarning says (mw-gq6.1567).
 func (s PathSet) notRunnableWarning(ctx context.Context, id, rig, acceptance string) string {
+	lines := []string{s.liveURLWarning(ctx, id, rig, acceptance), landingCheckWarning(id, acceptance)}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// liveURLWarning is the live-URL half of notRunnableWarning.
+func (s PathSet) liveURLWarning(ctx context.Context, id, rig, acceptance string) string {
 	site := ""
 	if s.Rules != nil && strings.TrimSpace(rig) != "" {
 		if requirements, err := s.Rules.EpicRequirements(ctx, rig); err == nil {

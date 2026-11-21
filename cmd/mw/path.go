@@ -60,6 +60,9 @@ func newPathSetCmd() *cobra.Command {
 			"Writing a size L or XL on a story whose acceptance criteria ask for more than one of a new\n" +
 			"setting, a new component and a removal says so on stderr, naming the criteria (mw-gq6.852).\n" +
 			"The size is also the story's turn cap: XS 60, S 90, M 120, L 160, XL 200, unless max_turns is set.\n\n" +
+			"An acceptance criterion that says it is the landing check 'from his use' or 'not the Builder's' gets a WARN on\n" +
+			"stderr: a Builder is held to every line of the acceptance and cannot run it; put it on a VERIFY AFTER\n" +
+			"LANDING line of the description (mw-gq6.1567). Nothing is refused.\n\n" +
 			"After the write, a story that mw dispatch would pass over is named, before it is un-held: no files key on a\n" +
 			"rig whose file says files_expected = true, a bug with no Sweep: line, a Tester story with no Landed story:\n" +
 			"line. A warning only; nothing is refused for it.\n\n" +
