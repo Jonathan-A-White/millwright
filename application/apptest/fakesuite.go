@@ -305,6 +305,11 @@ func (f *FakeLandProcesses) Begin(ctx context.Context, rig string, _ bool) error
 	return f.FakeSuiteProcesses.Begin(ctx, rig)
 }
 
+// BeginScoped implements application.LandProcesses.
+func (f *FakeLandProcesses) BeginScoped(ctx context.Context, rig string, _ application.LandScope) error {
+	return f.FakeSuiteProcesses.Begin(ctx, rig)
+}
+
 // Waiting says whether something is waiting on the suite of rig.
 func (f *FakeSuiteProcesses) Waiting(rig string) bool {
 	f.mu.Lock()

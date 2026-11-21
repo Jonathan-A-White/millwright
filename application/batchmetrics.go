@@ -61,6 +61,11 @@ type BatchMetric struct {
 	// follower and the next batch read them back (mw-gq6.1246).
 	IDs []string `json:"ids,omitempty"`
 	Red bool     `json:"red,omitempty"`
+	// Suspect is, on a batch of several held red, the one story its fixer named
+	// as the cause, or whose branch alone changed the files of the failing
+	// tests: the next landing leaves it out and lands the others together
+	// (mw-6ww.119.11.1.2). A guess, never a verdict: empty when none is named.
+	Suspect string `json:"suspect,omitempty"`
 }
 
 // Metric is the line the batch leaves, as of at.
@@ -76,6 +81,9 @@ func (r BatchReport) Metric(at time.Time) BatchMetric {
 	if r.Landed {
 		m.IDs = storyIDs(r.Merged)
 	}
+	if m.heldRed() && len(m.IDs) > 1 {
+		m.Suspect = r.suspect()
+	}
 	if r.Tested {
 		m.GateRuns = max(r.GateRuns, 1)
 		m.GateMinutes = r.GateTook.Minutes()
@@ -90,6 +98,45 @@ func (r BatchReport) Metric(at time.Time) BatchMetric {
 		m.RedMinutes = at.Sub(r.RedAt).Minutes()
 	}
 	return m
+}
+
+// suspect is the one story of the batch that made it red, as far as the batch
+// can tell: the story its fixer named as the cause (or, when it named none as a
+// cause, the one whose files it said it touched), else the one whose branch
+// alone changed the files of the failing tests (found, once the tests were red,
+// as failingOwner). Two stories named, or none, or one outside the batch, is
+// none: the guess that is wrong costs one more gate, never a landing.
+func (r BatchReport) suspect() string {
+	if f := r.Fixer; f != nil {
+		// What it said made the batch red is the stronger word: one that names
+		// two stories is no suspect, whatever it touched.
+		if words := f.Causes; len(words) > 0 {
+			return r.onlyStoryOf(words)
+		}
+		if id := r.onlyStoryOf(f.Touched); id != "" {
+			return id
+		}
+	}
+	if slices.Contains(storyIDs(r.Queue), r.failingOwner) {
+		return r.failingOwner
+	}
+	return ""
+}
+
+// onlyStoryOf is the one story of the batch that words name, however many
+// times; empty when they name none of the batch, or more than one.
+func (r BatchReport) onlyStoryOf(words []FixerWord) string {
+	var named string
+	for _, w := range words {
+		if !slices.Contains(storyIDs(r.Queue), w.Story) {
+			return ""
+		}
+		if named != "" && named != w.Story {
+			return ""
+		}
+		named = w.Story
+	}
+	return named
 }
 
 // readBatches are the batch lines, oldest first as the history keeps them: a
@@ -125,7 +172,7 @@ func (m BatchMetric) heldRed() bool { return m.Outcome == BatchHeld && m.Red }
 // HeldRedTogether is the rig's last batch held red with more than one story in
 // it, reached from the end of lines past the batches of one story that were
 // landed alone after it: one story's fault held the rest, so its stories are
-// landed again one at a time (mw-gq6.1246). A line of one story, landed or held
+// landed again in parts (mw-gq6.1246, mw-6ww.119.11.1.2). A line of one story, landed or held
 // red alone, does not end the drain, so a follower made anew goes on with it
 // (mw-m634lgt); a batch of several stories since, or one that left no ids,
 // does. The stories held red alone since are left out of the batch returned.

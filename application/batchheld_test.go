@@ -28,7 +28,7 @@ func heldBatch(at time.Time, number int, ids ...string) application.BatchMetric 
 		Batch: number, Stories: len(ids), IDs: ids, Outcome: application.BatchHeld, Red: true}
 }
 
-func TestAfterABatchHeldRedTheFollowerLandsItsStoriesOneAtATimeAtOnce(t *testing.T) {
+func TestAfterABatchHeldRedTheFollowerLandsItsStoriesInPartsAtOnce(t *testing.T) {
 	j := newLandingJob(t)
 	j.rule("lampas", domain.LandingBatch)
 	ids := []string{"lp-23", "lp-27", "lp-8"}
@@ -48,7 +48,7 @@ func TestAfterABatchHeldRedTheFollowerLandsItsStoriesOneAtATimeAtOnce(t *testing
 		return j.land(ctx, rig, one)
 	}
 	landings := j.landingsOn(j.tracker)
-	landings.Land, landings.History = land, history
+	landings.Land, landings.History, landings.LandScoped = land, history, j.landScoped
 
 	if err := landings.Job().Run(context.Background()); err == nil {
 		t.Fatal("expected the held batch to fail the pass")
@@ -57,21 +57,21 @@ func TestAfterABatchHeldRedTheFollowerLandsItsStoriesOneAtATimeAtOnce(t *testing
 	j.now = j.now.Add(time.Minute)
 	reason, due := landings.Job().Probe(context.Background())
 	if !due {
-		t.Fatal("expected a rig whose batch was held red to be due again at once, its stories one at a time")
+		t.Fatal("expected a rig whose batch was held red to be due again at once, its stories in parts")
 	}
-	if !strings.Contains(reason, "one at a time") {
-		t.Errorf("expected the probe to say the stories land one at a time, got %q", reason)
+	if !strings.Contains(reason, "landed in parts") {
+		t.Errorf("expected the probe to say the stories land in parts, got %q", reason)
 	}
 	mustDo(t, landings.Job().Run(context.Background()))
-	want := []string{"lampas one=false", "lampas one=true", "lampas one=true", "lampas one=true"}
+	want := []string{"lampas one=false", "lampas only=lp-23", "lampas only=lp-27,lp-8"}
 	if !reflect.DeepEqual(j.asked, want) {
-		t.Fatalf("expected the held batch's three stories landed one at a time after it, got %v", j.asked)
+		t.Fatalf("expected the held batch's three stories landed in two halves after it, got %v", j.asked)
 	}
 }
 
 // The follower is begun again after every landing of the factory rig: what a
 // held batch was is read from the batch lines, not kept in its memory.
-func TestAFollowerBegunAfterABatchWasHeldRedStillLandsItsStoriesOneAtATime(t *testing.T) {
+func TestAFollowerBegunAfterABatchWasHeldRedStillLandsItsStoriesInParts(t *testing.T) {
 	j := newLandingJob(t)
 	j.rule("lampas", domain.LandingBatch)
 	j.queued("lampas", "lp-1", 300)
@@ -80,11 +80,11 @@ func TestAFollowerBegunAfterABatchWasHeldRedStillLandsItsStoriesOneAtATime(t *te
 	history := &apptest.FakeBatchMetrics{}
 	mustDo(t, history.AppendBatch(context.Background(), heldBatch(j.now.Add(-10*time.Minute), 524, "lp-1", "lp-2")))
 	landings := j.landingsOn(j.tracker)
-	landings.History = history
+	landings.History, landings.LandScoped = history, j.landScoped
 
 	mustDo(t, landings.Job().Run(context.Background()))
-	// The two the held batch had, alone; lp-3 waits for the next batch.
-	if want := []string{"lampas one=true", "lampas one=true"}; !reflect.DeepEqual(j.asked, want) {
+	// The two the held batch had, each alone; lp-3 waits for the next batch.
+	if want := []string{"lampas only=lp-1", "lampas only=lp-2"}; !reflect.DeepEqual(j.asked, want) {
 		t.Fatalf("expected the held batch's two stories landed alone, got %v", j.asked)
 	}
 }
@@ -105,10 +105,10 @@ func TestAFollowerMadeAnewGoesOnLandingAHeldBatchAlone(t *testing.T) {
 	mustDo(t, history.AppendBatch(ctx, application.BatchMetric{Kind: application.BatchKind, At: j.now.Add(-10 * time.Minute),
 		Rig: "lampas", Batch: 553, Stories: 1, IDs: []string{"lp-1"}, Outcome: application.BatchGreen}))
 	landings := j.landingsOn(j.tracker)
-	landings.History = history
+	landings.History, landings.LandScoped = history, j.landScoped
 
 	mustDo(t, landings.Job().Run(ctx))
-	if want := []string{"lampas one=true", "lampas one=true"}; !reflect.DeepEqual(j.asked, want) {
+	if want := []string{"lampas only=lp-2", "lampas only=lp-3"}; !reflect.DeepEqual(j.asked, want) {
 		t.Fatalf("expected the other two of the held batch landed alone, got %v", j.asked)
 	}
 }
@@ -130,9 +130,9 @@ func TestTheDrainOfAHeldBatchEndsAtTheNextBatchOfSeveralAndSkipsWhatWasHeldAlone
 		mustDo(t, history.AppendBatch(ctx, heldBatch(j.now.Add(-30*time.Minute), 552, "lp-1", "lp-2", "lp-3")))
 		mustDo(t, history.AppendBatch(ctx, single(j.now.Add(-20*time.Minute), 553, application.BatchHeld, "lp-2")))
 		landings := j.landingsOn(j.tracker)
-		landings.History = history
+		landings.History, landings.LandScoped = history, j.landScoped
 		mustDo(t, landings.Job().Run(ctx))
-		if want := []string{"lampas one=true"}; !reflect.DeepEqual(j.asked, want) {
+		if want := []string{"lampas only=lp-3"}; !reflect.DeepEqual(j.asked, want) {
 			t.Fatalf("expected only lp-3 landed alone, got %v", j.asked)
 		}
 	})
@@ -154,9 +154,9 @@ func TestTheDrainOfAHeldBatchEndsAtTheNextBatchOfSeveralAndSkipsWhatWasHeldAlone
 }
 
 // A batch held for the host, not its tests (it never ran them red), and a
-// held story landed alone, are not landed one at a time: the first is the
+// held story landed alone, are not landed in parts: the first is the
 // load's, the second has no other story to free.
-func TestABatchHeldWithoutARedOrAloneIsNotLandedOneAtATime(t *testing.T) {
+func TestABatchHeldWithoutARedOrAloneIsNotLandedInParts(t *testing.T) {
 	for name, line := range map[string]application.BatchMetric{
 		"busy":  {Kind: application.BatchKind, Rig: "lampas", Batch: 9, Stories: 2, IDs: []string{"lp-1", "lp-2"}, Outcome: application.BatchHeld},
 		"alone": heldBatch(time.Time{}, 9, "lp-1"),

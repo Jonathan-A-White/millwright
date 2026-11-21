@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
 )
 
@@ -229,4 +230,22 @@ func noScope(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return prog
+}
+
+// mw-6ww.119.11.1.2: a held batch's stories are landed again in parts, each
+// `mw land <rig> --only <ids>`.
+func TestAScopedLandingRunsMwLandWithItsOnlyAndWithoutLists(t *testing.T) {
+	prog := standIn(t, "0.05", 0)
+	l := &apartproc.Landings{Dir: t.TempDir(), Program: prog, Scope: noScope(t), Poll: 20 * time.Millisecond}
+	scope := application.LandScope{Only: []string{"lp-1", "lp-2"}, Without: []string{"lp-3"}}
+	if err := l.BeginScoped(context.Background(), "lampas", scope); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Wait(context.Background(), "lampas"); err != nil {
+		t.Fatal(err)
+	}
+	args, _ := os.ReadFile(prog + ".args")
+	if got, want := strings.TrimSpace(string(args)), "land lampas --only lp-1,lp-2 --without lp-3"; got != want {
+		t.Errorf("expected mw to be run as %q, got %q", want, got)
+	}
 }

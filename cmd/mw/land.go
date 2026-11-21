@@ -20,6 +20,8 @@ import (
 // branch of a rig that lands in batches (plans/0117, Land Rush 3).
 func newLandCmd() *cobra.Command {
 	var dryRun, one bool
+	var only, without []string
+	var setAside, why string
 
 	cmd := &cobra.Command{
 		Use:   "land <rig>",
@@ -54,6 +56,16 @@ func newLandCmd() *cobra.Command {
 			"story's files only is also pushed to that story's branch at the origin, so the batch landed\n" +
 			"again merges it, and the Held mail says where; one that spans stories stays in the bundle alone.\n\n" +
 			"--one takes only the oldest queued story, whatever else is queued, and lands it by itself.\n\n" +
+			"--only <id>[,<id>...] takes just those queued stories, and --without <id>[,<id>...] leaves those\n" +
+			"queued stories out of this batch; what either skips stays queued for the next. After a batch\n" +
+			"of several is held red, the follower lands its stories again through them: the story its fixer\n" +
+			"named as the cause (or the one whose branch alone changed the failing tests' files) is left\n" +
+			"out, the others land together and it lands alone; with none named the stories land as two\n" +
+			"halves, and only a half held red again goes one story at a time. By hand, the Mayor leaves a\n" +
+			"suspect out with mw land <rig> --without <story>.\n\n" +
+			"--set-aside <story> --why \"...\" takes one queued story out of the batch queue and lands nothing:\n" +
+			"its branch is kept, its claim is given back held, and a SET-ASIDE comment carries the why. The\n" +
+			"next mw land takes the remaining queued stories as one batch; mw release <story> puts it back.\n\n" +
 			"--dry-run prints the batch it would make and does nothing else: nothing is merged, tested,\n" +
 			"pushed, recorded or mailed.",
 		Args: cobra.ExactArgs(1),
@@ -65,6 +77,15 @@ func newLandCmd() *cobra.Command {
 			host, err := config.Host()
 			if err != nil {
 				return err
+			}
+			if setAside != "" || why != "" {
+				if setAside == "" {
+					return fmt.Errorf("land %s: --why goes with --set-aside <story>", args[0])
+				}
+				if dryRun || one || len(only) > 0 || len(without) > 0 {
+					return fmt.Errorf("land %s: --set-aside takes a story out of the queue and lands nothing: it goes with --why and no other flag", args[0])
+				}
+				return application.SetAside{Tracker: mwGateway(dir, host), Host: host, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0], setAside, why)
 			}
 			rigs, err := config.Rigs()
 			if err != nil {
@@ -200,7 +221,7 @@ func newLandCmd() *cobra.Command {
 				Units:        hostUnits(),
 				Stamps:       stamps,
 			}, room)
-			landing := batchLandFor(next, files, dryRun, one, cmd.ErrOrStderr())
+			landing := batchLandFor(next, files, dryRun, application.LandScope{One: one, Only: only, Without: without}, cmd.ErrOrStderr())
 			if self, err := os.Executable(); err == nil {
 				if home, err := os.UserHomeDir(); err == nil {
 					// The grist smoke goes on apart from this landing (mw-apvyg8j).
@@ -214,6 +235,13 @@ func newLandCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"print the batch it would make, oldest queued first, and do nothing else")
+	cmd.Flags().StringSliceVar(&only, "only", nil,
+		"take just these queued stories (ids, comma separated): how the follower lands a held batch in parts")
+	cmd.Flags().StringSliceVar(&without, "without", nil,
+		"leave these queued stories out of this batch (ids, comma separated): they stay queued for the next")
+	cmd.Flags().StringVar(&setAside, "set-aside", "",
+		"take this queued story out of the batch queue: its branch is kept, its claim given back held; needs --why, lands nothing")
+	cmd.Flags().StringVar(&why, "why", "", "why the story is set aside: the SET-ASIDE comment on it carries this")
 	cmd.Flags().BoolVar(&one, "one", false,
 		"take only the oldest queued story: how the follower lands what a rig flipped back to landing = each had queued")
 	return cmd
@@ -223,14 +251,16 @@ func newLandCmd() *cobra.Command {
 // ports on it (withVaultPorts), and the Tester trial of the [tester] table, as
 // mw next gives its Next (mw-gq6.962). A table that cannot be read springs no
 // Tester story and never stops a landing: it is said on errw, and it goes on.
-func batchLandFor(next application.Next, files *vault.Vault, dryRun, one bool, errw io.Writer) application.BatchLand {
+func batchLandFor(next application.Next, files *vault.Vault, dryRun bool, scope application.LandScope, errw io.Writer) application.BatchLand {
 	return application.BatchLand{
 		Next:    withTesterTrial(withVaultPorts(next, files), "mw land", errw),
 		Records: files,
 		Metrics: files,
 		Fix:     true,
 		DryRun:  dryRun,
-		One:     one,
+		One:     scope.One,
+		Only:    scope.Only,
+		Without: scope.Without,
 	}
 }
 

@@ -132,6 +132,12 @@ type BatchLand struct {
 	// rig flipped back to landing = each lands what was left in its queue, one
 	// story at a time (the follower's batch-land job, Land Rush 4).
 	One bool
+	// Only, when set, takes just these queued stories, and Without leaves these
+	// queued ones out of the batch (mw land --only, --without): the follower
+	// lands a held batch's stories in parts through them, the Mayor leaves a
+	// suspect out by hand (mw-6ww.119.11.1.2). What they skip stays queued.
+	Only    []string
+	Without []string
 	// Apart, when set, is where the grist smoke of a landed batch is handed
 	// to be made in a process of its own, so that mw land ends without it
 	// (mw-apvyg8j). Nil makes the smoke in mw land, as the process that is
@@ -236,6 +242,9 @@ type BatchReport struct {
 	// Fixer is the one fixer the batch was given (Land Rush 5), nil when it
 	// was given none.
 	Fixer *BatchFixing
+	// failingOwner is the one story of the batch whose branch alone changed
+	// the files of the tests that failed (findFailingOwner); empty when none.
+	failingOwner string
 
 	Landed bool
 	// Held is why nothing of the batch landed, empty when it landed.
@@ -483,6 +492,7 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport, 
 		queue = append(queue, BatchStory{ID: detail.Story.ID, Title: detail.Story.Title, QueuedAt: detail.QueuedAt, detail: detail, path: path})
 	}
 	SortOldestQueued(queue)
+	queue = b.narrow(queue, report)
 	queue = b.leaveOutHeldAlone(ctx, rig, queue, report)
 	if len(queue) == 0 {
 		return nil, nil
@@ -506,6 +516,32 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport, 
 		kept = kept[:batchMax]
 	}
 	return kept, nil
+}
+
+// narrow keeps of the queue what --only names and leaves out what --without
+// names, each said in the report: what it skips stays queued for the next batch.
+func (b BatchLand) narrow(queue []BatchStory, report *BatchReport) []BatchStory {
+	if len(b.Only) == 0 && len(b.Without) == 0 {
+		return queue
+	}
+	queuedIDs := storyIDs(queue)
+	for _, id := range b.Only {
+		if !slices.Contains(queuedIDs, id) {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s was asked for with --only, but it is not queued, so it is not in this batch", id))
+		}
+	}
+	var kept []BatchStory
+	for _, s := range queue {
+		switch {
+		case len(b.Only) > 0 && !slices.Contains(b.Only, s.ID):
+			// Not asked for: it waits, and says nothing of it.
+		case slices.Contains(b.Without, s.ID):
+			report.Notes = append(report.Notes, fmt.Sprintf("%s is left out of this batch (--without): it stays queued for the next", s.ID))
+		default:
+			kept = append(kept, s)
+		}
+	}
+	return kept
 }
 
 // leaveOutHeldAlone takes out of the queue each story whose tests were red when
@@ -1525,10 +1561,13 @@ type QueuedStoryReader interface {
 // waits BatchEvery the same way, unless its queue changes first (mw-gq6.824).
 //
 // A rig whose last batch was held red with more than one story in it (its
-// History) has those stories landed one at a time, the oldest first, at once
-// the first time, stopping at the first that fails: one story's red held the
-// rest, and the next batch would take them all again (mw-gq6.1246). The story
-// held red alone is left out of the batches after it until one lands.
+// History) has those stories landed again in parts, at once the first time:
+// one story's red held the rest, and the next batch would take them all again
+// (mw-gq6.1246). The story its fixer named as the cause is left out of the
+// others, which land together, and lands alone after them; with none named they
+// land as two halves, and only a half held red again goes one story at a time,
+// stopping at the first that fails (mw-6ww.119.11.1.2). The story held red
+// alone is left out of the batches after it until one lands.
 type BatchLandings struct {
 	// Rigs are the rigs checked out on this host, by name, as the follower
 	// started; ReadRigs, when set, is asked on every pass for the rigs as they
@@ -1544,6 +1583,11 @@ type BatchLandings struct {
 	Home func(ctx context.Context) (bool, error)
 	// Land does mw land <rig>, or with one mw land <rig> --one.
 	Land func(ctx context.Context, rig string, one bool) error
+	// LandScoped does mw land <rig> --only <ids> and --without <ids> for the
+	// stories a scope names: how a batch held red is landed again in parts
+	// (mw-6ww.119.11.1.2). Nil lands what is left of such a batch as the whole
+	// queue, in one.
+	LandScoped func(ctx context.Context, rig string, scope LandScope) error
 	// Pending, when set, names the rigs whose landing runs on apart from the
 	// follower, or ended with no follower told how (DetachedLand.Pending):
 	// each pass waits for those first, due or not, so that a landing a
@@ -1559,8 +1603,8 @@ type BatchLandings struct {
 	// for a rig that has fallen due; zero is DefaultBatchRecheck.
 	Recheck time.Duration
 	// History is the batch lines (BatchMetric), read for each rig's last
-	// batch: one held red with more than one story is landed again one story
-	// at a time, at once (mw-gq6.1246). Nil reads none.
+	// batch: one held red with more than one story is landed again in parts,
+	// at once (mw-gq6.1246, mw-6ww.119.11.1.2). Nil reads none.
 	History BatchHistory
 
 	rigsMu sync.Mutex // guards Rigs once ReadRigs has replaced it
@@ -1568,7 +1612,7 @@ type BatchLandings struct {
 	mu     sync.Mutex
 	failed map[string]time.Time // rig -> when its landing last failed
 	// drained is, for each rig, the number of the batch held red together
-	// whose stories this follower began to land one at a time: it does so at
+	// whose stories this follower began to land again in parts: it does so at
 	// once only once, and after that as any failed landing waits.
 	drained map[string]int
 	// nothing is, for a rig whose last landing ended clean and left its queue
@@ -1629,11 +1673,18 @@ type batchDue struct {
 	queued int
 	queue  batchQueue
 	// heldRed is the batch held red together whose stories this landing
-	// lands one at a time (mw-gq6.1246); 0 for any other landing.
+	// lands again in parts (mw-gq6.1246); 0 for any other landing. held are
+	// the stories of it still queued, in the order it merged them, and suspect
+	// the one it named, when it is among them.
 	heldRed int
+	held    []string
+	suspect string
 }
 
 func (d batchDue) String() string {
+	if d.heldRed > 0 {
+		return fmt.Sprintf("%s (%d queued, batch %d held red, landed in parts)", d.rig, d.queued, d.heldRed)
+	}
 	if d.each {
 		return fmt.Sprintf("%s (%d queued, one at a time)", d.rig, d.queued)
 	}
@@ -1649,15 +1700,15 @@ type batchQueue struct {
 	ids []string
 }
 
-// holding is how many of ids the queue holds.
-func (q batchQueue) holding(ids []string) int {
-	count := 0
+// among is the ids that the queue holds, in the order given.
+func (q batchQueue) among(ids []string) []string {
+	var held []string
 	for _, id := range ids {
 		if slices.Contains(q.ids, id) {
-			count++
+			held = append(held, id)
 		}
 	}
-	return count
+	return held
 }
 
 // same says whether q holds the stories of other and no more.
@@ -1755,15 +1806,18 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 		}
 		settings := rules.LandingSettings()
 		q := queues[name]
-		// A batch held red with more than one story in it is landed again one
-		// story at a time, oldest first, and at once the first time: one
-		// story's red held the rest, and the next batch would take them all
-		// again with it (batch 524 of lampas, mw-gq6.1246).
+		// A batch held red with more than one story in it is landed again in
+		// parts, at once the first time: one story's red held the rest, and the
+		// next batch would take them all again with it (batch 524 of lampas,
+		// mw-gq6.1246). The story its fixer named is left out of the others,
+		// which land together; with none named the batch lands as two halves
+		// (mw-6ww.119.11.1.2).
 		together, heldTogether := HeldRedTogether(rigBatches(batches, name))
-		alone := 0
+		var heldIDs []string
 		if heldTogether && settings.Mode == domain.LandingBatch {
-			alone = q.holding(together.IDs)
+			heldIDs = q.among(together.IDs)
 		}
+		alone := len(heldIDs)
 		first := alone > 0 && b.drained[name] != together.Batch
 		if failed, was := b.failed[name]; was && (held || (!first && now.Sub(failed) < settings.BatchEvery)) {
 			continue
@@ -1776,7 +1830,8 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 			}
 		}
 		if alone > 0 {
-			due = append(due, batchDue{rig: name, each: true, queued: alone, queue: q, heldRed: together.Batch})
+			due = append(due, batchDue{rig: name, each: true, queued: alone, queue: q, heldRed: together.Batch,
+				held: heldIDs, suspect: together.Suspect})
 			continue
 		}
 		if settings.Mode == domain.LandingEach {
@@ -1941,7 +1996,7 @@ func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 		return b.Land(ctx, d.rig, false)
 	}
 	if d.heldRed > 0 {
-		return b.landAlone(ctx, d)
+		return b.landHeld(ctx, d)
 	}
 	for left := d.queued; left > 0; {
 		if err := b.Land(ctx, d.rig, true); err != nil {
@@ -1967,28 +2022,102 @@ func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 	return nil
 }
 
-// landAlone lands the stories of a batch held red together one at a time, the
-// oldest first, as many as it held, and stops at the first landing that fails:
+// LandScope is which of a rig's queued stories an mw land takes: Only, when set,
+// just these, and Without leaves these out; One takes the oldest only.
+type LandScope struct {
+	One     bool
+	Only    []string
+	Without []string
+}
+
+// landHeld lands again the stories of a batch held red together, in parts
+// (mw-6ww.119.11.1.2): the stories but its suspect as one batch, then the suspect
+// alone; with no suspect, in two halves, oldest first. A part held red again,
+// of several, goes one story at a time, stopping at the first held red alone:
 // that story is left out of the batches after it (BatchLand.leaveOutHeldAlone),
-// so the rest of the queue lands without it (mw-gq6.1246).
-func (b *BatchLandings) landAlone(ctx context.Context, d batchDue) error {
+// so the rest of the queue lands without it (mw-gq6.1246). A part held does not
+// stop the next: it is separate work, and what was in it stays queued.
+func (b *BatchLandings) landHeld(ctx context.Context, d batchDue) error {
 	b.mu.Lock()
 	if b.drained == nil {
 		b.drained = map[string]int{}
 	}
 	b.drained[d.rig] = d.heldRed
 	b.mu.Unlock()
-	for left := d.queued; left > 0; left-- {
-		if err := b.Land(ctx, d.rig, true); err != nil {
-			return err
-		}
-		if left > 1 {
+	if b.LandScoped == nil {
+		return b.Land(ctx, d.rig, false)
+	}
+	var errs []error
+	for i, part := range heldParts(d.held, d.suspect) {
+		if i > 0 {
 			if at, err := b.Home(ctx); err != nil || !at {
+				return errors.Join(append(errs, err)...)
+			}
+		}
+		if err := b.landPart(ctx, d.rig, part); err != nil {
+			if errors.Is(err, ErrLeftRunning) || ctx.Err() != nil {
 				return err
 			}
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// heldParts divides the stories of a held batch (oldest first) into the batches
+// they are landed again in: all but the suspect, then the suspect; or, with no
+// suspect among them, two halves. One story is one part.
+func heldParts(ids []string, suspect string) [][]string {
+	switch {
+	case len(ids) == 0:
+		return nil
+	case len(ids) == 1:
+		return [][]string{ids}
+	case slices.Contains(ids, suspect):
+		var rest []string
+		for _, id := range ids {
+			if id != suspect {
+				rest = append(rest, id)
+			}
+		}
+		return [][]string{rest, {suspect}}
+	}
+	half := len(ids) / 2
+	return [][]string{ids[:half], ids[half:]}
+}
+
+// landPart lands ids as one batch. A batch of several that ends held red, as
+// the rig's last batch line says, is landed again one story at a time.
+func (b *BatchLandings) landPart(ctx context.Context, rig string, ids []string) error {
+	err := b.LandScoped(ctx, rig, LandScope{Only: ids})
+	if err == nil || len(ids) < 2 || errors.Is(err, ErrLeftRunning) || !b.heldRedAgain(ctx, rig, ids) {
+		return err
+	}
+	for _, id := range ids {
+		if err := b.LandScoped(ctx, rig, LandScope{Only: []string{id}}); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// heldRedAgain says the rig's last batch line is a batch held red of exactly
+// ids.
+func (b *BatchLandings) heldRedAgain(ctx context.Context, rig string, ids []string) bool {
+	lines := rigBatches(readBatches(ctx, b.History), rig)
+	if len(lines) == 0 {
+		return false
+	}
+	last := lines[len(lines)-1]
+	if !last.heldRed() || len(last.IDs) != len(ids) {
+		return false
+	}
+	for _, id := range last.IDs {
+		if !slices.Contains(ids, id) {
+			return false
+		}
+	}
+	return true
 }
 
 // LandProcesses is the port the follower's landings are begun and waited for
@@ -2001,6 +2130,9 @@ type LandProcesses interface {
 	// landing of rig begun earlier, by this follower or another, is still
 	// running or ended with no follower told how: that one is the landing.
 	Begin(ctx context.Context, rig string, one bool) error
+	// BeginScoped is Begin for a landing of some of the queue: mw land <rig>
+	// with --only and --without as the scope names them.
+	BeginScoped(ctx context.Context, rig string, scope LandScope) error
 	// Wait returns when the landing of rig ends: nil if it landed, an error if
 	// it failed or ended without saying. Once told, it is no longer pending. A
 	// ctx that ends stops the wait, not the landing.
@@ -2021,6 +2153,14 @@ type DetachedLand struct {
 // A wait the follower stopping ends is ErrLeftRunning: the landing goes on.
 func (d DetachedLand) Land(ctx context.Context, rig string, one bool) error {
 	if err := d.Processes.Begin(ctx, rig, one); err != nil {
+		return LeftRunning(ctx, fmt.Errorf("beginning mw land %s: %w", rig, err))
+	}
+	return LeftRunning(ctx, d.Processes.Wait(ctx, rig))
+}
+
+// LandScoped is Land for a landing of some of the queue (LandScope).
+func (d DetachedLand) LandScoped(ctx context.Context, rig string, scope LandScope) error {
+	if err := d.Processes.BeginScoped(ctx, rig, scope); err != nil {
 		return LeftRunning(ctx, fmt.Errorf("beginning mw land %s: %w", rig, err))
 	}
 	return LeftRunning(ctx, d.Processes.Wait(ctx, rig))

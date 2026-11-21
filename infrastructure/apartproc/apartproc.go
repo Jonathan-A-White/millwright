@@ -80,6 +80,22 @@ func (l *Landings) Begin(ctx context.Context, rig string, one bool) error {
 	return l.apart().begin(ctx, rig, "mw land "+rig, args...)
 }
 
+// BeginScoped implements application.LandProcesses: `Program land <rig>` with
+// --only and --without as the scope names them.
+func (l *Landings) BeginScoped(ctx context.Context, rig string, scope application.LandScope) error {
+	args := []string{l.Program, "land", rig}
+	if scope.One {
+		args = append(args, "--one")
+	}
+	if len(scope.Only) > 0 {
+		args = append(args, "--only", strings.Join(scope.Only, ","))
+	}
+	if len(scope.Without) > 0 {
+		args = append(args, "--without", strings.Join(scope.Without, ","))
+	}
+	return l.apart().begin(ctx, rig, "mw land "+rig, args...)
+}
+
 // Wait implements application.LandProcesses.
 func (l *Landings) Wait(ctx context.Context, rig string) error {
 	return l.apart().wait(ctx, rig, "mw land "+rig, "failed")
