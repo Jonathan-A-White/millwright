@@ -401,6 +401,31 @@ finds the lock held says so in one line: who holds it (a batch named with its ri
 goes ahead of single stories, and that it keeps the lock across its parts), since when,
 and that the check waits for its turn up to what its deadline has left.
 
+A story that changes only a rig's data files is gated by the data's own check, in place of
+the rig's parts (`application/datascope.go`, mw-gq6.1589). A host names, in the home's
+config.toml (hosts/boost-config.toml for the boxes), a table `[data_parts.<rig>]` beside
+`[test_parts.<rig>]`: `paths`, globs of the rig's data files (a file, a directory or a
+glob, `**` for any number of directories), and `command`, the data's own checks. When every
+file the story's branch changes against its base is inside `paths`, `mw check <story>` (the
+whole check, and each `--part`) has one part, "data scope", that runs `command`; the check
+says so in its first lines ("data scope  N changed file(s), every one inside the
+[data_parts.<rig>] paths"), the log keeps the line, and the last call reads the one part's
+record at the tip and says "the gate ran in its data scope". One changed file outside `paths`,
+a branch that changes no file, or a rig with no table: the rig's whole gate and its parts,
+as before. `mw next` trusts a pass of the data scope at the tip as it trusts the parts, on a
+rig that lands in batches (the queue) and on one that lands each (the close-out's gate in
+the worktree is not run again, and a merge that is not a fast-forward is still tested whole);
+the ledger line says "tested by mw check, data scope at <commit>: pass (N changed file(s))".
+Whichever pass it is, `mw next` tells a data-scope pass from a whole one: a whole check's log
+that says data scope is not trusted once the story has a file outside `paths`, and a part's
+record of the rig's own parts is never read as the data part's. A part of the rig's gate that
+a Builder ran before a later commit added a data-only change is not the data part's pass:
+the record is per commit. What still runs everything: the batch gate (`mw land`), which tests
+the merged result whole, and the nightly suite (`mw suite`); neither reads the key, and the
+paths are the files whose own tests are the data's, so a data story's failure that only the
+whole gate would find is found at the batch. The way back is to delete the table: the next
+check and close-out gate the story whole.
+
 The numbers behind the order and the rule, from the vault's `runs/suite/lampas` of the 21
 nights 2026-10-13 to 2026-11-02: the whole suite ran 16 to 131 minutes (median 36), from
 08:00 to 09:44 UTC. Taking the lock before the calm wait made a close-out wait for that and

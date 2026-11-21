@@ -157,3 +157,142 @@ Feature: Checking a rig whose gate is split into parts
     When a session checks "mw-gq6.1" part 1
     Then the check part fails
     And the check part error says: the gate of the rig millwright is not split into parts
+
+  # A rig whose stories sometimes change nothing but data files names them, and the
+  # command that checks them, under [data_parts.<rig>] (mw-gq6.1589). A story whose
+  # every changed file is inside those paths is gated by that command, as one part,
+  # in place of the rig's parts; one file outside and the gate is the rig's own.
+
+  Scenario: A story that changes only the data files runs the data's own check in place of the rig's parts (mw-gq6.1589)
+    Given the host names the rig's data files as "data/**,docs/lxx-*.md" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+      | docs/lxx-notes.md           |
+    When a session checks "mw-gq6.2" part 1
+    Then the check part passes
+    And the parts that ran, in order, were: data
+    And the rig's tests were run 0 times
+    And the check prints: data scope  2 changed file(s)
+    And the check prints: part 1 of 1 (data scope) passed
+
+  Scenario: The last call of a data-scope story reports its gate green from the one data part, and says so first (mw-gq6.1589)
+    Given the host names the rig's data files as "data/**" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+    When a session checks "mw-gq6.2" part 1
+    And a session checks "mw-gq6.2"
+    Then the check passes
+    And the check prints: data scope  1 changed file(s)
+    And the check prints: the gate ran in its data scope (1 changed file(s))
+    And the check does not print: the gate ran as 3 parts
+    And the parts that ran, in order, were: data
+    And the check says the branch would be landed
+    And the check log of "mw-gq6.2" holds: data scope  1 changed file(s)
+
+  Scenario: A data-scope story whose data check has not run is not green, and names the one part to run (mw-gq6.1589)
+    Given the host names the rig's data files as "data/**" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+    When a session checks "mw-gq6.2"
+    Then the check fails
+    And the check prints: part 1 (data scope) has not been run at this commit: mw check mw-gq6.2 --part 1
+    And the check does not print: part 2
+
+  Scenario: A story with one changed file outside the data paths runs the rig's parts as before (mw-gq6.1589)
+    Given the host names the rig's data files as "data/**" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+      | src/review.ts               |
+    When a session checks "mw-gq6.2" part 2
+    Then the check part passes
+    And the parts that ran, in order, were: unit-1
+    And the check prints: part 2 of 3 (unit 1/2) passed
+    And the check does not print: data scope
+
+  Scenario: A rig with no data key is gated by its parts whatever its story changes (mw-gq6.1589)
+    Given the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+    When a session checks "mw-gq6.2" part 3
+    Then the check part passes
+    And the parts that ran, in order, were: unit-2
+    And the check does not print: data scope
+
+  Scenario: A batch rig queues a data-scope story on the pass of its data check, with no part run again (mw-gq6.1589)
+    Given the rig lands its stories in batches
+    And the host names the rig's data files as "data/**" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+    And the session of "mw-gq6.2" reported a plain success
+    When a session checks "mw-gq6.2" part 1
+    And mw closes out "mw-gq6.2"
+    Then the story "mw-gq6.2" is recorded as queued for batch landing
+    And the parts that ran, in order, were: data
+    And the rig's tests were run 0 times
+    And the last ledger line holds:
+      | queued for batch landing                      |
+      | tested by mw check, data scope at             |
+      | pass (1 changed file(s))                      |
+    And the last ledger line does not say "mw next re-ran the rig's tests"
+    And the last ledger line does not say "parts at"
+
+  Scenario: A batch rig queues a data-scope story on a whole check's pass, and the ledger says it was the data scope (mw-gq6.1589)
+    Given the rig lands its stories in batches
+    And the host names the rig's data files as "data/**" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+    And the session of "mw-gq6.2" reported a plain success
+    When a session checks "mw-gq6.2" part 1
+    And a session checks "mw-gq6.2"
+    And mw closes out "mw-gq6.2"
+    Then the story "mw-gq6.2" is recorded as queued for batch landing
+    And the parts that ran, in order, were: data
+    And the last ledger line holds:
+      | tested by mw check, data scope at |
+    And the last ledger line does not say "tested by mw check at"
+    And the last ledger line does not say "mw next re-ran the rig's tests"
+
+  Scenario: A batch rig's story with a file outside the data paths is queued on the rig's parts as today (mw-gq6.1589)
+    Given the rig lands its stories in batches
+    And the host names the rig's data files as "data/**" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+      | src/review.ts               |
+    And the session of "mw-gq6.2" reported a plain success
+    When a session checks "mw-gq6.2" part 1
+    And a session checks "mw-gq6.2" part 2
+    And a session checks "mw-gq6.2" part 3
+    And mw closes out "mw-gq6.2"
+    Then the story "mw-gq6.2" is recorded as queued for batch landing
+    And the parts that ran, in order, were: lint, unit-1, unit-2
+    And the last ledger line holds:
+      | tested by mw check, parts at |
+    And the last ledger line does not say "data scope"
+
+  Scenario: A rig that lands each lands a data-scope story on the pass of its data check, with no part run again (mw-gq6.1589)
+    Given the rig lands its stories each by itself
+    And the host names the rig's data files as "data/**" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+    And the session of "mw-gq6.2" reported a plain success
+    When a session checks "mw-gq6.2" part 1
+    And mw closes out "mw-gq6.2"
+    Then the story "mw-gq6.2" is closed
+    And the parts that ran, in order, were: data
+    And the last ledger line holds:
+      | landed on main                    |
+      | tested by mw check, data scope at |
+    And the last ledger line does not say "mw next re-ran the rig's tests: pass"
+
+  Scenario: A rig that lands each runs the rig's gate at the close-out for a story with a file outside the data paths, as today (mw-gq6.1589)
+    Given the rig lands its stories each by itself
+    And the host names the rig's data files as "data/**" and checks them with "printf 'data\n' >> {log}"
+    And the story "mw-gq6.2" has been worked in its own worktree, changing only these files:
+      | data/lxx/choices/gen-01.tsv |
+      | src/review.ts               |
+    And the session of "mw-gq6.2" reported a plain success
+    When mw closes out "mw-gq6.2"
+    Then the story "mw-gq6.2" is closed
+    And the parts that ran, in order, were: lint, unit-1, unit-2
+    And the last ledger line holds:
+      | mw next re-ran the rig's tests: pass |
+    And the last ledger line does not say "data scope"

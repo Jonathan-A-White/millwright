@@ -23,6 +23,8 @@ import (
 func registerCheckPartsSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's gate is split into these parts:$`, c.theGateIsSplit)
 	ctx.Given(`^the rig's gate is not split into parts$`, c.theGateIsNotSplit)
+	ctx.Given(`^the host names the rig's data files as "([^"]*)" and checks them with "([^"]*)"$`, c.theHostNamesTheDataFiles)
+	ctx.Given(`^the story "([^"]*)" has been worked in its own worktree, changing only these files:$`, c.theStoryChangedOnlyThese)
 	ctx.Given(`^the part "([^"]*)" fails, saying "([^"]*)"$`, c.aPartFails)
 	ctx.Given(`^the part "([^"]*)" fails its first run only, saying "([^"]*)"$`, c.aPartFailsOnce)
 
@@ -36,6 +38,7 @@ func registerCheckPartsSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.When(`^a session checks "([^"]*)" part (\d+) in one foreground call$`, c.aSessionChecksAPartInOneCall)
 	ctx.When(`^the session of "([^"]*)" commits another change$`, c.theSessionCommitsAgain)
 
+	ctx.Then(`^the check log of "([^"]*)" holds: (.+)$`, c.theCheckLogHolds)
 	ctx.Then(`^the check part passes$`, c.theCheckPartPasses)
 	ctx.Then(`^the check part fails$`, c.theCheckPartFails)
 	ctx.Then(`^the check part error says: (.+)$`, c.theCheckPartErrorSays)
@@ -47,6 +50,41 @@ func (c *nextContext) theGateIsSplit(table *godog.Table) error {
 	for _, row := range table.Rows[1:] {
 		command := strings.ReplaceAll(row.Cells[1].Value, "{log}", c.checkLog)
 		c.gateParts = append(c.gateParts, application.GatePart{Name: row.Cells[0].Value, Command: command})
+	}
+	return nil
+}
+
+// theHostNamesTheDataFiles is a [data_parts.<rig>] key: the paths, as the config
+// file has them in a comma-separated list, and the command, which like a part's
+// writes one word to the scenario's log.
+func (c *nextContext) theHostNamesTheDataFiles(paths, command string) error {
+	c.dataScope = map[string]application.DataScope{c.rigKey(): {
+		Paths:   strings.Split(paths, ","),
+		Command: strings.ReplaceAll(command, "{log}", c.checkLog),
+	}}
+	return nil
+}
+
+// theStoryChangedOnlyThese is a worked story whose commit holds the files the
+// table lists, and no other.
+func (c *nextContext) theStoryChangedOnlyThese(id string, table *godog.Table) error {
+	if err := c.worked(id); err != nil {
+		return err
+	}
+	dir := application.WorktreeDir(c.rig, id)
+	for _, row := range table.Rows {
+		full := filepath.Join(dir, filepath.FromSlash(row.Cells[0].Value))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(full, []byte("the work of "+id+"\n"), 0o644); err != nil {
+			return err
+		}
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "The data work of " + id}} {
+		if err := gitRun(dir, "git", args...); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -207,5 +245,18 @@ func (c *nextContext) aSessionChecksAPartInOneCall(id string, part int) error {
 	k := build(false, &c.printed)
 	k.PartStarter = starter
 	c.checked, c.err = k.Run(context.Background(), id)
+	return nil
+}
+
+// theCheckLogHolds is the log mw check kept for the story's first attempt, which
+// mw next reads, holding the words.
+func (c *nextContext) theCheckLogHolds(id, words string) error {
+	log, err := vault.New(c.vault).ReadRunFile(context.Background(), id, application.CheckLogFileName(1))
+	if err != nil {
+		return fmt.Errorf("expected a check log of %s: %w", id, err)
+	}
+	if !strings.Contains(log, strings.TrimSpace(words)) {
+		return fmt.Errorf("expected the check log of %s to hold %q, got:\n%s", id, words, log)
+	}
 	return nil
 }

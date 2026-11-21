@@ -269,13 +269,20 @@ func (c *nextContext) checkWith(id string, slots *rig.Slots) error {
 
 // newCheck is the use case mw check runs, over the scenario's world.
 func (c *nextContext) newCheck(worktrees *rig.Worktrees, slot application.MergeSlot, load application.HostLoad, out io.Writer) application.Check {
+	var changes application.BranchChanges
+	if c.dataScope != nil {
+		// Read only for a host that names a rig's data files, so that no other
+		// scenario of mw check meets what the files a branch changes can refuse.
+		changes = worktrees
+	}
 	return application.Check{
+		Changes:    changes,
 		Tracker:    c.tracker,
 		Slot:       slot,
 		Landing:    worktrees,
 		Checks:     rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		SpecChecks: rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
-		Parts:      rig.NewChecks(rig.WithParts(map[string][]application.GatePart{c.rigKey(): c.gateParts})),
+		Parts:      rig.NewChecks(rig.WithParts(map[string][]application.GatePart{c.rigKey(): c.gateParts}), rig.WithDataScope(c.dataScope)),
 		Part:       c.partToCheck,
 		Host:       nextHost,
 		Rigs:       map[string]string{c.rigKey(): c.rig},

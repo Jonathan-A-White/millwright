@@ -110,6 +110,18 @@ func landingChecks(vaultDir string, which gateCommands) (*rig.Checks, error) {
 			return nil, err
 		}
 		options = append(options, rig.WithParts(gateParts(configured)))
+		// A story that changes only a rig's data files is gated by the data's own
+		// check, which only mw check and a story's close-out read (mw-gq6.1589); the
+		// batch gate runs the gate whole.
+		data, err := config.DataParts()
+		if err != nil {
+			return nil, err
+		}
+		scopes := map[string]application.DataScope{}
+		for rigName, scope := range data {
+			scopes[rigName] = application.DataScope{Paths: scope.Paths, Command: scope.Command}
+		}
+		options = append(options, rig.WithDataScope(scopes))
 	}
 	if which.reread {
 		options = append(options, rig.WithGateLinesFrom(func() (rig.GateLines, error) { return gateLinesNow(which) }, time.Now))

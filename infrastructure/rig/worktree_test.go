@@ -276,6 +276,26 @@ func TestChangedFilesAreWhatTheStoryBranchChangedSinceItsMergeBase(t *testing.T)
 	}
 }
 
+// A file moved is both files changed: a story that moves code into a data folder
+// has changed the code's old path too (mw-gq6.1589).
+func TestAMovedFileIsBothItsOldPathAndItsNewOneChanged(t *testing.T) {
+	here := aRigWithAServer(t)
+	run(t, here, "git", "checkout", "-q", "-b", "mw/story")
+	if err := os.MkdirAll(filepath.Join(here, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(t, here, "git", "mv", "src/app.txt", "data/app.txt")
+	run(t, here, "git", "commit", "-qm", "Moved")
+
+	got, err := rig.New().ChangedFiles(context.Background(), here, "main", "mw/story")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"data/app.txt", "src/app.txt"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
 func TestABranchThatIsNotThereHasChangedNothing(t *testing.T) {
 	here := aRigWithAServer(t)
 	got, err := rig.New().ChangedFiles(context.Background(), here, "main", "mw/worked-elsewhere")

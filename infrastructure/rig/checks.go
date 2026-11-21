@@ -42,18 +42,20 @@ type Checks struct {
 	commands map[string]string
 	command  string
 	parts    map[string][]application.GatePart
-	specs    map[string]string
-	related  map[string]string
-	always   map[string][]string
-	named    map[string]string
-	timing   map[string][]string
-	git      string
-	shell    string
-	nice     int
-	jobs     int
-	runs     *TestRuns
-	read     func() (GateLines, error)
-	now      func() time.Time
+	// data is each rig's data scope (WithDataScope).
+	data    map[string]application.DataScope
+	specs   map[string]string
+	related map[string]string
+	always  map[string][]string
+	named   map[string]string
+	timing  map[string][]string
+	git     string
+	shell   string
+	nice    int
+	jobs    int
+	runs    *TestRuns
+	read    func() (GateLines, error)
+	now     func() time.Time
 }
 
 // Checks satisfies the port.
@@ -99,6 +101,20 @@ func WithParts(parts map[string][]application.GatePart) CheckOption {
 	}
 }
 
+// WithDataScope names each rig's data scope, by rig name, as the
+// `[data_parts.<rig>]` tables of the config file have them (mw-gq6.1589): the
+// paths of the rig's data files and the command that checks them. A rig the map
+// does not name, or names with no paths or no command, has none.
+func WithDataScope(scopes map[string]application.DataScope) CheckOption {
+	return func(c *Checks) {
+		for rig, scope := range scopes {
+			if len(scope.Paths) > 0 && strings.TrimSpace(scope.Command) != "" {
+				c.data[rig] = scope
+			}
+		}
+	}
+}
+
 // WithNice runs every rig's tests under `nice -n <n>`, so they yield the CPU to
 // the mill's own work on the same host (mw-gq6.312). 0, the default, runs them
 // as they were.
@@ -138,7 +154,7 @@ func WithTimingTests(timing map[string][]string) CheckOption {
 // NewChecks returns the checks of a rig whose tests are DefaultCommand, unless
 // an option says otherwise.
 func NewChecks(opts ...CheckOption) *Checks {
-	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, specs: map[string]string{}, related: map[string]string{}, always: map[string][]string{}, named: map[string]string{}, timing: map[string][]string{}, git: Program, shell: Shell, now: time.Now}
+	c := &Checks{commands: map[string]string{}, command: DefaultCommand, parts: map[string][]application.GatePart{}, data: map[string]application.DataScope{}, specs: map[string]string{}, related: map[string]string{}, always: map[string][]string{}, named: map[string]string{}, timing: map[string][]string{}, git: Program, shell: Shell, now: time.Now}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -167,6 +183,15 @@ func (c *Checks) Parts(rig string) []application.GatePart { return c.view().part
 
 // Checks satisfies the port a split gate is read and run through.
 var _ application.GateParts = (*Checks)(nil)
+
+// DataScope implements application.DataScopes: the rig's data paths and the
+// command that checks them, false for a rig with none.
+func (c *Checks) DataScope(rig string) (application.DataScope, bool) {
+	scope, ok := c.data[rig]
+	return scope, ok
+}
+
+var _ application.DataScopes = (*Checks)(nil)
 
 // Run implements application.Checks.
 func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked, error) {

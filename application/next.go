@@ -871,6 +871,8 @@ type closeOut struct {
 	// Checked when none did.
 	mergedFailed Checked
 
+	dataState // what the close-out knows of the story's data scope (datascope.go)
+
 	// worktreeFailed says the rig's tests failed in the worktree and the
 	// close-out went on to the merged result (mw-gq6.552): a merge that is a
 	// fast-forward then still has its tests run, since no run has passed.
@@ -1577,7 +1579,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// tells a later run that this story is landed — the close did fail, on the
 	// run it was written for — and a run that cannot tell a landed story from
 	// an unlanded one would merge it all over again.
-	s.outcome = fmt.Sprintf("%s, %d commits, mw next re-ran the rig's tests: pass", landed.LandedAs(c.target), report.Commits)
+	s.outcome = c.landedOutcome(landed, report)
 	if c.cappedAfterClosing {
 		s.outcome += "; " + LandedAfterTurnCap
 	}
@@ -2484,26 +2486,6 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 		return Refusal{ReasonOpenSteps, why, "Still open:\n" + stepList(open) + wayOut + n.unrunPartsSaid(ctx, c)}, true
 	}
 	return Refusal{}, false
-}
-
-// unrunPartsSaid is what an open-steps refusal adds when the rig's gate is split
-// into parts and some part has not passed at the branch's tip: each such part
-// with the command that runs it, so that whoever takes the story over runs
-// them rather than the whole gate. Empty when the gate is not split, every part
-// passed, or the parts cannot be read.
-func (n Next) unrunPartsSaid(ctx context.Context, c *closeOut) string {
-	if n.GateParts == nil || n.GateRecords == nil || n.Landing == nil {
-		return ""
-	}
-	parts := n.GateParts.Parts(c.path.Rig)
-	if len(parts) == 0 {
-		return ""
-	}
-	gate, _ := recordedGate{records: n.GateRecords, storyID: c.id, attempt: c.attempt(), parts: parts, tip: cleanTipOf(ctx, n.Landing, c)}.Run(ctx, "", "")
-	if gate.Passed {
-		return ""
-	}
-	return "\n\nThe rig's gate is split into " + fmt.Sprint(len(parts)) + " parts and these have not passed at the branch's tip:\n" + bulletList(strings.Split(gate.Output, "\n"))
 }
 
 // closingCommentRefusal is the refusal of a story whose formula is finished but

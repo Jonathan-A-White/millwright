@@ -79,6 +79,10 @@ func newCheckCmd() *cobra.Command {
 			"until the session ends, and it does not try the merge, so a branch that passes here can still be\n" +
 			"stopped by a conflict or by the other host's work. The commits are counted against the target\n" +
 			"branch as the rig last saw the remote's.\n\n" +
+			"A rig whose config file has a [data_parts.<rig>] table (paths and command, mw-gq6.1589) gates a story whose every\n" +
+			"changed file is inside its paths by the command alone, as one part named \"data scope\": the check says so in its\n" +
+			"first lines, mw check <story> --part 1 runs it, and mw next trusts its pass at the tip. One file outside\n" +
+			"the paths, or no table, and the rig's whole gate and parts are run as before; the batch gate never reads it.\n\n" +
 			"A rig whose whole gate outruns a foreground tool call's 600 seconds (the default cap) is named as parts in the host's\n" +
 			"config file (the [test_parts.<rig>] tables, mw-gq6.567). mw check <story> --part N then runs part N\n" +
 			"alone, after the same wait for a calm host a whole check makes (up to nine minutes, ending in one line\n" +

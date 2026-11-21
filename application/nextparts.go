@@ -26,6 +26,9 @@ type partsAtTip struct {
 	// skipped are the numbers of the parts the close-out's gate did not run
 	// because they passed at tip: what its ledger line says it trusted.
 	skipped []int
+	// data is set when the one part is the story's data scope (datascope.go), not a
+	// part of the rig's gate.
+	data *dataGate
 }
 
 // has says part n passed at the tip.
@@ -59,11 +62,16 @@ func (n Next) readPartsAtTip(ctx context.Context, c *closeOut, tip string) *part
 		return nil
 	}
 	parts := n.GateParts.Parts(c.path.Rig)
+	if c.data != nil {
+		// A story changing only the rig's data files has the one part of its data
+		// scope: the records of the rig's own parts say nothing of it.
+		parts = c.data.parts()
+	}
 	if len(parts) == 0 {
 		return nil
 	}
 	gate := recordedGate{records: n.GateRecords, storyID: c.id, attempt: c.attempt(), parts: parts, tip: tip}
-	p := &partsAtTip{tip: tip}
+	p := &partsAtTip{tip: tip, data: c.data}
 	for i, part := range parts {
 		p.names = append(p.names, part.Name)
 		if gate.stateOf(ctx, i+1) == partPassed {
@@ -112,6 +120,13 @@ func (p *partsAtTip) tested() string {
 		return ""
 	}
 	short := shortCommit(p.tip)
+	if p.data != nil {
+		specs := "changed specs run at close-out"
+		if p.specs {
+			specs = "changed specs passed at " + short
+		}
+		return fmt.Sprintf("tested by mw check, %s at %s: pass (%d changed file(s)); %s", DataScopeName, short, p.data.files, specs)
+	}
 	if len(p.skipped) == len(p.names) {
 		specs := "changed specs run at close-out"
 		if p.specs {
@@ -138,3 +153,27 @@ func (p *partsAtTip) tested() string {
 // specsPassed says the changed specs' record is a pass at the tip, so that the
 // close-out does not run them again.
 func (p *partsAtTip) specsPassed() bool { return p != nil && p.specs }
+
+// unrunPartsSaid is what an open-steps refusal adds when the rig's gate is split
+// into parts and some part has not passed at the branch's tip: each such part
+// with the command that runs it, so that whoever takes the story over runs
+// them rather than the whole gate. Of a story that changes only the rig's data
+// files it is the one part of its data scope (datascope.go), not the rig's parts.
+// Empty when the gate is not split, every part passed, or the parts cannot be read.
+func (n Next) unrunPartsSaid(ctx context.Context, c *closeOut) string {
+	if n.GateParts == nil || n.GateRecords == nil || n.Landing == nil {
+		return ""
+	}
+	parts, what := n.GateParts.Parts(c.path.Rig), "The rig's gate is split into "+fmt.Sprint(len(n.GateParts.Parts(c.path.Rig)))+" parts"
+	if data := n.dataGate(ctx, c); data != nil {
+		parts, what = data.parts(), "The story changes only the rig's data files, so its gate is its data scope, "+fmt.Sprint(len(data.parts()))+" part"
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	gate, _ := recordedGate{records: n.GateRecords, storyID: c.id, attempt: c.attempt(), parts: parts, tip: cleanTipOf(ctx, n.Landing, c)}.Run(ctx, "", "")
+	if gate.Passed {
+		return ""
+	}
+	return "\n\n" + what + " and these have not passed at the branch's tip:\n" + bulletList(strings.Split(gate.Output, "\n"))
+}

@@ -480,6 +480,14 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	}
 	// Every test-runner ticket the check takes names the story (mw-gq6.1491).
 	ctx = WithTestRunFor(ctx, storyID)
+	// A story that changes only the rig's data files is gated by the data's own
+	// check, in one part, in place of the rig's gate (datascope.go); the check says
+	// so at once, and its log keeps the line.
+	if k.Records != nil && k.Part == 0 && !k.SpecsWorker {
+		if data := k.dataGate(ctx, c); data != nil && k.Out != nil {
+			fmt.Fprintf(k.Out, "%s%s\n", dataScopeLineStart, data.words())
+		}
+	}
 	// A part prints its own report: none of the whole check's verdict.
 	if k.Part != 0 {
 		return k.checkPart(ctx, report, c)
@@ -514,13 +522,13 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	loadBound, handBack := k.LoadBound, func(ctx context.Context, reading LoadReading, since time.Time, waited time.Duration, again bool) error {
 		return k.calmRefusal(ctx, c, report.Attempt, reading, since, waited, again)
 	}
-	split := k.splitGate(path.Rig)
+	split := k.splitGate(c)
 	var kept, keptNote string
 	if split {
 		// A split gate runs nothing here: the parts were run, each in a call of
 		// its own, and this reads what they said at the tip. It takes no slot and
 		// waits for no calm host, so it finishes at once.
-		checks = recordedGate{records: k.Records, storyID: storyID, attempt: report.Attempt, parts: k.partsOf(path.Rig), tip: tip}
+		checks = recordedGate{records: k.Records, storyID: storyID, attempt: report.Attempt, parts: k.partsFor(c), tip: tip}
 		load, handBack = nil, nil
 	} else {
 		// A whole check waits for a calm host no longer than for the slot, and is
@@ -656,7 +664,11 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		report.Notes = append(report.Notes, keptNote)
 	}
 	if split && report.Passed() {
-		report.Notes = append(report.Notes, fmt.Sprintf("the gate ran as %d parts and every part passed at the tip", len(k.partsOf(path.Rig))))
+		if c.data != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("the gate ran in its data scope (%d changed file(s)), not as the rig's parts, and it passed at the tip", c.data.files))
+		} else {
+			report.Notes = append(report.Notes, fmt.Sprintf("the gate ran as %d parts and every part passed at the tip", len(k.partsOf(path.Rig))))
+		}
 	}
 	if tip != "" {
 		if after, err := k.Landing.RefHead(ctx, c.rigDir, c.branch); err == nil && after == tip {
