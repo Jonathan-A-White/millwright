@@ -87,8 +87,10 @@ func (l *aLandingAndACheckOfOneRig) report() *application.BatchReport {
 		Merged: []application.BatchStory{{ID: "mw-x.1"}}}
 }
 
-// startCheck runs a whole check of the rig in the background; its wait is a few
-// seconds, which a deadlock outlasts and a working order never reads.
+// startCheck runs a whole check of the rig in the background; its wait is read off
+// a clock that stands still (CallNow), so only the hang guard of the real time ends
+// it: a deadlock outlasts the test's own waits and a working order never reads it,
+// however long a loaded host takes (mw-gq6.1375).
 func (l *aLandingAndACheckOfOneRig) startCheck() <-chan checkEnded {
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
@@ -97,7 +99,7 @@ func (l *aLandingAndACheckOfOneRig) startCheck() <-chan checkEnded {
 	go func() {
 		report, err := application.Check{
 			Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: l.checks,
-			Slot: l.slots, GateLock: l.gate, Records: l.records, PartSlotWait: checkSlotWait,
+			Slot: l.slots, GateLock: l.gate, Records: l.records, PartSlotWait: hangGuard, CallNow: l.clock.Now,
 			GateNoticeEvery: time.Hour, Host: "laptop", Remote: "origin",
 			Rigs: map[string]string{"millwright": l.rigDir},
 			Out:  writerOf(l.told),
@@ -107,10 +109,6 @@ func (l *aLandingAndACheckOfOneRig) startCheck() <-chan checkEnded {
 	return ended
 }
 
-// checkSlotWait is the wait a whole check is given for the merge slot: a deadlock
-// outlasts it, a working order never reads it.
-const checkSlotWait = 30 * time.Second
-
 type checkEnded struct {
 	report application.CheckReport
 	err    error
@@ -119,7 +117,7 @@ type checkEnded struct {
 // waitQueued waits for the gate lock's queue to hold n tickets.
 func (l *aLandingAndACheckOfOneRig) waitQueued(n int) {
 	l.t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); l.queuedGate() < n; time.Sleep(time.Millisecond) {
+	for deadline := time.Now().Add(hangGuard); l.queuedGate() < n; time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
 			l.t.Fatalf("expected %d in the gate lock's queue, got %d", n, l.queuedGate())
 		}
@@ -128,15 +126,16 @@ func (l *aLandingAndACheckOfOneRig) waitQueued(n int) {
 
 // finishes fails the test unless the landing's gate and the check both end, with
 // the tests passed, and the check without having waited out its wait for the slot
-// (a deadlock's way out).
-func (l *aLandingAndACheckOfOneRig) finishes(gated <-chan application.Checked, checked <-chan checkEnded, began time.Time) {
+// (a deadlock's way out): its clock stands still, so a check that ended with an
+// error ended on the hang guard of its real time, and says so.
+func (l *aLandingAndACheckOfOneRig) finishes(gated <-chan application.Checked, checked <-chan checkEnded) {
 	l.t.Helper()
 	select {
 	case gate := <-gated:
 		if !gate.Passed {
 			l.t.Errorf("expected the landing's gate to pass, got %+v\n%s", gate, l.said.String())
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		l.t.Fatalf("expected the landing's gate to end: it and the check wait on each other\nlanding said:\n%s\ncheck said:\n%s", l.said.String(), l.told.String())
 	}
 	select {
@@ -144,11 +143,8 @@ func (l *aLandingAndACheckOfOneRig) finishes(gated <-chan application.Checked, c
 		if ended.err != nil {
 			l.t.Errorf("expected the check to pass, got %v\n%s\ncheck said:\n%s", ended.err, ended.report, l.told.String())
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		l.t.Fatalf("expected the check to end\ncheck said:\n%s", l.told.String())
-	}
-	if took := time.Since(began); took >= checkSlotWait {
-		l.t.Errorf("expected both to end before the check's wait for the slot ran out (%s), they took %s\nlanding said:\n%s\ncheck said:\n%s", checkSlotWait, took, l.said.String(), l.told.String())
 	}
 	if holder := l.gate.Holder(); holder != "" {
 		l.t.Errorf("expected the gate lock to be free after both, %q holds it", holder)
@@ -167,7 +163,6 @@ func TestALandingThatWaitedForTheGateLockSharedAndAWholeCheckQueuedBehindItBothE
 		t.Fatal(err)
 	}
 
-	began := time.Now()
 	gated := make(chan application.Checked, 1)
 	go func() { gated <- l.land().GateTheBatch(context.Background(), l.rigDir, l.report()) }()
 	l.waitQueued(1)
@@ -176,7 +171,7 @@ func TestALandingThatWaitedForTheGateLockSharedAndAWholeCheckQueuedBehindItBothE
 	if err := other.Holding.Release(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	l.finishes(gated, checked, began)
+	l.finishes(gated, checked)
 }
 
 // The landing holds the gate lock and waits for the host to calm with its slot
@@ -194,18 +189,17 @@ func TestALandingThatWaitedForACalmHostHoldingTheGateLockAndAWholeCheckQueuedBot
 		// The check takes the slot the landing gave up and queues for the lock the
 		// landing holds, or, the lock being given back for the wait, goes on and says
 		// it passed: the wait ends on either, with a generous bound (mw-gq6.1482).
-		for deadline := time.Now().Add(5 * time.Second); l.queuedGate() < 1 && !strings.Contains(l.told.String(), "passed") && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		for deadline := time.Now().Add(hangGuard); l.queuedGate() < 1 && !strings.Contains(l.told.String(), "passed") && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		}
 		return nil
 	}
 
-	began := time.Now()
 	gated := make(chan application.Checked, 1)
 	go func() { gated <- land.GateTheBatch(context.Background(), l.rigDir, l.report()) }()
 	var gate application.Checked
 	select {
 	case gate = <-gated:
-	case <-time.After(5 * time.Second):
+	case <-time.After(hangGuard):
 		t.Fatalf("expected the landing's gate to end\nlanding said:\n%s\ncheck said:\n%s", l.said.String(), l.told.String())
 	}
 	if !gate.Passed {
@@ -217,5 +211,5 @@ func TestALandingThatWaitedForACalmHostHoldingTheGateLockAndAWholeCheckQueuedBot
 	}
 	done := make(chan application.Checked, 1)
 	done <- gate
-	l.finishes(done, checked, began)
+	l.finishes(done, checked)
 }

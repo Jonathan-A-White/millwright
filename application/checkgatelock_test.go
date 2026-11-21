@@ -184,7 +184,9 @@ func TestACloseOutsGateHoldingTheHostsGateLockMakesAWholeCheckWaitAndEndInOneLin
 	if err == nil {
 		t.Fatalf("expected the check not to pass while a close-out's gate held the host's gate lock\n%s", report)
 	}
-	if time.Since(started) > 30*time.Second {
+	// The wait is 1.5 s of real time; a host that takes longer is not a failure, one
+	// that never gives up is: the bound is a hang guard (mw-gq6.1376).
+	if time.Since(started) > hangGuard {
 		t.Errorf("expected the check to give up at its wait, it took %s", time.Since(started))
 	}
 	refusal := slotRefusalOf(report)
@@ -236,7 +238,7 @@ func TestACheckWaitingForTheHostsGateLockRunsOnceItIsGivenBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.releaseOnceTold(closeOut.Holding, "gate lock is held by mw-gq6.894")
-	report, err := w.check(5 * time.Second)
+	report, err := w.check(hangGuard)
 	if err != nil {
 		t.Fatalf("expected the check to pass once the gate lock was free, got %v\n%s", err, report)
 	}
@@ -256,7 +258,7 @@ func TestAWholeCheckHoldingTheHostsGateLockMakesACloseOutsGateWait(t *testing.T)
 	w := newWholeCheckBesideTheGateLock(t, checks)
 	done := make(chan error, 1)
 	go func() {
-		_, err := w.check(5 * time.Second)
+		_, err := w.check(hangGuard)
 		done <- err
 	}()
 	select {
@@ -288,7 +290,7 @@ func TestAWholeCheckHoldingTheHostsGateLockMakesACloseOutsGateWait(t *testing.T)
 
 func TestAWholeCheckThatFailsGivesTheHostsGateLockBack(t *testing.T) {
 	w := newWholeCheckBesideTheGateLock(t, &scriptedChecks{passes: []bool{false}})
-	if _, err := w.check(time.Second); err == nil {
+	if _, err := w.check(hangGuard); err == nil {
 		t.Fatal("expected the check to fail")
 	}
 	if holder := w.gate.Holder(); holder != "" {
@@ -480,7 +482,7 @@ func TestAWholeCheckQueuedBehindALongGateRunsOnceItFreesAndSaysHowLongItWaitedAn
 		t.Fatal(err)
 	}
 	w.releaseOnceTold(closeOut.Holding, "gate lock is held by mw-5r3p30.1028")
-	report, err := w.check(10 * time.Second)
+	report, err := w.check(hangGuard)
 	if err != nil {
 		t.Fatalf("expected the check to wait for the gate lock and pass, got %v\n%s", err, report)
 	}
@@ -688,7 +690,7 @@ func TestACheckRunAgainWithinItsKeepTimeHasItsPlaceAheadOfATicketTakenInBetween(
 	case <-quietFor(300 * time.Millisecond):
 	}
 
-	report, err := w.check(10 * time.Second)
+	report, err := w.check(hangGuard)
 	if err != nil {
 		t.Fatalf("expected the second call to take its place and run, got %v\n%s", err, report)
 	}
@@ -729,7 +731,7 @@ func TestACheckThatKeepsNoPlaceTakesUpThePlaceAForegroundCheckOfTheSameStoryKept
 	// The same story's check, asked to keep no place, with the lock free: it takes
 	// the kept place, which is at the head, and runs.
 	w.keep = 0
-	report, err := w.check(2 * time.Second)
+	report, err := w.check(hangGuard)
 	if err != nil {
 		t.Fatalf("expected the check to take the story's own kept place and run, got %v\n%s", err, report)
 	}
@@ -756,7 +758,7 @@ func TestAKeptPlaceIsGivenUpWhenItsKeepTimeHasPassed(t *testing.T) {
 	closeOut.Holding.Release(context.Background())
 	time.Sleep(300 * time.Millisecond)
 	// Nobody comes back for it: a close-out's gate takes the lock at once.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), hangGuard)
 	defer cancel()
 	turn, err := w.gate.Take(ctx, "a close-out", nil)
 	if err != nil {
@@ -1400,7 +1402,10 @@ func TestAWholeChecksWaitForTheGateLockEndsWhenTheChecksClockPassesItsBound(t *t
 	if err == nil {
 		t.Fatalf("expected the check not to pass while the gate lock was held\n%s", report)
 	}
-	if took := time.Since(started); took > 20*time.Second {
+	// An hour of wait, ended by a clock moved two hours on: it ended on the clock
+	// and not on the real hour if it took far less than the hour, however long a
+	// loaded host took over it (mw-gq6.1376).
+	if took := time.Since(started); took > 30*time.Minute {
 		t.Errorf("expected the wait to end when the check's clock passed its bound, it took %s of real time", took)
 	}
 	refusal := slotRefusalOf(report)
@@ -1440,7 +1445,10 @@ func TestAWholeChecksWaitForTheMergeSlotEndsWhenTheChecksClockPassesItsBound(t *
 	if err == nil {
 		t.Fatalf("expected the check not to pass while the merge slot was held\n%s", report)
 	}
-	if took := time.Since(started); took > 20*time.Second {
+	// An hour of wait, ended by a clock moved two hours on: it ended on the clock
+	// and not on the real hour if it took far less than the hour, however long a
+	// loaded host took over it (mw-gq6.1376).
+	if took := time.Since(started); took > 30*time.Minute {
 		t.Errorf("expected the wait to end when the check's clock passed its bound, it took %s of real time", took)
 	}
 	refusal := slotRefusalOf(report)
@@ -2258,25 +2266,45 @@ func quietFor(d time.Duration) <-chan time.Time {
 	return time.NewTimer(d).C
 }
 
-// TestNoTestOfTheGateLockReadsARealClockBoundUnderAMinute reads this file for the
-// bounds it sets with time.Now().Add or time.After on a number of seconds or
-// milliseconds written out, and names each under realClockBoundFloor.
-func TestNoTestOfTheGateLockReadsARealClockBoundUnderAMinute(t *testing.T) {
-	source, err := os.ReadFile("checkgatelock_test.go")
+// realClockBoundsUnderTheFloor reads a test file for the bounds it sets on real
+// time with a number written out: a wait made with time.Now().Add or time.After,
+// and an elapsed time compared with time.Since or took (a bound on how long a
+// wait took, which a host that takes its time fails though the wait ended on the
+// clock). It names each under realClockBoundFloor (mw-gq6.1375, mw-gq6.1376).
+func realClockBoundsUnderTheFloor(t *testing.T, file string) []string {
+	t.Helper()
+	source, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bound := regexp.MustCompile(`time\.(?:Now\(\)\.Add|After)\(\s*(\d+)\s*\*\s*time\.(Second|Millisecond|Minute)\s*\)`)
+	wait := regexp.MustCompile(`time\.(?:Now\(\)\.Add|After)\(\s*(\d+)\s*\*\s*time\.(Second|Millisecond|Minute)\s*\)`)
+	took := regexp.MustCompile(`(?:time\.Since\(|\btook\b).*>=?\s*(\d+)\s*\*\s*time\.(Second|Millisecond|Minute)`)
 	unit := map[string]time.Duration{"Millisecond": time.Millisecond, "Second": time.Second, "Minute": time.Minute}
+	var under []string
 	for number, line := range strings.Split(string(source), "\n") {
-		for _, found := range bound.FindAllStringSubmatch(line, -1) {
-			count, err := strconv.Atoi(found[1])
-			if err != nil {
-				t.Fatal(err)
+		for _, re := range []*regexp.Regexp{wait, took} {
+			for _, found := range re.FindAllStringSubmatch(line, -1) {
+				count, err := strconv.Atoi(found[1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if d := time.Duration(count) * unit[found[2]]; d < realClockBoundFloor {
+					under = append(under, fmt.Sprintf("%s:%d reads a real-clock bound of %s, under the %s of a hang guard: %s", file, number+1, d, realClockBoundFloor, strings.TrimSpace(line)))
+				}
 			}
-			if d := time.Duration(count) * unit[found[2]]; d < realClockBoundFloor {
-				t.Errorf("checkgatelock_test.go:%d reads a real-clock bound of %s, under the %s of a hang guard: %s", number+1, d, realClockBoundFloor, strings.TrimSpace(line))
-			}
+		}
+	}
+	return under
+}
+
+// TestNoTestOfTheGateLockReadsARealClockBoundUnderAMinute reads the tests of the
+// gate lock for the bounds they set on real time, and names each under
+// realClockBoundFloor. The landing-and-check tests wait on the same lock and
+// slot, and are read with them (mw-gq6.1375).
+func TestNoTestOfTheGateLockReadsARealClockBoundUnderAMinute(t *testing.T) {
+	for _, file := range []string{"checkgatelock_test.go", "landlockorder_test.go"} {
+		for _, line := range realClockBoundsUnderTheFloor(t, file) {
+			t.Error(line)
 		}
 	}
 }
