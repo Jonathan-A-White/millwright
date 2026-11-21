@@ -114,7 +114,7 @@ func (q Queue) Run(ctx context.Context) (QueueReport, error) {
 	}
 	// The order is Dispatch's: inStartOrder with each rig's feature share kept.
 	// What a feature waits on is read from the blocked stories already in hand.
-	inOrder, moved := inShareOrder(ctx, inStartOrder(unblocked), shares.running, q.Rules, func() map[string]bool { return featureWaits(blocked) })
+	inOrder, moved, _ := inShareOrder(ctx, inStartOrder(unblocked), shares.running, q.Rules, func() map[string]bool { return featureWaits(blocked) })
 	for _, detail := range inOrder {
 		row := q.row(detail)
 		if reason := moved[detail.Story.ID]; reason != "" {
