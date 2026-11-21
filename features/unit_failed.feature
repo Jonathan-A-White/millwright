@@ -3,8 +3,8 @@ Feature: mw doctor unit-failed
   which runs `mw doctor unit-failed <unit>`. A unit a timer runs fails now and then and
   is clean on its next run, so the Mayor is told of the second failure in a row, not
   the first: the first is recorded, with the end of the unit's journal; a second with no
-  clean run between them is mailed to the Mayor naming both, with both journals' last
-  lines; a clean run in between starts the count again. A unit no timer runs (a oneshot
+  clean run between them is mailed to the Mayor naming both, with the count and the
+  command that prints the unit's log, not the log; a clean run in between starts the count again. A unit no timer runs (a oneshot
   started by hand) is mailed at its first failure.
 
   Scenario: A timer unit failing once is recorded and no mail is sent
@@ -20,8 +20,10 @@ Feature: mw doctor unit-failed
     Then one mail was sent to the Mayor
     And the mail subject is "unit failed twice in a row: mw-dispatch.service on laptop"
     And the mail is from "doctor@laptop"
-    And the mail body says "first run: bd sync exited 1"
-    And the mail body says "second run: bd sync exited 1"
+    And the mail body says "mw-dispatch.service failed 2 times in a row"
+    And the mail body says "journalctl --user -u mw-dispatch.service -n 40 --no-pager"
+    And the mail body does not say "first run: bd sync exited 1"
+    And the mail body does not say "second run: bd sync exited 1"
     And no failure of "mw-dispatch.service" is recorded
 
   Scenario: Fail, pass, fail sends no mail

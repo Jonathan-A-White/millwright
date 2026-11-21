@@ -24,8 +24,8 @@ func newDoctorUnitFailedCmd() *cobra.Command {
 			"runs (mw-dispatch.service, by mw-dispatch.timer) often fails once and is clean on its next\n" +
 			"run, so its first failure is only recorded, with the last lines of its journal, in the\n" +
 			"doctor's state directory (unit-failed/<unit>). A second failure with no clean run of the\n" +
-			"unit between them mails the Mayor from doctor@<host>, naming both and carrying both\n" +
-			"journals' last lines; a clean run between them starts the count again. A unit no timer\n" +
+			"unit between them mails the Mayor from doctor@<host>, naming both, the count and the\n" +
+			"command that prints the unit's journal, not the journal; a clean run between them starts the count again. A unit no timer\n" +
 			"runs is mailed at its first failure. It reads the journal and writes one file and at most\n" +
 			"one mail.",
 		Args: cobra.ExactArgs(1),

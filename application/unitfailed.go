@@ -51,8 +51,9 @@ type UnitFailures interface {
 // UnitFailed is what runs when a unit ends in failure
 // (contrib/systemd/mw-unit-failed@.service). A unit a timer runs often fails
 // once and is clean on its next run, so the first failure is only kept; a
-// second, with no clean run between, is mailed to the Mayor with the end of
-// both journals, and a clean run in between starts the count again. A unit no
+// second, with no clean run between, is mailed to the Mayor with the unit, the
+// count and the command that prints its journal (not the journal), and a clean
+// run in between starts the count again. A unit no
 // timer runs is mailed at once, as every failure was before.
 type UnitFailed struct {
 	Units    UnitSystem
@@ -114,8 +115,10 @@ func (u UnitFailed) Run(ctx context.Context, unit string) (UnitFailedOutcome, er
 			clean = false
 		}
 		if !clean {
-			body := fmt.Sprintf("First failure (%s):\n%s\n\nSecond failure (%s):\n%s",
-				first.At.UTC().Format(time.RFC3339), first.Journal, at.UTC().Format(time.RFC3339), journal)
+			// The mail names the unit, the count and the command that prints
+			// the log, and does not carry the log: it was most of the mail's size.
+			body := fmt.Sprintf("%s failed 2 times in a row on %s: at %s and at %s.\nThe log: %s",
+				unit, u.Host, first.At.UTC().Format(time.RFC3339), at.UTC().Format(time.RFC3339), JournalCommand(unit))
 			// A fault that lasts is mailed on every second failure, not on
 			// every one: the pair is spent by this mail.
 			u.forget(ctx, unit)
@@ -129,6 +132,16 @@ func (u UnitFailed) Run(ctx context.Context, unit string) (UnitFailedOutcome, er
 	}
 	u.say("%s failed once; recorded, no mail until it fails again without a clean run between\n", unit)
 	return UnitFailureKept, nil
+}
+
+// UnitFailedLogLines is how many lines of a unit's journal the command of
+// JournalCommand prints.
+const UnitFailedLogLines = 40
+
+// JournalCommand is the command that prints the end of a unit's journal, run on
+// the host that mailed it.
+func JournalCommand(unit string) string {
+	return fmt.Sprintf("journalctl --user -u %s -n %d --no-pager", unit, UnitFailedLogLines)
 }
 
 func (u UnitFailed) journal(ctx context.Context, unit string) string {
