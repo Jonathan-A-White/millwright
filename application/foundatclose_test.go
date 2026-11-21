@@ -42,6 +42,16 @@ func TestParseFoundNotFixed(t *testing.T) {
 		{"ends at what's new", "Found, not fixed:\nA (a.go:1)\nWhat's new: none", true, []string{"A (a.go:1)"}},
 		{"a line twice counts once", "Found, not fixed:\nA (a.go:1)\nA (a.go:1)", true, []string{"A (a.go:1)"}},
 		{"the last heading is the section", "Found, not fixed:\nOld\n\nFound, not fixed:\nNew", true, []string{"New"}},
+		{"a trailing note in parentheses is no finding (mw-6ww.175.45)",
+			"Found, not fixed:\nFiled: A is wrong (a.go:1). AC: go test ./a passes.\nFiled: B is wrong (b.go:2). AC: go test ./b passes.\nFiled: C is wrong (c.go:3). AC: go test ./c passes.\n(I did not run the tests named in these AC lines; the files named are my guess at where each belongs.)\n\nFor the rig memory: nothing",
+			true, []string{"Filed: A is wrong (a.go:1). AC: go test ./a passes.", "Filed: B is wrong (b.go:2). AC: go test ./b passes.", "Filed: C is wrong (c.go:3). AC: go test ./c passes."}},
+		{"a bulleted note in parentheses is no finding", "Found, not fixed:\n- A (a.go:1)\n- (note: B is by design.)", true, []string{"A (a.go:1)"}},
+		{"a note with a parenthesis inside is no finding", "Found, not fixed:\nA (a.go:1)\n(I guessed (a.go) for each.)", true, []string{"A (a.go:1)"}},
+		{"a note alone is no finding and says nothing", "Found, not fixed:\n(none seen)\nA (a.go:1)", true, []string{"A (a.go:1)"}},
+		{"a note after nothing", "Found, not fixed: nothing\n(I ran no tests.)", true, nil},
+		{"a finding that contains a parenthesis is a finding", "Found, not fixed:\nA is wrong (a.go:1) and B too", true, []string{"A is wrong (a.go:1) and B too"}},
+		{"a finding that starts with a parenthesis and goes on is a finding", "Found, not fixed:\n(a.go:1) is wrong. AC: go test passes (here)", true, []string{"(a.go:1) is wrong. AC: go test passes (here)"}},
+		{"a finding that starts with a parenthesis and ends with one after more text", "Found, not fixed:\n(a.go) is wrong (see b.go)", true, []string{"(a.go) is wrong (see b.go)"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
