@@ -98,7 +98,7 @@ func ParseFoundNotFixed(comment string) FoundNotFixed {
 	said := false
 	take := func(raw string) {
 		text := strings.Join(strings.Fields(domain.TrimListMarker(raw)), " ")
-		if text == "" {
+		if text == "" || isBuilderNote(text) {
 			return
 		}
 		said = true
@@ -122,6 +122,31 @@ func ParseFoundNotFixed(comment string) FoundNotFixed {
 		take(raw)
 	}
 	return found
+}
+
+// isBuilderNote says whether text, a line of the section already trimmed, is a
+// note of the Builder's and no finding: it starts with '(' and the parenthesis
+// that closes that one is the line's last character, as in '(I did not run the
+// tests named above.)' (mw-gq6.1297). A line that holds a parenthesis, or starts
+// with one and goes on after its closing one, is a finding. A note is no
+// finding and not something said: it ends no section and starts none.
+func isBuilderNote(text string) bool {
+	if !strings.HasPrefix(text, "(") {
+		return false
+	}
+	depth := 0
+	for i, r := range text {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i == len(text)-1
+			}
+		}
+	}
+	return false
 }
 
 func endsFoundSection(line string) bool {
