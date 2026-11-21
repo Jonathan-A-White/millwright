@@ -120,3 +120,9 @@ func (b BatchLand) LandTheBatchIn(ctx context.Context, dir string, report *Batch
 	}
 	report.Notes = append(report.Notes, nr.Notes...)
 }
+
+// MailTheBatch lets the tests of package application_test send the one mail a
+// batch that did not land whole sends the Mayor (BatchLand.mailTheMayor).
+func (b BatchLand) MailTheBatch(ctx context.Context, report *BatchReport) {
+	b.mailTheMayor(ctx, report, &NextReport{})
+}
