@@ -100,3 +100,11 @@ func (b BatchLand) HoldQueue(ctx context.Context, queue []BatchStory) func() {
 func (b BatchLand) FixerReads(report *BatchReport) (outcome, mail string) {
 	return report.fixerBundleLines(), report.fixerMail()
 }
+
+// HoldingTheSlot is b holding the rig's merge slot as Run holds it once it has
+// taken it (batchSlot), so that its waits yield holding as a batch's do.
+func (b BatchLand) HoldingTheSlot(holding Holding) BatchLand {
+	b.slot = &batchSlot{holding: holding}
+	b.Next.SlotYield, b.Next.SlotShared = b.slot.yield, b.slot.shared
+	return b
+}

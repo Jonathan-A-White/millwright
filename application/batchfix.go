@@ -296,8 +296,8 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, rules domain.Epi
 
 	// The batch waits for its fixer with the merge slot shared, so that the
 	// rig's checks run meanwhile; it takes the slot alone again before it looks
-	// at what the fixer left.
-	resume := n.yieldSlot(ctx)
+	// at what the fixer left, and keeps it alone through its re-gate.
+	resume := b.yieldForTheFixer(ctx)
 	f.Ended, err = n.Runner.Wait(ctx, spec.Name)
 	resume()
 	if lost := b.slotLost(); lost != "" {
