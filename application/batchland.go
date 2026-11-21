@@ -266,6 +266,9 @@ type BatchReport struct {
 	// MainLabels says of each failing test of the batch's gate whether it fails
 	// on main too (mw-gq6.929).
 	MainLabels string
+	// MainNotChecked is why the batch's failing tests were not run alone on main,
+	// when they were not (mw-gq6.1454): the mail opens with it.
+	MainNotChecked string
 
 	// versionCommit is the commit that raised the batch's version: no work of
 	// any story's, and so left out of the files the rig's related-tests line is
@@ -1086,6 +1089,7 @@ func (b BatchLand) mainAlone(ctx context.Context, rigDir string, report *BatchRe
 	bc := b.batchCloseOut(report, rigDir)
 	red := b.Next.mainAlone(ctx, bc, nr, failed, report.Base)
 	report.MainLabels = nr.MainLabels
+	report.MainNotChecked = nr.MainNotChecked
 	if record := bc.recordPath(bc.mainLog); bc.mainLog != "" && record != "" {
 		report.Records = append(report.Records, record)
 	}
@@ -1282,7 +1286,7 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 			n.Host, report.Label(), report.Target, shortCommit(report.Commit))
 	} else {
 		fmt.Fprintf(&body, "mw land on %s held %s: %s.\nNothing was pushed: %s stays at %s on %s. Every story below stays queued (run=queued, open and claimed).\n\n",
-			n.Host, report.Label(), firstLine(report.Held), report.Target, shortCommit(report.Base), n.remote())
+			n.Host, report.Label(), firstLine(report.heldWhy()), report.Target, shortCommit(report.Base), n.remote())
 	}
 	listed := report.SetAside
 	if !report.Landed {
@@ -1326,6 +1330,16 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 		return
 	}
 	report.Mailed = append(report.Mailed, subject)
+}
+
+// heldWhy is Held with "main not checked (<reason>)" before it when the batch's
+// failing tests were not run alone on main, so that the mail's first line says
+// the stories' fault is not told, as a refused story's does (mw-gq6.1454).
+func (r BatchReport) heldWhy() string {
+	if r.MainNotChecked == "" {
+		return r.Held
+	}
+	return fmt.Sprintf("%s (%s): %s", MainNotCheckedWords, r.MainNotChecked, r.Held)
 }
 
 func (r BatchReport) setAside(id string) (BatchStory, bool) {

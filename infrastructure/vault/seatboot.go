@@ -45,9 +45,10 @@ func (v *Vault) VaultFile(_ context.Context, rel string) (string, error) {
 	return string(text), nil
 }
 
-// NewestVaultFile implements application.SeatBootFiles: the newest .md file,
-// by name, of a directory of the vault — the way a seat's handoffs are named,
-// by date and number, the last by name is the newest.
+// NewestVaultFile implements application.SeatBootFiles: the newest .md file
+// of a directory of the vault, by name in natural order (application.NaturalLess:
+// runs of digits compared as numbers, the date first, then the count, so
+// 2026-11-21-1000 is after 2026-11-21-999 and 2026-11-22-1 after both).
 func (v *Vault) NewestVaultFile(_ context.Context, dir string) (string, string, error) {
 	if err := safeRel(dir); err != nil {
 		return "", "", err
@@ -58,7 +59,8 @@ func (v *Vault) NewestVaultFile(_ context.Context, dir string) (string, string, 
 	}
 	newest := ""
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), application.HandoffExt) {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), application.HandoffExt) &&
+			(newest == "" || application.NaturalLess(newest, entry.Name())) {
 			newest = entry.Name()
 		}
 	}
