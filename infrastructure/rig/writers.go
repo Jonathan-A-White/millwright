@@ -40,9 +40,10 @@ func (h holder) String() string {
 	return fmt.Sprintf("pid %d (%s)", h.pid, h.command)
 }
 
-// holdersOf is every process, not this one nor one that started it, whose
-// working directory or an open file lies inside dir. A host with no /proc, and
-// a process of another user whose links cannot be read, are not found.
+// holdersOf is every process, not this one nor one that started it nor one that
+// reads its output, whose working directory or an open file lies inside dir. A
+// host with no /proc, and a process of another user whose links cannot be read,
+// are not found.
 func holdersOf(dir string) []holder {
 	root := dir
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
@@ -53,10 +54,11 @@ func holdersOf(dir string) []holder {
 		return nil
 	}
 	mine := ancestry()
+	pipes := ownOutputPipes()
 	var found []holder
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
-		if err != nil || mine[pid] {
+		if err != nil || mine[pid] || sharesAPipe(pid, pipes) {
 			continue
 		}
 		if holds(pid, root) {
@@ -92,6 +94,41 @@ func ancestry() map[int]bool {
 		pid = ppid
 	}
 	return mine
+}
+
+// ownOutputPipes is the pipes this process's standard output and error are:
+// "pipe:[1234]", as /proc names them. A close-out runs as `{ mw next; } | tee -a
+// next-N.log` from the session's shell, in the story's worktree, so the tee is
+// not an ancestor and holds the worktree by its working directory; ended with the
+// other writers, it leaves the close-out's next line to die of SIGPIPE, with
+// whatever it had begun left half done (mw-gq6.1580).
+func ownOutputPipes() map[string]bool {
+	pipes := map[string]bool{}
+	for _, fd := range []string{"1", "2"} {
+		if target := readlink("/proc/self/fd/" + fd); strings.HasPrefix(target, "pipe:[") {
+			pipes[target] = true
+		}
+	}
+	return pipes
+}
+
+// sharesAPipe reports whether the process has one of pipes open: it reads or
+// writes what this process's output goes through.
+func sharesAPipe(pid int, pipes map[string]bool) bool {
+	if len(pipes) == 0 {
+		return false
+	}
+	base := "/proc/" + strconv.Itoa(pid) + "/fd"
+	fds, err := os.ReadDir(base)
+	if err != nil {
+		return false
+	}
+	for _, fd := range fds {
+		if pipes[readlink(base+"/"+fd.Name())] {
+			return true
+		}
+	}
+	return false
 }
 
 // holds reports whether the process's working directory or one of its open
