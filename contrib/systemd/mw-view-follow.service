@@ -35,8 +35,12 @@ ExecStart=/usr/bin/env mw events follow
 Restart=on-failure
 RestartSec=5
 
-# A pass is cheap and steps aside for real work.
-Nice=19
+# A pass is cheap, but the Governor's tap waits on it: it shows in the app within
+# two seconds only if this gets the CPU while Builders' builds hold the host at
+# several times its cores (mw-gq6.1571). The weight is the one dolt-beads and
+# postern-backend have (contrib/dolt-beads/priority.conf), and it is set here, not
+# by Nice=: a user unit may not lower its niceness without root.
+CPUWeight=1000
 
 [Install]
 WantedBy=default.target

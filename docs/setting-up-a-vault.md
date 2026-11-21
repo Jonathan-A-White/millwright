@@ -264,6 +264,11 @@ safe, and [*What a host is told*](../README.md#what-a-host-is-told) for every se
 Set `postern_channel = "direct"` to hand records to the backend without any
 chain: see the next chapter.
 
+On a home that runs Builders' builds beside the backend, `sh scripts/install-dolt-priority.sh
+postern-backend` adds a `CPUWeight=1000` drop-in (`contrib/postern-backend/priority.conf`) to
+the unit and reads the weight back; without it the backend can be starved at a load of several
+times the cores, and the phone falls to *Live from the chain* (mw-gq6.1571).
+
 **Running without it.** Leave out the backend, the key and `postern_governor_key`.
 Nothing else needs them. You talk to the Mayor in the terminal (`mw seat up
 mayor`); the Mayor asks you its questions there, in the Session; you release epics with `mw release <epic>` and approve
