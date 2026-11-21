@@ -113,7 +113,7 @@ func newYnabCategoriesCmd(budget *string) *cobra.Command {
 			for _, k := range cats {
 				target := "-"
 				if k.HasTarget {
-					target = application.Dollars(k.GoalTarget)
+					target = application.TargetText(k)
 				}
 				fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", k.ID, oneLine(k.Group), oneLine(k.Name), target, application.Dollars(k.Balance))
 			}

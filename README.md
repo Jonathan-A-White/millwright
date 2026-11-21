@@ -2622,7 +2622,12 @@ targets follow it by a command, never by hand. `mw budget sync` reads the
 sheet's `Item` and `Total Per Month` columns through the `mw gdrive` sign-in
 (no second Google client) and, for each YNAB category of the same name (case
 and spaces ignored), sets its goal target in milliunits, only where it differs;
-a second run prints `nothing to change`. A row whose Total is blank, `#REF!` or
+a second run prints `nothing to change`. A sheet row written `<X> Budget`
+matches the category named exactly `<X>` (a row named as a category keeps it;
+`Food Budget` with two Food categories stays unmatched and is listed with
+them). A yearly YNAB target (`goal_cadence` 13) is compared with twelve months
+of the sheet's amount, within two cents a month, and is set to it, the line
+naming `yearly`; a weekly or other cadence is skipped and named. A row whose Total is blank, `#REF!` or
 not an amount is skipped and named, never written as 0. It also lists sheet
 items with no YNAB category and YNAB categories with a target but no sheet row,
 and changes neither. The budget is `--budget`, else `ynab_budget_id` in

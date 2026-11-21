@@ -41,7 +41,7 @@ func standIn(t *testing.T) (ynab.Client, *[]seen) {
 		case r.Method == http.MethodGet && r.URL.Path == "/budgets/b1/categories":
 			_, _ = w.Write([]byte(`{"data":{"category_groups":[
 				{"name":"Bills","hidden":false,"deleted":false,"categories":[
-					{"id":"c1","name":"Utilities","goal_type":"NEED","goal_target":1009000,"balance":5000},
+					{"id":"c1","name":"Utilities","goal_type":"NEED","goal_target":1009000,"goal_cadence":13,"goal_cadence_frequency":1,"balance":5000},
 					{"id":"c2","name":"Groceries","goal_type":null,"goal_target":0},
 					{"id":"c3","name":"Removed","deleted":true}]},
 				{"name":"Old","hidden":true,"categories":[{"id":"c4","name":"Stale","goal_type":"MF","goal_target":1000}]},
@@ -85,6 +85,9 @@ func TestCategoriesAreFlattenedWithTheirGroupAndTarget(t *testing.T) {
 	u, g, s := cats[0], cats[1], cats[2]
 	if u.Name != "Utilities" || u.Group != "Bills" || !u.HasTarget || u.GoalTarget != 1009000 || u.Balance != 5000 {
 		t.Errorf("utilities = %+v", u)
+	}
+	if u.GoalCadence != 13 || u.GoalCadenceFrequency != 1 {
+		t.Errorf("the cadence was not read: %+v", u)
 	}
 	if g.HasTarget {
 		t.Errorf("a category with no goal has a target: %+v", g)

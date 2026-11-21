@@ -27,9 +27,14 @@ type YNABCategory struct {
 	// goal is set at all (a goal with a target of 0 is a goal).
 	GoalTarget int64
 	HasTarget  bool
-	Balance    int64
-	Hidden     bool
-	Deleted    bool
+	// GoalCadence and GoalCadenceFrequency are YNAB's goal_cadence and
+	// goal_cadence_frequency: 0 or 1 is monthly, 13 is yearly, and the
+	// frequency says how many of that period one GoalTarget covers.
+	GoalCadence          int
+	GoalCadenceFrequency int
+	Balance              int64
+	Hidden               bool
+	Deleted              bool
 }
 
 // YNABBudget is the part of YNAB that setting targets needs.
@@ -66,6 +71,10 @@ type BudgetSync struct {
 type budgetChange struct {
 	category YNABCategory
 	to       int64
+	// months is how many months the target covers, and label names the
+	// cadence when it is not monthly.
+	months int64
+	label  string
 }
 
 // sheetAmount is one usable row of the sheet.
@@ -103,23 +112,32 @@ func (b BudgetSync) Run(ctx context.Context) error {
 	}
 	var changes []budgetChange
 	var noCategory []string
-	matched := map[string]bool{}
-	for _, a := range amounts {
-		c, ok := byName[budgetKey(a.item)]
+	matched := map[string]string{}
+	for _, a := range exactNamesFirst(amounts, byName) {
+		c, ok := matchCategory(byName, a.item)
 		if !ok {
-			noCategory = append(noCategory, a.item)
+			noCategory = append(noCategory, noCategoryLine(byName, a.item))
 			continue
 		}
-		matched[budgetKey(c.Name)] = true
-		if c.HasTarget && c.GoalTarget == a.milli {
+		if first, dup := matched[budgetKey(c.Name)]; dup {
+			skipped = append(skipped, skippedRow{item: a.item, why: "the same YNAB category as the sheet row " + first})
 			continue
 		}
-		changes = append(changes, budgetChange{category: c, to: a.milli})
+		matched[budgetKey(c.Name)] = a.item
+		months, label, ok, why := targetMonths(c)
+		if !ok {
+			skipped = append(skipped, skippedRow{item: a.item, why: why})
+			continue
+		}
+		if sameTarget(c, months, a.milli) {
+			continue
+		}
+		changes = append(changes, budgetChange{category: c, to: a.milli * months, months: months, label: label})
 	}
 	var noRow []string
 	for _, c := range byName {
-		if c.HasTarget && !matched[budgetKey(c.Name)] && !skippedItem(skipped, c.Name) {
-			noRow = append(noRow, fmt.Sprintf("%s (%s)", c.Name, Dollars(c.GoalTarget)))
+		if c.HasTarget && matched[budgetKey(c.Name)] == "" && !skippedItem(skipped, c.Name) {
+			noRow = append(noRow, fmt.Sprintf("%s (%s)", c.Name, TargetText(c)))
 		}
 	}
 	sort.Strings(noRow)
@@ -133,7 +151,7 @@ func (b BudgetSync) Run(ctx context.Context) error {
 		fmt.Fprintln(out, "nothing to change")
 	}
 	for _, ch := range changes {
-		line := fmt.Sprintf("%s %s: %s -> %s", verb, strings.Join(strings.Fields(ch.category.Name), " "), oldTarget(ch.category), Dollars(ch.to))
+		line := changeLine(verb, ch)
 		if !b.DryRun {
 			if err := b.YNAB.SetGoalTarget(ctx, b.BudgetID, ch.category.ID, ch.to); err != nil {
 				return fmt.Errorf("setting the target of %s in YNAB: %w", ch.category.Name, err)

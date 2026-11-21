@@ -263,3 +263,91 @@ func TestARefusedWriteStopsTheSyncAndSaysWhatWasChanged(t *testing.T) {
 		t.Errorf("output:\n%s", out.String())
 	}
 }
+
+func cadenceCats() []application.YNABCategory {
+	return []application.YNABCategory{
+		{ID: "y1", Name: "Life Insurance", GoalTarget: 4478200, HasTarget: true, GoalCadence: 13, GoalCadenceFrequency: 1},
+		{ID: "y2", Name: "Utilities", GoalTarget: 1009000, HasTarget: true, GoalCadence: 1, GoalCadenceFrequency: 1},
+		{ID: "y3", Name: "Food [Monthly]", GoalTarget: 100000, HasTarget: true, GoalCadence: 1},
+		{ID: "y4", Name: "Food [Sporadic]", GoalTarget: 50000, HasTarget: true, GoalCadence: 1},
+		{ID: "y5", Name: "Weekly Thing", GoalTarget: 10000, HasTarget: true, GoalCadence: 2, GoalCadenceFrequency: 1},
+	}
+}
+
+func TestAYearlyTargetIsComparedAsAMonthAndANearEqualMonthIsNoChange(t *testing.T) {
+	rows := [][]string{{"Item", "Total Per Month"}, {"Life Insurance", "$373.20"}}
+	y := &fakeYNAB{cats: cadenceCats()}
+	out := runSync(t, true, &fakeSheet{rows: rows}, y)
+	if strings.Contains(out, "Life Insurance:") || !strings.HasPrefix(out, "nothing to change\n") {
+		t.Errorf("a yearly target 4478.20 and 373.20 a month was listed as a change:\n%s", out)
+	}
+}
+
+func TestAYearlyTargetIsWrittenAsTwelveMonthsAndTheLineNamesTheCadence(t *testing.T) {
+	rows := [][]string{{"Item", "Total Per Month"}, {"Life Insurance", "$400.00"}}
+	y := &fakeYNAB{cats: cadenceCats()}
+	out := runSync(t, false, &fakeSheet{rows: rows}, y)
+	if len(y.patches) != 1 || y.patches[0] != (patch{"y1", 4800000}) {
+		t.Fatalf("patches = %v\n%s", y.patches, out)
+	}
+	if !strings.Contains(out, "changed Life Insurance: 4478.20 -> 4800.00 (yearly, 400.00 a month)") {
+		t.Errorf("the line does not name the cadence:\n%s", out)
+	}
+}
+
+func TestAMonthlyCadenceTargetIsComparedAsBefore(t *testing.T) {
+	rows := [][]string{{"Item", "Total Per Month"}, {"Utilities", "$1,215.00"}}
+	y := &fakeYNAB{cats: cadenceCats()}
+	out := runSync(t, false, &fakeSheet{rows: rows}, y)
+	if len(y.patches) != 1 || y.patches[0] != (patch{"y2", 1215000}) {
+		t.Fatalf("patches = %v\n%s", y.patches, out)
+	}
+	if strings.Contains(out, "monthly") {
+		t.Errorf("a monthly line names no cadence:\n%s", out)
+	}
+}
+
+func TestACadenceItCannotConvertIsLeftAloneAndSaid(t *testing.T) {
+	rows := [][]string{{"Item", "Total Per Month"}, {"Weekly Thing", "$50"}}
+	y := &fakeYNAB{cats: cadenceCats()}
+	out := runSync(t, false, &fakeSheet{rows: rows}, y)
+	if len(y.patches) != 0 {
+		t.Fatalf("wrote %v", y.patches)
+	}
+	if !strings.Contains(out, "Weekly Thing: the YNAB target is weekly") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestABudgetRowMatchesTheCategoryNamedWithoutTheWord(t *testing.T) {
+	rows := [][]string{{"Item", "Total Per Month"}, {"Utilities Budget", "$1,215.00"}}
+	y := &fakeYNAB{cats: cadenceCats()}
+	out := runSync(t, false, &fakeSheet{rows: rows}, y)
+	if len(y.patches) != 1 || y.patches[0] != (patch{"y2", 1215000}) {
+		t.Fatalf("patches = %v\n%s", y.patches, out)
+	}
+	if !strings.Contains(out, "changed Utilities: 1009.00 -> 1215.00") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestABudgetRowWithTwoCategoriesStartingWithItsNameStaysUnmatchedAndListed(t *testing.T) {
+	rows := [][]string{{"Item", "Total Per Month"}, {"Food Budget", "$900"}}
+	y := &fakeYNAB{cats: cadenceCats()}
+	out := runSync(t, false, &fakeSheet{rows: rows}, y)
+	if len(y.patches) != 0 {
+		t.Fatalf("wrote %v", y.patches)
+	}
+	if !strings.Contains(out, "sheet items with no YNAB category:\n  Food Budget") {
+		t.Errorf("Food Budget is not listed:\n%s", out)
+	}
+}
+
+func TestARowNamedLikeACategoryBeatsTheBudgetRowForIt(t *testing.T) {
+	rows := [][]string{{"Item", "Total Per Month"}, {"Utilities Budget", "$5"}, {"Utilities", "$1,215.00"}}
+	y := &fakeYNAB{cats: cadenceCats()}
+	out := runSync(t, false, &fakeSheet{rows: rows}, y)
+	if len(y.patches) != 1 || y.patches[0] != (patch{"y2", 1215000}) {
+		t.Fatalf("patches = %v\n%s", y.patches, out)
+	}
+}
