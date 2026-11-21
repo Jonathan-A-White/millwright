@@ -30,7 +30,8 @@ import (
 // in-memory stand-ins for the work tracker and the runner. Nothing here reaches
 // the factory's own vault, rigs, beads database or terminal.
 type dispatchContext struct {
-	root    string // holds the origin, the rig checkout and the vault
+	skipped []string // the rigs this host declines, skip_rigs
+	root    string   // holds the origin, the rig checkout and the vault
 	vault   string
 	rig     string
 	seed    string // a second clone, standing in for the other host
@@ -181,6 +182,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" records a molecule that does not exist$`, c.theStoryRecordsAMissingMolecule)
 
 	ctx.Given(`^this host is at load ([0-9.]+) of (\d+) cores$`, c.thisHostIsAtLoad)
+	ctx.Given(`^this host declines the rig "([^"]*)"$`, func(name string) error { c.skipped = append(c.skipped, name); return nil })
 	ctx.When(`^this host is then at load ([0-9.]+) of (\d+) cores$`, c.thisHostIsAtLoad)
 	ctx.Given(`^this host has (\d+) MB of memory available$`, c.thisHostHasMemoryAvailable)
 	ctx.Given(`^this host's load cannot be read$`, c.thisHostsLoadCannotBeRead)
@@ -1251,6 +1253,7 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		Rigs:        map[string]string{"millwright": c.rig},
 		Changes:     worktrees,
 		Room:        c.room,
+		SkipRigs:    application.SkipRigs{Rigs: c.skipped},
 		Events:      c.events,
 		DryRun:      dryRun,
 		Out:         &c.out,

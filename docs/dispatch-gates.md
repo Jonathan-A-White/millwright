@@ -23,6 +23,7 @@ three.
 | `landed` | its last run landed it and only the close was lost |
 | `blocked` | it waits on a story that is not closed |
 | `rig-not-checked-out` | the rig is not under `[rigs]` in the config file |
+| `skip-rigs` | the host declines the rig (`skip_rigs` in the config file's `[dispatch]` table) and the story is pathed `auto`: it is left to the other hosts, so this host's gate and merge slot stay free for another rig's, until this host has passed it for the way-out wait (`skip_rigs_wait_min`, default 20 minutes) with no other host taking it; a story pathed to this host by name is taken at once (below) |
 | `smoke-hold` | the rig's last grist smoke failed and the story does not name a failing example in its smoke_examples, title or description |
 | `metered-network` | the rig installs dependencies and the network is metered |
 | `no-grist-key` | the story's acceptance or description runs `mw grist eval` or `mw grist smoke`, or its path carries `smoke_examples`, or its files key names a path or glob under `grinds/`, and the host has no readable grist test key (`grist_test_key_file`); it waits for a host that has one (mw-gq6.741, mw-gq6.779) |
@@ -45,6 +46,7 @@ A refused story's kept claim (`run=blocked`) holds its files at `shared-files` u
 - [The bug recheck](#the-bug-recheck)
 - [The handed-back gate](#the-handed-back-gate)
 - [The held-for gate](#the-held-for-gate)
+- [The skip-rigs gate](#the-skip-rigs-gate)
 - [The harness-hold gate](#the-harness-hold-gate)
 - [The smoke-hold gate, and the gates that cannot hold their own fix](#the-smoke-hold-gate-and-the-gates-that-cannot-hold-their-own-fix)
 - [The starved-rig alarm](#the-starved-rig-alarm)
@@ -101,6 +103,22 @@ at once and the next tick, a dozen seconds later, would take it again before the
 Mayor had parked it (mw-gq6.753). Whoever ends the event removes the label. The gate
 stops a new claim only: a session already running when the label is put on runs on.
 The starved-rig alarm does not count these stories.
+
+## The skip-rigs gate
+
+`[dispatch] skip_rigs = ["millwright"]` in the config file makes a host decline
+those rigs: a ready story of one, pathed `auto`, is passed over there under
+`skip-rigs` (`mw dispatch --dry-run` prints the name beside it), so the host's
+gate lock and merge slot stay free for a rig only it can work. A story pathed to
+the host by name (`host=laptop`) is still taken. The way out keeps a story from
+starving when no other host is up: the first tick that meets the story notes the
+time in the host's own note (`host.<host>.passed`, as the other host's own
+reasons are), and once the host has passed it for `skip_rigs_wait_min` minutes
+(default 20) the gate lets it through; it keeps that time while the story stays
+ready and unstarted, so a later pass over it by no room or the cap does not make
+it wait again. A host with no way to note the time declines nothing. The rig
+must still be under `[rigs]`: declining is a choice about auto stories, not a
+checkout (`rig-not-checked-out`).
 
 ## The harness-hold gate
 
@@ -188,6 +206,7 @@ under DAMPERS. These never make the check faulty (mw-gq6.1166).
 | `landed` | lost close |
 | `blocked` | blocked |
 | `rig-not-checked-out` | rig not checked out |
+| `skip-rigs` | host declines the rig |
 | `smoke-hold` | smoke hold |
 | `metered-network` | metered network |
 | `no-grist-key` | no grist key |

@@ -34,6 +34,7 @@ var DispatchGates = []DispatchGate{
 	{"landed", "its last run landed it and only the close was lost"},
 	{"blocked", "it waits on a story that is not closed"},
 	{"rig-not-checked-out", "the rig is not under [rigs] in the config file"},
+	{"skip-rigs", "the host declines the rig ([dispatch] skip_rigs) and the story is pathed auto: it is left to the other hosts, until none has taken it for the way-out wait (skip_rigs_wait_min, default 20 minutes); a story pathed to the host by name is taken"},
 	{"smoke-hold", "the rig's last grist smoke failed and the story does not name a failing example in its smoke_examples, title or description"},
 	{"metered-network", "the rig installs dependencies and the network is metered"},
 	{"no-grist-key", "the story's acceptance or description runs mw grist eval or mw grist smoke, or its path carries smoke_examples, or its files key names a path under grinds/, and the host has no readable grist test key"},
