@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -370,5 +371,21 @@ func TestARigWithTimingTestsRunsItsCommandsWithTheTimingEnvironment(t *testing.T
 	}
 	if checked.Output != "" {
 		t.Errorf("a rig without timing tests printed %q, want nothing", checked.Output)
+	}
+}
+
+func TestDataScopeIsKnownForTheRigsThatHaveOneAndNoOther(t *testing.T) {
+	checks := rig.NewChecks(rig.WithDataScope(map[string]application.DataScope{
+		"lampas":    {Paths: []string{"data/**"}, Command: "npm run check:data"},
+		"nopaths":   {Command: "true"},
+		"nocommand": {Paths: []string{"data/**"}},
+	}))
+	if scope, ok := checks.DataScope("lampas"); !ok || scope.Command != "npm run check:data" || len(scope.Paths) != 1 {
+		t.Errorf("expected lampas to have its data scope, got %+v, %v", scope, ok)
+	}
+	for _, name := range []string{"nopaths", "nocommand", "postern"} {
+		if _, ok := checks.DataScope(name); ok {
+			t.Errorf("expected no data scope for %s", name)
+		}
 	}
 }

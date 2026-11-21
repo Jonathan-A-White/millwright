@@ -3026,6 +3026,42 @@ func TestTestPartsNamesEachRigsGateInTheOrderTheFileHasIt(t *testing.T) {
 	}
 }
 
+func TestDataPartsNamesEachRigsDataPathsAndTheCommandThatChecksThem(t *testing.T) {
+	writeConfig(t, "[test_parts.lampas]\nlint = \"npm run lint\"\n\n"+
+		"[data_parts.lampas]\n"+
+		"paths = [\"data/lxx/**\", \"docs/lxx-*.md\"] # the Septuagint\n"+
+		"command = \"npm ci && npx vitest run tests/unit/lxx-*.test.ts\"\n\n"+
+		"[data_parts.postern]\n"+
+		"paths = [\n  \"data/**\", # all of it\n  'docs/data.md',\n]\n"+
+		"command = 'npm run check:data'\n\n"+
+		"[data_parts.nocommand]\npaths = [\"data/**\"]\n\n"+
+		"[data_parts.nopaths]\ncommand = \"true\"\n\n"+
+		"[after_landing]\nlampas = \"make build\"\n")
+
+	scopes, err := config.DataParts()
+	if err != nil {
+		t.Fatalf("DataParts: %v", err)
+	}
+	want := map[string]config.DataPart{
+		"lampas":  {Paths: []string{"data/lxx/**", "docs/lxx-*.md"}, Command: "npm ci && npx vitest run tests/unit/lxx-*.test.ts"},
+		"postern": {Paths: []string{"data/**", "docs/data.md"}, Command: "npm run check:data"},
+	}
+	if !reflect.DeepEqual(scopes, want) {
+		t.Fatalf("DataParts = %+v, want %+v (a rig missing its paths or its command has none)", scopes, want)
+	}
+}
+
+func TestDataPartsOfAHostWithNoConfigFileOrNoKeyIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if scopes, err := config.DataParts(); err != nil || len(scopes) != 0 {
+		t.Fatalf("DataParts = %+v, %v; want none", scopes, err)
+	}
+	writeConfig(t, "[test_parts.lampas]\nlint = \"npm run lint\"\n")
+	if scopes, err := config.DataParts(); err != nil || len(scopes) != 0 {
+		t.Fatalf("DataParts = %+v, %v; want none for a host with only test_parts", scopes, err)
+	}
+}
+
 func TestTestPartsOfAHostWithNoConfigFileIsEmpty(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	parts, err := config.TestParts()

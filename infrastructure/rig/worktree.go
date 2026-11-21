@@ -577,7 +577,7 @@ func (w *Worktrees) ChangedFiles(ctx context.Context, rigDir, base, branch strin
 	if _, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
 		return nil, nil
 	}
-	out, err := w.git(ctx, rigDir, "diff", "--name-only", "-z", base+"..."+branch, "--")
+	out, err := w.git(ctx, rigDir, "diff", "--name-only", "--no-renames", "-z", base+"..."+branch, "--")
 	if err != nil {
 		return nil, err
 	}
