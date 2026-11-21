@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -158,14 +159,46 @@ const (
 		" from dependencies d"
 )
 
-// beadColumns is a bead as a listing reads it, its lease and the count of its
-// comments beside it, for a where and an order to follow.
+// beadColumns is a bead as a listing reads it, with its lease and a count of
+// comments of 0, for a where and an order to follow. The count is read apart, for
+// the ids of the beads listed (commentCountsOf): a subselect that grouped the
+// comments of every bead there is read the whole table for any listing
+// (mw-gq6.1532).
 const beadColumns = "select i.id as id, i.title as title, i.description as description, i.acceptance_criteria as acceptance_criteria," +
 	" i.status as status, i.issue_type as issue_type, i.assignee as assignee, i.estimated_minutes as estimated_minutes," +
 	" i.created_at as created_at, i.started_at as started_at, i.updated_at as updated_at, i.closed_at as closed_at," +
-	" i.priority as priority, i.metadata as metadata, le.lease_expires_at as lease_expires_at, coalesce(cc.n, 0) as comment_count" +
-	" from issues i left join leases le on le.issue_id = i.id" +
-	" left join (select issue_id, count(*) as n from comments group by issue_id) cc on cc.issue_id = i.id"
+	" i.priority as priority, i.metadata as metadata, le.lease_expires_at as lease_expires_at, 0 as comment_count" +
+	" from issues i left join leases le on le.issue_id = i.id"
+
+// sideChunk is how many ids one side query of a listing names at most.
+const sideChunk = 1000
+
+// idsIn is the condition that a column is one of ids: how a side query of a
+// listing (its edges, its comment counts) is scoped to the beads the listing
+// found, which the server reads by an index, where a join with the listing's own
+// condition read the whole table (mw-gq6.1530, mw-gq6.1532).
+func idsIn(column string, ids []string) string {
+	quoted := make([]string, len(ids))
+	for i, id := range ids {
+		quoted[i] = sqlQuoted(id)
+	}
+	return column + " in (" + strings.Join(quoted, ", ") + ")"
+}
+
+// beadEdgesOf is beadEdgesQuery for the beads ids names: no join, no order by.
+func beadEdgesOf(ids []string) string {
+	return beadEdgesQuery + " where " + idsIn("d.issue_id", ids)
+}
+
+// commentCountsOf is the statements that count the comments of the beads ids
+// names, one for each sideChunk of them, each a row of a bead and its count.
+func commentCountsOf(ids []string) []string {
+	var queries []string
+	for chunk := range slices.Chunk(ids, sideChunk) {
+		queries = append(queries, "select c.issue_id, count(*) as n from comments c where "+idsIn("c.issue_id", chunk)+" group by c.issue_id")
+	}
+	return queries
+}
 
 // listingQueries are the three reads of a listing: its beads, their labels and
 // their edges. A listing whose edges are read by the ids of the beads it found
@@ -175,6 +208,9 @@ const beadColumns = "select i.id as id, i.title as title, i.description as descr
 type listingQueries struct {
 	beads, labels, edges string
 	edgesOf              func(ids []string) string
+	// commentsOf, when set, gives the statements that count the comments of the
+	// beads found; a listing with none leaves every count 0.
+	commentsOf func(ids []string) []string
 }
 
 // listAllOverConnection is the beads `bd list --all --json` prints, read over
@@ -185,7 +221,7 @@ func (g *Gateway) listAllOverConnection(ctx context.Context) (all []bead, ok boo
 	if db == nil {
 		return nil, false
 	}
-	all, err := readListing(ctx, db, listingQueries{beads: beadsListQuery, labels: beadLabelsQuery, edges: beadEdgesQuery}, nil)
+	all, err := readListing(ctx, db, listingQueries{beads: beadsListQuery, labels: beadLabelsQuery, edges: beadEdgesQuery, commentsOf: commentCountsOf}, nil)
 	if err != nil {
 		g.keptFailed(ctx, "every bead", err)
 		return nil, false
@@ -267,6 +303,18 @@ func readListing(ctx context.Context, db *sql.DB, q listingQueries, targets map[
 		return nil, err
 	}
 
+	if q.commentsOf != nil && len(all) > 0 {
+		ids := make([]string, len(all))
+		for i, b := range all {
+			ids[i] = b.ID
+		}
+		for _, query := range q.commentsOf(ids) {
+			if err := readCommentCounts(bounded, db, query, all, at); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	edgesQuery := q.edges
 	if q.edgesOf != nil {
 		if len(all) == 0 {
@@ -315,6 +363,27 @@ func readListing(ctx context.Context, db *sql.DB, q listingQueries, targets map[
 		}
 	}
 	return all, edges.Err()
+}
+
+// readCommentCounts runs one commentCountsOf statement and gives each bead it
+// names its count.
+func readCommentCounts(ctx context.Context, db *sql.DB, query string, all []bead, at map[string]int) error {
+	counts, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer counts.Close()
+	for counts.Next() {
+		var id string
+		var n int
+		if err := counts.Scan(&id, &n); err != nil {
+			return err
+		}
+		if i, held := at[id]; held {
+			all[i].CommentCount = n
+		}
+	}
+	return counts.Err()
 }
 
 // queuedStoriesQuery is a row for each story in hand that carries the

@@ -27,9 +27,10 @@ func (g *Gateway) showOverConnection(ctx context.Context, ids []string) (details
 	held := inList(ids)
 	targets := map[string]string{}
 	found, err := readListing(ctx, db, listingQueries{
-		beads:   beadColumns + " where i.id in (" + held + ") order by i.created_at, i.id",
-		labels:  "select l.issue_id, l.label from labels l where l.issue_id in (" + held + ") order by l.issue_id, l.label",
-		edgesOf: liveEdgesOf,
+		beads:      beadColumns + " where i.id in (" + held + ") order by i.created_at, i.id",
+		labels:     "select l.issue_id, l.label from labels l where l.issue_id in (" + held + ") order by l.issue_id, l.label",
+		edgesOf:    liveEdgesOf,
+		commentsOf: commentCountsOf,
 	}, targets)
 	if err != nil {
 		g.keptFailed(ctx, "the beads by id", err)

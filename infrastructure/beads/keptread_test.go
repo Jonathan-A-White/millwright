@@ -172,6 +172,8 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 			}}, nil
 		}
 		return &keptRows{cols: cols}, nil
+	case strings.Contains(q, "count(*) as n from comments c where"):
+		return &keptRows{cols: []string{"issue_id", "n"}, rows: [][]driver.Value{{"t-1.1", int64(1)}, {"t-0", int64(3)}}}, nil
 	case strings.Contains(q, "from labels"):
 		return &keptRows{cols: []string{"issue_id", "label"}, rows: [][]driver.Value{{"t-1.1", "hitl"}, {"t-1.1", "run:running"}}}, nil
 	case strings.Contains(q, "from dependencies"):

@@ -63,3 +63,46 @@ func TestAMailboxIsListedByBdWhenThereIsNoKeptConnection(t *testing.T) {
 		t.Fatalf("expected one bd list of the inbox, got %q", calls)
 	}
 }
+
+// mw-gq6.1530: the inbox's edges were a join of every dependency with the
+// issues on the mailbox's own condition, and an order by on top. They are read
+// for the ids of the mail found, which the server finds by an index.
+func TestTheEdgesOfAnInboxAreReadByTheIdsOfItsMailAndNotByAJoin(t *testing.T) {
+	ctx := context.Background()
+	program, asked := recordingBd(t)
+	server := aQuietFactory(asked)
+	mail := func(id, at string) []driver.Value {
+		return []driver.Value{id, "Subject of " + id, "Body of " + id, "", "open", "mail", "mayor", nil, at, nil, at, nil, int64(2), `{}`, nil, int64(0)}
+	}
+	server.beads = append(server.beads, mail("mw-m1", "2026-10-18 09:10:00"), mail("mw-m2", "2026-10-18 09:30:00"))
+	server.edges = append(server.edges, [3]string{"mw-m2", "mw-m1", "related"}, [3]string{"mw-e.2", "mw-e.9", "related"})
+	g := beads.New(t.TempDir(), beads.WithProgram(program), beads.WithHeadDB(server.open(t)), beads.WithKeptSaid(io.Discard))
+
+	got, err := g.Inbox(ctx, "mayor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[1].ReplyTo != "mw-m1" {
+		t.Fatalf("expected the two mails, the second a reply to the first, got %+v", got)
+	}
+	server.mu.Lock()
+	seen := append([]string(nil), server.seen...)
+	server.mu.Unlock()
+	edges := 0
+	for _, q := range seen {
+		l := strings.ToLower(q)
+		if !strings.Contains(l, "from dependencies") {
+			continue
+		}
+		edges++
+		if strings.Contains(l, "join issues i on i.id = d.issue_id") || strings.Contains(l, "order by") {
+			t.Errorf("expected the edges read with no join and no order by, got %s", q)
+		}
+		if !strings.Contains(l, "d.issue_id in ('mw-m1', 'mw-m2')") {
+			t.Errorf("expected the edges read by the ids of the mail found, got %s", q)
+		}
+	}
+	if edges != 1 {
+		t.Errorf("expected one edges statement, got %d", edges)
+	}
+}
