@@ -59,8 +59,9 @@ const wslTrimDropInText = "[Unit]\nConditionVirtualization=\n"
 const WSLTrimDistro = "Ubuntu-24.04"
 
 // WSLTrimRootScript is the shell script run once per WSL host as root: it
-// writes both drop-ins, reloads systemd and restarts fstrim.timer (which is
-// Persistent, so it catches up the weeks it missed at once). It holds no
+// writes both drop-ins, reloads systemd, restarts fstrim.timer and runs one
+// trim at once: a Persistent timer that never ran has no stamp to catch up from,
+// so a restart alone left the Laptop's never run (mw-gq6.1527). It holds no
 // quote, backtick or dollar, so it passes unchanged through a PowerShell
 // single-quoted string and wsl.exe, and the drop-in text is written out in it
 // as plain text (printf, the opening bracket and each newline's backslash
@@ -72,7 +73,7 @@ func WSLTrimRootScript() string {
 	for _, path := range WSLTrimDropIns {
 		fmt.Fprintf(&b, " && printf %s > %s", wslTrimDropInPrintf, path)
 	}
-	b.WriteString(" && systemctl daemon-reload && systemctl restart fstrim.timer")
+	b.WriteString(" && systemctl daemon-reload && systemctl restart fstrim.timer && systemctl start fstrim.service")
 	return b.String()
 }
 
@@ -235,7 +236,11 @@ func (w *WSLTrim) systemctl(ctx context.Context, args ...string) (string, error)
 	if program == "" {
 		program = "systemctl"
 	}
-	out, err := exec.CommandContext(ctx, program, args...).Output()
+	cmd := exec.CommandContext(ctx, program, args...)
+	// systemd 255 ignores --timestamp=unix in `systemctl show` and prints its
+	// times in $TZ; in UTC, lastTrigger reads them whatever the host's zone.
+	cmd.Env = append(os.Environ(), "TZ=UTC")
+	out, err := cmd.Output()
 	return string(out), err
 }
 
@@ -250,11 +255,16 @@ func showProperties(out string) map[string]string {
 	return props
 }
 
-// lastTrigger is the time of a LastTriggerUSec read with --timestamp=unix
-// ('@1730000000'), and whether the timer ever ran: empty, n/a and @0 say it
-// did not.
+// lastTrigger is the time of a LastTriggerUSec, and whether the timer ever ran:
+// empty, n/a and @0 say it did not. It reads the form --timestamp=unix asks for
+// ('@1730000000') and the one systemd 255 prints all the same, run in UTC ('Tue
+// 2026-11-17 14:12:19 UTC'): reading only the first, the check said 'never run'
+// on the desktop for days after its trim ran (mw-gq6.1527).
 func lastTrigger(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
+	if at, err := time.Parse("Mon 2006-01-02 15:04:05 UTC", value); err == nil {
+		return at, true
+	}
 	if !strings.HasPrefix(value, "@") {
 		return time.Time{}, false
 	}
