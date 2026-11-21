@@ -26,6 +26,9 @@ type partsAtTip struct {
 	// skipped are the numbers of the parts the close-out's gate did not run
 	// because they passed at tip: what its ledger line says it trusted.
 	skipped []int
+	// data is set when the one part is the story's data scope (datascope.go), not a
+	// part of the rig's gate.
+	data *dataGate
 }
 
 // has says part n passed at the tip.
@@ -59,11 +62,16 @@ func (n Next) readPartsAtTip(ctx context.Context, c *closeOut, tip string) *part
 		return nil
 	}
 	parts := n.GateParts.Parts(c.path.Rig)
+	if c.data != nil {
+		// A story changing only the rig's data files has the one part of its data
+		// scope: the records of the rig's own parts say nothing of it.
+		parts = c.data.parts()
+	}
 	if len(parts) == 0 {
 		return nil
 	}
 	gate := recordedGate{records: n.GateRecords, storyID: c.id, attempt: c.attempt(), parts: parts, tip: tip}
-	p := &partsAtTip{tip: tip}
+	p := &partsAtTip{tip: tip, data: c.data}
 	for i, part := range parts {
 		p.names = append(p.names, part.Name)
 		if gate.stateOf(ctx, i+1) == partPassed {
@@ -112,6 +120,13 @@ func (p *partsAtTip) tested() string {
 		return ""
 	}
 	short := shortCommit(p.tip)
+	if p.data != nil {
+		specs := "changed specs run at close-out"
+		if p.specs {
+			specs = "changed specs passed at " + short
+		}
+		return fmt.Sprintf("tested by mw check, %s at %s: pass (%d changed file(s)); %s", DataScopeName, short, p.data.files, specs)
+	}
 	if len(p.skipped) == len(p.names) {
 		specs := "changed specs run at close-out"
 		if p.specs {

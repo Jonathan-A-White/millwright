@@ -59,9 +59,31 @@ func (n Next) readLanding(ctx context.Context, c *closeOut, report *NextReport) 
 		report.Notes = append(report.Notes, fmt.Sprintf("%s/%s.toml: %s", RigsDir, c.path.Rig, warning))
 	}
 	if rules.LandingSettings().Mode != domain.LandingBatch {
+		n.markData(ctx, c)
 		return
 	}
 	n.markBatch(ctx, c)
+}
+
+// dataGate reads whether the story is gated in its data scope, once.
+func (n Next) dataGate(ctx context.Context, c *closeOut) *dataGate {
+	if n.GateParts == nil {
+		return nil
+	}
+	return dataGateOf(ctx, n.GateParts, n.Changes, StartPoint(n.remote(), c.target), c)
+}
+
+// markData reads, for a rig that lands each story, whether the story is gated in
+// its data scope and its data check passed at the tip, which the close-out then
+// trusts in place of the rig's gate in the worktree. A rig with no data key, and
+// a story with a file outside the paths, are left as they were.
+func (n Next) markData(ctx context.Context, c *closeOut) {
+	if n.dataGate(ctx, c) == nil {
+		return
+	}
+	if tip, err := n.Landing.RefHead(ctx, c.rigDir, c.branch); err == nil {
+		c.parts = n.readPartsAtTip(ctx, c, tip)
+	}
 }
 
 // markBatch records that the story is to be queued: its branch's tip, and the
@@ -74,9 +96,14 @@ func (n Next) markBatch(ctx context.Context, c *closeOut) {
 		return
 	}
 	c.tip = tip
+	n.dataGate(ctx, c)
 	if log, err := n.Vault.ReadRunFile(ctx, c.id, CheckLogFileName(c.attempt())); err == nil && CheckedTip(log) == tip {
-		c.trusted = tip
-		return
+		// A check in the data scope is trusted only while the story is still in it:
+		// its pass is of the data's own check, not of the rig's gate.
+		if _, ofData := CheckedDataScope(log); !ofData || c.data != nil {
+			c.trusted, c.trustedData = tip, ofData
+			return
+		}
 	}
 	// No whole check passed at the tip: the part records of the attempt say which
 	// parts of a split gate did, and the close-out runs only the rest
@@ -182,7 +209,12 @@ func (n Next) queue(ctx context.Context, c *closeOut, report *NextReport) (NextR
 	report.Queued, report.QueuedAs, report.Trusted = true, c.branch+" at "+n.remote(), c.trusted
 
 	tested := "mw next re-ran the rig's tests: pass"
-	if c.trusted != "" {
+	if c.trusted != "" && c.trustedData {
+		// What mw check passed at the tip is the data's own check: the ledger and the
+		// mail say so, and not that the rig's tests were not run again.
+		tested = fmt.Sprintf("tested by mw check, %s at %s: pass (%d changed file(s))", DataScopeName, shortCommit(c.trusted), c.data.files)
+		report.Trusted, report.TestedParts = "", tested
+	} else if c.trusted != "" {
 		tested = fmt.Sprintf("tested by mw check at %s: pass", shortCommit(c.trusted))
 	} else if said := c.parts.tested(); said != "" {
 		tested, report.TestedParts = said, said

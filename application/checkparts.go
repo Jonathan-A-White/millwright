@@ -201,10 +201,31 @@ func (k Check) partsOf(rig string) []GatePart {
 	return k.Parts.Parts(rig)
 }
 
-// splitGate says the check is of a rig whose gate is named as parts and keeps
+// partsFor is the parts of the gate of this story: the one part of its data scope
+// when every file it changes is inside the rig's data paths (datascope.go), else
+// the rig's own.
+func (k Check) partsFor(c *closeOut) []GatePart {
+	if k.Records != nil {
+		if data := k.dataGate(context.Background(), c); data != nil {
+			return data.parts()
+		}
+	}
+	return k.partsOf(c.path.Rig)
+}
+
+// dataGate reads whether the story is gated in its data scope.
+func (k Check) dataGate(ctx context.Context, c *closeOut) *dataGate {
+	remote := k.Remote
+	if remote == "" {
+		remote = DefaultRemote
+	}
+	return dataGateOf(ctx, k.Parts, k.Changes, StartPoint(remote, c.target), c)
+}
+
+// splitGate says the check is of a story whose gate is named as parts and keeps
 // their records.
-func (k Check) splitGate(rig string) bool {
-	return k.Records != nil && len(k.partsOf(rig)) > 0
+func (k Check) splitGate(c *closeOut) bool {
+	return k.Records != nil && len(k.partsFor(c)) > 0
 }
 
 // partLabel is how a part is named in what the check prints.
@@ -222,7 +243,7 @@ func partLabel(n, of int, part GatePart) string {
 // CheckPartSlotWait ends with a line naming the holder and the command to run
 // again.
 func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (CheckReport, error) {
-	parts := k.partsOf(c.path.Rig)
+	parts := k.partsFor(c)
 	switch {
 	case len(parts) == 0 || k.Records == nil:
 		return report, fmt.Errorf("checking %s: the gate of the rig %s is not split into parts on %s: run mw check %s without --part, or name the parts under [test_parts.%s] in the config file",
@@ -237,6 +258,10 @@ func (k Check) checkPart(ctx context.Context, report CheckReport, c *closeOut) (
 		return k.runPartWorker(ctx, report, c, label, part, tip)
 	}
 	fit, unknown := k.partFitOf(ctx, c.path.Rig, k.Part, k.began)
+	if c.data != nil {
+		// The figures kept for the rig's part N are not this part's.
+		fit, unknown = nil, false
+	}
 	if fit != nil && k.refusedLate(ctx, c, report.Attempt) {
 		fit.refusedBefore = true
 	}
@@ -446,7 +471,7 @@ func (k Check) runPartKeeping(ctx context.Context, report CheckReport, c *closeO
 
 	// How long a part that passed took is kept, by part number and host, for the
 	// fit test of the next foreground call (mw-gq6.944).
-	if checked.Passed && !checked.NotRun {
+	if checked.Passed && !checked.NotRun && c.data == nil {
 		//mw:realclock At is the date the part's time was kept at, written to the part-time note; the seconds it took read callNow
 		taken := PartTime{Story: c.id, Rig: c.path.Rig, Host: k.Host, Part: k.Part, At: time.Now(), Seconds: k.callNow().Sub(ranFrom).Seconds()}
 		_, _ = k.Records.PutRunFile(ctx, c.id, CheckPartTimeFileName(report.Attempt, k.Part), taken.String())
@@ -454,6 +479,9 @@ func (k Check) runPartKeeping(ctx context.Context, report CheckReport, c *closeO
 
 	var said strings.Builder
 	fmt.Fprintf(&said, "check on %s: %s\n", k.Host, c.id)
+	if c.data != nil {
+		fmt.Fprintf(&said, "%s%s\n", dataScopeLineStart, c.data.words())
+	}
 	if ranTwice != "" {
 		fmt.Fprintf(&said, "  %s\n", ranTwice)
 	}
