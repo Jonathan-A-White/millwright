@@ -13,9 +13,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -212,15 +214,7 @@ func newFactory(t *testing.T) *factory {
 		socket: fmt.Sprintf("mw-test-mailnotify-%d-%d", os.Getpid(), factories.Add(1)),
 		script: script,
 	}
-	t.Cleanup(func() {
-		// kill-server fails when the server has already stopped: that is fine.
-		_ = command(f.t, "tmux", "-L", f.socket, "kill-server").Run()
-		dir := os.Getenv("TMUX_TMPDIR")
-		if dir == "" {
-			dir = "/tmp"
-		}
-		_ = os.Remove(filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()), f.socket))
-	})
+	t.Cleanup(func() { stopTmux(f.t, f.socket) })
 
 	f.write("bin/bd", "#!/bin/sh\necho \"$*\" >> \"$MW_TEST_DIR/bd.log\"\n"+
 		"case \"$1 $2\" in\n"+
@@ -251,6 +245,62 @@ func newFactory(t *testing.T) *factory {
 	f.write("loadavg", "0.10 0.10 0.10 1/100 1\n", 0o644)
 	f.inbox()
 	return f
+}
+
+// stopTmux ends the private tmux server on socket and everything that runs in
+// its panes, and returns only once none of it is left. kill-server only sends
+// the panes a hangup and returns: on a loaded host a pane (its dd, its mv, its
+// sleep) is still running when the test returns, and writes into t.TempDir()
+// as the dir is removed, which fails the test at its cleanup with 'directory
+// not empty' (mw-gq6.1556). Each pane leads its own process group, so the
+// groups are listed first, killed, and waited for.
+func stopTmux(t testing.TB, socket string) {
+	var groups []int
+	if out, err := command(t, "tmux", "-L", socket, "list-panes", "-a", "-F", "#{pane_pid}").Output(); err == nil {
+		for _, field := range strings.Fields(string(out)) {
+			if pid, err := strconv.Atoi(field); err == nil && pid > 1 {
+				groups = append(groups, pid)
+			}
+		}
+	}
+	// kill-server fails when the server has already stopped: that is fine.
+	_ = command(t, "tmux", "-L", socket, "kill-server").Run()
+	for _, group := range groups {
+		_ = syscall.Kill(-group, syscall.SIGKILL)
+	}
+	for deadline := time.Now().Add(settleBudget); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if !anyRunningIn(groups) {
+			break
+		}
+	}
+	dir := os.Getenv("TMUX_TMPDIR")
+	if dir == "" {
+		dir = "/tmp"
+	}
+	_ = os.Remove(filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()), socket))
+}
+
+// anyRunningIn is whether a process of any of the process groups is still
+// running: a zombie waits only to be reaped and writes nothing.
+func anyRunningIn(groups []int) bool {
+	stats, _ := filepath.Glob("/proc/[0-9]*/stat")
+	for _, path := range stats {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		// pid (comm) state ppid pgrp ...: comm may hold spaces and brackets.
+		rest := string(raw)
+		rest = rest[strings.LastIndex(rest, ")")+1:]
+		fields := strings.Fields(rest)
+		if len(fields) < 3 || fields[0] == "Z" || fields[0] == "X" {
+			continue
+		}
+		if pgrp, err := strconv.Atoi(fields[2]); err == nil && slices.Contains(groups, pgrp) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *factory) path(rel string) string { return filepath.Join(f.dir, rel) }
@@ -2031,4 +2081,49 @@ func (f *factory) pathEnv() string {
 		}
 	}
 	return "PATH=" + strings.Join(dirs, ":")
+}
+
+// A pane that outlives kill-server (it ignores the hangup, as a session on a
+// loaded host is still running when the signal comes) must not write into the
+// test's temp dir once the factory's cleanup has returned: the dir is removed
+// next, and a file written into it then fails the test at its cleanup with
+// 'directory not empty' (mw-gq6.1556).
+func TestAPaneThatIgnoresTheHangupIsEndedBeforeTheCleanupReturns(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not on PATH")
+	}
+	dir := t.TempDir()
+	socket := fmt.Sprintf("mw-test-mailnotify-stop-%d", os.Getpid())
+	script := filepath.Join(dir, "pane.sh")
+	body := "#!/bin/sh\ntrap '' HUP TERM\ntouch \"$1/started\"\nwhile :; do date > \"$1/late.new\"; mv \"$1/late.new\" \"$1/late\"; sleep 0.05; done\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := command(t, "tmux", "-L", socket, "new-session", "-d", "-s", "stop", script, dir).CombinedOutput(); err != nil {
+		t.Fatalf("tmux new-session: %v\n%s", err, out)
+	}
+	for deadline := time.Now().Add(settleBudget); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(dir, "started")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = command(t, "tmux", "-L", socket, "kill-server").Run()
+			t.Fatal("the pane never started")
+		}
+	}
+
+	stopTmux(t, socket)
+
+	entries := func() string {
+		names, _ := filepath.Glob(filepath.Join(dir, "late*"))
+		return strings.Join(names, " ")
+	}
+	before := entries()
+	time.Sleep(300 * time.Millisecond)
+	st1, _ := os.Stat(filepath.Join(dir, "late"))
+	time.Sleep(300 * time.Millisecond)
+	st2, _ := os.Stat(filepath.Join(dir, "late"))
+	if st1 == nil || st2 == nil || !st1.ModTime().Equal(st2.ModTime()) || before != entries() {
+		t.Fatalf("the pane was still writing into the temp dir after the cleanup returned (%q)", entries())
+	}
 }
