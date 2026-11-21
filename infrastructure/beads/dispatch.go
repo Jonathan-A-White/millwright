@@ -189,7 +189,8 @@ func (g *Gateway) readClosedStories(ctx context.Context, since time.Time) ([]app
 // none here.
 //
 // With a run cache a rig read again in the run, from a time no earlier, is
-// answered from the first read (mw-gq6.1286).
+// answered from the first read (mw-gq6.1286). Over a kept connection it is one
+// query and no bd, and a row holds no epic (mw-gq6.1323).
 func (g *Gateway) ClosedStoriesOfRig(ctx context.Context, rig string, since time.Time, limit int) ([]application.ClosedStory, error) {
 	key := "rig " + rig + " " + strconv.Itoa(limit)
 	if g.cache != nil {
@@ -205,6 +206,9 @@ func (g *Gateway) ClosedStoriesOfRig(ctx context.Context, rig string, since time
 }
 
 func (g *Gateway) readClosedStoriesOfRig(ctx context.Context, rig string, since time.Time, limit int) ([]application.ClosedStory, error) {
+	if closed, ok := g.closedOfRigOverConnection(ctx, rig, since, limit); ok {
+		return closed, nil
+	}
 	out, err := g.call(ctx, "list", "--status", StatusClosed, "--closed-after", since.UTC().Format(time.RFC3339),
 		"--exclude-type", "epic", "--metadata-field", "rig="+rig, "--sort", "closed", "--brief",
 		"--limit", strconv.Itoa(limit), "--json")

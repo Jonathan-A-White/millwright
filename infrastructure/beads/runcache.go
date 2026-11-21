@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // WithRunCache makes the Gateway ask bd once, in its life, for what a command
@@ -41,6 +42,15 @@ type runCache struct {
 	// 2.9 MB and more than a second at load 11 (mw-gq6.1340).
 	live  memo[*liveListing]
 	notes memo[map[string]any]
+	// keptNotes is the table of every note as the kept connection read it, each
+	// prefix of NotesWithPrefix is answered from it: the read is the whole table
+	// (1.2 MB) whatever the prefix, 0.3 s at load, and the doctor's dampers pass
+	// asks five prefixes (mw-gq6.1323).
+	keptNotes memo[map[string]string]
+	// graph is BeadGraph as it was read: the doctor's dampers pass reads it for
+	// the grillings and again for the stuck check, 2.5 s each at load
+	// (mw-gq6.1323).
+	graph memo[[]domain.GraphBead]
 	// closed is the closed stories read of a rig, or of every rig, each kept
 	// under the kind of read it was (see closedMemo).
 	closed closedMemo
@@ -52,6 +62,8 @@ func (c *runCache) reset() {
 	c.index.reset()
 	c.live.reset()
 	c.notes.reset()
+	c.keptNotes.reset()
+	c.graph.reset()
 	c.closed.reset()
 }
 

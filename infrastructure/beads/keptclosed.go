@@ -3,6 +3,7 @@ package beads
 import (
 	"context"
 	"database/sql"
+	"strconv"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -96,4 +97,59 @@ func readClosed(ctx context.Context, db *sql.DB, since time.Time) ([]application
 		}
 	}
 	return closed, edges.Err()
+}
+
+// closedOfRigQuery is one rig's closed stories as `bd list --status closed
+// --closed-after --exclude-type epic --metadata-field rig=<rig> --sort closed
+// --limit` lists them: newest first, the rig the story's own metadata names. The
+// bd list of it was 6 to 9 s at load on a host that reaches its beads by the
+// network, and 59 s once (mw-gq6.1323).
+const closedOfRigQuery = "select i.id as id, i.title as title, i.issue_type as issue_type, i.closed_at as closed_at," +
+	" i.close_reason as close_reason, i.metadata as metadata from issues i where " + closedWhere +
+	" and json_unquote(json_extract(i.metadata, '$.rig')) = ? order by i.closed_at desc, i.id"
+
+// closedOfRigOverConnection is ClosedStoriesOfRig read over the kept connection
+// in one query; ok is false when there is no connection or it failed, and the
+// caller starts a bd. A row holds no epic (EpicID), which the one caller of the
+// read, the survey of the starved rigs, does not read; mail and event beads
+// carry no rig and are left out.
+func (g *Gateway) closedOfRigOverConnection(ctx context.Context, rig string, since time.Time, limit int) (closed []application.ClosedStory, ok bool) {
+	db := g.keptDB()
+	if db == nil {
+		return nil, false
+	}
+	query := closedOfRigQuery
+	if limit > 0 {
+		query += " limit " + strconv.Itoa(limit)
+	}
+	closed, err := readClosedOfRig(ctx, db, query, since, rig)
+	if err != nil {
+		g.keptFailed(ctx, "the closed stories of a rig", err)
+		return nil, false
+	}
+	return closed, true
+}
+
+func readClosedOfRig(ctx context.Context, db *sql.DB, query string, since time.Time, rig string) ([]application.ClosedStory, error) {
+	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
+	defer cancel()
+	rows, err := db.QueryContext(bounded, query, since.UTC().Format(time.DateTime), rig)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	closed := []application.ClosedStory{}
+	for rows.Next() {
+		var story application.ClosedStory
+		var closedAt, reason, meta sql.NullString
+		if err := rows.Scan(&story.ID, &story.Title, &story.Type, &closedAt, &reason, &meta); err != nil {
+			return nil, err
+		}
+		story.CloseReason = reason.String
+		story.ClosedAt = bead{ClosedAt: rfc3339Of(closedAt.String)}.closedAt()
+		path := bead{Metadata: metadataOf(meta)}.pathMetadata()
+		story.Rig, story.Host = path["rig"], path["host"]
+		closed = append(closed, story)
+	}
+	return closed, rows.Err()
 }

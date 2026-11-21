@@ -2,6 +2,7 @@ package beads
 
 import (
 	"context"
+	"slices"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -11,7 +12,19 @@ import (
 // molecule beads are left out: they are never an epic, a map or a ticket, and
 // they are most of the database. Over a kept connection it is three narrow
 // queries and no bd (mw-gq6.612).
+//
+// With a run cache the graph is read once and each later read is a copy of the
+// first's slice, so a caller that reorders it changes nobody else's
+// (mw-gq6.1323).
 func (g *Gateway) BeadGraph(ctx context.Context) ([]domain.GraphBead, error) {
+	if g.cache == nil {
+		return g.readBeadGraph(ctx)
+	}
+	graph, err := g.cache.graph.get(func() ([]domain.GraphBead, error) { return g.readBeadGraph(ctx) })
+	return slices.Clone(graph), err
+}
+
+func (g *Gateway) readBeadGraph(ctx context.Context) ([]domain.GraphBead, error) {
 	if graph, ok := g.graphOverConnection(ctx); ok {
 		return graph, nil
 	}
