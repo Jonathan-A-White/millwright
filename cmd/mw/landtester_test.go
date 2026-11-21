@@ -35,7 +35,7 @@ func TestTheBatchLandersNextCarriesTheTesterTrialOfTheConfig(t *testing.T) {
 	var stderr bytes.Buffer
 	dir := t.TempDir()
 
-	batch := batchLandFor(application.Next{}, mwVault(dir, "laptop"), false, false, &stderr)
+	batch := batchLandFor(application.Next{}, mwVault(dir, "laptop"), false, application.LandScope{}, &stderr)
 
 	if !batch.Next.Tester.On("lampas", time.Now()) {
 		t.Fatalf("the batch lander's Next has no Tester trial on for lampas: %+v", batch.Next.Tester)
@@ -54,7 +54,7 @@ func TestAnUnreadableTesterTableIsSaidAndStopsNoBatchLanding(t *testing.T) {
 	var stderr bytes.Buffer
 	dir := t.TempDir()
 
-	batch := batchLandFor(application.Next{}, mwVault(dir, "laptop"), false, false, &stderr)
+	batch := batchLandFor(application.Next{}, mwVault(dir, "laptop"), false, application.LandScope{}, &stderr)
 
 	if batch.Next.Tester.On("lampas", time.Now()) {
 		t.Error("an unreadable table sprang a trial")
@@ -70,7 +70,7 @@ func TestTheBatchLandersNextReadsThePastBenchmarks(t *testing.T) {
 	writeTesterConfig(t, "")
 	dir := t.TempDir()
 
-	batch := batchLandFor(application.Next{}, mwVault(dir, "laptop"), false, false, io.Discard)
+	batch := batchLandFor(application.Next{}, mwVault(dir, "laptop"), false, application.LandScope{}, io.Discard)
 
 	if batch.Next.Benchmarks == nil {
 		t.Fatal("the batch lander's Next has no book of past benchmarks")

@@ -184,6 +184,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializePathScenario(ctx)
 	steps.InitializePauseScenario(ctx)
 	steps.InitializeAfterLandingScenario(ctx)
+	steps.InitializeBatchLandHeldScenario(ctx)
 	steps.InitializePeekScenario(ctx)
 	steps.InitializePosternBeadScenario(ctx)
 	steps.InitializePosternInboxScenario(ctx)
