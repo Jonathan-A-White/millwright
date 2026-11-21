@@ -72,6 +72,9 @@ type SweepReport struct {
 	// Queued is the claimed stories left alone because they are queued for
 	// batch landing: their session is gone and their lease lapsed by design.
 	Queued []string
+	// Landed is the claimed stories left alone because their last run landed
+	// them: their close is being written, by a batch or a close-out.
+	Landed []string
 	// HandedBack is the claimed stories left alone because their close-out
 	// handed them back for their close-out alone (RunCloseOutAgain,
 	// mw-gq6.467): the next dispatch tick runs it again.
@@ -155,6 +158,15 @@ func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport)
 		report.HandedBack = append(report.HandedBack, id)
 		return
 	}
+	// Landed: only its close is left, and the batch or close-out that landed it
+	// is writing that. A lease that lapsed while it queued is no sign of trouble,
+	// and run=stuck written now would hide the landing from that close
+	// (mw-5r3p30.1206, batch 580). Read fresh, for the listing is older than the
+	// landing may be.
+	if landedNow(ctx, s.Tracker, detail) {
+		report.Landed = append(report.Landed, id)
+		return
+	}
 	if recordedGone(ctx, s.Tracker, id) {
 		report.Skipped = append(report.Skipped, id)
 		return
@@ -173,6 +185,12 @@ func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport)
 // every other claimed story unexamined.
 func (s Sweep) markStuck(ctx context.Context, detail StoryDetail, why string, report *SweepReport) {
 	id := detail.Story.ID
+	// Read again right before the write: the batch may have landed it since the
+	// check in one.
+	if landedNow(ctx, s.Tracker, detail) {
+		report.Landed = append(report.Landed, id)
+		return
+	}
 	if err := s.Tracker.CommentOnStory(ctx, id, why); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be commented on: %v", id, err))
 	}
@@ -213,6 +231,9 @@ func (r SweepReport) String() string {
 	}
 	if len(r.Queued) > 0 {
 		clip(&b, "  queued for batch landing, not stuck: "+strings.Join(r.Queued, ", "))
+	}
+	if len(r.Landed) > 0 {
+		clip(&b, "  landed, closing, not stuck: "+strings.Join(r.Landed, ", "))
 	}
 	if len(r.HandedBack) > 0 {
 		clip(&b, "  handed back for its close-out alone, not stuck: "+strings.Join(r.HandedBack, ", "))

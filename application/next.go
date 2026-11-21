@@ -3955,7 +3955,11 @@ func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []
 		// A story queued for batch landing has no session by design, and its
 		// claim and worktree wait for its batch; one handed back for its
 		// close-out alone waits for the next dispatch tick (mw-gq6.467).
-		if id == skip || QueuedForBatch(detail) || CloseOutAgain(detail) {
+		// One whose run landed is only waiting for its close, which the batch or
+		// close-out that landed it writes: no session is not a sign of trouble,
+		// and neither a given-back claim nor run=stopped must reach that close
+		// (mw-5r3p30.1206).
+		if id == skip || QueuedForBatch(detail) || CloseOutAgain(detail) || LandedRun(detail) {
 			continue
 		}
 		status, err := n.Runner.Status(ctx, SessionName(id))
@@ -3964,6 +3968,11 @@ func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []
 			continue
 		}
 		if status.Running() {
+			continue
+		}
+		// The listing is older than a landing may be: read it again before a
+		// write that would reach the story's close.
+		if landedNow(ctx, n.Tracker, detail) {
 			continue
 		}
 
