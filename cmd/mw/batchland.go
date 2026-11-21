@@ -9,6 +9,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 )
 
 // batchLandSpringJob is the job that runs `mw land <rig>` on each of this
@@ -38,7 +39,8 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 	if err != nil {
 		return application.SpringJob{}, fmt.Errorf("finding the home directory to keep the landings' state in: %w", err)
 	}
-	detached := batchLandApart(self, landStateDir(home), "")
+	landed := landStateDir(home)
+	detached := batchLandApart(self, landed, "")
 	landings := &application.BatchLandings{
 		Rigs:     rigs,
 		ReadRigs: config.Rigs, // each pass: a rig added while the follower runs is landed (mw-gq6.748)
@@ -55,6 +57,12 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 		// The batch lines: a batch held red together lands in parts next
 		// (mw-gq6.1246, mw-6ww.119.11.1.2).
 		History: mwVault(dir, host),
+		// A due batch the home would wait for (its load at its cores, or its gate
+		// lock held by another rig's gate) is landed on another host with room, over
+		// ssh (mw-gq6.1616).
+		Elsewhere:  newSSHBatchHosts(host, &apartproc.Landings{Dir: landed, Program: self}),
+		Load:       hostload.Proc{}, // the load alone: no swap is sampled for a look at the home
+		GateHolder: hostGateHolder(),
 	}
 	return landings.Job(), nil
 }

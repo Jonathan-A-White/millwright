@@ -36,6 +36,11 @@ type BatchWait struct {
 	// GateHeldBy is whose gate holds the host's gate lock while the rig's lander
 	// waits for it, empty when it does not wait.
 	GateHeldBy string
+	// LandingOn is the host another host's batch claim says the rig's batch is
+	// landing on, when that is not this host: the home handed it there while it
+	// was busy (mw-gq6.1616). It says where, in place of the gate the home's own
+	// lander would wait for.
+	LandingOn string
 	// TooLong says the story has waited past QueuedTooLongFactor times its
 	// rig's batch_every with no batch running or landing.
 	TooLong bool
@@ -50,6 +55,8 @@ func (w BatchWait) Lines() []string {
 		since += " since " + w.Since.UTC().Format(QueuedClock)
 	}
 	switch {
+	case w.LandingOn != "":
+		return []string{since + ", its batch landing on " + w.LandingOn}
 	case w.GateHeldBy != "":
 		return []string{since + ", its batch waiting for the gate held by " + w.GateHeldBy}
 	case !w.InBatchSince.IsZero():
@@ -89,6 +96,7 @@ func (s Status) batchWaits(ctx context.Context, work WorkInHand) map[string]Batc
 	}
 	every := map[string]time.Duration{}
 	now := s.now()
+	lands := map[string]string{} // rig -> the other host its batch lands on
 	waits := make(map[string]BatchWait, len(queued))
 	for _, d := range queued {
 		rig := d.Merged().Rig
@@ -101,13 +109,31 @@ func (s Status) batchWaits(ctx context.Context, work WorkInHand) map[string]Batc
 			}
 		}
 		w := BatchWait{Since: d.QueuedAt, InBatchSince: jobs[rig], Landing: landing[rig], Every: every[rig]}
+		if _, read := lands[rig]; !read {
+			lands[rig] = s.batchLandsElsewhere(ctx, rig, now)
+		}
+		w.LandingOn = lands[rig]
 		if w.Landing && holder != "" && !ownBatch(holder, rig) {
 			w.GateHeldBy = holder
 		}
-		w.TooLong = w.InBatchSince.IsZero() && !w.Landing && !w.Since.IsZero() && now.Sub(w.Since) > QueuedTooLongFactor*w.Every
+		w.TooLong = w.InBatchSince.IsZero() && !w.Landing && w.LandingOn == "" && !w.Since.IsZero() && now.Sub(w.Since) > QueuedTooLongFactor*w.Every
 		waits[d.Story.ID] = w
 	}
 	return waits
+}
+
+// batchLandsElsewhere is the other host rig's batch claim says it is landing on,
+// "" when none is, or it is this host's own (whose lines say the rest), or the
+// claim cannot be read.
+func (s Status) batchLandsElsewhere(ctx context.Context, rig string, now time.Time) string {
+	if s.Notes == nil {
+		return ""
+	}
+	host, landing := BatchLandsOn(ctx, s.Notes, rig, now)
+	if !landing || host == s.Host {
+		return ""
+	}
+	return host
 }
 
 // landingRigs are the rigs with an `mw land` alive on this host: the landing

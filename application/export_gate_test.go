@@ -126,3 +126,9 @@ func (b BatchLand) LandTheBatchIn(ctx context.Context, dir string, report *Batch
 func (b BatchLand) MailTheBatch(ctx context.Context, report *BatchReport) {
 	b.mailTheMayor(ctx, report, &NextReport{})
 }
+
+// ClaimTheRig is claimTheRig, for a test of what a landing does with the rig's
+// batch claim.
+func (b BatchLand) ClaimTheRig(ctx context.Context, rig string, report *BatchReport) (said []string, unclaim func(), claimed bool) {
+	return b.claimTheRig(ctx, rig, report)
+}

@@ -77,18 +77,45 @@ func (r Remote) RunNamedOn(ctx context.Context, host, rig, ref string, tests []s
 	return application.ParseNamedHere(text)
 }
 
-// run runs command on host over its ssh line and returns what it printed.
-func (r Remote) run(ctx context.Context, host, command string) (string, error) {
+// LandRoom implements application.BatchElsewhere's ask: it runs mw land <rig>
+// --room on host, which says whether the rig is checked out there, whose gate
+// holds its gate lock and its load, and reads that from what it printed.
+func (r Remote) LandRoom(ctx context.Context, host, rig string) (application.BatchRoom, error) {
+	text, err := r.run(ctx, host, "mw land "+quote(rig)+" --room")
+	if err != nil {
+		return application.BatchRoom{}, err
+	}
+	return application.ParseBatchRoom(host, text)
+}
+
+// LandArgv is the command that runs mw land <rig> on host over its ssh line, for
+// a landing begun apart from the follower (apartproc.Landings.BeginOn).
+func (r Remote) LandArgv(host, rig string) ([]string, error) {
+	return r.argv(host, "mw land "+quote(rig))
+}
+
+// argv is the ssh command that runs command on host, in a login shell.
+func (r Remote) argv(host, command string) ([]string, error) {
 	prefix := strings.Fields(r.Reach[host])
 	if len(prefix) < 2 {
 		if why := r.Gaps[host]; why != "" {
-			return "", fmt.Errorf("no way to reach %s: %s", host, why)
+			return nil, fmt.Errorf("no way to reach %s: %s", host, why)
 		}
-		return "", fmt.Errorf("no way to reach %s: set `%s = \"ssh <alias>\"` under [hands_hosts] in the config file", host, host)
+		return nil, fmt.Errorf("no way to reach %s: set `%s = \"ssh <alias>\"` under [hands_hosts] in the config file", host, host)
 	}
 	args := append(append(append([]string{}, prefix[1:len(prefix)-1]...), unattendedSSH...), prefix[len(prefix)-1],
 		"bash -lc "+quote(command))
-	cmd := exec.CommandContext(ctx, prefix[0], args...)
+	return append([]string{prefix[0]}, args...), nil
+}
+
+// run runs command on host over its ssh line and returns what it printed.
+func (r Remote) run(ctx context.Context, host, command string) (string, error) {
+	argv, err := r.argv(host, command)
+	if err != nil {
+		return "", err
+	}
+	prefix := strings.Fields(r.Reach[host])
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

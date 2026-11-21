@@ -18,7 +18,7 @@ import (
 // newLandCmd builds `mw land <rig>`: the one command that pushes the target
 // branch of a rig that lands in batches (plans/0117, Land Rush 3).
 func newLandCmd() *cobra.Command {
-	var dryRun, one bool
+	var dryRun, one, room bool
 	var only, without []string
 	var setAside, why string
 
@@ -66,9 +66,21 @@ func newLandCmd() *cobra.Command {
 			"its branch is kept, its claim is given back held, and a SET-ASIDE comment carries the why. The\n" +
 			"next mw land takes the remaining queued stories as one batch; mw release <story> puts it back.\n\n" +
 			"--dry-run prints the batch it would make and does nothing else: nothing is merged, tested,\n" +
-			"pushed, recorded or mailed.",
+			"pushed, recorded or mailed.\n\n" +
+			"A rig has one batch at a time across all hosts: a landing takes the rig's batch claim, kept in\n" +
+			"the tracker every host shares, and one that finds another host's batch holding it lands\n" +
+			"nothing and says whose it is. A lease that ran out unrenewed, a host that died, is taken back.\n" +
+			"When its host is busy, the follower hands a due batch to another host that has the rig and room\n" +
+			"(--room says whether this one has: the rig checked out, the gate lock free, the load under\n" +
+			"the cores) and runs mw land there over ssh.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if room {
+				if dryRun || one || len(only) > 0 || len(without) > 0 || setAside != "" || why != "" {
+					return fmt.Errorf("land %s: --room says whether this host has room to land the batch and lands nothing: it goes with no other flag", args[0])
+				}
+				return runLandRoom(cmd.Context(), args[0], cmd.OutOrStdout())
+			}
 			dir, err := config.Vault()
 			if err != nil {
 				return err
@@ -241,6 +253,8 @@ func newLandCmd() *cobra.Command {
 	cmd.Flags().StringVar(&setAside, "set-aside", "",
 		"take this queued story out of the batch queue: its branch is kept, its claim given back held; needs --why, lands nothing")
 	cmd.Flags().StringVar(&why, "why", "", "why the story is set aside: the SET-ASIDE comment on it carries this")
+	cmd.Flags().BoolVar(&room, "room", false,
+		"print whether this host has room to land the rig's batch (rig checked out, gate lock free, load under its cores) and land nothing: what the home asks over ssh")
 	cmd.Flags().BoolVar(&one, "one", false,
 		"take only the oldest queued story: how the follower lands what a rig flipped back to landing = each had queued")
 	return cmd
@@ -253,6 +267,7 @@ func newLandCmd() *cobra.Command {
 func batchLandFor(next application.Next, files *vault.Vault, dryRun bool, scope application.LandScope, errw io.Writer) application.BatchLand {
 	return application.BatchLand{
 		Next:    withTesterTrial(withVaultPorts(next, files), "mw land", errw),
+		Claim:   batchClaimFor(next),
 		Records: files,
 		Metrics: files,
 		Fix:     true,
@@ -275,4 +290,17 @@ func withVaultPorts(n application.Next, files *vault.Vault) application.Next {
 	n.Home = files
 	n.Benchmarks = vault.Benchmarks{Vault: files}
 	return n
+}
+
+// batchClaimFor is the rig's batch claim across hosts for the Next mw land built:
+// kept in the tracker's key-value store, which every host shares, with this
+// host named in it so that mw status can say where the batch lands
+// (mw-gq6.1616). A tracker with no such store makes the zero claim, which takes
+// none.
+func batchClaimFor(next application.Next) application.BatchClaim {
+	notes, ok := next.Tracker.(application.SlotNotes)
+	if !ok {
+		return application.BatchClaim{}
+	}
+	return application.BatchClaim{Notes: notes, Host: next.Host}
 }

@@ -106,3 +106,46 @@ func TestRetryThereRunsMwRetryWithItsFlagsOnTheHostAndReturnsWhatItPrints(t *tes
 		t.Fatalf("expected ssh's stderr in the error, got %v", err)
 	}
 }
+
+func TestLandRoomRunsMwLandRoomOnTheHostAndReadsWhatItPrints(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + log + "\nprintf 'Welcome to cloud14\\nrig: yes\\ngate: free\\nload: 1.5 8 0\\n'\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	room, err := Remote{Reach: map[string]string{"cloud14": "ssh mw@10.0.0.14"}}.LandRoom(context.Background(), "cloud14", "lampas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if room.Host != "cloud14" || !room.HasRig || room.GateHeldBy != "" || room.Load.Load != 1.5 || room.Load.Cores != 8 || !room.Free() {
+		t.Fatalf("read %+v", room)
+	}
+	args, _ := os.ReadFile(log)
+	if want := "-o\nBatchMode=yes\nmw@10.0.0.14\nbash -lc 'mw land '\\''lampas'\\'' --room'\n"; string(args) != want {
+		t.Fatalf("ssh got\n%s\nwant\n%s", args, want)
+	}
+}
+
+func TestLandRoomIsAnErrorWhenTheHostSaysNothingOfItsRoom(t *testing.T) {
+	standIn(t, 0) // prints "host: desktop"
+	if _, err := (Remote{Reach: map[string]string{"desktop": "ssh desktop"}}).LandRoom(context.Background(), "desktop", "lampas"); err == nil {
+		t.Fatal("expected a host that says nothing of a room to be an error")
+	}
+}
+
+func TestLandArgvIsTheSshCommandThatRunsMwLandOnTheHost(t *testing.T) {
+	argv, err := Remote{Reach: map[string]string{"cloud14": "ssh mw@10.0.0.14"}}.LandArgv("cloud14", "lampas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ssh", "-o", "BatchMode=yes", "mw@10.0.0.14", "bash -lc 'mw land '\\''lampas'\\'''"}
+	if strings.Join(argv, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %q, want %q", argv, want)
+	}
+	if _, err := (Remote{}).LandArgv("cloud14", "lampas"); err == nil {
+		t.Fatal("expected a host with no way to be reached to be an error")
+	}
+}

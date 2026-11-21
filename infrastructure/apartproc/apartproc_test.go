@@ -249,3 +249,31 @@ func TestAScopedLandingRunsMwLandWithItsOnlyAndWithoutLists(t *testing.T) {
 		t.Errorf("expected mw to be run as %q, got %q", want, got)
 	}
 }
+
+// mw-gq6.1616: a landing begun on another host runs apart from the follower in
+// the state of the rig's landing here, so the follower that comes back finds and
+// waits for it, and no second landing of the rig begins beside it.
+func TestALandingBegunOnAnotherHostIsPendingAndWaitedForAndNotBegunTwice(t *testing.T) {
+	prog := heldStandIn(t) // stands for ssh: it runs until released
+	l := &apartproc.Landings{Dir: t.TempDir(), Program: "unused", Scope: noScope(t), Poll: 20 * time.Millisecond}
+	if err := l.BeginOn(context.Background(), "lampas", "cloud14", []string{prog, "mw@10.0.0.14", "bash -lc 'mw land lampas'"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := l.Pending(context.Background()); err != nil || len(got) != 1 || got[0] != "lampas" {
+		t.Fatalf("expected the landing on cloud14 pending as lampas's, got %v %v", got, err)
+	}
+	// The follower beginning the rig's landing here finds it, and begins none.
+	if err := l.Begin(context.Background(), "lampas", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prog+".go", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Wait(context.Background(), "lampas"); err != nil {
+		t.Fatalf("expected the landing that passed to be told so, got %v", err)
+	}
+	args, _ := os.ReadFile(prog + ".args")
+	if got := strings.Count(string(args), "mw@10.0.0.14 bash -lc"); got != 1 {
+		t.Errorf("expected one landing begun, on cloud14, got %d (%q)", got, args)
+	}
+}

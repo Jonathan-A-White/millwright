@@ -126,6 +126,9 @@ type CrossHolding struct {
 	slot CrossSlot
 	key  string
 	rig  string
+	// name is what the holding is called in what it says of itself: "the
+	// cross-host merge slot" unless a batch claim (BatchClaim) holds it.
+	name string
 
 	mu      sync.Mutex
 	lease   CrossSlotLease
@@ -320,6 +323,15 @@ func (s CrossSlot) hold(ctx context.Context, key, rig string, lease CrossSlotLea
 	return h
 }
 
+// what is how the holding names itself: "the cross-host merge slot", or "the
+// batch claim" for a BatchClaim's.
+func (h *CrossHolding) what() string {
+	if h.name == "" {
+		return "the cross-host merge slot"
+	}
+	return h.name
+}
+
 // renew pushes the lease's expiry on, when it is still this holding's. It
 // reports whether to go on renewing: a lease another close-out has taken over
 // is never written over.
@@ -342,7 +354,7 @@ func (h *CrossHolding) renew(ctx context.Context) bool {
 			by = read.Holder
 		}
 		h.lost = true
-		h.trouble = append(h.trouble, fmt.Sprintf("the cross-host merge slot of %s was lost while this landing held it: its lease ran out unrenewed and it is now held by %s", h.rig, by))
+		h.trouble = append(h.trouble, fmt.Sprintf("%s of %s was lost while this landing held it: its lease ran out unrenewed and it is now held by %s", h.what(), h.rig, by))
 		return false
 	}
 	if ctx.Err() != nil {
@@ -388,23 +400,23 @@ func (h *CrossHolding) Release(ctx context.Context) []string {
 		defer h.mu.Unlock()
 		said = h.trouble
 		for _, f := range h.fails {
-			said = append(said, f.line(fmt.Sprintf("the cross-host merge slot of %s could not be renewed", h.rig)))
+			said = append(said, f.line(fmt.Sprintf("%s of %s could not be renewed", h.what(), h.rig)))
 		}
 		if h.lost {
 			return
 		}
 		note, err := h.slot.Notes.Note(ctx, h.key)
 		if err != nil {
-			said = append(said, fmt.Sprintf("the cross-host merge slot of %s could not be given back: %v; its lease runs out by itself at %s",
-				h.rig, err, h.lease.Expires.UTC().Format(time.RFC3339)))
+			said = append(said, fmt.Sprintf("%s of %s could not be given back: %v; its lease runs out by itself at %s",
+				h.what(), h.rig, err, h.lease.Expires.UTC().Format(time.RFC3339)))
 			return
 		}
 		if read, ok := ReadCrossSlotLease(note); !ok || read.Token != h.lease.Token {
 			return
 		}
 		if err := h.slot.Notes.ClearNote(ctx, h.key); err != nil {
-			said = append(said, fmt.Sprintf("the cross-host merge slot of %s could not be given back: %v; its lease runs out by itself at %s",
-				h.rig, err, h.lease.Expires.UTC().Format(time.RFC3339)))
+			said = append(said, fmt.Sprintf("%s of %s could not be given back: %v; its lease runs out by itself at %s",
+				h.what(), h.rig, err, h.lease.Expires.UTC().Format(time.RFC3339)))
 		}
 	})
 	return said

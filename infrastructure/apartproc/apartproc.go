@@ -96,6 +96,15 @@ func (l *Landings) BeginScoped(ctx context.Context, rig string, scope applicatio
 	return l.apart().begin(ctx, rig, "mw land "+rig, args...)
 }
 
+// BeginOn is Begin for a landing on another host: remote is the ssh command that
+// runs `mw land <rig>` there (peekremote.Remote.Argv), run apart from the
+// follower in the state of the rig's landing here, so that a landing begun on
+// another host is found, waited for and told as one begun here (mw-gq6.1616).
+// As Begin, a landing of rig still running or owed is the landing.
+func (l *Landings) BeginOn(ctx context.Context, rig, host string, remote []string) error {
+	return l.apart().begin(ctx, rig, "mw land "+rig+" on "+host, remote...)
+}
+
 // Wait implements application.LandProcesses.
 func (l *Landings) Wait(ctx context.Context, rig string) error {
 	return l.apart().wait(ctx, rig, "mw land "+rig, "failed")

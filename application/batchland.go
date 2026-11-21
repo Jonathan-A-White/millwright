@@ -143,6 +143,11 @@ type BatchLand struct {
 	// (mw-apvyg8j). Nil makes the smoke in mw land, as the process that is
 	// handed one (SmokeLanded) does.
 	Apart SmokeApart
+	// Claim is the rig's batch claim across hosts, taken before the merge slot
+	// and held until the batch has landed or been held; an mw land that finds
+	// another host's batch holding it lands nothing (mw-gq6.1616). The zero
+	// Claim takes none.
+	Claim BatchClaim
 	// SmokeHere says the smoke is made by this BatchLand, whatever Apart is:
 	// set by SmokeLanded, so that the process handed a smoke does not hand it
 	// on.
@@ -352,6 +357,17 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		return report, nil
 	}
 
+	// The rig's batch claim across hosts: one batch of a rig at a time on any
+	// host, taken before the merge slot so that no host waits for the slot of a
+	// batch another host is landing (mw-gq6.1616).
+	claimSaid, unclaim, claimed := b.claimTheRig(ctx, rig, &report)
+	if !claimed {
+		gather()
+		n.print(report.String())
+		return report, nil
+	}
+	defer unclaim()
+
 	// The rig's merge slot on this host, as a close-out takes it: no other
 	// landing of the rig here while the batch is made, tested and pushed.
 	holding, err := n.Slot.Take(ctx, rigDir, fmt.Sprintf("mw land on %s, landing a batch of %s", n.Host, rig))
@@ -373,7 +389,7 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 	// pushed read a queue that batch has since landed and a target it has since
 	// moved: landing those stories again wrote their What's new lines a second
 	// time, under the version the batch before had raised (mw-gq6.514).
-	report.Notes = report.Notes[:noted]
+	report.Notes = append(report.Notes[:noted], claimSaid...)
 	if err := b.readQueue(ctx, rig, rigDir, &report, &nr, rules.LandingSettings().BatchMax); err != nil {
 		release()
 		gather()
@@ -1592,6 +1608,13 @@ type QueuedStoryReader interface {
 // mw land takes the rig's merge slot besides. The host's gate lock stays one for
 // all rigs, so their tests still run one after another.
 //
+// A batch the home would wait for, because its load has reached its cores or its
+// gate lock is held by another's gate, is landed on another host instead when one
+// has the rig checked out, a free gate lock and a load under its cores: the job
+// runs mw land <rig> there over ssh (BatchElsewhere), and the fixer of that batch
+// is a session of that host. A rig has one batch at a time across all hosts, by
+// its batch claim (BatchClaim), which mw land itself takes (mw-gq6.1616).
+//
 // A rig whose landing failed (a held batch, which the Mayor is mailed, or a
 // story landed that left the queue as it was) is not tried again until
 // BatchEvery has passed, so a red batch is not run again every pass, nor while
@@ -1646,6 +1669,14 @@ type BatchLandings struct {
 	// batch: one held red with more than one story is landed again in parts,
 	// at once (mw-gq6.1246, mw-6ww.119.11.1.2). Nil reads none.
 	History BatchHistory
+	// Elsewhere, Load and GateHolder are how a due batch is landed on another host
+	// when the home is busy (mw-gq6.1616): Load is the home's own, GateHolder says
+	// whose gate holds its gate lock, "" for nobody, and Elsewhere is the host
+	// book and the ssh. A batch whose home is not busy, or for which no host has
+	// room, lands here as before. Nil Elsewhere never lands elsewhere.
+	Elsewhere  BatchElsewhere
+	Load       HostLoad
+	GateHolder func() string
 
 	rigsMu sync.Mutex // guards Rigs once ReadRigs has replaced it
 
@@ -1719,6 +1750,9 @@ type batchDue struct {
 	heldRed int
 	held    []string
 	suspect string
+	// adopted is a landing begun before this follower, waited for and not begun
+	// again, there or elsewhere.
+	adopted bool
 }
 
 func (d batchDue) String() string {
@@ -2016,7 +2050,7 @@ func (b *BatchLandings) pending(ctx context.Context, due []batchDue) ([]batchDue
 		if _, here := rigs[name]; !here || slices.ContainsFunc(due, func(d batchDue) bool { return d.rig == name }) {
 			continue
 		}
-		adopt = append(adopt, batchDue{rig: name})
+		adopt = append(adopt, batchDue{rig: name, adopted: true})
 	}
 	if len(adopt) == 0 {
 		return due, nil
@@ -2033,6 +2067,12 @@ func (b *BatchLandings) pending(ctx context.Context, due []batchDue) ([]batchDue
 // for ever.
 func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 	if !d.each {
+		// A busy home does not make a rig wait for its load and its gate lock
+		// while another host sits idle: it has the batch landed there (the batch
+		// claim keeps it one batch at a time, mw-gq6.1616).
+		if host, elsewhere := b.freeHost(ctx, d); elsewhere {
+			return b.Elsewhere.Land(ctx, host, d.rig)
+		}
 		return b.Land(ctx, d.rig, false)
 	}
 	if d.heldRed > 0 {

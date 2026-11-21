@@ -34,6 +34,11 @@ func registerStatusQueuedSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Given(`^the host's gate lock is held by "([^"]*)"$`, c.theGateLockIsHeldBy)
 	ctx.Then(`^the report says "([^"]*)" is waiting for the gate held by "([^"]*)"$`, c.theReportSaysWaitingForTheGate)
 	ctx.Then(`^the report says "([^"]*)" is landing in a batch now$`, c.theReportSaysLandingNow)
+	ctx.Given(`^the batch of the rig "([^"]*)" is landing on "([^"]*)"$`, c.theBatchIsLandingOn)
+	ctx.Given(`^the batch of the rig "([^"]*)" was landing on "([^"]*)" until (\d+) minutes ago$`, c.theBatchWasLandingOnUntil)
+	ctx.Then(`^the report says "([^"]*)" has its batch landing on "([^"]*)"$`, c.theReportSaysBatchLandingOn)
+	ctx.Then(`^the report does not say "([^"]*)" has its batch landing on "([^"]*)"$`, c.theReportDoesNotSayBatchLandingOn)
+	ctx.Then(`^the report does not say "([^"]*)" is waiting for the gate held by "([^"]*)"$`, c.theReportDoesNotSayWaitingForTheGate)
 	ctx.Then(`^the report says "([^"]*)" is queued too long$`, c.theReportSaysQueuedTooLong)
 	ctx.Then(`^the report does not say any story is queued too long$`, c.theReportSaysNoQueuedTooLong)
 	ctx.Then(`^the report does not call any story stranded$`, c.theReportCallsNoneStranded)
@@ -225,4 +230,48 @@ func (c *statusContext) theReportSaysWaitingForTheGate(id, holder string) error 
 
 func (c *statusContext) theReportSaysLandingNow(id string) error {
 	return c.reportSaysOf(id, "its batch is landing now")
+}
+
+// theBatchIsLandingOn leaves the rig's batch claim (mw-gq6.1616) held by host.
+func (c *statusContext) theBatchIsLandingOn(rig, host string) error {
+	return c.batchClaimUntil(rig, host, c.now.Add(application.BatchClaimTTL))
+}
+
+// theBatchWasLandingOnUntil leaves a claim whose lease ran out minutes ago.
+func (c *statusContext) theBatchWasLandingOnUntil(rig, host, minutes string) error {
+	ago, err := c.minutesAgo(minutes)
+	if err != nil {
+		return err
+	}
+	return c.batchClaimUntil(rig, host, ago)
+}
+
+func (c *statusContext) batchClaimUntil(rig, host string, expires time.Time) error {
+	lease := application.CrossSlotLease{Holder: "mw land on " + host + ", landing a batch of " + rig, Host: host,
+		Token: "claim-" + host, Taken: expires.Add(-application.BatchClaimTTL), Expires: expires}
+	return c.tracker.SetNote(context.Background(), application.BatchClaimKey(rig), lease.Note())
+}
+
+func (c *statusContext) theReportSaysBatchLandingOn(id, host string) error {
+	return c.reportSaysOf(id, "its batch landing on "+host)
+}
+
+func (c *statusContext) theReportDoesNotSayBatchLandingOn(id, host string) error {
+	return c.reportDoesNotSayOf(id, "its batch landing on "+host)
+}
+
+func (c *statusContext) theReportDoesNotSayWaitingForTheGate(id, holder string) error {
+	return c.reportDoesNotSayOf(id, "its batch waiting for the gate held by "+holder)
+}
+
+// reportDoesNotSayOf is reportSaysOf turned about: the block of the story does
+// not say words.
+func (c *statusContext) reportDoesNotSayOf(id, words string) error {
+	if err := c.reportSaysOf(id, ""); err != nil {
+		return err
+	}
+	if err := c.reportSaysOf(id, words); err == nil {
+		return fmt.Errorf("expected the block of %s not to say %q:\n%s", id, words, c.report.String())
+	}
+	return nil
 }

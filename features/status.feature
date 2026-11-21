@@ -1131,6 +1131,37 @@ Feature: mw status
     And the report does not say any story is queued too long
     And every line of the report is at most 60 columns wide
 
+  # mw-gq6.1616: a busy home hands a due batch to a host with room; the batch claim
+  # in the tracker says which, and a queued story says where its batch lands in
+  # place of the gate the home's own lander waited for.
+  Scenario: A queued story whose batch was handed to another host says where it lands
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.73" filed under it
+    And the status story "mw-gq6.73" is claimed with its session running
+    And the claim on "mw-gq6.73" was last renewed 3 hours ago
+    And the status story "mw-gq6.73" was queued for batch landing 150 minutes ago
+    And a landing of the rig "millwright" is running
+    And the host's gate lock is held by "mw-gq6.1612 check"
+    And the batch of the rig "millwright" is landing on "cloud14"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.73" is queued for batch landing since 150 minutes ago
+    And the report says "mw-gq6.73" has its batch landing on "cloud14"
+    And the report does not say "mw-gq6.73" is waiting for the gate held by "mw-gq6.1612 check"
+    And the report does not say any story is queued too long
+    And every line of the report is at most 60 columns wide
+
+  Scenario: A queued story whose batch claim ran out is not said to land anywhere
+    Given the rig "millwright" lands in batches every 30 minutes
+    And a status story "mw-gq6.74" filed under it
+    And the status story "mw-gq6.74" is claimed with its session running
+    And the claim on "mw-gq6.74" was last renewed 3 hours ago
+    And the status story "mw-gq6.74" was queued for batch landing 150 minutes ago
+    And the batch of the rig "millwright" was landing on "cloud14" until 10 minutes ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report does not say "mw-gq6.74" has its batch landing on "cloud14"
+
   Scenario: A queued story whose lander is running and holds no gate is in its batch
     Given the rig "millwright" lands in batches every 30 minutes
     And a status story "mw-gq6.72" filed under it
