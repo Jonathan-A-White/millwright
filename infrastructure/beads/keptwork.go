@@ -32,45 +32,37 @@ const liveIDs = "(select id from issues where status < 'closed' and issue_type n
 	" union all select id from issues where status > 'closed' and issue_type not in ('mail', 'event')" +
 	" union all select id from issues where status = 'closed' and issue_type = 'epic') live"
 
-// liveBeadsQuery, liveLabelsQuery and liveEdgesQuery are the live beads with
-// their labels and their edges, as beadsListQuery and its two lists read every
-// bead; an edge carries the status of the bead it names, so that a wait on a
+// liveBeadsQuery and liveLabelsQuery are the live beads with their labels, as
+// beadsListQuery and beadLabelsQuery read every bead; liveEdgesOf reads their
+// edges, and an edge carries the status of the bead it names, so that a wait on a
 // bead closed long ago is known to be over without reading that bead.
 var (
 	liveBeadsQuery = strings.Replace(beadColumns, " from issues i left join leases",
 		" from "+liveIDs+" join issues i on i.id = live.id left join leases", 1) + " order by i.created_at, i.id"
 	liveLabelsQuery = "select l.issue_id, l.label from labels l join " + liveIDs + " on live.id = l.issue_id" +
 		" order by l.issue_id, l.label"
-	liveEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id," +
-		" d.type, t.status as target_status from dependencies d join " + liveIDs + " on live.id = d.issue_id" +
-		" left join issues t on t.id = d.depends_on_issue_id order by d.issue_id, d.created_at"
 )
 
-// liveEdgesOf is liveEdgesQuery for the beads ids names: the server reads each
+// liveEdgesOf is the edges of the beads ids names: the server reads each
 // bead's edges by the index on the bead's id, where the join with the live
 // condition read every dependency there is, 1.0 to 1.4 s of the 90,000 at load
 // 14 and 0.4 s this way (mw-gq6.1340).
 func liveEdgesOf(ids []string) string {
-	quoted := make([]string, len(ids))
-	for i, id := range ids {
-		quoted[i] = sqlQuoted(id)
-	}
 	return "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id," +
 		" d.type, t.status as target_status from dependencies d" +
-		" left join issues t on t.id = d.depends_on_issue_id where d.issue_id in (" + strings.Join(quoted, ", ") + ")" +
+		" left join issues t on t.id = d.depends_on_issue_id where " + idsIn("d.issue_id", ids) +
 		" order by d.issue_id, d.created_at"
 }
 
 // withoutTexts is a listing's query with the description, the acceptance
-// criteria and the count of comments of each bead left out (read as empty and
-// 0): the first two are most of its 2.9 MB, and with the third, the grouping of
-// every comment there is, they were over half of the server's time at load 14
-// (mw-gq6.1340).
+// criteria of each bead left out (read as empty): they are most of its 2.9 MB,
+// and with the count of comments (a listing that prints no texts asks for none,
+// see readLiveOverConnection), they were over half of the server's time at load
+// 14 (mw-gq6.1340).
 func withoutTexts(query string) string {
 	return strings.NewReplacer("i.description as description", "'' as description",
 		"i.acceptance_criteria as acceptance_criteria", "'' as acceptance_criteria",
-		"coalesce(cc.n, 0) as comment_count", "0 as comment_count",
-		" left join (select issue_id, count(*) as n from comments group by issue_id) cc on cc.issue_id = i.id", "").Replace(query)
+	).Replace(query)
 }
 
 // liveListing is the live beads as one read over the kept connection found
@@ -110,11 +102,11 @@ func (g *Gateway) readLiveOverConnection(ctx context.Context) (*liveListing, boo
 		return nil, false
 	}
 	targets := map[string]string{}
-	beadsQuery := liveBeadsQuery
+	queries := listingQueries{beads: liveBeadsQuery, labels: liveLabelsQuery, edgesOf: liveEdgesOf, commentsOf: commentCountsOf}
 	if g.withoutTexts {
-		beadsQuery = withoutTexts(beadsQuery)
+		queries.beads, queries.commentsOf = withoutTexts(queries.beads), nil
 	}
-	all, err := readListing(ctx, db, listingQueries{beads: beadsQuery, labels: liveLabelsQuery, edgesOf: liveEdgesOf}, targets)
+	all, err := readListing(ctx, db, queries, targets)
 	if err != nil {
 		g.keptFailed(ctx, "the live beads", err)
 		return nil, false

@@ -166,6 +166,15 @@ func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.Na
 			rows = append(rows, row)
 		}
 		return &keptRows{cols: cols, rows: rows}, nil
+	case strings.Contains(q, "count(*) as n from comments c where"):
+		// The count of comments of the beads a statement names.
+		rows := [][]driver.Value{}
+		for _, id := range sortedKeys(s.comments) {
+			if strings.Contains(q, "'"+strings.ToLower(id)+"'") {
+				rows = append(rows, []driver.Value{id, int64(len(s.comments[id]))})
+			}
+		}
+		return &keptRows{cols: []string{"issue_id", "n"}, rows: rows}, nil
 	case strings.Contains(q, "union all select 'k'"):
 		// The snapshot's notes and the comments of the beads it names.
 		rows := s.commentRows("c")

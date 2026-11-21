@@ -53,8 +53,8 @@ func (g *Gateway) whereOverConnection(ctx context.Context, where, what string) (
 		beads: beadColumns + " where " + where + " order by i.created_at, i.id",
 		labels: "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + where +
 			" order by l.issue_id, l.label",
-		edges: "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id, d.type" +
-			" from dependencies d join issues i on i.id = d.issue_id where " + where + " order by d.issue_id, d.created_at",
+		edgesOf:    beadEdgesOf,
+		commentsOf: commentCountsOf,
 	}, nil)
 	if err != nil {
 		g.keptFailed(ctx, what, err)

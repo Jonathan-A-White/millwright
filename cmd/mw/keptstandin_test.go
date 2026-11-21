@@ -119,6 +119,9 @@ func (c standInConn) QueryContext(_ context.Context, query string, _ []driver.Na
 			{"e-1", "The epic", "open", "epic", int64(1), "2026-10-01 10:00:00"},
 			{"e-1.1", "The story", "open", "task", int64(2), "2026-10-01 10:05:00"},
 		}}, nil
+	case strings.Contains(q, "count(*) as n from comments c where"):
+		// The count of comments of the beads a statement names: none has any.
+		return &standInRows{cols: []string{"issue_id", "n"}}, nil
 	case strings.Contains(q, "from labels"):
 		return &standInRows{cols: []string{"issue_id", "label"}}, nil
 	case strings.Contains(q, "from dependencies"):

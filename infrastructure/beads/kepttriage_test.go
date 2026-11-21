@@ -37,6 +37,8 @@ func (triageConn) QueryContext(_ context.Context, query string, _ []driver.Named
 			rows: [][]driver.Value{
 				{"s-1", "A landing", "", "", "closed", "task", nil, nil, "2026-11-01 10:00:00", nil, "2026-11-02 10:00:00", "2026-11-02 10:00:00", int64(2), `{}`, nil, int64(0)},
 			}}, nil
+	case strings.Contains(q, "count(*) as n from comments c where"):
+		return &triageRows{cols: []string{"issue_id", "n"}}, nil
 	case strings.Contains(q, "from labels"):
 		return &triageRows{cols: []string{"issue_id", "label"}}, nil
 	case strings.Contains(q, "from dependencies"):
