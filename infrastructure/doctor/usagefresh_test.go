@@ -56,9 +56,49 @@ func TestUsageFreshIsFaultyAtMoreThanSeventyMinutesAndOKAtSeventy(t *testing.T) 
 }
 
 func TestUsageFreshIsFaultyForAReadingTakenBeforeAResetThatPassed(t *testing.T) {
-	verdict, reason := usageFreshCheck(t, 10*time.Minute, -5*time.Minute).Probe(context.Background())
-	if verdict != application.DoctorFaulty || !strings.Contains(reason, "taken before the week reset at 2026-10-30T19:55:00Z") {
-		t.Errorf("a young reading from before the reset: %v %q", verdict, reason)
+	// 45 minutes after the reset: the 30-minute reader and its grace have both run out.
+	verdict, reason := usageFreshCheck(t, 50*time.Minute, -45*time.Minute).Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "taken before the week reset at 2026-10-30T19:15:00Z") {
+		t.Errorf("a reading from before the reset, 45 minutes on: %v %q", verdict, reason)
+	}
+}
+
+// On 2026-11-20 the week reset at 12:59:00Z and the doctor paged at 13:03Z, before
+// the reader's next read (13:04Z) could have taken the new week (mw-3uk8nj3).
+func TestUsageFreshDoesNotPageBeforeTheReaderCouldHaveReadTheNewWeek(t *testing.T) {
+	// Read at reset-5m, now = reset+4m.
+	check := usageFreshCheck(t, 9*time.Minute, -4*time.Minute)
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("4 minutes after the reset: %v %q, want ok", verdict, reason)
+	}
+	for _, want := range []string{"STALE", "no page", "reset"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("the note should say %q, got %q", want, reason)
+		}
+	}
+	alarms, _ := usageFreshRun(t, check, doctor.New(t.TempDir()), usageFreshNow)
+	if len(alarms) != 0 {
+		t.Errorf("4 minutes after the reset: alarms %q, want none", alarms)
+	}
+}
+
+func TestUsageFreshPagesOnceTheReaderAndItsGraceHavePassedTheReset(t *testing.T) {
+	// The window is the timer's 30 minutes plus 10: exactly at it is still quiet.
+	edge := doctor.UsageFreshReadAfterReset
+	if edge != 40*time.Minute {
+		t.Fatalf("the window is %s, want 40m", edge)
+	}
+	if verdict, reason := usageFreshCheck(t, edge+5*time.Minute, -edge).Probe(context.Background()); verdict != application.DoctorOK {
+		t.Errorf("exactly at the window: %v %q, want ok", verdict, reason)
+	}
+	check := usageFreshCheck(t, 50*time.Minute, -45*time.Minute)
+	if verdict, _ := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+		t.Errorf("45 minutes after the reset: %v, want faulty", verdict)
+	}
+	alarms, _ := usageFreshRun(t, check, doctor.New(t.TempDir()), usageFreshNow)
+	if len(alarms) != 1 || !strings.Contains(alarms[0], "taken before the week reset") {
+		t.Errorf("45 minutes after the reset: alarms %q, want one", alarms)
 	}
 }
 
@@ -157,7 +197,7 @@ func TestUsageFreshAlarmsForEachReasonThatPages(t *testing.T) {
 	}{
 		{"within the margin of the trip", 85, 72 * time.Minute, 24 * time.Hour, false, "85.0%"},
 		{"no reading at all", 0, 0, 24 * time.Hour, true, "no usage reading was ever kept"},
-		{"taken before a reset that passed", 41, 10 * time.Minute, -5 * time.Minute, false, "taken before the week reset"},
+		{"taken before a reset that passed", 41, 50 * time.Minute, -45 * time.Minute, false, "taken before the week reset"},
 		{"over the age limit", 41, 6*time.Hour + time.Minute, 24 * time.Hour, false, "6h1m old"},
 	}
 	for _, c := range cases {

@@ -27,15 +27,23 @@ const (
 // When a stale reading pages him (mw-gq6.883; PROVISIONAL, the Governor to
 // confirm: it is his phone). A reading past the age of application.UsageStaleAfter
 // is always shown as STALE in mw status, but pages only when it could hide a
-// trip of the pause: it was taken before a reset that has passed, it is over
-// UsageFreshPageAge old, or its percent is within UsageFreshPageMargin points of
-// where the pause trips. No reading at all pages too. On 2026-10-29 a reading
+// trip of the pause: it was taken before a reset that passed more than
+// UsageFreshReadAfterReset ago (before that the reader has had no run to take the
+// new week), it is over UsageFreshPageAge old, or its percent is within
+// UsageFreshPageMargin points of where the pause trips. No reading at all pages too. On 2026-10-29 a reading
 // stood at 95% for 11 hours while the week reached 100%; on 2026-11-02 a 41%
 // reading 72 minutes old, with 53 points of room, paged as an Emergency.
 const (
 	UsageFreshPageAge    = 6 * time.Hour
 	UsageFreshPageMargin = 20.0
 )
+
+// UsageFreshReadAfterReset is how long after a reset the doctor waits before a
+// reading taken before it pages (mw-3uk8nj3): the mw-usage-read timer's 30
+// minutes (contrib/systemd/mw-usage-read.timer) plus 10 for the read itself and
+// a missed tick's slack. Until then the reader has not yet had a run that could
+// have taken the new week, so a healthy reader is not called broken.
+const UsageFreshReadAfterReset = 40 * time.Minute
 
 // usageFreshAlarmStateName is where the check remembers, between runs, the seqs
 // of the alarms it has sent, so a fresh reading can clear each.
@@ -152,6 +160,15 @@ func (u *UsageFresh) look(ctx context.Context) (finding, application.UsageReadin
 		return finding{}, last, nil
 	}
 	if last.BeforeReset(now) {
+		if since := now.Sub(last.Resets); since <= UsageFreshReadAfterReset {
+			// The week has only just reset: the reader has not yet had a run that
+			// could have taken the new week, and the old week's percent says
+			// nothing of the pause's trip in this one.
+			return finding{
+				why:  "STALE: " + stale,
+				note: fmt.Sprintf("STALE, no page: %s; the reset was %d min ago and the mw-usage-read timer has not yet had a run since (it pages after %s); mw status shows STALE", stale, int(since.Minutes()), UsageFreshReadAfterReset),
+			}, last, nil
+		}
 		return finding{why: "STALE: " + stale, page: true}, last, nil
 	}
 	if age := now.Sub(last.At); age > UsageFreshPageAge {
