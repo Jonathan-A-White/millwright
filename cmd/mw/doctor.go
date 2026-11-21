@@ -679,7 +679,12 @@ func newDoctorCmd() *cobra.Command {
 // and verdicts go through gateways that ask bd afresh, so a note written in the
 // run is read as written.
 func doctorDamperSurvey(vault, host string) (application.DamperSurvey, error) {
-	return damperSurvey(mwGateway(vault, host, beads.WithRunCache()), vault, host)
+	gateway := mwGateway(vault, host, beads.WithRunCache())
+	survey, err := damperSurvey(gateway, vault, host)
+	if err != nil {
+		return survey, err
+	}
+	return withDoctorTiming(survey, gateway, os.Stderr), nil
 }
 
 // doctorCheckBudget is how long one check's probe, or the dampers read, may take

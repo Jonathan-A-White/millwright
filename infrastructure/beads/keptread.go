@@ -493,12 +493,48 @@ func (g *Gateway) noteOverConnection(ctx context.Context, key string) (value str
 }
 
 // notesOverConnection is `bd kv list` over the kept connection, narrowed to the
-// keys with prefix; ok is false when there is no connection or it failed.
+// keys with prefix; ok is false when there is no connection or it failed. With a
+// run cache the table is read once and each prefix is answered from it.
 func (g *Gateway) notesOverConnection(ctx context.Context, prefix string) (map[string]string, bool) {
 	db := g.keptDB()
 	if db == nil {
 		return nil, false
 	}
+	var table map[string]string
+	if g.cache == nil {
+		var ok bool
+		if table, ok = g.readKeptNotes(ctx, db); !ok {
+			return nil, false
+		}
+	} else {
+		var err error
+		table, err = g.cache.keptNotes.get(func() (map[string]string, error) {
+			read, ok := g.readKeptNotes(ctx, db)
+			if !ok {
+				return nil, errKeptNotes
+			}
+			return read, nil
+		})
+		if err != nil {
+			return nil, false
+		}
+	}
+	found := map[string]string{}
+	for key, value := range table {
+		if strings.HasPrefix(key, prefix) {
+			found[key] = value
+		}
+	}
+	return found, true
+}
+
+// errKeptNotes is the read of the notes over the kept connection failing, which
+// readKeptNotes has already said.
+var errKeptNotes = errors.New("the notes could not be read over the kept connection")
+
+// readKeptNotes is every note, a null value left out; ok is false when the
+// query failed.
+func (g *Gateway) readKeptNotes(ctx context.Context, db *sql.DB) (map[string]string, bool) {
 	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
 	defer cancel()
 	rows, err := db.QueryContext(bounded, "select substr(`key`, 4) as k, `value` as v from config where `key` like 'kv.%'")
@@ -515,7 +551,7 @@ func (g *Gateway) notesOverConnection(ctx context.Context, prefix string) (map[s
 			g.keptFailed(ctx, "the notes", err)
 			return nil, false
 		}
-		if strings.HasPrefix(key, prefix) && value.Valid {
+		if value.Valid {
 			found[key] = value.String
 		}
 	}

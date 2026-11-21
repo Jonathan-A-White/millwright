@@ -843,11 +843,30 @@ func ReadProposals(ctx context.Context, beads VerifyBeads, now time.Time) ([]Dam
 			ids = append(ids, c.ID)
 		}
 	}
-	comments, err := beads.StoriesComments(ctx, uniqueStrings(ids))
+	comments, err := proposalComments(ctx, beads, uniqueStrings(ids))
 	if err != nil {
 		return nil, fmt.Errorf("reading the comments of the beads: %w", err)
 	}
 	return ProposalsOf(comments), nil
+}
+
+// ProposalCommentReader is what a VerifyBeads may also be: it reads, of each
+// bead, only the comments that open PROPOSED, VERIFIED, UNVERIFIED or REJECTED,
+// the ones ProposalsOf reads, a tenth of the comments there are. A bead with
+// none of them may be left out of the answer.
+type ProposalCommentReader interface {
+	StoriesProposalComments(ctx context.Context, ids []string) (map[string][]Comment, error)
+}
+
+// proposalComments are the comments ProposalsOf reads of the beads: only those
+// that open a verify word when the tracker can read them alone, every comment
+// when it cannot. The doctor's dampers line read every comment of every story
+// landed in 14 days, 1,563 beads and 3 to 5 s at load (mw-gq6.1323).
+func proposalComments(ctx context.Context, beads VerifyBeads, ids []string) (map[string][]Comment, error) {
+	if narrow, ok := beads.(ProposalCommentReader); ok {
+		return narrow.StoriesProposalComments(ctx, ids)
+	}
+	return beads.StoriesComments(ctx, ids)
 }
 
 // DamperCounts reads the work itself and then the alarms, for mw doctor.

@@ -33,6 +33,9 @@ type keptServer struct {
 	// mailed says that the vault also holds a mail bead and an event bead, which
 	// a query that leaves both types out does not return.
 	mailed atomic.Bool
+	// graphed says that the server answers the bead graph's own query for the
+	// beads (graphBeadsQuery).
+	graphed atomic.Bool
 
 	mu   sync.Mutex
 	seen []string
@@ -123,6 +126,20 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 			rows = kept
 		}
 		return &keptRows{cols: cols, rows: rows}, nil
+	case c.s.graphed.Load() && strings.Contains(q, "i.priority, i.created_at from issues i where"):
+		// The bead graph's beads (graphBeadsQuery), read only when graphed is set;
+		// otherwise the query is one the server does not answer and the graph is
+		// read from the listing by bd.
+		return &keptRows{cols: []string{"id", "title", "status", "issue_type", "priority", "created_at"}, rows: [][]driver.Value{
+			{"t-1", "Epic", "open", "epic", int64(1), "2026-10-01 10:00:00"},
+			{"t-1.1", "By hand", "in_progress", "task", int64(2), "2026-10-01 10:05:00"},
+		}}, nil
+	case strings.Contains(q, "json_extract(i.metadata"):
+		// One rig's newest closed stories (readClosedOfRig).
+		return &keptRows{cols: []string{"id", "title", "issue_type", "closed_at", "close_reason", "metadata"}, rows: [][]driver.Value{
+			{"t-9", "Landed", "task", "2026-10-02 09:00:00", "Done", `{"rig":"millwright","host":"laptop"}`},
+			{"t-7", "Earlier", "bug", "2026-10-01 09:00:00", nil, `{"rig":"millwright","host":"cloud5"}`},
+		}}, nil
 	case strings.Contains(q, "i.status = 'closed'") && strings.Contains(q, "from issues i where"):
 		return &keptRows{cols: []string{"id", "title", "issue_type", "closed_at", "close_reason", "metadata"}, rows: [][]driver.Value{
 			{"t-9", "Landed", "task", "2026-10-02 09:00:00", "Done", `{"rig":"millwright","host":"laptop"}`},
@@ -173,6 +190,12 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 	case strings.Contains(q, "from events e"):
 		return &keptRows{cols: []string{"k", "id", "what", "actor", "text", "at", "type", "status", "assignee", "labels"}, rows: [][]driver.Value{
 			{"7", "t-1.1", "updated", "mw@laptop", nil, "2026-10-01 11:00:00", "task", "in_progress", "mw@laptop", "run:running"},
+		}}, nil
+	case strings.Contains(q, "regexp_like(c.text"):
+		// The comments that open a word of mw verify, of the ids asked.
+		return &keptRows{cols: []string{"k", "id", "a", "b", "t", "at"}, rows: [][]driver.Value{
+			{"c", int64(12), "t-9", "mw@laptop", "PROPOSED VERIFIED by the Governor's use, from tx-2 (2026-10-02T10:00:00Z): it shows (confidence 0.8, sonnet, run r-2)", "2026-10-03 11:00:00"},
+			{"c", int64(11), "t-9", "mw@laptop", "VERIFIED by the Governor", "2026-10-03 10:00:00"},
 		}}, nil
 	case strings.Contains(q, "from comments c join"):
 		return &keptRows{cols: []string{"k", "id", "actor", "text", "at", "type", "status", "assignee", "labels"}, rows: nil}, nil
