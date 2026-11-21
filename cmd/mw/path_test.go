@@ -65,3 +65,16 @@ func TestParseAfterReadsIdsAndNone(t *testing.T) {
 		}
 	}
 }
+
+// Both commands' help says an acceptance criterion that is the landing check from
+// his use is warned of, and where it goes instead (mw-gq6.1567).
+func TestPathSetAndFileHelpNameTheVerifyAfterLandingLine(t *testing.T) {
+	for _, args := range [][]string{{"path", "set", "--help"}, {"file", "--help"}} {
+		help := helpOf(t, args...)
+		for _, want := range []string{"from his use", "VERIFY AFTER", "LANDING"} {
+			if !strings.Contains(help, want) {
+				t.Errorf("mw %s: expected the help to say %q, got:\n%s", strings.Join(args, " "), want, help)
+			}
+		}
+	}
+}
