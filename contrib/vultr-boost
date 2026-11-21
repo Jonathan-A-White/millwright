@@ -303,6 +303,68 @@ hubssh() { # remote command string
 	ssh -o BatchMode=yes -o ConnectTimeout=15 "$HUB_SSH" "$1"
 }
 
+# --- the rigs a box clones (mw-gq6.1566) ------------------------------------------
+# A box is told which rigs to clone (BOOST_RIGS, "name=url name=url"): the [cloud] rigs
+# of the home's config.toml when it has one, else the tfvars `rigs`, else every rig of the
+# home's [rigs] that has a [tests] gate and an origin (millwright, the box's own checkout, is
+# left out). A [cloud] rigs entry is a name (its url is the origin of that rig's checkout on
+# the home) or a name=url. A url never carries a login: the token is BOOST_GITHUB_TOKEN.
+CONFIG=$HOME/.config/mw/config.toml
+
+cfg_table() { # TABLE: one "key<TAB>value" line for each one-line key of the config's [TABLE]
+	[ -r "$CONFIG" ] || return 0
+	awk -v t="[$1]" '
+		/^[[:space:]]*\[/ { s = $0; sub(/[[:space:]]*#.*/, "", s); sub(/^[[:space:]]+/, "", s); on = (s == t); next }
+		on && /^[[:space:]]*[A-Za-z0-9_."-]+[[:space:]]*=/ {
+			k = $0; sub(/[[:space:]]*=.*/, "", k); sub(/^[[:space:]]+/, "", k); gsub(/"/, "", k)
+			v = $0; sub(/^[^=]*=[[:space:]]*/, "", v)
+			if (v ~ /^"/) { v = substr(v, 2); i = index(v, "\""); v = substr(v, 1, i - 1) }
+			else { sub(/[[:space:]]*#.*/, "", v); sub(/[[:space:]]+$/, "", v) }
+			print k "\t" v
+		}' "$CONFIG"
+}
+
+cfg_value() { # TABLE KEY: the value of KEY in the config's [TABLE], empty if none
+	cfg_table "$1" | awk -F'\t' -v k="$2" '$1 == k { print $2; exit }'
+}
+
+rig_origin() { # NAME: the https or git@ url of the origin of the home's checkout of rig NAME, no login; empty if none
+	local dir url
+	dir=$(cfg_value rigs "$1")
+	[ -n "$dir" ] && [ -d "$dir" ] || return 0
+	url=$(git -C "$dir" remote get-url origin 2>/dev/null) || return 0
+	printf '%s\n' "$url" | sed 's#^\(https\{0,1\}://\)[^/@]*@#\1#'
+}
+
+box_rigs() { # the rigs a box clones as "name=url name=url", empty if none is known
+	local said word name url out=""
+	said=$(cfg_value cloud rigs)
+	[ -n "$said" ] || said=$(tfvar rigs)
+	if [ -z "$said" ]; then
+		# every rig of the home's [rigs] with a [tests] gate and an origin, millwright apart
+		for name in $(cfg_table rigs | cut -f1); do
+			[ "$name" != millwright ] || continue
+			[ -n "$(cfg_value tests "$name")" ] || continue
+			[ -n "$(rig_origin "$name")" ] || continue
+			said="${said:+$said }$name"
+		done
+	fi
+	for word in $said; do
+		name=${word%%=*}
+		if [ "$name" != "$word" ]; then
+			url=${word#*=}
+		else
+			url=$(rig_origin "$name")
+			if [ -z "$url" ]; then
+				echo "    note: rig $name has no checkout with an origin under [rigs]; the box will not clone it" >&2
+				continue
+			fi
+		fi
+		out="${out:+$out }$name=$url"
+	done
+	printf '%s\n' "$out"
+}
+
 # --- the dry run: every step, none run ----------------------------------------
 plan_up() {
 	STEPS=6
@@ -314,6 +376,7 @@ plan_up() {
 	step "ssh $HUB_SSH: copy /etc/wireguard/wg0.conf to a dated backup, then $ENROL $NAME <the box's public key>"
 	would "print the backup's path and the way back (ssh $HUB_SSH '$ENROL --remove $NAME')"
 	step "terraform -chdir=$TFDIR init, then apply -state=<private dir>/terraform.tfstate -var-file=$TFVARS -var name=$NAME$(snapshot_var) (tokens in TF_VAR_* only)"
+	would "clone on the box (BOOST_RIGS): $(box_rigs)"
 	would "ask to confirm, or pass -auto-approve with --yes; this is where the box starts to cost money"
 	step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
 }
@@ -567,9 +630,16 @@ do_up() {
 	step "terraform: init, then apply (this is where the box starts to cost money)"
 	cost_line
 	tf_init
-	local rc=0
+	local rc=0 rigs rig_var=()
+	rigs=$(box_rigs)
+	if [ -n "$rigs" ]; then
+		rig_var=(-var "rigs=$rigs")
+		echo "    rigs: the box clones $rigs"
+	else
+		echo "    note: no rig is known to clone on the box: [cloud] rigs, the tfvars rigs and a [rigs] rig with a [tests] gate and an origin are all missing"
+	fi
 	# shellcheck disable=SC2046
-	tf apply -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(snapshot_args) $(confirm_args) || rc=$?
+	tf apply -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" ${rig_var[@]+"${rig_var[@]}"} $(snapshot_args) $(confirm_args) || rc=$?
 
 	step "state: seal it in the vault"
 	seal_state

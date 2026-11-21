@@ -94,7 +94,7 @@ price before terraform asks to apply.
    | `plan` | | the Vultr plan id (default `vhp-8c-16gb-amd`) |
    | `user` | | the user the Boost dispatches as (default `mw`) |
    | `beads_port`, `beads_user` | | the beads server's port (3307) and user |
-   | `rigs`, `vault_repo`, `cap` | | passed to the bootstrap: `"name=url name=url"`, the vault's url, sessions at once |
+   | `rigs`, `vault_repo`, `cap` | | passed to the bootstrap: `"name=url name=url"`, the vault's url, sessions at once. With no `rigs` here and no `[cloud]` `rigs` (below), `up` passes every rig of the home's `[rigs]` that has a `[tests]` line and a git origin (millwright apart), as `name=<origin url>`; `up --dry-run` lists them (mw-gq6.1566) |
    | `git_name`, `git_email` | | the git identity |
    | `ssh_authorized_key` | | a public key that may ssh in as the box's user |
    | `ssh_allowed_cidr` | | who may reach ssh on the box's public address (default anywhere) |
@@ -192,6 +192,7 @@ no_dispatch_minutes = 30    # how long after its make a box may go with no dispa
 prefix          = "cloud"   # a box is named the prefix and a number: cloud1, cloud2 (lower-case letters and hyphens)
 snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
 command         = "<full path to contrib/vultr-boost>"   # default: the millwright checkout of [rigs]
+rigs            = "lampas sermon-index"   # the rigs a new box clones, each a name (its url is its checkout's origin) or name=url; default: every [rigs] rig with a [tests] line
 
 [cloud.caps]                # the sessions each host runs at once
 desktop = 2

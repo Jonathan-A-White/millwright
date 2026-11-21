@@ -135,6 +135,7 @@
 //	no_dispatch_minutes = 30                # how long after its make a box may go with no dispatch before it is destroyed
 //	snapshot        = "<a Vultr snapshot id>"   # contrib/vultr-boost snapshot makes one
 //	command         = "/home/jwhite/millwright/contrib/vultr-boost"
+//	rigs            = "lampas sermon-index"   # the rigs a new box clones (contrib/vultr-boost up); default: every [rigs] rig with a [tests] line
 //
 //	[cloud.caps]                        # the sessions each host runs at once
 //	desktop = 2
