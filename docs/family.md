@@ -96,7 +96,8 @@ anything (a free port, an empty vault directory, a dolt on the `PATH`), and it w
 | the vault: a git repository, one commit, laid from the starter kit (`seats/`, `CLAUDE.md`), its beads database made on that server | `~/luke-vault` |
 
 On a host that runs tests beside the served beads, `sh scripts/install-dolt-priority.sh` adds the
-`CPUWeight=1000` drop-in (`contrib/dolt-beads/priority.conf`) to that unit and reads the weight back.
+`CPUWeight=1000` drop-in (`contrib/dolt-beads/priority.conf`) to that unit and reads the weight back
+(`sh scripts/install-dolt-priority.sh postern-backend` does the same for the postern backend).
 The weight keeps the server fed; it does not shorten a read. `go run ./contrib/dolt-beads/trace <command>`
 lists the statements a command's `bd` waits on and the server's time over each.
 
