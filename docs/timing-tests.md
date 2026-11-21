@@ -80,7 +80,9 @@ main with `MW_TIMING=only` and `MW_TIMING_TESTS` (the rig's globs).
 While the home is busy (its load at its cores, or its gate lock held by a gate) and
 another host has the rig checked out, a free gate lock and a load under its cores,
 the run is made there instead, by `mw timing <rig>` over ssh, so that it does not
-wait for the home's calm; the nightly suite is handed on the same way. `mw status`
+wait for the home's calm, to a host whose mw has `mw timing` (its `mw land <rig> --room`
+prints a `timing: yes` line; an older mw prints none, and is passed over); the nightly
+suite is handed on the same way, to any host with room. `mw status`
 says it under SUITE as `timing lampas on cloud9`. `mw timing <rig>` is also the way
 to run a rig's timing tests by hand: it runs them whether or not they are due.
 

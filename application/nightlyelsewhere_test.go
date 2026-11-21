@@ -292,6 +292,63 @@ func TestAnExplicitTimingRunOfARigWithNoTimingTestsIsRefused(t *testing.T) {
 	}
 }
 
+// mw-gq6.1621: a box whose mw is older than the home's has no mw timing, so it says
+// no "timing: yes" line to mw land --room, and a timing run is never handed to it.
+func TestATimingRunIsHandedOnlyToABoxThatHasMwTiming(t *testing.T) {
+	older := func(host string, load float64) application.BatchRoom {
+		room := free(host, load)
+		room.HasTiming = false // what an mw from before mw timing says: no timing line
+		return room
+	}
+	t.Run("the freest box is passed over when its mw is older", func(t *testing.T) {
+		f := newTimingNight(t)
+		elsewhere := &apptest.FakeNightlyElsewhere{Hosts: []application.BatchRoom{older("cloud2", 0.1), free("cloud9", 4)}}
+		f.place(elsewhere, func() string { return "mw-x check" })
+		mustDo(t, f.night.Job().Run(context.Background()))
+		if got, want := elsewhere.Ran(), []string{"cloud9 timing lampas"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("expected the timing run on cloud9, which has mw timing, got %v", got)
+		}
+	})
+	t.Run("with only older boxes the home runs it as before", func(t *testing.T) {
+		f := newTimingNight(t)
+		elsewhere := &apptest.FakeNightlyElsewhere{Hosts: []application.BatchRoom{older("cloud2", 0.1)}}
+		f.place(elsewhere, func() string { return "mw-x check" })
+		mustDo(t, f.night.Job().Run(context.Background()))
+		if got := elsewhere.Ran(); len(got) != 0 {
+			t.Fatalf("expected nothing handed to a box with no mw timing, got %v", got)
+		}
+		if ran := f.runner.Ran(); len(ran) != 1 {
+			t.Fatalf("expected the home to run the tests once, got %+v", ran)
+		}
+	})
+	t.Run("the suite still goes to an older box, which has mw suite --file", func(t *testing.T) {
+		a := newNightlySuite(t)
+		a.load.Reading = busyHome()
+		room := free("cloud2", 0.1)
+		room.HasTiming = false
+		a.elsewhere.Hosts = []application.BatchRoom{room}
+		a.run()
+		if got, want := a.elsewhere.Ran(), []string{"cloud2 suite lampas"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("expected the suite run on cloud2, got %v", got)
+		}
+	})
+}
+
+// What mw land --room prints says whether the box has mw timing; an mw that
+// predates the line prints none, and is read as a box without it.
+func TestAnOlderBoxsRoomSaysNoTiming(t *testing.T) {
+	said := application.BatchRoom{HasRig: true, HasTiming: true, Load: application.LoadReading{Load: 1, Cores: 8}}.String()
+	got, err := application.ParseBatchRoom("cloud9", said)
+	if err != nil || !got.HasTiming {
+		t.Fatalf("expected a box that says timing: yes to have mw timing, got %+v, %v from %q", got, err, said)
+	}
+	older := "rig: yes\ngate: free\nload: 1 8 0\n"
+	got, err = application.ParseBatchRoom("cloud2", older)
+	if err != nil || got.HasTiming || !got.HasRig {
+		t.Fatalf("expected an older box's room read, without mw timing, got %+v, %v", got, err)
+	}
+}
+
 // mw status reads the claim a busy home wrote when it handed a nightly run to a
 // box, and says where the suite and the timing run are (mw-gq6.1617).
 func TestStatusSaysWhereTheNightlySuiteAndTimingRunOfARigAre(t *testing.T) {

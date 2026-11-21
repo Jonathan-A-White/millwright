@@ -63,11 +63,28 @@ func (p NightlyPlace) Choose(ctx context.Context, kind, rig string) (string, boo
 	if err != nil {
 		return "", false
 	}
+	if kind == NightlyTimingKind {
+		rooms = withMwTiming(rooms)
+	}
 	host, ok := freestHost(rooms, p.Host)
 	if ok {
 		p.say("  nightly %s of %s: %s is busy (%s), so it runs on %s, which has room\n", kind, rig, p.Host, busy, host)
 	}
 	return host, ok
+}
+
+// withMwTiming is the rooms of the hosts whose mw has mw timing: a timing run
+// handed to a box whose mw is older fails with an ssh error and the rig is not
+// tried again that day (mw-gq6.1621). A suite goes to any box, mw suite --file
+// being older than mw land --room.
+func withMwTiming(rooms []BatchRoom) []BatchRoom {
+	var with []BatchRoom
+	for _, r := range rooms {
+		if r.HasTiming {
+			with = append(with, r)
+		}
+	}
+	return with
 }
 
 // RunOn runs the nightly kind of rig on host and waits for it, with a claim on

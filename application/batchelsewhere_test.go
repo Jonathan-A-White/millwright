@@ -83,7 +83,7 @@ func (a *aBatchWithRoomElsewhere) run() {
 }
 
 func free(host string, load float64) application.BatchRoom {
-	return application.BatchRoom{Host: host, HasRig: true, Load: application.LoadReading{Load: load, Cores: 8}}
+	return application.BatchRoom{Host: host, HasRig: true, HasTiming: true, Load: application.LoadReading{Load: load, Cores: 8}}
 }
 
 func TestADueBatchOfABusyHomeLandsOnAFreeHost(t *testing.T) {

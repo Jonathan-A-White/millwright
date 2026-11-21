@@ -25,7 +25,8 @@ func runLandRoom(ctx context.Context, rigName string, out io.Writer) error {
 		return err
 	}
 	_, has := rigs[rigName]
-	room := application.BatchRoom{HasRig: has}
+	// This mw is one that has mw timing: an older one prints no timing line.
+	room := application.BatchRoom{HasRig: has, HasTiming: true}
 	// A load that cannot be read leaves the cores at 0, which is no room.
 	if reading, err := (hostload.Proc{}).Load(ctx); err == nil {
 		room.Load = reading

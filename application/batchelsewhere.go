@@ -15,6 +15,9 @@ type BatchRoom struct {
 	Host string
 	// HasRig says the rig is checked out there.
 	HasRig bool
+	// HasTiming says the host's mw has mw timing, which a timing run is handed on
+	// to it with (mw-gq6.1621). An mw from before it prints no such line.
+	HasTiming bool
 	// GateHeldBy is whose gate holds the host's gate lock, empty when it is free.
 	GateHeldBy string
 	Load       LoadReading
@@ -44,6 +47,9 @@ const (
 	batchRoomRig  = "rig: "
 	batchRoomGate = "gate: "
 	batchRoomLoad = "load: "
+	// batchRoomTiming is the line an mw that has mw timing prints; an older mw
+	// prints none (mw-gq6.1621).
+	batchRoomTiming = "timing: "
 
 	batchRoomGateFree = "free"
 	batchRoomHeldBy   = "held by "
@@ -63,6 +69,11 @@ func (r BatchRoom) String() string {
 	}
 	fmt.Fprintf(&b, "%s%s\n", batchRoomGate, gate)
 	fmt.Fprintf(&b, "%s%g %d %d\n", batchRoomLoad, r.Load.Load, r.Load.Cores, r.Load.PartWorkers)
+	timing := "no"
+	if r.HasTiming {
+		timing = "yes"
+	}
+	fmt.Fprintf(&b, "%s%s\n", batchRoomTiming, timing)
 	return b.String()
 }
 
@@ -83,6 +94,8 @@ func ParseBatchRoom(host, text string) (BatchRoom, error) {
 				room.GateHeldBy = by
 			}
 			gate = true
+		case strings.HasPrefix(line, batchRoomTiming):
+			room.HasTiming = strings.TrimPrefix(line, batchRoomTiming) == "yes"
 		case strings.HasPrefix(line, batchRoomLoad):
 			fields := strings.Fields(strings.TrimPrefix(line, batchRoomLoad))
 			if len(fields) != 3 {
