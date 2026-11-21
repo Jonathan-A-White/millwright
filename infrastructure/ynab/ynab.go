@@ -184,7 +184,10 @@ func (c Client) Categories(ctx context.Context, budget string) ([]application.YN
 					Deleted    bool   `json:"deleted"`
 					GoalType   string `json:"goal_type"`
 					GoalTarget int64  `json:"goal_target"`
-					Balance    int64  `json:"balance"`
+					// GoalCadence and its frequency say what period the target covers.
+					GoalCadence          int   `json:"goal_cadence"`
+					GoalCadenceFrequency int   `json:"goal_cadence_frequency"`
+					Balance              int64 `json:"balance"`
 				} `json:"categories"`
 			} `json:"category_groups"`
 		} `json:"data"`
@@ -204,6 +207,7 @@ func (c Client) Categories(ctx context.Context, budget string) ([]application.YN
 			cats = append(cats, application.YNABCategory{
 				ID: k.ID, Group: g.Name, Name: k.Name,
 				GoalTarget: k.GoalTarget, HasTarget: k.GoalType != "",
+				GoalCadence: k.GoalCadence, GoalCadenceFrequency: k.GoalCadenceFrequency,
 				Balance: k.Balance, Hidden: k.Hidden || g.Hidden,
 			})
 		}

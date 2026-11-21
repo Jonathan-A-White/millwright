@@ -41,7 +41,9 @@ func newBudgetSyncCmd() *cobra.Command {
 		Long: "sync reads the Budget sheet's Item and Total Per Month columns (through the mw gdrive sign-in)\n" +
 			"and, for each YNAB category of the same name (case and spaces ignored), sets its goal target to\n" +
 			"that amount, writing only the targets that differ and printing each change. A second run\n" +
-			"prints 'nothing to change'.\n\n" +
+			"prints 'nothing to change'. A row written '<X> Budget' matches the category named exactly '<X>'.\n" +
+			"A yearly YNAB target is compared with, and set to, twelve months of the sheet's amount (the\n" +
+			"line names the cadence); a weekly or other cadence is skipped and named.\n\n" +
 			"A row whose Total is blank, #REF! or not an amount is skipped and named, never written as 0.\n" +
 			"It also lists sheet items with no YNAB category and YNAB categories with a target but no sheet\n" +
 			"row; it changes neither. With --dry-run it reads both and writes nothing.\n\n" +
