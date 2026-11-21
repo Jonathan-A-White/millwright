@@ -185,6 +185,62 @@ func TestAnItemOnTheSheetTwiceWithDifferentAmountsIsSkipped(t *testing.T) {
 	}
 }
 
+// realSheetRows is shaped like his tab 2025: the item column's header cell is
+// blank, and the summary rows sit above the budget items.
+func realSheetRows() [][]string {
+	return [][]string{
+		{"", "Total Per Month", "Total Per Year", "Category", "Percent Full", "Percent Take-Home", "Notes"},
+		{"Income", "$13,792.88", "$165,514.56", "", "", "100.00%", "Annual Income", "$259,000.00"},
+		{"Remainder", "$233.19", "$2,798.28"},
+		{"Total Expenses", "$13,559.69", "$162,716.28"},
+		{"Personal Maintenance", "$239.00", "$2,868.00", "Personal"},
+		{"Mortgage", "$2,028.52", "$24,342.24", "Home"},
+	}
+}
+
+func TestABlankItemHeaderMeansTheFirstColumnAndSummaryRowsAreNeverWritten(t *testing.T) {
+	cats := append(ynabCats(), application.YNABCategory{ID: "c9", Name: "Mortgage", GoalTarget: 2028520, HasTarget: true})
+	y := &fakeYNAB{cats: cats}
+	out := runSync(t, true, &fakeSheet{rows: realSheetRows()}, y)
+
+	if len(y.patches) != 0 {
+		t.Fatalf("a dry run wrote %v", y.patches)
+	}
+	if !strings.Contains(out, "would change Personal Maintenance: 102.00 -> 239.00") {
+		t.Errorf("output lacks the Personal Maintenance change:\n%s", out)
+	}
+	if strings.Contains(out, "Mortgage:") {
+		t.Errorf("an equal amount was listed as a change:\n%s", out)
+	}
+	if !strings.Contains(out, "sheet items with no YNAB category:\n  Income\n  Remainder\n  Total Expenses\n") {
+		t.Errorf("the summary rows are not listed as having no YNAB category:\n%s", out)
+	}
+
+	live := &fakeYNAB{cats: cats}
+	runSync(t, false, &fakeSheet{rows: realSheetRows()}, live)
+	if len(live.patches) != 1 || live.patches[0] != (patch{"c1", 239000}) {
+		t.Fatalf("patches = %v, want only Personal Maintenance", live.patches)
+	}
+}
+
+func TestTheItemColumnIsTheOneHeadedItemEvenWhenTheFirstIsNot(t *testing.T) {
+	rows := [][]string{{"Row", "Item", "Total Per Month"}, {"1", "Rent", "$2,500"}}
+	y := &fakeYNAB{cats: ynabCats()}
+	runSync(t, false, &fakeSheet{rows: rows}, y)
+	if len(y.patches) != 1 || y.patches[0] != (patch{"c3", 2500000}) {
+		t.Fatalf("patches = %v", y.patches)
+	}
+}
+
+func TestATotalHeaderWithAnItemNamedFirstColumnIsNotAHeaderRow(t *testing.T) {
+	rows := [][]string{{"Rent", "Total Per Month"}, {"Rent", "5"}}
+	y := &fakeYNAB{cats: ynabCats()}
+	err := application.BudgetSync{Sheet: &fakeSheet{rows: rows}, YNAB: y, Out: &bytes.Buffer{}}.Run(context.Background())
+	if err == nil || len(y.patches) != 0 {
+		t.Fatalf("err = %v, patches = %v", err, y.patches)
+	}
+}
+
 func TestASheetWithoutTheTwoColumnsIsRefusedAndNothingIsWritten(t *testing.T) {
 	y := &fakeYNAB{cats: ynabCats()}
 	err := application.BudgetSync{Sheet: &fakeSheet{rows: [][]string{{"Item", "Amount"}}}, YNAB: y, Out: &bytes.Buffer{}}.Run(context.Background())
