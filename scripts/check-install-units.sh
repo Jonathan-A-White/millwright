@@ -80,8 +80,8 @@ standin() { # <dir> <name>, the body on stdin
 	chmod +x "$1/$2"
 }
 
-# systemctl logs every call. `is-active` answers from FAKE_ACTIVE, a list of
-# timer names that are active; nothing else it is asked does anything. A
+# systemctl logs every call. `is-active` answers from FAKE_ACTIVE, and `is-enabled`
+# from FAKE_ENABLED, each a list of timer names; nothing else it is asked does anything. A
 # `--system` install calls it with no `--user`; both forms are accepted.
 standin "$STAND" systemctl <<'EOF'
 #!/bin/sh
@@ -94,6 +94,12 @@ is-active)
 		case " $FAKE_ACTIVE " in *" $a "*) exit 0 ;; esac
 	done
 	exit 3 ;;
+is-enabled)
+	shift
+	for a in "$@"; do
+		case " $FAKE_ENABLED " in *" $a "*) exit 0 ;; esac
+	done
+	exit 1 ;;
 daemon-reload | enable | disable) exit 0 ;;
 *) exit 99 ;;
 esac
@@ -501,6 +507,92 @@ snap >"$T/before"
 run mw-health
 rc_is 1
 has 'systemctl'
+unchanged "$(cat "$T/before")"
+ok
+
+# --- 11b. --boost: the one name for what a Boost runs (mw-6ww.185.8) ---------------------------
+BOOST="mw-dispatch mw-doctor mw-host-sweep mw-host-tidy"
+
+NAME="--boost lists the four units and says which this host lacks, and changes nothing"
+world
+ENVX="FAKE_ACTIVE=mw-dispatch.timer FAKE_ENABLED=mw-dispatch.timer"
+snap >"$T/before"
+run --boost
+rc_is 0
+for n in $BOOST; do has "$n"; done
+has 'This host lacks: mw-dispatch mw-doctor mw-host-sweep mw-host-tidy'
+has 'sh scripts/install-units.sh --boost --enable'
+only_reads
+unchanged "$(cat "$T/before")"
+ok
+
+NAME="--boost --lacking prints only the names this host lacks, on one line"
+world
+ENVX="FAKE_ACTIVE=mw-dispatch.timer FAKE_ENABLED=mw-dispatch.timer"
+run --boost --lacking
+rc_is 0
+[ "$OUT" = "mw-dispatch mw-doctor mw-host-sweep mw-host-tidy" ] || fail "$NAME: said '$OUT'"
+only_reads
+ok
+
+NAME="--boost on a host that has them all linked, enabled and active lacks none"
+world
+run --boost --enable
+: >"$W/calls"
+RC=0
+OUT=$(cd "$W" && env -i PATH="$W/bin:$REAL" HOME="$W/home" USER=tester FAKE_CALLS="$W/calls" \
+	FAKE_ACTIVE='mw-dispatch.timer mw-doctor.timer mw-host-sweep.timer mw-host-tidy.timer' \
+	FAKE_ENABLED='mw-dispatch.timer mw-doctor.timer mw-host-sweep.timer mw-host-tidy.timer' \
+	"$SH" "$REPO_ROOT/$SCRIPT" --boost --lacking 2>&1) || RC=$?
+rc_is 0
+[ -z "$OUT" ] || fail "$NAME: said '$OUT'"
+ok
+
+NAME="--boost --enable links all four, arms all four timers, and reloads once"
+world
+run --boost --enable
+rc_is 0
+for n in $BOOST; do
+	is_link_to_rig "$USERDIR/$n.service" "$n.service"
+	is_link_to_rig "$USERDIR/$n.timer" "$n.timer"
+done
+is_link_to_rig "$USERDIR/mw-unit-failed@.service" mw-unit-failed@.service
+calls_are 1 '^systemctl --user daemon-reload$'
+calls_are 1 '^systemctl --user enable --now mw-dispatch.timer mw-doctor.timer mw-host-sweep.timer mw-host-tidy.timer$'
+calls_are 0 '^loginctl'
+ok
+
+NAME="--boost --enable twice changes nothing the second time"
+snap >"$T/before"
+run --boost --enable
+rc_is 0
+has 'skip:'
+unchanged "$(cat "$T/before")"
+ok
+
+NAME="--boost --dry-run --enable links nothing and enables nothing"
+world
+snap >"$T/before"
+run --boost --dry-run --enable
+rc_is 0
+has 'would link'
+has 'would run: systemctl --user enable --now mw-dispatch.timer mw-doctor.timer mw-host-sweep.timer mw-host-tidy.timer'
+only_reads
+unchanged "$(cat "$T/before")"
+ok
+
+NAME="--boost takes no unit name, and does not go with --system or a bare --lacking"
+world
+snap >"$T/before"
+run --boost mw-health
+rc_is 2
+has 'takes no unit name'
+run --boost --system
+rc_is 2
+has 'do not go together'
+run --lacking
+rc_is 2
+has 'needs --boost'
 unchanged "$(cat "$T/before")"
 ok
 

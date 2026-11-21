@@ -6,6 +6,8 @@
 #   sh scripts/install-units.sh --enable mw-dispatch mw-health
 #   sh scripts/install-units.sh --dry-run mw-health    say what would happen
 #   sh scripts/install-units.sh --system --enable       root units; see below
+#   sh scripts/install-units.sh --boost                list the units a Boost runs, and which this host lacks
+#   sh scripts/install-units.sh --boost --enable       link and enable them all
 #
 # A unit name is a timer/service pair in contrib/systemd/, named without its
 # suffix (mw-dispatch, mw-millhand-tick, mw-millhand-review, mw-mail-notify,
@@ -13,6 +15,15 @@
 # ${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user, so a landing that changes a
 # unit needs only `systemctl --user daemon-reload` on a host. Run it from the
 # rig's own checkout: the links point there.
+#
+# --boost names the set every host runs, one name for the units a Boost's
+# bootstrap enables (contrib/boost-bootstrap.sh) and the one command mw doctor
+# host-upkeep gives a host that lacks one: mw-dispatch, mw-doctor (its report is
+# what mw status reads), mw-host-sweep and mw-host-tidy (the disk's upkeep,
+# mw-6ww.185.8). Alone it lists them and which of them this host lacks (not
+# linked, or its timer not enabled and active) and changes nothing; with
+# --enable it links and enables the set, as if each were named. --boost
+# --lacking prints only the names this host lacks, on one line, for a script.
 #
 # A unit with a .service and no .timer beside it (mw-view-follow) is a daemon:
 # it is named the same way, only its .service is linked, and --enable runs
@@ -54,10 +65,15 @@ set -eu
 DRY=0
 ENABLE=0
 SYSTEM=0
+BOOST=0
+LACKING=0
+# The units every host runs, which a Boost's bootstrap enables.
+BOOST_UNITS="mw-dispatch mw-doctor mw-host-sweep mw-host-tidy"
 
 usage() {
 	cat <<'EOF'
 Usage: sh install-units.sh [--enable] [--dry-run] [unit-name]...
+       sh install-units.sh --boost [--enable] [--dry-run]
        sh install-units.sh --system [--enable] [--dry-run]
        sh install-units.sh --help
 
@@ -74,6 +90,10 @@ root), runs `systemctl daemon-reload`, and takes no unit name.
               without it no timer is enabled
   --dry-run   print what would be done; change nothing
   --system    install the root units instead of a --user pair
+  --boost     the set a Boost runs (mw-dispatch, mw-doctor, mw-host-sweep,
+              mw-host-tidy): list it and which this host lacks; with --enable
+              link and enable it; takes no unit name
+  --lacking   with --boost, print only the names this host lacks
   --help      print this
 
 `loginctl enable-linger` is printed as a hand step and never run.
@@ -92,11 +112,20 @@ for arg in "$@"; do
 	--enable) ENABLE=1 ;;
 	--dry-run) DRY=1 ;;
 	--system) SYSTEM=1 ;;
+	--boost) BOOST=1 ;;
+	--lacking) LACKING=1 ;;
 	--help | -h) usage; exit 0 ;;
 	-*) echo "install-units.sh: unknown option: $arg" >&2; usage >&2; exit 2 ;;
 	*) UNITS="$UNITS $arg" ;;
 	esac
 done
+
+[ "$LACKING" = 0 ] || [ "$BOOST" = 1 ] || { echo "install-units.sh: --lacking needs --boost" >&2; exit 2; }
+if [ "$BOOST" = 1 ]; then
+	[ "$SYSTEM" = 0 ] || { echo "install-units.sh: --boost and --system do not go together: --boost is the user units" >&2; exit 2; }
+	[ -z "$UNITS" ] || { echo "install-units.sh: --boost takes no unit name: it is the set $BOOST_UNITS" >&2; exit 2; }
+	[ "$LACKING" = 0 ] || [ "$ENABLE" = 0 ] || { echo "install-units.sh: --lacking only reads: it does not go with --enable" >&2; exit 2; }
+fi
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 RIG=$(cd "$SELF_DIR/.." && pwd)
@@ -220,6 +249,48 @@ state() {
 	else echo partial
 	fi
 }
+
+# --- --boost: the set a Boost runs ------------------------------------------------
+# lacks <name>: true when the unit is not linked here, or its timer is not enabled and active.
+lacks() {
+	[ "$(state "$1")" = linked ] || return 0
+	command -v systemctl >/dev/null 2>&1 || return 0
+	systemctl --user is-enabled --quiet "$1.timer" >/dev/null 2>&1 || return 0
+	systemctl --user is-active --quiet "$1.timer" >/dev/null 2>&1 || return 0
+	return 1
+}
+if [ "$BOOST" = 1 ]; then
+	for n in $BOOST_UNITS; do
+		is_pair "$n" || die "the Boost's unit $n has no timer/service pair in $SRC"
+	done
+	LACKED=""
+	for n in $BOOST_UNITS; do
+		if lacks "$n"; then LACKED="$LACKED $n"; fi
+	done
+	if [ "$LACKING" = 1 ]; then
+		echo "${LACKED# }"
+		exit 0
+	fi
+	if [ "$ENABLE" = 0 ]; then
+		printf '%-22s %-10s %s\n' UNIT INSTALLED ACTIVE
+		for n in $BOOST_UNITS; do
+			active=unknown
+			if command -v systemctl >/dev/null 2>&1; then
+				if systemctl --user is-active --quiet "$n.timer" >/dev/null 2>&1; then active=yes; else active=no; fi
+			fi
+			printf '%-22s %-10s %s\n' "$n" "$(state "$n")" "$active"
+		done
+		echo
+		if [ -n "$LACKED" ]; then
+			echo "This host lacks:$LACKED"
+			echo "Link and enable the set: sh scripts/install-units.sh --boost --enable"
+		else
+			echo "This host lacks none of the units a Boost runs."
+		fi
+		exit 0
+	fi
+	UNITS=$BOOST_UNITS
+fi
 
 # --- no unit named: the list ---------------------------------------------------
 if [ -z "$UNITS" ]; then
