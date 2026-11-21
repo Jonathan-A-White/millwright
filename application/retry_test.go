@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -53,6 +54,11 @@ type fakeRetryLanding struct {
 	// OriginTip is the commit RefHead reports for the story's branch at the
 	// remote (origin/mw/<id>); empty means the remote does not have it.
 	OriginTip string
+
+	// NoBranch says the rig's checkout here has no local branch of the story
+	// (mw/<id>), as on a host the story was not worked on (mw-gq6.1564): RefHead
+	// of it fails as git's rev-parse --verify does.
+	NoBranch bool
 
 	bundled, removed, branchDeleted bool
 }
@@ -140,6 +146,9 @@ func (f *fakeRetryLanding) OpenLanding(context.Context, string, string) (string,
 	return "", nil
 }
 func (f *fakeRetryLanding) RefHead(_ context.Context, _, ref string) (string, error) {
+	if f.NoBranch && strings.HasPrefix(ref, application.BranchPrefix) {
+		return "", fmt.Errorf("git rev-parse --verify --quiet %s^{commit}: exit status 1", ref)
+	}
 	if strings.HasPrefix(ref, application.DefaultRemote+"/"+application.BranchPrefix) {
 		return f.OriginTip, nil
 	}
