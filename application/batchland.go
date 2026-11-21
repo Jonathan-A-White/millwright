@@ -33,6 +33,10 @@ const (
 	// left ahead of the batch it was given, kept when the batch is held so that
 	// its work is not lost with the landing worktree (mw-gq6.865).
 	BatchFixerBundleFile = "fixer.bundle"
+	// BatchFixerLeftoversFile is what a fixer that did not end in success left
+	// uncommitted in the landing, as a diff: the files are discarded from the
+	// landing, and kept here (mw-qqxlwm3.1).
+	BatchFixerLeftoversFile = "fixer-uncommitted.diff"
 )
 
 // The subjects of mw land's mail to the Mayor about a batch that did not land

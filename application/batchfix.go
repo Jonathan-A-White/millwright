@@ -61,6 +61,17 @@ type BatchFixing struct {
 	// Trouble is why it could not be started or did not end well, empty when
 	// it ran and ended.
 	Trouble string
+	// Failed is how it ended when that was not a success, in the words a hold
+	// opens with ("fixer ran out of turns"): it is a failed fixer, and what it
+	// left uncommitted was discarded (mw-qqxlwm3.1). Empty when it ended well,
+	// or the harness stopped it for a limit of the factory's (Stopped).
+	Failed string
+	// Discarded are the paths a failed fixer left uncommitted, Leftovers where
+	// they are kept as a diff (by path from the vault's root), and LeftoversSaid
+	// why the diff could not be kept, when it could not.
+	Discarded     []string
+	Leftovers     string
+	LeftoversSaid string
 	// Stopped is the harness's stop for a limit of the factory's
 	// (HarnessStopOf) that ended it, or that this host was held for when it
 	// was to be started (mw-gq6.472): nil when none. It says nothing of the
@@ -303,6 +314,9 @@ func (b BatchLand) fix(ctx context.Context, dir, rigDir string, rules domain.Epi
 		report.Notes = append(report.Notes, fmt.Sprintf("the fixer's session %s could not be closed: %v", spec.Name, err))
 	}
 	b.readFixer(ctx, f, report)
+	if end := f.failedEnd(); end != "" {
+		return b.failedFixer(ctx, dir, report, end)
+	}
 	if stop := f.Stopped; stop != nil {
 		// Stopped by the harness, not by its work: what it left is neither
 		// tested nor judged, and the batch waits for the stop's time, when it
@@ -451,6 +465,10 @@ func (r BatchReport) fixerRecord() string {
 		fmt.Fprintf(&b, "spent: %s\n", f.Result.Spent())
 		fmt.Fprintf(&b, "its run: %s\n", RunRecord(f.Name))
 	}
+	if f.Failed != "" {
+		fmt.Fprintf(&b, "failed: the %s\n", f.Failed)
+		b.WriteString(f.leftoversLines())
+	}
 	if f.Commit != "" {
 		fmt.Fprintf(&b, "left the batch at %s\n", f.Commit)
 	}
@@ -522,9 +540,14 @@ func (r BatchReport) fixerMail() string {
 		fmt.Fprintf(&b, "Its run: %s/%s/\n", RunsDir, f.Name)
 		return b.String()
 	}
-	if !r.Tested && len(r.Merged) == 0 {
+	switch {
+	case f.Failed != "":
+		fmt.Fprintf(&b, ". The %s, so mw did not look at the batch it left nor test it, and the batch is held: no second fixer is started.\n", f.Failed)
+		b.WriteString(r.failedCauseLine())
+		b.WriteString(f.leftoversLines())
+	case !r.Tested && len(r.Merged) == 0:
 		b.WriteString(". mw looked at the batch it left: none of the branches set aside was in it, so the rig's tests were not run, and the batch is held: no second fixer is started.\n")
-	} else {
+	default:
 		b.WriteString(". mw looked at the batch it left and ran the rig's tests on it again itself, and the batch is held: no second fixer is started.\n")
 	}
 	if f.Bundle != "" {
@@ -759,9 +782,152 @@ func (r BatchReport) fixerBundleLines() string {
 	case f == nil:
 		return ""
 	case f.Bundle != "":
-		return fmt.Sprintf("the fixer %s's commits are kept in %s:\n%s", f.Name, f.Bundle, f.bundledList()) + f.carriedLines()
+		return f.leftoversLines() + fmt.Sprintf("the fixer %s's commits are kept in %s:\n%s", f.Name, f.Bundle, f.bundledList()) + f.carriedLines()
 	case f.BundleSaid != "":
-		return f.BundleSaid + "\n" + f.carriedLines()
+		return f.leftoversLines() + f.BundleSaid + "\n" + f.carriedLines()
+	}
+	return f.leftoversLines()
+}
+
+// LeftoversKeeper is what a Landing may also do: keep what the worktree at dir
+// holds uncommitted, tracked and untracked alike, as a diff against HEAD in the
+// file dest (its directory made if it is not there), and then leave the worktree
+// exactly as HEAD has it, clean. It is how a failed fixer's files are discarded
+// without being lost (mw-qqxlwm3.1).
+type LeftoversKeeper interface {
+	KeepLeftovers(ctx context.Context, dir, dest string) error
+}
+
+// failedEnd is how the fixer ended in the words a hold opens with, when that was
+// not a success: it ran out of turns, ended in an error, or was killed. Empty
+// when it ended well, or the harness stopped it for a limit of the factory's,
+// which says nothing of its work (Stopped). A result that could not be read of a
+// session that exited cleanly is not an end it can be called failed for: the
+// tests on the batch are the judge then.
+func (f BatchFixing) failedEnd() string {
+	if f.Stopped != nil || !f.Started {
+		return ""
+	}
+	if f.ResultRead {
+		switch {
+		case f.Result.Finished():
+			return ""
+		case f.Result.Subtype == "error_max_turns":
+			return "fixer ran out of turns"
+		case f.Result.Subtype == "" || f.Result.Subtype == "success":
+			return "fixer ended in error"
+		default:
+			return "fixer ended as " + f.Result.Subtype
+		}
+	}
+	if f.Ended.State != StateExited || f.Ended.ExitCode != 0 {
+		return "fixer was killed (its session ended: " + string(f.Ended.State) + ")"
 	}
 	return ""
+}
+
+// failedFixer holds the batch for a fixer that did not end in success. What it
+// left uncommitted is discarded from the landing and kept as a diff in the
+// batch's records, so that what would be tested is what would be pushed and no
+// work is lost; its commits are kept by bundleFixer, as for any held batch. The
+// hold names the story set aside as the cause (mw-qqxlwm3.1).
+func (b BatchLand) failedFixer(ctx context.Context, dir string, report *BatchReport, end string) bool {
+	f := report.Fixer
+	f.Failed = end
+	left, err := b.Next.Landing.Uncommitted(ctx, dir)
+	switch {
+	case err != nil:
+		f.LeftoversSaid = fmt.Sprintf("what it left uncommitted could not be read, so none of it was kept: %v", err)
+		report.Notes = append(report.Notes, f.LeftoversSaid)
+	case len(left) > 0:
+		f.Discarded = left
+		b.keepLeftovers(ctx, dir, report)
+	}
+	why := f.Trouble
+	if why == "" {
+		why = "its session ended " + string(f.Ended.State)
+	}
+	report.Held = fmt.Sprintf("the %s (%s: %s), so what it left was not tested or pushed; %s", end, f.Name, why, report.failedCause())
+	return false
+}
+
+// keepLeftovers keeps the files a failed fixer left uncommitted as a diff in the
+// batch's records and clears the landing's worktree of them. When it cannot, the
+// reason is said in the records and the mail, and the batch is held all the same.
+func (b BatchLand) keepLeftovers(ctx context.Context, dir string, report *BatchReport) {
+	f := report.Fixer
+	trouble := func(why string) {
+		f.LeftoversSaid = fmt.Sprintf("its %d uncommitted files could not be kept as a diff, and stay in the landing worktree until it is taken away: %s", len(f.Discarded), why)
+		report.Notes = append(report.Notes, f.LeftoversSaid)
+	}
+	keeper, ok := b.Next.Landing.(LeftoversKeeper)
+	if !ok {
+		trouble("this landing cannot keep a diff")
+		return
+	}
+	var dest string
+	if b.Records != nil {
+		dest = b.Records.BatchFilePath(report.Rig, report.Number, BatchFixerLeftoversFile)
+	}
+	if dest == "" {
+		trouble("the batch's records have no place for it")
+		return
+	}
+	if err := keeper.KeepLeftovers(ctx, dir, dest); err != nil {
+		trouble(err.Error())
+		return
+	}
+	f.Leftovers = path.Join(BatchDir, report.Rig, strconv.Itoa(report.Number), BatchFixerLeftoversFile)
+	report.Records = append(report.Records, f.Leftovers)
+}
+
+// failedCause says, for the hold, what the failed fixer had been given to mend:
+// the stories set aside, or a red batch.
+func (r BatchReport) failedCause() string {
+	if len(r.SetAside) == 0 {
+		return "the cause is the rig's tests failing on the batch, which it was to mend"
+	}
+	return "the cause is the story set aside that it was to merge: " + strings.Join(storyIDs(r.SetAside), ", ")
+}
+
+// failedCauseLine is the Held mail's line naming the cause of a failed fixer: each
+// story set aside, why, and the files it conflicted in.
+func (r BatchReport) failedCauseLine() string {
+	if len(r.SetAside) == 0 {
+		return "The cause: the rig's tests failed on the batch, and the fixer that was to mend it did not end well.\n"
+	}
+	var b strings.Builder
+	for _, s := range r.SetAside {
+		fmt.Fprintf(&b, "The cause: %s was set aside (%s), and the fixer that was given it to merge did not end well", s.ID, s.Why)
+		if len(s.ConflictFiles) > 0 {
+			fmt.Fprintf(&b, "; it conflicted in %s", strings.Join(s.ConflictFiles, ", "))
+		}
+		b.WriteString(".\n")
+	}
+	return b.String()
+}
+
+// leftoversLines are the lines of a held batch's records and mail about what a
+// failed fixer left uncommitted: where the diff is kept and which files, or why
+// it is not; empty for a fixer that left none.
+func (f BatchFixing) leftoversLines() string {
+	if len(f.Discarded) == 0 && f.LeftoversSaid == "" {
+		return ""
+	}
+	var b strings.Builder
+	switch {
+	case f.Leftovers != "":
+		fmt.Fprintf(&b, "Its %d uncommitted files were discarded from the landing and are kept as a diff in the vault: %s\n", len(f.Discarded), f.Leftovers)
+	default:
+		fmt.Fprintf(&b, "%s\n", f.LeftoversSaid)
+	}
+	const shown = 30
+	for i, file := range f.Discarded {
+		if i == shown {
+			fmt.Fprintf(&b, "  and %d more\n", len(f.Discarded)-shown)
+			break
+		}
+		fmt.Fprintf(&b, "  %s\n", file)
+	}
+	return b.String()
 }

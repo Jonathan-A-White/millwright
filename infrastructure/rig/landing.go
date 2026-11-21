@@ -21,6 +21,7 @@ import (
 // in: both are the rig's git, and they share the same command and the same
 // remote.
 var _ application.Landing = (*Worktrees)(nil)
+var _ application.LeftoversKeeper = (*Worktrees)(nil)
 
 // Ahead implements application.Landing: the commits branch has that base does
 // not.
@@ -128,6 +129,37 @@ func (w *Worktrees) CommitLeftovers(ctx context.Context, dir, message string) (s
 		return "", err
 	}
 	return strings.TrimSpace(sha), nil
+}
+
+// KeepLeftovers implements application.LeftoversKeeper: every change in the
+// worktree at dir, untracked files and binaries included, is written as one diff
+// against HEAD to dest, and the worktree is then put back to HEAD, clean.
+// Ignored files are not touched. The diff is written before anything is
+// discarded, and nothing is discarded when it could not be.
+func (w *Worktrees) KeepLeftovers(ctx context.Context, dir, dest string) error {
+	if dir == "" || dest == "" {
+		return fmt.Errorf("keeping leftovers: in which worktree, and to where?")
+	}
+	if _, err := w.git(ctx, dir, "add", "-A"); err != nil {
+		return err
+	}
+	diff, err := w.git(ctx, dir, "diff", "--cached", "--binary", "HEAD")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("making the directory %s belongs in: %w", dest, err)
+	}
+	if err := os.WriteFile(dest, []byte(diff), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", dest, err)
+	}
+	if _, err := w.git(ctx, dir, "reset", "--hard", "-q", "HEAD"); err != nil {
+		return err
+	}
+	// reset --hard leaves a file the diff added only if it was untracked before
+	// the add: after add -A it is staged, so the reset has removed it already.
+	_, err = w.git(ctx, dir, "clean", "-fdq")
+	return err
 }
 
 // Bundle implements application.Landing.

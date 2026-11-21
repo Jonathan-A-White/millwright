@@ -143,6 +143,13 @@ and no second fixer is started. A fixer the harness stops for a limit holds the
 batch until the reset, and a held batch is not tried again until `batch_every`
 has passed.
 
+A fixer that ends on anything but success (it ran out of turns, ended in an
+error, or its session was killed) is a failed fixer, and the batch is held. What
+it left uncommitted is discarded from the landing and kept as a diff,
+`fixer-uncommitted.diff`, in the batch's records beside `fixer.bundle`; mw does
+not test what it left. The outcome says how it ended ("the fixer ran out of
+turns") and the Held mail names the story set aside as the cause.
+
 ## Records
 
 - `runs/batch/<rig>/<n>/` in the vault keeps the batch: merge order, gate log,

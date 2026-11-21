@@ -1369,3 +1369,50 @@ func TestCarryRefusesAMergeWhoseParentsAreBothNew(t *testing.T) {
 		t.Errorf("expected the worktree put back at %s, got %s", merge, got)
 	}
 }
+
+// A failed fixer's uncommitted files are written as one diff, untracked files
+// and all, and the worktree is then clean; the diff applies to a clean copy of
+// HEAD and brings back every change (mw-qqxlwm3.1).
+func TestKeepLeftoversWritesEveryChangeAsADiffAndLeavesTheWorktreeClean(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	write(t, here, "gone.md", "to be deleted\n")
+	write(t, here, ".gitignore", "*.log\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Files to disturb")
+
+	write(t, here, "README.md", "changed in place\n")
+	run(t, here, "git", "rm", "-q", "gone.md")
+	write(t, here, "notes/half-done.md", "new and untracked\n")
+	write(t, here, "build.log", "ignored\n")
+
+	dest := filepath.Join(t.TempDir(), "runs", "batch", "fixer-uncommitted.diff")
+	if err := worktrees.KeepLeftovers(ctx, here, dest); err != nil {
+		t.Fatalf("keeping the leftovers: %v", err)
+	}
+	left, err := worktrees.Uncommitted(ctx, here)
+	if err != nil || len(left) != 0 {
+		t.Fatalf("expected a clean worktree, got %q (%v)", left, err)
+	}
+	if _, err := os.Stat(filepath.Join(here, "notes", "half-done.md")); err == nil {
+		t.Errorf("expected the untracked file discarded")
+	}
+	if _, err := os.Stat(filepath.Join(here, "build.log")); err != nil {
+		t.Errorf("expected an ignored file left alone: %v", err)
+	}
+	diff, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("reading the diff: %v", err)
+	}
+	for _, want := range []string{"README.md", "changed in place", "gone.md", "notes/half-done.md", "new and untracked"} {
+		if !strings.Contains(string(diff), want) {
+			t.Errorf("expected the diff to hold %q, got:\n%s", want, diff)
+		}
+	}
+	run(t, here, "git", "apply", dest)
+	back, err := worktrees.Uncommitted(ctx, here)
+	if err != nil || len(back) != 3 {
+		t.Fatalf("expected the diff to bring back three changed paths, got %q (%v)", back, err)
+	}
+}
