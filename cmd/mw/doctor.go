@@ -430,6 +430,9 @@ func newDoctorCmd() *cobra.Command {
 			}
 			// /tmp over 20 GB (mw-d40q096); the cure is the daily tmp tidy.
 			tmpSize := &application.TmpSizeCheck{Host: host, Dir: os.TempDir(), Disk: tmpdisk.Disk{}}
+			// The sweep and the tidies have run here, and their timers are enabled
+			// (mw-6ww.185.8); the cure runs them.
+			hostUpkeep := hostUpkeepCheck(vault, host, rigsAt)
 			rootDisk := doctor.NewRootDiskBudget()
 			rootDisk.Budget, rootDisk.Margin = rootDiskBudget, rootDiskMargin
 			rootDisk.Note = func(ctx context.Context, text string) error {
@@ -616,6 +619,7 @@ func newDoctorCmd() *cobra.Command {
 				builderBurn,
 				goCacheSize,
 				tmpSize,
+				hostUpkeep,
 				stuckClaims,
 				rigKinds,
 				rigOrigins,

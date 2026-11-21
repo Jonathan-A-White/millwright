@@ -9,6 +9,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostsweep"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 
@@ -104,6 +105,9 @@ func newHostSweepCmd() *cobra.Command {
 				sweep.Log = ticklog.New(filepath.Join(home, MillhandTickStateDir))
 			}
 			_, runErr := sweep.Run(cmd.Context())
+			if !dry && runErr == nil {
+				recordUpkeepRun(doctor.HostUpkeepSweepMark)
+			}
 			if first && runErr == nil {
 				if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
 					return err

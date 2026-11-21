@@ -15,6 +15,15 @@ Its ages are PROVISIONAL, for the Governor to confirm (mw-gq6.1427).
 | 4 | `node_modules` and `ms-playwright` (the Playwright browsers) inside a worktree | The story is closed, and the worktree has no uncommitted change and no process in it. Row 1 takes them with the worktree; this row is for a worktree row 1 kept because of a commit not on main | Delete those directories only |
 | 5 | A `beads-*-aside-*` directory in the home directory (what `mw home move` sets aside) | Its newest file is 7 days old or more (`host_sweep_aside_days`, `MW_HOST_SWEEP_ASIDE_DAYS`) | Delete the directory, whole |
 
+<!-- toc -->
+
+- [What it never touches](#what-it-never-touches)
+- [Running it](#running-it)
+- [Whether it has run: `mw doctor host-upkeep`](#whether-it-has-run-mw-doctor-host-upkeep)
+- [The runs](#the-runs)
+
+<!-- /toc -->
+
 ## What it never touches
 
 * A worktree with an uncommitted change (an untracked file counts), or one git
@@ -35,16 +44,42 @@ Its ages are PROVISIONAL, for the Governor to confirm (mw-gq6.1427).
 nothing. `mw host sweep` removes them and writes one line a path to the
 Millhand's tick log (`tidy: host: removed ...`, under mw tidy's prefix so the
 tick's counts read past it); a second run lists nothing. `mw-host-sweep.timer`
-runs `mw host sweep --timer` every Sunday at 04:40 UTC and 15 minutes after the
-host boots, as `mw-doctor.timer` is installed:
+runs `mw host sweep --timer` every day at 04:40 UTC and 15 minutes after the
+host boots (daily, not weekly: the sweep spends no fuel, and the desktop churned
+about 60 GB in a day; the cadence is PROVISIONAL, for the Governor to confirm).
+Every host runs it, with the tidy, the doctor and the dispatch, from one name:
 
 ```
-sh scripts/install-units.sh --enable mw-host-sweep
+sh scripts/install-units.sh --boost            # the four units, and which this host lacks
+sh scripts/install-units.sh --boost --enable   # link and enable them (a Boost's bootstrap does)
 ```
 
 With `--timer` the **first run on a host only lists**, and keeps
 `~/.local/state/mw/host-sweep-listed`; every later run removes. Delete that file
 to have the timer list once more.
+
+## Whether it has run: `mw doctor host-upkeep`
+
+A real run of the sweep, and of `mw host tidy go-cache`, leaves a mark under
+`~/.local/state/mw` (`host-sweep-ran`, `host-tidy-go-cache-ran`); a listing run
+leaves only `host-sweep-listed`. The `host-upkeep` check of `mw doctor` is faulty
+when:
+
+* the last real sweep is over 2 days old, or there has only ever been a listing
+  run, or none at all;
+* the last go-cache tidy is over 2 days old, or none has run;
+* over 20 worktrees of stories closed for over a day are still in the worktrees
+  directory beside a rig (a story built here and landed from another host leaves
+  its worktree here: the close-out that takes it away runs on the other host);
+* `mw-host-sweep.timer` or `mw-host-tidy.timer` is not enabled: the finding names
+  which, and the one command, `sh scripts/install-units.sh --boost --enable`, run
+  from the rig's checkout (a person runs it: no cure does).
+
+Its cure runs `mw host tidy tmp`, `mw host tidy go-cache` and `mw host sweep`
+itself, in that order (a sweep the doctor's time limit cuts short goes on at the
+next run, each act standing alone), and its way back says what each removed.
+Nothing it removes is put back: a closed story's worktree is gone with its
+merged or pushed commits, a cache is rebuilt by its tool.
 
 ## The runs
 

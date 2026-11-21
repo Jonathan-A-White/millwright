@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gocache"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmpdisk"
 )
@@ -48,6 +49,9 @@ func newHostTidyGoCacheCmd() *cobra.Command {
 				DryRun: dryRun,
 				Out:    cmd.OutOrStdout(),
 			}.Run(cmd.Context())
+			if err == nil && !dryRun {
+				recordUpkeepRun(doctor.HostUpkeepGoTidyMark)
+			}
 			return err
 		},
 	}

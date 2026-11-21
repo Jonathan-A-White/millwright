@@ -6008,8 +6008,8 @@ and `beads-*-aside-*` directories over 7. It never touches a worktree with an
 uncommitted change, a branch with a commit that is neither on main nor pushed, a
 story that is not closed, or a directory a process is running in. `--dry-run`
 lists each path with its size and the reason and changes nothing. The timer
-(`sh scripts/install-units.sh --enable mw-host-sweep`) runs it weekly and at
-boot; its first run on a host only lists. `docs/host-sweep.md` is the table.
+(`sh scripts/install-units.sh --boost --enable`, the set every host runs) runs it daily and at
+boot; its first run on a host only lists, and `mw doctor host-upkeep` says when it has not run. `docs/host-sweep.md` is the table.
 
 ## mw host tidy
 
