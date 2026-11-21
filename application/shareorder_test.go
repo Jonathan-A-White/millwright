@@ -3,6 +3,7 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -309,5 +310,53 @@ func TestShareOrderIsThePosternUpNextToo(t *testing.T) {
 	}
 	if got, want := upNext(nil), []string{"mw-q.fix", "mw-q.feat"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected today's Up next %v with no rules, got %v", want, got)
+	}
+}
+
+// A rig file that cannot be read gives today's order, but the dispatch report
+// says so, naming the rig, rather than turning the share off without a word.
+func TestShareOrderNoteNamesTheRigWhoseFileCannotBeRead(t *testing.T) {
+	tracker, rules := aShareFixture(t, []shared{
+		{"mw-q.fix", "[bug] an older fix", 2, 9},
+		{"mw-q.feat", "A newer feature", 2, 2},
+	})
+	runningShared(t, tracker, 5, 0)
+	rules.Err = errors.New("unknown key feature_sahre")
+
+	dispatch, _, _, _, _ := aFactory(t)
+	tracker.AddFormula("tdd-feature")
+	dispatch.Tracker = tracker
+	dispatch.Rules = rules
+	dispatch.Cap = 20
+	dispatch.DryRun = true
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("the dry run: %v", err)
+	}
+	var ids []string
+	for _, s := range report.Started {
+		ids = append(ids, s.StoryID)
+	}
+	if want := []string{"mw-q.fix", "mw-q.feat"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("expected today's order %v, got %v", want, ids)
+	}
+	var found string
+	for _, n := range report.Notes {
+		if strings.Contains(n, "share") && strings.Contains(n, "millwright") {
+			found = n
+		}
+	}
+	if found == "" || !strings.Contains(found, "unknown key feature_sahre") {
+		t.Fatalf("expected a Notes line naming the rig and the refusal, got %v", report.Notes)
+	}
+	// The same rig is named once, however many of its stories are ready.
+	count := 0
+	for _, n := range report.Notes {
+		if strings.Contains(n, "share") && strings.Contains(n, "millwright") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected the rig named once, got %d in %v", count, report.Notes)
 	}
 }

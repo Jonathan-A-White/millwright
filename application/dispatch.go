@@ -1124,7 +1124,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("dispatching on %s: reading what is ready here: %w", d.Host, err)
 	}
-	ready = d.shareOrder(ctx, inStartOrder(ready), shares.running)
+	ready = d.shareOrder(ctx, inStartOrder(ready), shares.running, &report)
 	reads.takeCandidates(d.Host, ready)
 
 	// The formulas installed are read once, and only if a story names one. A

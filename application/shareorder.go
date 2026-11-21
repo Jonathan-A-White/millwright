@@ -78,11 +78,12 @@ func shareWords(features, running int, share float64) string {
 // It is an order, not a gate: nothing is held back, and a feature that dispatch
 // passes over for a file another story has is simply not started, the loop going
 // on to the fix after it. A rig file without the key, no rules, or rules that
-// cannot be read give today's order. waited is read at most once, and only when
-// some rig has a share.
-func inShareOrder(ctx context.Context, sorted, running []StoryDetail, rules EpicRules, waited func() map[string]bool) ([]StoryDetail, map[string]string) {
+// cannot be read give today's order; a rig whose file cannot be read is named in
+// the notes, one line a rig, so the share is not turned off without a word.
+// waited is read at most once, and only when some rig has a share.
+func inShareOrder(ctx context.Context, sorted, running []StoryDetail, rules EpicRules, waited func() map[string]bool) ([]StoryDetail, map[string]string, []string) {
 	if rules == nil {
-		return sorted, nil
+		return sorted, nil, nil
 	}
 	places := map[string][]int{}
 	var rigs []string
@@ -99,9 +100,14 @@ func inShareOrder(ctx context.Context, sorted, running []StoryDetail, rules Epic
 	var lane map[string]bool
 	var ordered []StoryDetail
 	var why map[string]string
+	var notes []string
 	for _, rig := range rigs {
 		required, err := rules.EpicRequirements(ctx, rig)
-		if err != nil || required.FeatureShare <= 0 {
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("the rig %s's feature share could not be read, so its stories keep today's order: %v", rig, err))
+			continue
+		}
+		if required.FeatureShare <= 0 {
 			continue
 		}
 		if ordered == nil {
@@ -153,23 +159,24 @@ func inShareOrder(ctx context.Context, sorted, running []StoryDetail, rules Epic
 		}
 	}
 	if ordered == nil {
-		return sorted, nil
+		return sorted, nil, notes
 	}
-	return ordered, why
+	return ordered, why, notes
 }
 
 // shareOrder is the order a dispatch on this host starts ready in: the order
 // inShareOrder keeps, given what is running on every host. What a feature waits
 // on is read from the tracker's blocked stories, once, and only when a rig has
 // a share; a tracker that cannot say leaves it to the features themselves.
-func (d Dispatch) shareOrder(ctx context.Context, ready, running []StoryDetail) []StoryDetail {
-	ordered, _ := inShareOrder(ctx, ready, running, d.Rules, func() map[string]bool {
+func (d Dispatch) shareOrder(ctx context.Context, ready, running []StoryDetail, report *DispatchReport) []StoryDetail {
+	ordered, _, notes := inShareOrder(ctx, ready, running, d.Rules, func() map[string]bool {
 		blocked, err := d.Tracker.BlockedForHost(ctx, d.Host)
 		if err != nil {
 			return nil
 		}
 		return featureWaits(blocked)
 	})
+	report.Notes = append(report.Notes, notes...)
 	return ordered
 }
 
@@ -188,7 +195,7 @@ func inShareOrderOfView(ctx context.Context, b *viewBuild, rules EpicRules, orde
 		}
 		running = append(running, d)
 	}
-	out, _ := inShareOrder(ctx, ordered, running, rules, func() map[string]bool {
+	out, _, _ := inShareOrder(ctx, ordered, running, rules, func() map[string]bool {
 		var blocked []StoryDetail
 		for _, id := range b.order {
 			if e := b.entries[id]; !e.verifyOnly && len(e.waits) > 0 {
