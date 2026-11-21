@@ -613,8 +613,9 @@ type GristEvalExamples struct {
 	// grind, its instructions, its schema and its examples are read there and
 	// not at main, and every send carries the instructions and schema for the
 	// mill to grind with (GristGrindOverride), so a change to them is proved
-	// before it lands. The grind file's own model and effort stay main's; the
-	// grind file is sent too, which the mill uses only for a kind main lacks.
+	// before it lands. The grind file is sent too, and the mill judges and grinds
+	// by it (its versions, attachments, scoring, maxTurns, timeoutSeconds and
+	// forward); the model and effort stay main's for a kind main grinds.
 	Ref string
 	// Out is where the report is printed; nil prints nothing.
 	Out io.Writer

@@ -452,11 +452,11 @@ func newGristEvalCmd() *cobra.Command {
 			"A worktree path reads its committed HEAD (commit first: git commit -- <path>). Each example\n" +
 			"is then sent in a talk of its own, ended when answered, even one of a single turn. The mill\n" +
 			"takes that text from the test key alone and only in an eval: or smoke: talk, so a live app's\n" +
-			"grists are ground only with main's; the grind file's model and effort stay main's. A kind main\n" +
-			"does not have yet is the exception: the grind file at the ref is sent too, and the mill grinds\n" +
-			"with it, so a new kind is proved on its branch before it lands. A version main does not have\n" +
-			"yet of a kind it has is taken from the ref's grind file too; the model, effort and the rest\n" +
-			"of the grind file stay main's.",
+			"grists are ground only with main's. The grind file at the ref is sent too, and the mill judges\n" +
+			"and grinds by it: its versions, attachments, scoring, maxTurns, timeoutSeconds and forward are\n" +
+			"the ref's, so a new version, or a change to what a grind takes, is proved on its branch before\n" +
+			"it lands. The model and effort stay main's. A kind main does not have yet, or one main only\n" +
+			"forwards, has no model or effort at main: the mill grinds it wholly by the ref's grind file.",
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 || len(examples) > 0 {
