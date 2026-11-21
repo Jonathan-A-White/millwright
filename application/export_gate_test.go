@@ -108,3 +108,15 @@ func (b BatchLand) HoldingTheSlot(holding Holding) BatchLand {
 	b.Next.SlotYield, b.Next.SlotShared = b.slot.yield, b.slot.shared
 	return b
 }
+
+// LandTheBatchIn lets the tests of package application_test run the batch's
+// merges, fixer, gate and push (BatchLand.landIn) over a queue, and the note a
+// landed batch leaves on each story it set aside, as Run does them in order.
+func (b BatchLand) LandTheBatchIn(ctx context.Context, dir string, report *BatchReport) {
+	var nr NextReport
+	b.landIn(ctx, dir, dir, domain.EpicRequirements{}, report, &nr)
+	if report.Landed {
+		b.noteSetAside(ctx, report)
+	}
+	report.Notes = append(report.Notes, nr.Notes...)
+}

@@ -412,6 +412,10 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		}
 	}
 
+	if report.Landed {
+		b.noteSetAside(ctx, &report)
+	}
+
 	// The grist smoke sends every example of every app the batch touched, and
 	// nothing it does needs the rig's merge slot or holds back a mail: the
 	// landed tail lets the slot go before it, and the next landing of the rig
@@ -614,10 +618,15 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	b.mergeAll(ctx, dir, rigDir, rules.UnionMergeFiles, report)
 	// A branch set aside for its conflicts is the fixer's to merge, before the
 	// version is raised and the tests are run: what it merges then gets its
-	// changelog entry, and the batch is tested once, after it. A batch of which
-	// every branch was set aside for its conflicts is given it too: only when
-	// nothing is left for the fixer to merge, or none can start, is it held.
-	if b.mayFix() && report.conflicted() {
+	// changelog entry, and the batch is tested once, after it. But only a batch
+	// of which every branch was set aside for its conflicts is given it before
+	// the push: only when nothing is left for the fixer to merge, or none can
+	// start, is that batch held. A batch of which some branches merged lands
+	// those first, tested as merged, and the ones set aside stay queued: the green
+	// part is never held for a fixer, which a slow one held for 13 hours in
+	// batch 595 of lampas (mw-qqxlwm3.2). The next batch finds them alone, and
+	// gives them the fixer then.
+	if b.mayFix() && report.conflicted() && len(report.Merged) == 0 {
 		why := fmt.Sprintf("%s set aside for conflicts", strings.Join(storyIDs(report.SetAside), ", "))
 		if !b.fix(ctx, dir, rigDir, rules, report, why, nr) {
 			return
@@ -747,6 +756,23 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	// Outside the landed tail, and why (outsideTheTail, landedtail.go).
 	report.tags = n.publishTags(ctx, nr, dir, report.Base, named)
 	report.Commit, report.Landed = commit, true
+}
+
+// noteSetAside tells, on each story a landed batch set aside and in the report,
+// that the rest of the batch landed without it and it stays queued (mw-qqxlwm3.2).
+// A comment that cannot be written is a note: the landing is done either way.
+func (b BatchLand) noteSetAside(ctx context.Context, report *BatchReport) {
+	n := b.Next
+	for _, s := range report.SetAside {
+		line := fmt.Sprintf("%s was set aside by %s (%s); the other %s landed on %s at %s without waiting for it, and it stays queued",
+			s.ID, report.Label(), firstLine(s.Why), countStories(len(report.Merged)), report.Target, shortCommit(report.Commit))
+		report.Notes = append(report.Notes, line)
+		comment := fmt.Sprintf("Set aside by %s: %s\nThe other %s landed on %s at %s without waiting for it. This story stays queued: the next batch that finds it conflicting on its own gives it the batch's fixer.",
+			report.Label(), s.Why, countStories(len(report.Merged)), report.Target, shortCommit(report.Commit))
+		if err := writeRetrying(ctx, n, nil, "the note on a story set aside", func() error { return n.Tracker.CommentOnStory(ctx, s.ID, comment) }); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("the note saying why %s was set aside could not be written on it: %v", s.ID, err))
+		}
+	}
 }
 
 // allOnTarget says every story the batch merged was on the target already.

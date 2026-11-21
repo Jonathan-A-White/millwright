@@ -72,6 +72,7 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the gate log of batch (\d+) shows the tests' command, then the changed-specs command, with the text "([^"]*)"$`, c.theGateLogShowsTheSpecs)
 	ctx.Then(`^the gate log of batch (\d+) says "([^"]*)"$`, c.theGateLogSays)
 	ctx.When(`^mw lands the batch of the rig$`, c.mwLandsTheBatch)
+	ctx.When(`^mw lands the next batch of the rig$`, c.mwLandsTheBatch)
 	ctx.Given(`^the host stays at a load of (\d+) on (\d+) cores through the wait for it to calm$`, c.theHostStaysBusy)
 	ctx.When(`^the host calms and mw lands the batch of the rig again$`, c.theHostCalmsAndMwLandsAgain)
 	registerLedgerWatchSteps(ctx, c)
