@@ -187,7 +187,7 @@ idle_minutes    = 30        # a box with no story this long is destroyed
 hourly_usd      = 0.132     # what one box costs an hour
 box_cap         = 2         # sessions a box runs at once; a change reaches the boxes up (see "A changed box_cap")
 up_minutes      = 60        # how long a make may run before it reads the box back from Vultr
-slow_make_minutes = 30      # how long a make may run, unfinished, before it is a cloud event and a DAMPERS line
+slow_make_minutes = 75      # how long a make may run, unfinished, before it is a cloud event and a DAMPERS line
 no_dispatch_minutes = 30    # how long after its make a box may go with no dispatch before it is destroyed
 prefix          = "cloud"   # a box is named the prefix and a number: cloud1, cloud2 (lower-case letters and hyphens)
 snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
@@ -234,7 +234,7 @@ Each check:
    `cloud1  making 56m, Vultr active locked` (Vultr's word as the last check read
    it), never as up or working: it has taken no story and counts no session free
    (the check counts its sessions as coming, so it does not make a second box for
-   the same stories). A make still running `slow_make_minutes` (default 30) after
+   the same stories). A make still running `slow_make_minutes` (default 75) after
    it began is one `cloud` event naming the box and Vultr's status, and a `cloud
    make` line under DAMPERS for as long as it runs. A box that has not dispatched
    `no_dispatch_minutes` (default 30) after its make finished (its first dispatch

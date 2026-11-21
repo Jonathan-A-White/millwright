@@ -14,7 +14,7 @@ import (
 )
 
 // slowMakeVault is a vault whose cloud book holds a box that has been made for
-// 56 minutes, and a config with a [cloud] table, as on a host that runs boxes.
+// 80 minutes, and a config with a [cloud] table, as on a host that runs boxes.
 func slowMakeVault(t *testing.T, now time.Time) string {
 	t.Helper()
 	mwConfig(t, "host = \"laptop\"\n\n[cloud]\ncommand = \"/opt/millwright/contrib/vultr-boost\"\n")
@@ -23,7 +23,7 @@ func slowMakeVault(t *testing.T, now time.Time) string {
 	if err := os.MkdirAll(filepath.Dir(book), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	up := now.Add(-56 * time.Minute).Format(time.RFC3339)
+	up := now.Add(-80 * time.Minute).Format(time.RFC3339)
 	raw := `{"month":"2026-11","boxes":[{"name":"cloud1","up":"` + up + `","making":true,"vultr":"active locked"}]}`
 	if err := os.WriteFile(book, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)

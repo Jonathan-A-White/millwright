@@ -32,7 +32,7 @@ const (
 	DefaultCloudUpMinutes = 60
 	// DefaultCloudSlowMakeMinutes is how long a make may run before it is a
 	// cloud event and a DAMPERS line (mw-gq6.1113).
-	DefaultCloudSlowMakeMinutes = 30
+	DefaultCloudSlowMakeMinutes = 75
 	// DefaultCloudNoDispatchMinutes is how long after its make a box may go
 	// with no dispatch reaching the beads server before the check destroys it
 	// (mw-gq6.1143); it is past the 20 minutes after which the book says the
