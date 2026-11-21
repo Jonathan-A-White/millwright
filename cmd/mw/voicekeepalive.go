@@ -33,12 +33,12 @@ func voiceKeepAliveEnvPath() (string, error) {
 }
 
 // readVoiceKeepAliveEnv reads the file at path. A missing file is
-// application.ErrNoVoiceAppPassword; a file other users can read is refused,
+// application.ErrNoVoiceEnvFile, which turns the job off; a file other users can read is refused,
 // for it holds an app password.
 func readVoiceKeepAliveEnv(path string) (application.VoiceKeepAliveConfig, error) {
 	info, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return application.VoiceKeepAliveConfig{}, application.ErrNoVoiceAppPassword
+		return application.VoiceKeepAliveConfig{}, application.ErrNoVoiceEnvFile
 	}
 	if err != nil {
 		return application.VoiceKeepAliveConfig{}, err
@@ -144,8 +144,9 @@ func newVoiceKeepAliveCmd() *cobra.Command {
 			application.VoiceKeepAliveAccount + " over Gmail SMTP to the number's Voice text address, which Google\n" +
 			"sends as an SMS. The follower runs it every few hours on the home, and it sends once a month. The app\n" +
 			"password and the text address are read from the mode-600 file ~/" + application.VoiceKeepAliveEnvFile + "\n" +
-			"(CHURCH_VOICE_APP_PASSWORD, CHURCH_VOICE_TEXT_ADDRESS), or --env <file>. With no password the Governor\n" +
-			"gets one alarm 'no app password yet' and nothing is sent; a month that fails alerts him once.\n\n" +
+			"(CHURCH_VOICE_APP_PASSWORD, CHURCH_VOICE_TEXT_ADDRESS), or --env <file>. The file turns the job on:\n" +
+			"with no file the job is off ('off: no church-voice.env'), nothing is sent and nothing is posted. With a\n" +
+			"file that holds no password or address, or a send that fails, the Governor gets one alarm a month.\n\n" +
 			"  mw voice-keepalive --dry-run     print the email, send and post nothing, on any host\n" +
 			"  mw voice-keepalive               send now if this month's text is not sent (the home only)",
 		Args: cobra.NoArgs,

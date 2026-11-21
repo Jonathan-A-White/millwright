@@ -35,8 +35,16 @@ const VoiceKeepAliveText = "Testing"
 // VoiceKeepAliveAccount, CHURCH_VOICE_ACCOUNT).
 const VoiceKeepAliveEnvFile = ".config/mw/church-voice.env"
 
-// ErrNoVoiceAppPassword is what the credentials read says when the file is
-// missing, or holds no app password.
+// ErrNoVoiceEnvFile is what the credentials read says when the file does not
+// exist: the job is off, a skipped pass that posts nothing. The texts may be
+// carried some other way (Gmail scheduled sends), and the file turns the job on.
+var ErrNoVoiceEnvFile = errors.New("no church-voice.env")
+
+// VoiceKeepAliveOff is what a pass says when there is no file.
+const VoiceKeepAliveOff = "off: no church-voice.env"
+
+// ErrNoVoiceAppPassword is what the credentials read says when the file
+// exists but holds no app password.
 var ErrNoVoiceAppPassword = errors.New("no app password yet")
 
 // VoiceKeepAliveConfig is what the job reads from the file.
@@ -143,7 +151,8 @@ func VoiceKeepAliveJob(run func(context.Context) error) SpringJob {
 	return job
 }
 
-// Run sends this month's text if it is not sent yet. With dryRun it prints the
+// Run sends this month's text if it is not sent yet. With no file on the home
+// the job is off: a skipped pass, no send and no alarm. With dryRun it prints the
 // mail it would send, or the alert it would post, and writes, sends and posts
 // nothing, on any host. A month whose text is already sent, or a host that is
 // not the home, is a skipped pass.
@@ -164,6 +173,13 @@ func (k *VoiceKeepAlive) Run(ctx context.Context, dryRun bool) error {
 		}
 	}
 	cfg, err := k.Creds(ctx)
+	if errors.Is(err, ErrNoVoiceEnvFile) {
+		if dryRun {
+			k.say("mw voice-keepalive --dry-run: %s; the job is off, would post nothing, and sent nothing\n", VoiceKeepAliveOff)
+			return nil
+		}
+		return SkippedPass(VoiceKeepAliveOff)
+	}
 	if errors.Is(err, ErrNoVoiceAppPassword) {
 		return k.fail(ctx, dryRun, month, "no-password", nil, "Church Voice number keep-alive: no app password yet, so no text was sent. Put CHURCH_VOICE_APP_PASSWORD (and CHURCH_VOICE_TEXT_ADDRESS) in ~/"+VoiceKeepAliveEnvFile+" on the home.")
 	}
