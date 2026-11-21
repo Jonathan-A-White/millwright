@@ -17,6 +17,7 @@ instead of a fresh Builder session each.
 - [What a rig turns on](#what-a-rig-turns-on)
 - [Where a story waits](#where-a-story-waits)
 - [The batch](#the-batch)
+  - [A branch set aside does not hold the rest](#a-branch-set-aside-does-not-hold-the-rest)
   - [Rigs land side by side](#rigs-land-side-by-side)
   - [After a batch is held red](#after-a-batch-is-held-red)
 - [The fixer](#the-fixer)
