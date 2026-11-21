@@ -47,12 +47,13 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 		Home: func(ctx context.Context) (bool, error) {
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},
-		Land:    detached.Land,
-		Pending: detached.Pending,
-		Notes:   mwGateway(dir, host),
-		Host:    host,
-		// The batch lines: a batch held red together lands one story at a
-		// time next (mw-gq6.1246).
+		Land:       detached.Land,
+		LandScoped: detached.LandScoped, // a held batch's stories land again in parts (mw-6ww.119.11.1.2)
+		Pending:    detached.Pending,
+		Notes:      mwGateway(dir, host),
+		Host:       host,
+		// The batch lines: a batch held red together lands in parts next
+		// (mw-gq6.1246, mw-6ww.119.11.1.2).
 		History: mwVault(dir, host),
 	}
 	return landings.Job(), nil
