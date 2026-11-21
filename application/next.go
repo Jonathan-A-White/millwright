@@ -2488,26 +2488,6 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 	return Refusal{}, false
 }
 
-// unrunPartsSaid is what an open-steps refusal adds when the rig's gate is split
-// into parts and some part has not passed at the branch's tip: each such part
-// with the command that runs it, so that whoever takes the story over runs
-// them rather than the whole gate. Empty when the gate is not split, every part
-// passed, or the parts cannot be read.
-func (n Next) unrunPartsSaid(ctx context.Context, c *closeOut) string {
-	if n.GateParts == nil || n.GateRecords == nil || n.Landing == nil {
-		return ""
-	}
-	parts := n.GateParts.Parts(c.path.Rig)
-	if len(parts) == 0 {
-		return ""
-	}
-	gate, _ := recordedGate{records: n.GateRecords, storyID: c.id, attempt: c.attempt(), parts: parts, tip: cleanTipOf(ctx, n.Landing, c)}.Run(ctx, "", "")
-	if gate.Passed {
-		return ""
-	}
-	return "\n\nThe rig's gate is split into " + fmt.Sprint(len(parts)) + " parts and these have not passed at the branch's tip:\n" + bulletList(strings.Split(gate.Output, "\n"))
-}
-
 // closingCommentRefusal is the refusal of a story whose formula is finished but
 // which carries no closing comment written after its newest commit; false when
 // it has one, or has no formula (mw-gq6.630). A Builder can close the step that
