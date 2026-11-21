@@ -187,3 +187,101 @@ func TestRealclockCheckPassesThisRepository(t *testing.T) {
 		t.Fatalf("application/ holds a time.Now() or time.Since( that scripts/realclock-baseline.txt does not cover: %v\n%s", err, out)
 	}
 }
+
+// The read-then-replace shape (mw-gq6.1267): a variable takes time.Now() and is
+// then replaced when the injected Now is set. The real clock is read for
+// nothing, and a margin that depends on it fails under load. Only a time.Now()
+// inside a now() default method is meant; an allow comment does not exempt this
+// shape.
+const aReadThenReplace = `package application
+
+import "time"
+
+type Thing struct{ Now func() time.Time }
+
+func (x Thing) Run() time.Time {
+	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
+	if x.Now != nil {
+		now = x.Now()
+	}
+	return now
+}
+`
+
+const aNowDefaultMethod = `package application
+
+import "time"
+
+type Thing struct{ Now func() time.Time }
+
+func (x Thing) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}
+
+func (x Thing) Run() time.Time {
+	now := x.now()
+	return now
+}
+`
+
+func TestRealclockCheckFailsTheReadThenReplaceShapeNamingItsLine(t *testing.T) {
+	root := aRealclockTree(t, map[string]string{
+		"application/thing.go": aReadThenReplace,
+		realclockBaselinePath:  "",
+	})
+	out, err := checkRealclock(t, root)
+	if err == nil {
+		t.Fatalf("the read-then-replace shape passed:\n%s", out)
+	}
+	if !strings.Contains(out, "application/thing.go:8") {
+		t.Fatalf("the refusal does not name application/thing.go:8:\n%s", out)
+	}
+	if !strings.Contains(out, "now()") {
+		t.Fatalf("the refusal does not point at a now() default method:\n%s", out)
+	}
+}
+
+func TestRealclockCheckFailsTheShapeEvenWhenBaselinedOrBareOfAComment(t *testing.T) {
+	root := aRealclockTree(t, map[string]string{
+		"application/thing.go": strings.Replace(aReadThenReplace, " //mw:realclock the default of the injected Now, used where none is set", "", 1),
+		realclockBaselinePath:  "application/thing.go 1\n",
+	})
+	out, err := checkRealclock(t, root)
+	if err == nil || !strings.Contains(out, "application/thing.go:8") {
+		t.Fatalf("a baselined read-then-replace passed or was not named (%v):\n%s", err, out)
+	}
+}
+
+func TestRealclockCheckFailsTheShapeByPlainAssignmentOfTimeNowUTC(t *testing.T) {
+	root := aRealclockTree(t, map[string]string{
+		"application/utc.go":  "package application\n\nimport \"time\"\n\ntype A struct{ Now func() time.Time }\n\nfunc (a A) Run() time.Time {\n\tvar now time.Time\n\tnow = time.Now().UTC()\n\tif a.Now != nil {\n\t\tnow = a.Now()\n\t}\n\treturn now\n}\n",
+		realclockBaselinePath: "application/utc.go 1\n",
+	})
+	out, err := checkRealclock(t, root)
+	if err == nil || !strings.Contains(out, "application/utc.go:9") {
+		t.Fatalf("a read-then-replace by plain assignment passed or was not named (%v):\n%s", err, out)
+	}
+}
+
+func TestRealclockCheckPassesANowDefaultMethod(t *testing.T) {
+	root := aRealclockTree(t, map[string]string{
+		"application/thing.go": aNowDefaultMethod,
+		realclockBaselinePath:  "",
+	})
+	if out, err := checkRealclock(t, root); err != nil {
+		t.Fatalf("a now() default method was refused: %v\n%s", err, out)
+	}
+}
+
+func TestRealclockCheckPassesATimeNowKeptForElapsedTime(t *testing.T) {
+	root := aRealclockTree(t, map[string]string{
+		"application/pass.go": "package application\n\nimport \"time\"\n\ntype P struct{ Now func() time.Time }\n\nfunc (p P) Run() time.Time {\n\t//mw:realclock start of the real elapsed time the pass logs\n\tstarted := time.Now()\n\tnow := started\n\tif p.Now != nil {\n\t\tnow = p.Now()\n\t}\n\treturn now\n}\n",
+		realclockBaselinePath: "",
+	})
+	if out, err := checkRealclock(t, root); err != nil {
+		t.Fatalf("a time.Now() kept for elapsed time, never replaced, was refused: %v\n%s", err, out)
+	}
+}

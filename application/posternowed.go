@@ -352,10 +352,7 @@ func (o PosternOwed) Run(ctx context.Context) (PosternOwedReport, error) {
 	if o.Postern == nil || o.Cipher == nil || o.Keys == nil || o.Notes == nil {
 		return PosternOwedReport{}, fmt.Errorf("mw postern owed: needs the postern backend, its keys and the tracker's notes")
 	}
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if o.Now != nil {
-		now = o.Now()
-	}
+	now := o.now()
 	receipts, err := ReceiptsKept(ctx, o.Notes)
 	if err != nil {
 		return PosternOwedReport{}, fmt.Errorf("mw postern owed: %w", err)
@@ -450,4 +447,12 @@ func owedAlarm(receipts []PosternReceipt, now time.Time) (DamperAlarm, int, bool
 		Principle: DamperOwed,
 		Text:      fmt.Sprintf("%d of his posts have only a receipt (oldest %s): mw postern owed", count, elapsed(oldest)),
 	}, count, true
+}
+
+// now is the injected clock, or the host's when none is set.
+func (o PosternOwed) now() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

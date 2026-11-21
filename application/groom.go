@@ -157,10 +157,7 @@ func (g Groom) Run(ctx context.Context) (GroomReport, error) {
 	if g.Source == nil {
 		return report, fmt.Errorf("grooming %s: there is no work tracker to read", g.Rig)
 	}
-	now := time.Now() //mw:realclock the default of the injected Now, used where none is set
-	if g.Now != nil {
-		now = g.Now()
-	}
+	now := g.now()
 	stories, err := g.Source.StoriesSince(ctx, time.Time{})
 	if err != nil {
 		return report, fmt.Errorf("grooming %s: reading the stories: %w", g.Rig, err)
@@ -621,4 +618,12 @@ func underOrOn(percent, target int) string {
 		return fmt.Sprintf("FEATURES %d%%, on it", percent)
 	}
 	return fmt.Sprintf("FEATURES %d%%, %d points under", percent, target-percent)
+}
+
+// now is the injected clock, or the host's when none is set.
+func (g Groom) now() time.Time {
+	if g.Now != nil {
+		return g.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
