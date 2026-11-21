@@ -689,7 +689,7 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 	if err != nil {
 		return PausedSet{}, fmt.Errorf("reading whether the factory is paused: %w", err)
 	}
-	var set PausedSet
+	var set, inForce PausedSet
 	if paused {
 		set, err = p.Book.Read(ctx, dir)
 		if err != nil {
@@ -699,6 +699,9 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 			fmt.Fprintf(p.Out, "already paused since %s: nothing changed\n%s", set.PausedAt.UTC().Format(time.RFC3339), set)
 			return set, nil
 		}
+		inForce = set
+		inForce.Hosts, inForce.Stories = slices.Clone(set.Hosts), slices.Clone(set.Stories)
+		inForce.Notes, inForce.Unreached = slices.Clone(set.Notes), slices.Clone(set.Unreached)
 	}
 
 	until, plan := req.Until, ResumePlan{}
@@ -796,13 +799,13 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 
 	if !paused && set.MaxBoxesSet {
 		if err := p.Config.SetMaxBoxes(ctx, "0"); err != nil {
-			set.Notes = append(set.Notes, fmt.Sprintf("cloud.max_boxes could not be set to 0: %v", err))
+			set.addNote(fmt.Sprintf("cloud.max_boxes could not be set to 0: %v", err))
 		}
 	}
 	for i, host := range hosts {
 		if errs[i] != nil {
 			set.Unreached = append(set.Unreached, host)
-			set.Notes = append(set.Notes, fmt.Sprintf("%s: %v", host, errs[i]))
+			set.addNote(fmt.Sprintf("%s: %v", host, errs[i]))
 			continue
 		}
 		r := results[i]
@@ -822,12 +825,19 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 		unit := PauseTimerUnit(now)
 		made, err := p.Timer.Schedule(ctx, until, unit)
 		if err != nil {
-			set.Notes = append(set.Notes, fmt.Sprintf("the resume timer could not be scheduled: %v", err))
+			set.addNote(fmt.Sprintf("the resume timer could not be scheduled: %v", err))
 		} else {
 			set.Timer, set.ResumeAt = made, until
 		}
 	}
 
+	change := changeBetween(inForce, set)
+	if paused && change.none() {
+		// Asked again while a host stays down: the Mayor was told, and nothing
+		// is new to tell (mw-kzxfpzw).
+		fmt.Fprintf(p.Out, "already paused since %s: nothing changed\n%s", set.PausedAt.UTC().Format(time.RFC3339), set)
+		return set, nil
+	}
 	if err := p.Book.Write(ctx, dir, set); err != nil {
 		return set, fmt.Errorf("the paused set could not be kept in the vault: %w", err)
 	}
@@ -835,6 +845,10 @@ func (p Pause) Run(ctx context.Context, req PauseRequest) (PausedSet, error) {
 		return set, fmt.Errorf("the pause could not be marked in force: %w", err)
 	}
 	fmt.Fprint(p.Out, set)
+	if paused {
+		p.record(ctx, set, "The factory pause changed", change.body(set.Reason))
+		return set, nil
+	}
 	p.record(ctx, set, "The factory is paused", fmt.Sprintf("The factory is paused (%s).\n\n%s\nmw resume undoes it.", req.Reason, set))
 	return set, nil
 }
