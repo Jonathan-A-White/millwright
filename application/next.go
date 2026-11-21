@@ -2508,7 +2508,8 @@ func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, report *Ne
 	}
 	// The Mayor ran what the closing comment calls unmet and said so on the bead
 	// after it (--met-by-mayor, mw-gq6.1378): that comment is answered.
-	if unmet := UnmetCriteria(text); written && len(unmet) > 0 && !metByMayorAfter(comments, at) {
+	unmet, _ := UnmetCriteriaAfterHandoff(text, c.detail.Acceptance)
+	if written && len(unmet) > 0 && !metByMayorAfter(comments, at) {
 		return Refusal{ReasonUnmetCriterion, fmt.Sprintf("the closing comment of %s says an acceptance criterion is not met: %s", c.id, unmet[0]),
 			"The closing comment says, of acceptance criteria:\n" + bulletList(unmet) + "\n" +
 				"A story is landed when every acceptance criterion holds when run. One that holds only in part, is not met or was not run is not a landing: " +

@@ -164,7 +164,7 @@ func acNotMetDescription(c *closeOut, found ACNotMet, host string) string {
 // a mail to the Mayor. A bug of the same title, open or closed, is the one
 // already filed, so a close-out run again files nothing (mw-gq6.602).
 func (n Next) landedWithoutACs(ctx context.Context, c *closeOut, report *NextReport, again bool, comments []Comment) (verdict, block string) {
-	found := closingACNotMet(comments)
+	found := n.withoutMayorsToRun(c, comments, closingACNotMet(comments))
 	if !found.Found() {
 		return MailLanded, ""
 	}

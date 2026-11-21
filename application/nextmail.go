@@ -35,6 +35,7 @@ func (n Next) closingMail(ctx context.Context, c *closeOut, report *NextReport, 
 	var unmet, found string
 	if c.tested == "" {
 		verdict, unmet = n.landedWithoutACs(ctx, c, report, again, comments)
+		unmet = joinBlocks(unmet, n.landedWithMayorToRun(ctx, c, report, comments))
 		found = n.filedFromFoundNotFixed(ctx, c, report, again, comments)
 	}
 	return verdict, joinBlocks(unmet, found, n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments), closingDocs(comments).MailLine())

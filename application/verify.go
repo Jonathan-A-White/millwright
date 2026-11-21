@@ -295,7 +295,11 @@ func VerifyCandidates(ctx context.Context, beads VerifyBeads, now time.Time, sin
 		if have[c.ID] || c.ClosedAt.Before(now.Add(-since)) || verifiedIn(comments[c.ID]) {
 			continue
 		}
-		if section := howToCheckIt(comments[c.ID]); section != "" {
+		section := howToCheckIt(comments[c.ID])
+		if toRun := mayorToRunLines(comments[c.ID]); toRun != "" {
+			section = strings.TrimSpace(section + "\n\n" + toRun)
+		}
+		if section != "" {
 			out = append(out, VerifyCandidate{Bead: c.ID, Kind: VerifyKindLanding, Title: c.Title, Check: section + "\n", LandedAt: c.ClosedAt})
 		}
 	}
