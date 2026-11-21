@@ -19,6 +19,13 @@ func TestNamesTheGovernor(t *testing.T) {
 		"his words":               {"A charter changes only on his words.", true},
 		"tail and his own phrase": {"Decided by the Governor: land in batches; PROVISIONAL, the Governor to confirm.", true},
 		"plain":                   {"The gateway drops a message larger than the cap.", false},
+		// A fact about the guard, quoting the phrase as an example (mw-gq6.1501).
+		"fact about the guard": {"namesTheGovernor matches 'the Governor' lower-case-t, so a test fixture saying 'The Governor said' is not protected from make-room or boot room-making.", false},
+		"quoted double":        {"The guard reads \"Governor's\" and 'his words' as examples of his phrases.", false},
+		"quoted then asserted": {"The guard matches 'the Governor'; the Governor's word on mw-x: land in batches.", true},
+		"decided by, again":    {"Decided by the Governor 2026-10-01: land in batches.", true},
+		"his rule, again":      {"His rule: every story goes test-first.", true},
+		"word on mw-x":         {"the Governor's word on mw-x: land in batches.", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := namesTheGovernor(RigFact{Sentence: c.sentence}); got != c.want {

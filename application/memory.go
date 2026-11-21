@@ -1477,7 +1477,8 @@ type roomMove struct {
 // placed longest ago first; never a fact placed within MakeRoomKeepDays days,
 // whichever the tier, so lines placed in one sitting stay together; never a sentence beginning 'His ' or holding 'the
 // Governor', "Governor's" or 'his words' (a phrase that only asks his
-// confirmation, 'the Governor to confirm', is not his word); never an aged one with
+// confirmation, 'the Governor to confirm', or that is quoted as an example, is
+// not his word); never an aged one with
 // a since within MakeRoomKeepDays days, except by that last rule; the oldest since first, then, of one day, the
 // one placed first (the moment it was added), then the subject least queried (as
 // stats counts), then by slug. Each goes through Demote with
@@ -1781,12 +1782,16 @@ func (m Memory) roomBase(fact RigFact) bool {
 // "Governor's" or 'his words', or an opening 'His ' (mw-gq6.1000). A phrase that
 // only asks for his confirmation ('the Governor to confirm', "the Governor's to
 // choose": a Builder's decision placed PROVISIONAL) does not make it his
-// (mw-gq6.1468).
+// (mw-gq6.1468), nor does a phrase quoted as an example, in single or double
+// quotes ('the Governor', "Governor's"): a fact about the guard is not his
+// word (mw-gq6.1501). A phrase asserted outside quotes still is.
 func namesTheGovernor(fact RigFact) bool {
 	if strings.HasPrefix(fact.Sentence, "His ") {
 		return true
 	}
 	sentence := askForConfirmation.ReplaceAllString(fact.Sentence, "")
+	sentence = quotedPhrase.ReplaceAllString(sentence, "$1")
+	sentence = doubleQuotedPhrase.ReplaceAllString(sentence, "")
 	for _, phrase := range []string{"the Governor", "Governor's", "his words"} {
 		if strings.Contains(sentence, phrase) {
 			return true
@@ -1798,6 +1803,15 @@ func namesTheGovernor(fact RigFact) bool {
 // askForConfirmation matches the words of a Builder's decision that ask the
 // Governor to confirm or choose, which are not his word.
 var askForConfirmation = regexp.MustCompile(`(?:the )?Governor(?:'s)? to (?:confirm|choose)`)
+
+// quotedPhrase matches a single-quoted span holding one of his phrases, opened
+// after a space or bracket (so the apostrophe of "Governor's" opens none) and
+// holding no apostrophe; doubleQuotedPhrase the same in double quotes. A fact
+// that quotes a phrase as an example is about it, not his word (mw-gq6.1501).
+var (
+	quotedPhrase       = regexp.MustCompile(`(^|[\s(])'[^']*(?:the Governor|Governor's|his words)[^']*'`)
+	doubleQuotedPhrase = regexp.MustCompile(`"[^"]*(?:the Governor|Governor's|his words)[^"]*"`)
+)
 
 // sinceBefore reports whether a fact's since is more than days days ago.
 func (m Memory) sinceBefore(fact RigFact, days int) bool {
