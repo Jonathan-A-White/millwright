@@ -83,15 +83,23 @@ func (n Next) partsTakingTurns(ctx context.Context, c *closeOut, report *NextRep
 	var commands []string
 	var output strings.Builder
 	ahead := n.keepsTheLockAhead(ctx, c, parts)
+	// last is the part that ran before this one, -1 when none has: a part that
+	// passed at the tip (c.parts) is not run, and the turns are between the parts
+	// that are (nextparts.go).
+	last := -1
 	for i, part := range parts {
-		if i > 0 && !ahead && !n.keepsTheLock(c, i, parts) {
-			n.takeTurn(ctx, c, report, i, parts)
+		if c.parts.skip(dir == c.worktree, i+1) {
+			continue
 		}
-		if i > 0 {
+		if last >= 0 && !ahead && !n.keepsTheLock(c, i, parts) {
+			n.takeTurn(ctx, c, report, last, i, parts)
+		}
+		if last >= 0 {
 			if err := n.gateGivesWay(ctx, c); err != nil {
 				return Checked{}, err
 			}
 		}
+		last = i
 		run, err := n.GateParts.RunLine(ctx, c.path.Rig, dir, part.Command)
 		if err != nil {
 			return Checked{}, fmt.Errorf("part %d of %d of the rig's gate (%s) could not be run: %w", i+1, len(parts), part.Name, err)
@@ -120,20 +128,20 @@ func (n Next) keepsTheLockAhead(ctx context.Context, c *closeOut, parts []GatePa
 	return true
 }
 
-// takeTurn gives the host's gate lock back after part done of parts (counted from
-// zero, the part that ran last being done-1) and takes it again behind whoever
-// queued for it meanwhile, and says so. A lock that cannot be taken again is said,
-// and the rest run without it, as a close-out's gate does.
-func (n Next) takeTurn(ctx context.Context, c *closeOut, report *NextReport, done int, parts []GatePart) {
+// takeTurn gives the host's gate lock back after part last of parts (counted from
+// zero) and takes it again behind whoever queued for it meanwhile, before part
+// next, and says so. A lock that cannot be taken again is said, and the rest run
+// without it, as a close-out's gate does.
+func (n Next) takeTurn(ctx context.Context, c *closeOut, report *NextReport, last, next int, parts []GatePart) {
 	turns := c.turns
 	if turns.lock != nil {
 		n.giveTheGateLockBack(report, turns.lock)
 		turns.lock = nil
 	}
 	n.print(fmt.Sprintf("  turn    %s gives %s's gate lock back after part %d of %d (%s), and takes it again behind whoever waits for it\n",
-		c.id, n.Host, done, len(parts), parts[done-1].Name))
+		c.id, n.Host, last+1, len(parts), parts[last].Name))
 	began := n.now()
-	turns.lock, _ = n.takeTheGateLock(ctx, c, report, fmt.Sprintf("part %d of %d of the rig's gate (%s)", done+1, len(parts), parts[done].Name))
+	turns.lock, _ = n.takeTheGateLock(ctx, c, report, fmt.Sprintf("part %d of %d of the rig's gate (%s)", next+1, len(parts), parts[next].Name))
 	turns.waited += n.now().Sub(began)
 }
 

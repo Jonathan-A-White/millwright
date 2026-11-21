@@ -664,3 +664,64 @@ Feature: mw land lands a batch rig's queue under one gate run
     When mw lands the batch of the rig
     Then the fixer was started only once
     And the batch is held for the harness's stop of its fixer, not its work, until "2026-09-18T15:00:00Z"
+
+  # mw-6ww.119.11.1.1: a rig whose gate is named as parts keeps what each part said
+  # at the commit it ran at. A close-out of a story that was never given a whole
+  # check's pass (the Builder ran the parts and left the last call to the
+  # close-out) trusts the parts that passed at the queued tip and runs only the
+  # rest: the batch's gate still runs the whole suite on what is pushed.
+
+  Scenario: A story whose gate parts all passed at its tip is queued with no part run again (mw-6ww.119.11.1.1)
+    Given the rig's gate is split into these parts:
+      | name      | command                    |
+      | lint      | printf 'lint\n' >> {log}   |
+      | unit 1/2  | printf 'unit-1\n' >> {log} |
+      | unit 2/2  | printf 'unit-2\n' >> {log} |
+    And the story "mw-gq6.1" has been worked in its own worktree
+    And the session of "mw-gq6.1" reported a plain success
+    When a session checks "mw-gq6.1" part 1
+    And a session checks "mw-gq6.1" part 2
+    And a session checks "mw-gq6.1" part 3
+    And mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is recorded as queued for batch landing
+    And the parts that ran, in order, were: lint, unit-1, unit-2
+    And the rig's tests were run 0 times
+    And the last ledger line holds:
+      | queued for batch landing                                                                 |
+      | tested by mw check, parts at                                                             |
+      | pass; changed specs run at close-out                                                     |
+    And the last ledger line does not say "mw next re-ran the rig's tests"
+
+  Scenario: A story with one part passed at an older tip has that one part alone run at the close-out (mw-6ww.119.11.1.1)
+    Given the rig's gate is split into these parts:
+      | name      | command                    |
+      | lint      | printf 'lint\n' >> {log}   |
+      | unit 1/2  | printf 'unit-1\n' >> {log} |
+      | unit 2/2  | printf 'unit-2\n' >> {log} |
+    And the story "mw-gq6.1" has been worked in its own worktree
+    And the session of "mw-gq6.1" reported a plain success
+    When a session checks "mw-gq6.1" part 1
+    And the session of "mw-gq6.1" commits another change
+    And a session checks "mw-gq6.1" part 2
+    And a session checks "mw-gq6.1" part 3
+    And mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is recorded as queued for batch landing
+    And the parts that ran, in order, were: lint, unit-1, unit-2, lint
+    And the rig's tests were run 0 times
+    And the last ledger line holds:
+      | queued for batch landing                         |
+      | tested by mw check, parts 2, 3 of 3 at           |
+      | part 1 (lint) run at close-out                   |
+
+  Scenario: A story none of whose parts ran at its tip has every part run at the close-out (mw-6ww.119.11.1.1)
+    Given the rig's gate is split into these parts:
+      | name      | command                    |
+      | lint      | printf 'lint\n' >> {log}   |
+      | unit 1/2  | printf 'unit-1\n' >> {log} |
+    And the story "mw-gq6.1" has been worked in its own worktree
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is recorded as queued for batch landing
+    And the parts that ran, in order, were: lint, unit-1
+    And the last ledger line holds:
+      | mw next re-ran the rig's tests: pass |

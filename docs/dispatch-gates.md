@@ -366,7 +366,10 @@ A single story's close-out gate takes the lock by turns when its rig's gate is n
 parts on the host (`[test_parts.<rig>]`): it runs the parts one after another, as the
 rig's one line runs its steps, gives the lock back after each and takes it again behind
 whoever queued for it meanwhile (`application/gateturns.go`, mw-gq6.1275, mw-gq6.1301).
-A batch's gate runs the parts in place of its related-tests line too, but keeps the lock
+A close-out of a batch rig's story that has a pass of some parts at its queued tip runs only
+the others: the turns are taken between the parts that run (`application/nextparts.go`,
+mw-6ww.119.11.1.1, `docs/land-rush.md` "Where a story waits"). A batch's gate runs the parts
+in place of its related-tests line too, but keeps the lock
 across them (mw-gq6.1450): a batch takes precedence over single stories' checks and
 close-outs in every queue it waits in on the host, the gate lock, the test-runner slots
 (`builder_test_runs`) and its rig's merge slot, through a ticket that stands ahead of

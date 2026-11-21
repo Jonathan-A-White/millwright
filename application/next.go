@@ -645,6 +645,9 @@ type NextReport struct {
 	Queued   bool
 	QueuedAs string
 	Trusted  string
+	// TestedParts is, instead of Trusted, what the close-out trusted of a gate
+	// split into parts that mw check ran at the tip (nextparts.go).
+	TestedParts string
 	// MainRed is what the close-out found when the tests that failed on the
 	// story's merged result fail on the target branch alone too: the story was
 	// held on the bead that carries main's fix, not sent back or refused
@@ -952,6 +955,9 @@ type closeOut struct {
 	batch   bool
 	tip     string
 	trusted string
+	// parts is what the part records said of tip when no whole check passed
+	// there; nil when they said nothing (nextparts.go).
+	parts *partsAtTip
 
 	// tested is the landed story a Tester story tested, findings what it
 	// found, and findingsFrom the story they were written on, as its checks
@@ -2169,6 +2175,14 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 	if c.trusted != "" {
 		return found
 	}
+	// Failing that, the parts of a split gate that passed at the tip are trusted
+	// the same way, and only the rest of the gate is run (nextparts.go).
+	if c.parts.all() {
+		if refusal, stop := n.trustedPartsRefusal(ctx, c, report, base); stop {
+			refuse(refusal.Reason, refusal.Why, refusal.Said)
+		}
+		return found
+	}
 
 	// What the rig itself says about the work, in the worktree the session left.
 	gate := n.gate(ctx, c, report, c.worktree, "the rig's tests", RelatedSpan{Base: base})
@@ -2235,7 +2249,7 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 
 	// The specs the story added or changed, which the rig's gate does not run
 	// (mw-gq6.366), once the gate itself has passed.
-	if err == nil && checked.Passed {
+	if err == nil && checked.Passed && !c.parts.specsPassed() {
 		if refusal, stop := n.specsRefusal(ctx, c, report, c.worktree, base, "in the worktree", n.specsFailReason(ctx, c), true); stop {
 			refuse(refusal.Reason, refusal.Why, refusal.Said)
 		}

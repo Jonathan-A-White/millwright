@@ -284,6 +284,9 @@ func (r NextReport) text(forMail bool) string {
 		if r.Trusted != "" {
 			fmt.Fprintf(&b, "          tested by mw check at %s: the rig's tests were not run again\n", shortCommit(r.Trusted))
 		}
+		if r.TestedParts != "" {
+			fmt.Fprintf(&b, "          %s\n", r.TestedParts)
+		}
 	case r.FixedOnMain != nil:
 		fmt.Fprintf(&b, "  fixed   %s: nothing to land; the story is closed, its worktree and branch taken away\n", r.FixedOnMain.reason())
 	case r.Landed:

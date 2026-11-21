@@ -52,13 +52,14 @@ func (n Next) markBatch(ctx context.Context, c *closeOut) {
 		return
 	}
 	c.tip = tip
-	log, err := n.Vault.ReadRunFile(ctx, c.id, CheckLogFileName(c.attempt()))
-	if err != nil {
+	if log, err := n.Vault.ReadRunFile(ctx, c.id, CheckLogFileName(c.attempt())); err == nil && CheckedTip(log) == tip {
+		c.trusted = tip
 		return
 	}
-	if CheckedTip(log) == tip {
-		c.trusted = tip
-	}
+	// No whole check passed at the tip: the part records of the attempt say which
+	// parts of a split gate did, and the close-out runs only the rest
+	// (mw-6ww.119.11.1.1).
+	c.parts = n.readPartsAtTip(ctx, c, tip)
 }
 
 // rereadLanding settles, once the checks have passed, whether the rig lands in
@@ -161,6 +162,8 @@ func (n Next) queue(ctx context.Context, c *closeOut, report *NextReport) (NextR
 	tested := "mw next re-ran the rig's tests: pass"
 	if c.trusted != "" {
 		tested = fmt.Sprintf("tested by mw check at %s: pass", shortCommit(c.trusted))
+	} else if said := c.parts.tested(); said != "" {
+		tested, report.TestedParts = said, said
 	}
 	outcome := fmt.Sprintf("queued for batch landing as %s at %s (%s), %d commits, %s",
 		c.branch, n.remote(), shortCommit(c.tip), report.Commits, tested)

@@ -104,15 +104,7 @@ func (k Check) putSpecsRecord(ctx context.Context, storyID string, attempt int, 
 
 // specsRecordOf reads what the specs last said, false when nothing was kept.
 func (k Check) specsRecordOf(ctx context.Context, storyID string, attempt int) (specsRecord, bool) {
-	text, err := k.Records.ReadRunFile(ctx, storyID, CheckSpecsResultFileName(attempt))
-	if err != nil {
-		return specsRecord{}, false
-	}
-	var rec specsRecord
-	if json.Unmarshal([]byte(text), &rec) != nil {
-		return specsRecord{}, false
-	}
-	return rec, true
+	return specsRecordIn(ctx, k.Records, storyID, attempt)
 }
 
 // tipWord is a commit as a record keeps it: "-" when the worktree held more.
