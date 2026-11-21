@@ -137,6 +137,7 @@ func (h *HTTP) Messages(ctx context.Context, since int64) ([]application.Postern
 				if json.Unmarshal(raw, &p) == nil && p.Kind == application.PosternMessageKind {
 					record.Class, record.From, record.To = p.Class, p.From, p.To
 					record.Ts, record.Ciphertext = time.Unix(p.Ts, 0).UTC(), p.Ct
+					record.Bead, record.Channel = p.Bead, p.Channel
 				}
 			}
 			records = append(records, record)
