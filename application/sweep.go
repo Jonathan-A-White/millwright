@@ -185,12 +185,6 @@ func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport)
 // every other claimed story unexamined.
 func (s Sweep) markStuck(ctx context.Context, detail StoryDetail, why string, report *SweepReport) {
 	id := detail.Story.ID
-	// Read again right before the write: the batch may have landed it since the
-	// check in one.
-	if landedNow(ctx, s.Tracker, detail) {
-		report.Landed = append(report.Landed, id)
-		return
-	}
 	if err := s.Tracker.CommentOnStory(ctx, id, why); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be commented on: %v", id, err))
 	}
