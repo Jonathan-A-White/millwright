@@ -107,7 +107,7 @@ func (v *Vault) handoffDir(seat, host string) (string, error) {
 	return path.Join(SeatsDir, seat, application.HandoffsDir), nil
 }
 
-// handoffs is every handoff in a directory of the vault, oldest name first. A
+// handoffs is every handoff in a directory of the vault, oldest first, in natural order of the names. A
 // directory that is not there holds none, which is not an error here: a seat
 // that has never handed off is a thing the caller decides what to do about.
 func (v *Vault) handoffs(seat, dir string) ([]application.Handoff, error) {
@@ -136,9 +136,10 @@ func (v *Vault) handoffs(seat, dir string) ([]application.Handoff, error) {
 			Written: info.ModTime(),
 		})
 	}
-	// A seat numbers its handoffs so that their names sort into the order they
-	// were written; the newest is the last of them.
-	sort.Slice(handoffs, func(i, j int) bool { return handoffs[i].Name < handoffs[j].Name })
+	// A seat names its handoffs by date and count, which sort into the order they
+	// were written in natural order (digits as numbers, so -1000 is after -999);
+	// the newest is the last of them.
+	sort.Slice(handoffs, func(i, j int) bool { return application.NaturalLess(handoffs[i].Name, handoffs[j].Name) })
 	return handoffs, nil
 }
 

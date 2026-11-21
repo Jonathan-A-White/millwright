@@ -52,8 +52,8 @@ type BootPart struct {
 	// names one. A path may hold {host} and {seat}.
 	File string
 	Rig  string
-	// Newest is a directory of the vault whose newest .md file, by name, is
-	// read: a seat's handoffs.
+	// Newest is a directory of the vault whose newest .md file, by name in
+	// natural order (NaturalLess: -1000 after -999), is read: a seat's handoffs.
 	Newest string
 	// Command is a shell command line, run in the vault; what it prints is
 	// the part.
@@ -338,8 +338,9 @@ type SeatBootFiles interface {
 	// VaultFile reads one file by path from the vault's root.
 	VaultFile(ctx context.Context, rel string) (string, error)
 
-	// NewestVaultFile reads the newest .md file, by name, of a directory of
-	// the vault: its path from the vault's root and its text. A directory
+	// NewestVaultFile reads the newest .md file, by name in natural order
+	// (NaturalLess: runs of digits as numbers, so 2026-11-21-1000 is after
+	// 2026-11-21-999), of a directory of the vault: its path from the vault's root and its text. A directory
 	// with none is an error.
 	NewestVaultFile(ctx context.Context, dir string) (name, text string, err error)
 }

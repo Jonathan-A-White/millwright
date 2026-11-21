@@ -46,7 +46,7 @@ func (f *fakeSeatBootFiles) NewestVaultFile(_ context.Context, dir string) (stri
 	if len(names) == 0 {
 		return "", "", fmt.Errorf("%s holds no file", dir)
 	}
-	sort.Strings(names)
+	sort.Slice(names, func(i, j int) bool { return NaturalLess(names[i], names[j]) })
 	newest := names[len(names)-1]
 	return newest, f.files[newest], nil
 }
