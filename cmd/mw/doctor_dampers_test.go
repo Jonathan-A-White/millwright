@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -93,5 +94,73 @@ func TestDoctorDampersDoNotReadAStarvedRigsClosedStoriesAgain(t *testing.T) {
 	}
 	if reads != 1 {
 		t.Errorf("the rig's closed stories were read %d times in one doctor run, want once:\n%s", reads, readAsked(t, asked))
+	}
+}
+
+// mw-gq6.1323: the dampers line asked for every comment of every story landed in
+// 14 days (1,563 beads, 3 to 5 s at load) to find the few that open a word of mw
+// verify. It asks for those alone, in one query, and for no bead's comments
+// whole.
+func TestDoctorDampersAskForOnlyTheProposalCommentsOfTheLandedStories(t *testing.T) {
+	asked := aBdThatRecords(t)
+	dir := t.TempDir()
+	t.Setenv("MW_VAULT", dir)
+	t.Setenv("MW_HOST", "laptop")
+
+	survey, err := doctorDamperSurvey(dir, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := survey.DamperCounts(context.Background()); err != nil {
+		t.Fatalf("DamperCounts: %v", err)
+	}
+	narrow := 0
+	for _, line := range strings.Split(strings.TrimSpace(readAsked(t, asked)), "\n") {
+		if strings.Contains(line, "--include-comments") {
+			t.Errorf("a bead's comments were read whole: %s", line)
+		}
+		if strings.Contains(line, "from comments c where c.issue_id in") {
+			if !strings.Contains(line, "regexp_like(c.text") {
+				t.Errorf("a query read comments with no narrowing to the words of mw verify: %s", line)
+			}
+			narrow++
+		}
+	}
+	if narrow != 1 {
+		t.Errorf("expected one narrow read of the comments, got %d:\n%s", narrow, readAsked(t, asked))
+	}
+}
+
+// mw-gq6.1323: with MW_DOCTOR_TIMING set the survey prints one line for each read
+// of the tracker, with its seconds, so the time of the dampers line is seen by
+// call; with it unset it prints nothing.
+func TestDoctorDampersTimingPrintsOneLinePerReadWhenAsked(t *testing.T) {
+	aBdThatRecords(t)
+	dir := t.TempDir()
+	t.Setenv("MW_VAULT", dir)
+	t.Setenv("MW_HOST", "laptop")
+
+	for _, set := range []bool{false, true} {
+		if set {
+			t.Setenv(doctorTimingEnv, "1")
+		} else {
+			t.Setenv(doctorTimingEnv, "")
+		}
+		survey, err := doctorDamperSurvey(dir, "laptop")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		survey = withDoctorTiming(survey, mwGateway(dir, "laptop"), &out)
+		if _, err := survey.DamperCounts(context.Background()); err != nil {
+			t.Fatalf("DamperCounts: %v", err)
+		}
+		lines := strings.Count(out.String(), "doctor timing: ")
+		switch {
+		case !set && lines != 0:
+			t.Errorf("with %s unset the survey printed timing lines:\n%s", doctorTimingEnv, out.String())
+		case set && (lines == 0 || !strings.Contains(out.String(), "WorkInHand") || !strings.Contains(out.String(), "BeadGraph")):
+			t.Errorf("with %s set expected a timing line for each read, got:\n%s", doctorTimingEnv, out.String())
+		}
 	}
 }
