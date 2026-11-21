@@ -106,11 +106,15 @@ func newReleasePacedCmd() *cobra.Command {
 					ids = append(ids, strings.TrimSpace(line))
 				}
 			}
-			gateway, err := beads.FromConfig()
+			dir, err := config.Vault()
 			if err != nil {
 				return err
 			}
-			dir, err := config.Vault()
+			// The list is read with one ShowBeads, and that started a bd show of
+			// each story: 8 minutes for 232 of them (mw-6ww.119.10.10). It is read
+			// by id over one connection kept open for the run.
+			defer keepBeadsConnection(dir, cmd.ErrOrStderr())()
+			gateway, err := beads.FromConfig(followerGatewayOptions...)
 			if err != nil {
 				return err
 			}
