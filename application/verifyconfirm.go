@@ -433,11 +433,7 @@ func (c VerifyConfirm) olderThanLanding(ctx context.Context, bead StoryDetail, d
 	if demo {
 		landed = time.Time{}
 		if bead.EpicID != "" {
-			//mw:realclock the default of the injected Now, used where none is set
-			now := time.Now()
-			if c.Now != nil {
-				now = c.Now()
-			}
+			now := c.now()
 			closed, err := c.Beads.ClosedStories(ctx, now.Add(-verifyEpicLookback))
 			if err != nil {
 				return "", fmt.Errorf("reading the landed stories: %w", err)
@@ -515,11 +511,7 @@ type VerifyList struct {
 // that has a PROPOSED comment and no VERIFIED one: one entry for each proposal,
 // demos first, by id, then landings by close time.
 func (l VerifyList) Run(ctx context.Context) ([]VerifyWaiting, error) {
-	//mw:realclock the default of the injected Now, used where none is set
-	now := time.Now()
-	if l.Now != nil {
-		now = l.Now()
-	}
+	now := l.now()
 	work, err := l.Beads.WorkInHand(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading the open demos: %w", err)
@@ -606,4 +598,18 @@ func (l VerifyList) print(waiting []VerifyWaiting) {
 		fmt.Fprintf(l.Out, "  confirm: mw verify confirm %s --txid %s\n", w.Bead, w.Txid)
 	}
 	fmt.Fprintf(l.Out, "\n%d proposals waiting.\n", len(waiting))
+}
+
+func (x VerifyConfirm) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
+}
+
+func (x VerifyList) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

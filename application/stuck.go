@@ -142,11 +142,7 @@ type StuckSurvey struct {
 
 // Find reads the beads and reports the roots, in id order.
 func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
-	//mw:realclock the default of the injected Now, used where none is set
-	now := time.Now()
-	if s.Now != nil {
-		now = s.Now()
-	}
+	now := s.now()
 	beads, err := s.Graph.BeadGraph(ctx)
 	if err != nil {
 		return StuckReport{}, fmt.Errorf("reading the beads for the stuck check: %w", err)
@@ -388,4 +384,11 @@ func OpenRefusedStories(work WorkInHand, now time.Time) []OpenRefused {
 		return found[a].Story.Story.ID < found[b].Story.Story.ID
 	})
 	return found
+}
+
+func (x StuckSurvey) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

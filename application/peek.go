@@ -69,10 +69,7 @@ func (p Peek) Run(ctx context.Context, storyID string) error {
 		return p.remote(ctx, host, storyID)
 	}
 
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if p.Now != nil {
-		now = p.Now()
-	}
+	now := p.now()
 	session := SessionName(storyID)
 	status, err := p.Runner.Status(ctx, session)
 	if err != nil {
@@ -202,4 +199,11 @@ func elapsed(d time.Duration) string {
 		return fmt.Sprintf("%dh%02dm", minutes/60, minutes%60)
 	}
 	return fmt.Sprintf("%dd%02dh", minutes/(24*60), minutes/60%24)
+}
+
+func (x Peek) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

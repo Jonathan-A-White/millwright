@@ -254,11 +254,7 @@ func (u UsageRead) Run(ctx context.Context) error {
 			return err
 		}
 	}
-	//mw:realclock the default of the injected Now, used where none is set
-	now := time.Now()
-	if u.Now != nil {
-		now = u.Now()
-	}
+	now := u.now()
 	var screen UsageScreen
 	var text string
 	for look := 1; ; look++ {
@@ -305,11 +301,7 @@ func (u UsageRead) sweep(ctx context.Context) {
 		fmt.Fprintf(u.Out, "could not look for stale usage probes: %v\n", err)
 		return
 	}
-	//mw:realclock the default of the injected Now, used where none is set
-	now := time.Now()
-	if u.Now != nil {
-		now = u.Now()
-	}
+	now := u.now()
 	closed := 0
 	for _, p := range probes {
 		pid, ok := usageProbePid(p.Name)
@@ -355,4 +347,11 @@ func (u UsageRead) wait(ctx context.Context, d time.Duration) error {
 	case <-time.After(d):
 		return nil
 	}
+}
+
+func (x UsageRead) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

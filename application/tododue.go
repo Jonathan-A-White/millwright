@@ -132,11 +132,7 @@ type TodoDueReader interface {
 // once more. It reports how many pushes it sent, and an error only for what
 // stops the pass or what a push failed with.
 func (r TodoReminder) Run(ctx context.Context) (int, error) {
-	//mw:realclock the default of the injected Now, used where none is set
-	now := time.Now()
-	if r.Now != nil {
-		now = r.Now()
-	}
+	now := r.now()
 	if !r.anyDue(ctx, now) {
 		return 0, nil
 	}
@@ -241,4 +237,11 @@ type TodoNightlyNotes interface {
 // springs it, it runs every d, on the follower's own clock.
 func TodoReminderJob(every time.Duration, run func(context.Context) error) SpringJob {
 	return ClockJob(TodoReminderJobName, every, run)
+}
+
+func (x TodoReminder) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

@@ -51,10 +51,7 @@ type FactoryReportSend struct {
 
 // Run sends the summary, and reports the txid; empty when nothing was sent.
 func (s FactoryReportSend) Run(ctx context.Context) (string, error) {
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if s.Now != nil {
-		now = s.Now()
-	}
+	now := s.now()
 	now = now.UTC()
 	today := now.Format(LedgerDate)
 
@@ -113,4 +110,11 @@ func (s FactoryReportSend) printf(format string, args ...any) {
 	if s.Out != nil {
 		fmt.Fprintf(s.Out, format, args...)
 	}
+}
+
+func (x FactoryReportSend) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
