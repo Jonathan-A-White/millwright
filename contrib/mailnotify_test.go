@@ -420,15 +420,36 @@ func (f *factory) tmux(args ...string) string {
 // and index.
 func (f *factory) mayor(state, acting string) string {
 	f.t.Helper()
+	f.writePane(state)
+	return f.startMayor(acting)
+}
+
+// writePane writes the script the Mayor's pane runs in the named state.
+func (f *factory) writePane(state string) {
+	f.t.Helper()
 	f.write("pane.sh", "#!/bin/sh\n"+panes[state]+"\nexec cat > \"$MW_TEST_DIR/typed\"\n", 0o755)
 	if strings.HasPrefix(state, "enter-") {
 		f.keysReached()
 	}
+}
+
+// startMayor starts the Mayor's window on the private server, running the pane
+// script writePane wrote, and says in .mayor-acting where it is.
+//
+// The pane is started with sh reading the script, never by executing the file:
+// a test that forks (every test in this package that runs a command, side by
+// side) hands the child a copy of every file the process has open for writing
+// until its exec, and the kernel refuses to execute a file anyone has open for
+// writing ('Text file busy'), so a pane started as the file itself could die as it
+// began, its window gone before the test read it: 'tmux capture-pane: can't find
+// window @1' (mw-gq6.1362).
+func (f *factory) startMayor(acting string) string {
+	f.t.Helper()
 	// A window of another name first, so the Mayor's is neither index 0 nor the
 	// first the server lists.
 	f.tmux("new-session", "-d", "-s", "factory", "-n", "shell", "-x", "100", "-y", "20", "sleep 600")
 	out := f.tmux("new-window", "-d", "-P", "-F", "#{window_id} #{window_index}", "-n", "mayor-2026-09-19-10",
-		"env", "MW_TEST_DIR="+f.dir, "MW_FIXTURES="+fixtures(f.t), f.path("pane.sh"))
+		"env", "MW_TEST_DIR="+f.dir, "MW_FIXTURES="+fixtures(f.t), "sh", f.path("pane.sh"))
 	var id, index string
 	if _, err := fmt.Sscan(out, &id, &index); err != nil {
 		f.t.Fatalf("reading the new window from %q: %v", out, err)
@@ -763,6 +784,25 @@ func TestSyncsNoMoreOftenThanEveryFiveMinutes(t *testing.T) {
 				t.Fatalf("mw ran %d times, want %d", got, tc.syncs)
 			}
 		})
+	}
+}
+
+// A pane script that something has open for writing (another test's child, in the
+// moment between its fork and its exec) cannot be executed as a file, and the
+// pane's window must still be there and draw its prompt (mw-gq6.1362).
+func TestAMayorsWindowStartsWhileSomethingHoldsItsPaneScriptOpenForWriting(t *testing.T) {
+	f := newFactory(t)
+	f.writePane("idle")
+	held, err := os.OpenFile(f.path("pane.sh"), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	id := f.startMayor(actingByID)
+
+	if out := f.tmux("capture-pane", "-p", "-t", id); !strings.Contains(out, "❯") {
+		t.Fatalf("the window %s drew no prompt: %q", id, out)
 	}
 }
 
@@ -2099,7 +2139,7 @@ func TestAPaneThatIgnoresTheHangupIsEndedBeforeTheCleanupReturns(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := command(t, "tmux", "-L", socket, "new-session", "-d", "-s", "stop", script, dir).CombinedOutput(); err != nil {
+	if out, err := command(t, "tmux", "-L", socket, "new-session", "-d", "-s", "stop", "sh", script, dir).CombinedOutput(); err != nil {
 		t.Fatalf("tmux new-session: %v\n%s", err, out)
 	}
 	for deadline := time.Now().Add(settleBudget); ; time.Sleep(20 * time.Millisecond) {
