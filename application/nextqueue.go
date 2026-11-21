@@ -17,6 +17,28 @@ func QueuedForBatch(detail StoryDetail) bool {
 	return hasLabel(detail.Labels, RunState+":"+RunQueued)
 }
 
+// LandedRun reports whether a story's last run landed it (RunLanded), as the
+// run label on the listing says: its branch is on the target and only its close
+// is left to write, by the batch or close-out that landed it. Such a story
+// carries a lapsed lease and no session as surely as a queued one, so whatever
+// walks the claimed stories passes it over the same way: a state written over
+// run=landed hides it from the close that is being written (mw-ydkbsbr).
+func LandedRun(detail StoryDetail) bool {
+	return hasLabel(detail.Labels, RunState+":"+RunLanded)
+}
+
+// landedNow is LandedRun read fresh: the listing a walk began with may be older
+// than the landing that happened since. A read that fails says no, as
+// recordedGone does, so that a tracker that cannot answer is not a reason to
+// leave a story unexamined.
+func landedNow(ctx context.Context, tracker WorkTracker, detail StoryDetail) bool {
+	if LandedRun(detail) {
+		return true
+	}
+	was, err := tracker.StoryState(ctx, detail.Story.ID, RunState)
+	return err == nil && was == RunLanded
+}
+
 // readLanding reads how the story's rig lands its stories, before its checks:
 // on a rig that lands in batches, the commit at the branch's tip, and whether
 // mw check passed at that very commit, which the checks then trust in place of

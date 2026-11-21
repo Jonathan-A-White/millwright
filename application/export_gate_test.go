@@ -87,3 +87,10 @@ func (b BatchLand) GateTheBatchRun(ctx context.Context, dir string, report *Batc
 func (b BatchLand) FixTheBatch(ctx context.Context, dir string, report *BatchReport) bool {
 	return b.fix(ctx, dir, dir, domain.EpicRequirements{}, report, "the gate failed", &NextReport{})
 }
+
+// HoldQueue lets the tests of package application_test see the lease and the
+// closing-out mark a batch keeps on its queue while it runs.
+func (b BatchLand) HoldQueue(ctx context.Context, queue []BatchStory) func() {
+	unhold := b.holdQueue(ctx, queue)
+	return func() { unhold() }
+}

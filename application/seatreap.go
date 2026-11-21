@@ -199,6 +199,10 @@ const (
 	ReapFailed ReapOutcome = "failed"
 )
 
+// A SeatReap writes no run state: it reads a seat's windows and handoffs, closes
+// a window and appends to its own log, so it cannot race a batch's close of a
+// story (mw-5r3p30.1206).
+//
 // SeatReap is a watcher that closes a finished session's window: zero tokens,
 // started detached, and a window closes itself only in the sense that a
 // session ends its own window — no session ever closes another's.

@@ -20,7 +20,9 @@ type CloseOutMark struct {
 	Calming bool
 }
 
-// CloseOutMarks is where a close-out says it is running, outside the tracker:
+// CloseOutMarks is where a close-out says it is running, outside the tracker
+// (and so it writes no run state a batch's close of a story could lose to,
+// mw-5r3p30.1206):
 // a mark only this host reads, written by mw next and read straight by mw
 // status and the quiet alarm. The adapter is a file per story in this host's
 // state directory, and a mark whose process has gone is no mark.
