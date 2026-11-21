@@ -82,3 +82,39 @@ func TestEachBuildersClosingStepAsksForTheFoundNotFixedSection(t *testing.T) {
 		}
 	}
 }
+
+// The gate step does not say to hand back at the wait limit: mw check names the
+// step and says to close it as left to the close-out (mw-gq6.1557, mw-gq6.1563).
+func TestTheGateStepSaysWhatToDoOnTheWaitLimitLine(t *testing.T) {
+	for _, tc := range []struct{ file string }{
+		{"tdd-feature.formula.json"},
+		{"chore.formula.json"},
+	} {
+		raw, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var formula struct {
+			Steps []struct{ ID, Description string }
+		}
+		if err := json.Unmarshal(raw, &formula); err != nil {
+			t.Fatalf("%s: %v", tc.file, err)
+		}
+		found := false
+		for _, step := range formula.Steps {
+			if !strings.Contains(step.Description, "wait limit was reached") {
+				continue
+			}
+			found = true
+			if !strings.Contains(step.Description, "gate left to the close-out") {
+				t.Errorf("%s step %s: expected it to say to close the gate step as 'gate left to the close-out'", tc.file, step.ID)
+			}
+			if strings.Contains(step.Description, "Hand back only if a line says the wait limit") {
+				t.Errorf("%s step %s: expected it not to say to hand back at the wait limit", tc.file, step.ID)
+			}
+		}
+		if !found {
+			t.Errorf("%s: no step names the wait limit line", tc.file)
+		}
+	}
+}

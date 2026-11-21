@@ -1045,3 +1045,16 @@ func TestBootPromptOpensTheMemoryWithTheFactsAboutTheStorysFiles(t *testing.T) {
 		t.Errorf("expected today's boot for a story with no files, got:\n%s", without)
 	}
 }
+
+// The wait limit of mw check is not a hand-back (mw-gq6.1557): the kickoff prompt
+// says what the line asks for, so a Builder that reads the line finds the same
+// words in its boot (mw-gq6.1563).
+func TestKickoffPromptSaysWhatToDoOnTheWaitLimitLine(t *testing.T) {
+	prompt := application.KickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/vault", nil)
+
+	for _, want := range []string{"wait limit was reached", "gate left to the close-out", "mw next runs the gate"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the kickoff prompt to hold %q, got %q", want, prompt)
+		}
+	}
+}
