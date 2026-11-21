@@ -421,7 +421,7 @@ func newSeatBootCmd() *cobra.Command {
 			"by need with `mw seat read <seat> <topic>`. It is one tool call in place of a run of reads, and\n" +
 			"nothing the manifest does not name is read.\n\n" +
 			"A [[boot]] entry is one of `file` (a path from the vault's root, or from a rig's with `rig`),\n" +
-			"`newest` (a directory of the vault: its newest .md by name, a seat's handoffs) or `command` (a shell\n" +
+			"`newest` (a directory of the vault: its newest .md by name in natural order, a seat's handoffs) or `command` (a shell\n" +
 			"line run in the vault, what it prints being the part), with `section` (one heading of the file, by\n" +
 			"text or slug) and `cap` (bytes; 0 none; default the manifest's own `cap`, else " + strconv.Itoa(application.DefaultBootCap) + "). A path\n" +
 			"may hold {host} and {seat}. A [[topic]] entry names a file (and maybe a rig) whose headings are\n" +

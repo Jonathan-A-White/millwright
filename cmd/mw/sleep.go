@@ -223,7 +223,7 @@ func ideaEvidence(ctx context.Context, vaultDir string, gateway *beads.Gateway) 
 	var texts []application.NeedsYouText
 	handoffs := filepath.Join(vaultDir, "seats", "mayor", "handoffs")
 	if names, err := os.ReadDir(handoffs); err == nil {
-		sort.Slice(names, func(a, b int) bool { return names[a].Name() < names[b].Name() })
+		sort.Slice(names, func(a, b int) bool { return application.NaturalLess(names[a].Name(), names[b].Name()) })
 		if len(names) > sleepHandoffs {
 			names = names[len(names)-sleepHandoffs:]
 		}
