@@ -32,6 +32,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newImageCmd())
 	root.AddCommand(newGoogleCmd())
 	root.AddCommand(newGdriveCmd())
+	root.AddCommand(newYnabCmd())
+	root.AddCommand(newBudgetCmd())
 	root.AddCommand(newBrowserCmd())
 	root.AddCommand(newGmailCmd())
 	root.AddCommand(newGrillCmd())

@@ -53,6 +53,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [Linking his Google account (mw google)](#linking-his-google-account-mw-google)
   - [Finding a number in his contacts (mw contacts find)](#finding-a-number-in-his-contacts-mw-contacts-find)
   - [Reading and writing his Drive and Sheets (mw gdrive)](#reading-and-writing-his-drive-and-sheets-mw-gdrive)
+  - [His YNAB targets from his Budget sheet (mw ynab, mw budget sync)](#his-ynab-targets-from-his-budget-sheet-mw-ynab-mw-budget-sync)
   - [Reading his Gmail (mw gmail)](#reading-his-gmail-mw-gmail)
 - [A browser he signs into himself (mw browser)](#a-browser-he-signs-into-himself-mw-browser)
 - [Cloud boxes made by demand](#cloud-boxes-made-by-demand)
@@ -2604,6 +2605,29 @@ granted.
 No token or secret is printed or logged. The tests are
 `infrastructure/gdrive/gdrive_test.go`, `cmd/mw/gdrive_test.go` and
 `features/gdrive_selftest.feature`.
+
+### His YNAB targets from his Budget sheet (mw ynab, mw budget sync)
+
+    mw secrets put ynab_token < token.txt       # once: his YNAB personal access token
+    mw ynab accounts                            # id, name, type, balance, closed
+    mw ynab categories                          # id, group, name, target, balance
+    mw ynab transactions --since 2026-11-01     # date, amount, payee, category, account, memo
+    mw budget sync --dry-run                    # say each old -> new target, write nothing
+    mw budget sync                              # set the targets that differ, print each change
+
+The Budget sheet is the one source of his monthly amounts; YNAB's category
+targets follow it by a command, never by hand. `mw budget sync` reads the
+sheet's `Item` and `Total Per Month` columns through the `mw gdrive` sign-in
+(no second Google client) and, for each YNAB category of the same name (case
+and spaces ignored), sets its goal target in milliunits, only where it differs;
+a second run prints `nothing to change`. A row whose Total is blank, `#REF!` or
+not an amount is skipped and named, never written as 0. It also lists sheet
+items with no YNAB category and YNAB categories with a target but no sheet row,
+and changes neither. The budget is `--budget`, else `ynab_budget_id` in
+`~/.config/mw/config.toml` (or `$MW_YNAB_BUDGET_ID`), else his Simplified
+Budget; the sheet is `budget_sheet_id` and its tab `budget_sheet_tab` (or
+`$MW_BUDGET_SHEET_ID`, `$MW_BUDGET_SHEET_TAB`; `--sheet-id`, `--tab`). The
+token is read from `mw secrets` and is never printed or logged.
 
 ### Reading his Gmail (mw gmail)
 
