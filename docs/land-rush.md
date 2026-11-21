@@ -18,6 +18,7 @@ instead of a fresh Builder session each.
 - [Where a story waits](#where-a-story-waits)
 - [The batch](#the-batch)
   - [Rigs land side by side](#rigs-land-side-by-side)
+  - [After a batch is held red](#after-a-batch-is-held-red)
 - [The fixer](#the-fixer)
 - [Records](#records)
 - [The stop rule](#the-stop-rule)
