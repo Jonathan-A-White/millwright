@@ -63,6 +63,9 @@ func newPathSetCmd() *cobra.Command {
 			"An acceptance criterion that says it is the landing check 'from his use' or 'not the Builder's' gets a WARN on\n" +
 			"stderr: a Builder is held to every line of the acceptance and cannot run it; put it on a VERIFY AFTER\n" +
 			"LANDING line of the description (mw-gq6.1567). Nothing is refused.\n\n" +
+			"An acceptance criterion that names mw budget, the age key, gdrive or YNAB, on a story whose host is not a home\n" +
+			"host (laptop or desktop), gets a WARN on stderr, as mw release prints it: those secrets live on a home host alone,\n" +
+			"so pin the story there (mw-gq6.1578). Nothing is refused.\n\n" +
 			"After the write, a story that mw dispatch would pass over is named, before it is un-held: no files key on a\n" +
 			"rig whose file says files_expected = true, a bug with no Sweep: line, a Tester story with no Landed story:\n" +
 			"line. A warning only; nothing is refused for it.\n\n" +

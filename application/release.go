@@ -80,6 +80,7 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 	// A warning only: the stories are released all the same.
 	warnNoFilesKey(ctx, r.Out, r.Rules, epic.Stories...)
 	warnWrongRig(r.Out, r.Rigs, r.RigFiles, epic.Stories...)
+	warnHomeSecret(r.Out, epic.Stories...)
 
 	held := found.held()
 	iced := found.iced()
@@ -150,6 +151,7 @@ func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
 	// A warning only: the story is released all the same.
 	warnNoFilesKey(ctx, r.Out, r.Rules, detail)
 	warnWrongRig(r.Out, r.Rigs, r.RigFiles, detail)
+	warnHomeSecret(r.Out, detail)
 	if err := r.checkWordHolds(ctx, []heldRef{{ID: id, Parent: detail.EpicID}}); err != nil {
 		return found, err
 	}
