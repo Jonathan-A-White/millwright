@@ -80,10 +80,28 @@ func (c standInConn) QueryContext(_ context.Context, query string, _ []driver.Na
 		return nil, errors.New("server went away")
 	}
 	q := strings.ToLower(query)
-	if c.s.empty.Load() && (strings.Contains(q, "from issues") || strings.Contains(q, "from dependencies")) {
+	byID := strings.Contains(q, "where i.id in ('") || strings.Contains(q, "close_reason from issues i where i.id in")
+	if c.s.empty.Load() && !byID && (strings.Contains(q, "from issues") || strings.Contains(q, "from dependencies")) {
 		return &standInRows{cols: standInColumns(q)}, nil
 	}
 	switch {
+	case strings.Contains(q, "from issues i") && strings.Contains(q, "leases") && strings.Contains(q, "where i.id in ('"):
+		// A read of beads by id (bd show): the story sessions' stories, three of
+		// them, one closed and two open; an id the vault has no record of is
+		// not answered.
+		rows := [][]driver.Value{}
+		for _, row := range [][]driver.Value{
+			{"mw-t.1", "Done", "", "", "closed", "task", nil, nil, "2026-10-01 10:00:00", nil, "2026-10-02 10:00:00", "2026-10-02 10:00:00", int64(2), `{}`, nil, int64(0)},
+			{"mw-t.2", "Going", "", "", "open", "task", nil, nil, "2026-10-01 10:05:00", nil, "2026-10-01 10:05:00", nil, int64(2), `{}`, nil, int64(0)},
+			{"mw-t.3", "Waiting", "", "", "open", "task", nil, nil, "2026-10-01 10:06:00", nil, "2026-10-01 10:06:00", nil, int64(2), `{}`, nil, int64(0)},
+		} {
+			if strings.Contains(q, "'"+row[0].(string)+"'") {
+				rows = append(rows, row)
+			}
+		}
+		return &standInRows{cols: standInColumns(q), rows: rows}, nil
+	case strings.Contains(q, "close_reason from issues i where i.id in"):
+		return &standInRows{cols: []string{"id", "close_reason"}, rows: [][]driver.Value{{"mw-t.1", "landed abc"}}}, nil
 	case (strings.Contains(q, "from issues i") || strings.Contains(q, "live join issues i on i.id = live.id")) && strings.Contains(q, "leases"):
 		return &standInRows{cols: []string{"id", "title", "description", "acceptance_criteria", "status", "issue_type", "assignee",
 			"estimated_minutes", "created_at", "started_at", "updated_at", "closed_at", "priority", "metadata", "lease_expires_at", "comment_count"},

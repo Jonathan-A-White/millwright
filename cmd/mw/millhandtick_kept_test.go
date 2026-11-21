@@ -50,6 +50,44 @@ func TestTheMillhandTickStartsNoBd(t *testing.T) {
 	}
 }
 
+// The sweep of the tick reads the story of each story session on the host with
+// one ShowBeads, and that started a bd show per tick whenever a session ran,
+// not served over the kept connection (mw-gq6.1545). It is read over the kept
+// connection by id; the idle session of the closed story is closed all the
+// same, and the sessions of the open ones are left.
+func TestTheMillhandTickReadsSessionStoriesOverTheKeptConnection(t *testing.T) {
+	aTmuxOfItsOwn(t)
+	privateTmux(t, "scratch")
+	for _, name := range []string{"mw-t_1", "mw-t_2", "mw-t_3"} {
+		// The default server of this test's own TMUX_TMPDIR: where the sweep looks.
+		if out, err := exec.Command("tmux", "new-session", "-d", "-s", name, "sh").CombinedOutput(); err != nil {
+			t.Fatalf("starting the session %s: %v: %s", name, err, out)
+		}
+	}
+	t.Cleanup(func() { _ = exec.Command("tmux", "kill-server").Run() })
+	asked := aQuietBd(t)
+	server := aServerToReach(t)
+	server.empty.Store(true)
+
+	out, err := millhandCmd(t, "tick")
+	if err != nil {
+		t.Fatalf("expected the tick to complete, got %q, %v\n%s", out, err, readAsked(t, asked))
+	}
+	if got := strings.TrimSpace(readAsked(t, asked)); got != "" {
+		t.Errorf("expected no bd started by a tick over three story sessions, got %d:\n%s", len(strings.Split(got, "\n")), got)
+	}
+	if got := server.queries("where i.id in ('"); got == 0 {
+		t.Errorf("expected the stories of the sessions to be read by id over the kept connection, the server was asked no such query; the tick said:\n%s", out)
+	}
+	live, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		t.Fatalf("listing the sessions: %v", err)
+	}
+	if got := strings.Fields(string(live)); strings.Join(got, " ") != "mw-t_2 mw-t_3" {
+		t.Errorf("expected the idle session of the closed story to be closed and the others left, got %v", got)
+	}
+}
+
 // With no server to reach the tick reads by bd as it did, and completes.
 func TestTheMillhandTickReadsByBdWhenThereIsNoServerToReach(t *testing.T) {
 	aTmuxOfItsOwn(t)

@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -619,7 +620,8 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 // story's Defaults are its parent's, with no second look). A bead bd says it
 // has no record of is left out: asked about alone, bd refuses it; asked
 // about among others, the rest are read one at a time so that one unknown id
-// does not hide the beads that are there.
+// does not hide the beads that are there. A Gateway with a kept connection reads
+// them by id over it (keptshow.go) and asks bd only for what it did not find.
 func (g *Gateway) ShowBeads(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -627,6 +629,43 @@ func (g *Gateway) ShowBeads(ctx context.Context, ids []string) ([]application.St
 	if details, ok := g.showBeadsInRun(ctx, ids); ok {
 		return details, nil
 	}
+	details, ok := g.showOverConnection(ctx, ids)
+	if !ok {
+		return g.showByBd(ctx, ids)
+	}
+	// A bead the vault's issues do not hold may be one bd shows from elsewhere (a
+	// wisp), so what the connection did not find is asked of bd, and only that.
+	read := make(map[string]application.StoryDetail, len(details))
+	for _, detail := range details {
+		read[detail.Story.ID] = detail
+	}
+	var missing []string
+	for _, id := range ids {
+		if _, there := read[id]; !there && !slices.Contains(missing, id) {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return details, nil
+	}
+	elsewhere, err := g.showByBd(ctx, missing)
+	if err != nil {
+		return nil, err
+	}
+	for _, detail := range elsewhere {
+		read[detail.Story.ID] = detail
+	}
+	out := make([]application.StoryDetail, 0, len(ids))
+	for _, id := range ids {
+		if detail, there := read[id]; there {
+			out = append(out, detail)
+		}
+	}
+	return out, nil
+}
+
+// showByBd is ShowBeads asked of bd show.
+func (g *Gateway) showByBd(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
 	found, err := g.showMany(ctx, ids)
 	if err != nil {
 		if !beadMissing(err) {
@@ -637,7 +676,7 @@ func (g *Gateway) ShowBeads(ctx context.Context, ids []string) ([]application.St
 		}
 		var each []application.StoryDetail
 		for _, id := range ids {
-			one, err := g.ShowBeads(ctx, []string{id})
+			one, err := g.showByBd(ctx, []string{id})
 			if err != nil {
 				return nil, err
 			}
