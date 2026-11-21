@@ -267,3 +267,103 @@ func TestPathSetReleasesAModelStoryAtSeventyPercentWhenTheLineIs85(t *testing.T)
 		t.Errorf("expected the model story not held at 70%% with the line at 85, got:\n%s", out.String())
 	}
 }
+
+// heldLineOf sets the path of mw-gq6.2 with --after on a releasing rig that has
+// had comment written on it and says what mw path set printed.
+func heldLineOf(t *testing.T, labels []string, comment string) string {
+	t.Helper()
+	tracker, rules := aReleasingRig(t)
+	if len(labels) > 0 {
+		if err := tracker.SetLabels("mw-gq6.2", labels...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if comment != "" {
+		if err := tracker.CommentOnStory(context.Background(), "mw-gq6.2", comment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Out: &out, After: []string{"mw-gq6.3"}}).
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	return heldOf(out.String())
+}
+
+// heldOf is the held: line among what mw path set printed.
+func heldOf(printed string) string {
+	for _, line := range strings.Split(printed, "\n") {
+		if strings.HasPrefix(line, "held: ") {
+			return line
+		}
+	}
+	return ""
+}
+
+// mw-gq6.1552: a held: line names the way out, so nobody reaches for a raw bd
+// update to release the story.
+func TestPathSetHeldLineForAMayorsHoldNamesMwRelease(t *testing.T) {
+	printed := heldLineOf(t, nil, "HELD: waits for the new schema")
+	if !strings.HasPrefix(printed, "held: mw-gq6.2: it has a HELD: comment: HELD: waits for the new schema") ||
+		!strings.HasSuffix(printed, "release it with: mw release mw-gq6.2") {
+		t.Errorf("expected the held: line to end with the way out, got:\n%s", printed)
+	}
+	if strings.Contains(printed, "--over-hold") {
+		t.Errorf("a Mayor's hold needs no --over-hold, got:\n%s", printed)
+	}
+}
+
+func TestPathSetHeldLineForTheGovernorsWordNamesOverHold(t *testing.T) {
+	printed := heldLineOf(t, nil, "HELD: waits for the Governor's word on the colour")
+	if !strings.HasPrefix(printed, "held: mw-gq6.2: it is held on the Governor's word") ||
+		!strings.HasSuffix(printed, `release it with: mw release mw-gq6.2 --over-hold "<why>"`) {
+		t.Errorf("expected the held: line to end with the --over-hold way out, got:\n%s", printed)
+	}
+}
+
+func TestPathSetHeldLineForALabelNamesTheWayOut(t *testing.T) {
+	for label, want := range map[string]string{
+		application.LabelIcebox: "thaw it with: mw thaw mw-gq6.2",
+		application.LabelHitl:   "release it with: mw release mw-gq6.2",
+	} {
+		printed := heldLineOf(t, []string{label}, "")
+		if !strings.HasPrefix(printed, "held: mw-gq6.2: it has the label "+label) || !strings.HasSuffix(printed, want) {
+			t.Errorf("label %s: expected the held: line to end %q, got:\n%s", label, want, printed)
+		}
+	}
+}
+
+func TestPathSetHoldLineNamesMwRelease(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	var out strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Out: &out, After: []string{"mw-gq6.3"}, Hold: "waits for the demo"}).
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	if got := heldOf(out.String()); got != "held: mw-gq6.2: waits for the demo; release it with: mw release mw-gq6.2" {
+		t.Errorf("expected the --hold line to name the way out, got:\n%s", got)
+	}
+}
+
+func TestPathSetHeldLineForABugWithNoSweepNamesTheWayOut(t *testing.T) {
+	tracker, rules := aReleasingRig(t)
+	if err := tracker.SetType("mw-gq6.2", "bug"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetAcceptance("mw-gq6.2", "1. it works"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetCreated("mw-gq6.2", domain.SweepRuleFrom.Add(24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Out: &out, After: []string{"mw-gq6.3"}}).
+		Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	got := heldOf(out.String())
+	if !strings.HasPrefix(got, "held: mw-gq6.2: no sweep: mw-gq6.2") || !strings.HasSuffix(got, "then run mw path set mw-gq6.2 again") {
+		t.Errorf("expected the no-sweep held: line to name the way out, got %q", got)
+	}
+}
