@@ -390,8 +390,8 @@ func TestWSLFlagWatchScriptMatchesTheCommand(t *testing.T) {
 // (mw-2891blf.28).
 func TestWSLFlagWayBackChecksElevationBeforeRemovingAnything(t *testing.T) {
 	assertElevationFirst(t, "wsl-flag way back", WSLFlagWayBack())
-	if !strings.Contains(WSLFlagWayBack(), windowsElevationCheck) {
-		t.Errorf("the wsl-flag way back must use windowsElevationCheck")
+	if !strings.Contains(WSLFlagWayBack(), windowsElevationCheckRemoval) {
+		t.Errorf("the wsl-flag way back must use windowsElevationCheckRemoval")
 	}
 	if strings.Contains(WSLFlagWayBack(), "\n") {
 		t.Errorf("the wsl-flag way back is one line")

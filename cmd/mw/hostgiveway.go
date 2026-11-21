@@ -64,7 +64,17 @@ const giveWayLogoffQuery = `<QueryList><Query Id="0" Path="Microsoft-Windows-Use
 // at RunLevel Highest, are refused 'Access is denied' in a PowerShell that is
 // not elevated, which leaves a half-installed set): it throws before anything is
 // written.
-const windowsElevationCheck = `if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'this PowerShell is not elevated: run as administrator: nothing installed' }`
+const windowsElevationCheck = windowsElevationCheckHead + `nothing installed` + windowsElevationCheckTail
+
+// windowsElevationCheckRemoval is the same check for a way-back paste, whose throw
+// says 'nothing removed' where 'nothing installed' would read wrong (mw-2891blf.30).
+const windowsElevationCheckRemoval = windowsElevationCheckHead + `nothing removed` + windowsElevationCheckTail
+
+// The check's text up to what the paste would not have done, and after it.
+const (
+	windowsElevationCheckHead = `if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'this PowerShell is not elevated: run as administrator: `
+	windowsElevationCheckTail = `' }`
+)
 
 var giveWayAccountRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
@@ -114,10 +124,11 @@ func giveWayRegisterAll() []string {
 // windowsPasteOneLine joins a paste's statements into the one physical line it is
 // printed as. A paste of many lines typed into a console came out garbled and
 // left earlier lines' variables in use (mw-gq6.1437). The what-and-way-back
-// note is a block comment at the head, so the elevation check is the first
-// statement.
+// note is a block comment at the head, and everything after it is one `& { ... }`
+// whose first statement is the elevation check: a throw there stops the whole
+// paste, also in a console that takes it line by line (mw-2891blf.30).
 func windowsPasteOneLine(note string, statements ...string) string {
-	return "<# " + note + " #> " + strings.Join(statements, "; ") + "\n"
+	return "<# " + note + " #> & { " + strings.Join(statements, "; ") + " }\n"
 }
 
 // GiveWayInstallLine is the paste, for a NEW admin Windows PowerShell of the
@@ -171,7 +182,7 @@ func GiveWayUninstallLine() string {
 	}
 	return windowsPasteOneLine("millwright give way, taken away (mw host giveway --uninstall-line): removes the four tasks and the folder "+giveWayDir+
 		", then tells the host to go on (mw giveway off). Way back: mw host giveway --install-line.",
-		windowsElevationCheck,
+		windowsElevationCheckRemoval,
 		strings.Join(names, ",")+" | ForEach-Object { Unregister-ScheduledTask -TaskName $_ -Confirm:$false -ErrorAction SilentlyContinue }",
 		`Remove-Item -Recurse -Force "`+giveWayDir+`" -ErrorAction SilentlyContinue`,
 		"$env:WSL_UTF8='1'",
