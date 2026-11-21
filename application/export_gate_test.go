@@ -94,3 +94,9 @@ func (b BatchLand) HoldQueue(ctx context.Context, queue []BatchStory) func() {
 	unhold := b.holdQueue(ctx, queue)
 	return func() { unhold() }
 }
+
+// FixerReads lets the tests of package application_test read what a held batch's
+// outcome.txt and Held mail say of its fixer.
+func (b BatchLand) FixerReads(report *BatchReport) (outcome, mail string) {
+	return report.fixerBundleLines(), report.fixerMail()
+}
