@@ -684,3 +684,59 @@ func (g *aGateLockOnce) Take(ctx context.Context, holder string, held func(strin
 	g.took = true
 	return g.aGateLock.Take(ctx, holder, held)
 }
+
+// aSuiteBugAt is a suite bug whose description names the main sha it failed at,
+// as mw suite --file writes it.
+func aSuiteBugAt(t *testing.T, tracker *apptest.FakeTracker, id, sha string) {
+	t.Helper()
+	aSuiteBug(t, tracker, id, application.LabelBug, application.LabelSuite)
+	description := greekSpec + " on lampas main at " + sha + ": failed twice (in the whole run and again alone).\n\nMain's sha: " + sha + "\n"
+	if err := tracker.SetDescription(id, description); err != nil {
+		t.Fatalf("describing %s: %v", id, err)
+	}
+}
+
+func TestADispatchDoesNotCallASuiteBugFixedByAStoryWhenMainHasNotMovedFromTheShaItNames(t *testing.T) {
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	const sha = "bf12d63a1c0e9d47b2a5f6083c1d9e7a4b5c6d70"
+	aSuiteBugAt(t, tracker, "mw-gq6.1", sha)
+	dispatch.Rechecks = &stubRechecks{answer: application.SpecRecheck{Spec: greekSpec, Sha: sha, Passed: true, Tests: 9, Tail: "  9 passed\n"}}
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got := tracker.CloseReason("mw-gq6.1"); got != "" {
+		t.Errorf("the bug was closed as %q: a pass at the sha it failed at is a flake, not a fix", got)
+	}
+	if d, _ := tracker.ShowStory(context.Background(), "mw-gq6.1"); d.Status != apptest.StatusDeferred {
+		t.Errorf("the bug's status is %q, want it held (%q)", d.Status, apptest.StatusDeferred)
+	}
+	said := strings.Join(tracker.Comments("mw-gq6.1"), "\n")
+	if !strings.HasPrefix(said, application.HeldCommentPrefix) || !strings.Contains(said, "flaky") || !strings.Contains(said, "bf12d63a1") {
+		t.Errorf("the comment should open HELD:, say flaky and name the sha, got %q", said)
+	}
+	if strings.Contains(said, "landed after the bug was filed") || strings.Contains(report.String(), "already fixed") {
+		t.Errorf("no story fixed it, yet: comment %q, report %q", said, report.String())
+	}
+	if len(report.FixedOnMain) != 0 || len(report.Started) != 0 || len(worktrees.added) != 0 || len(runner.Started()) != 0 {
+		t.Errorf("nothing should be closed or started: %+v", report)
+	}
+}
+
+func TestADispatchStillClosesASuiteBugWhenMainHasMovedFromTheShaItNames(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aSuiteBugAt(t, tracker, "mw-gq6.1", "bf12d63a1c0e9d47b2a5f6083c1d9e7a4b5c6d70")
+	dispatch.Rechecks = &stubRechecks{answer: application.SpecRecheck{Spec: greekSpec, Sha: "9f3c2ab41d0e", Passed: true, Tests: 3, Tail: "  3 passed\n"}}
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got := tracker.CloseReason("mw-gq6.1"); !strings.HasPrefix(got, "already fixed on main at 9f3c2ab41") {
+		t.Errorf("close reason %q, want already fixed on main", got)
+	}
+	if len(report.FixedOnMain) != 1 {
+		t.Errorf("the report should name the story closed, got %+v", report.FixedOnMain)
+	}
+}

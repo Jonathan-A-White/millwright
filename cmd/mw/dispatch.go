@@ -342,7 +342,9 @@ func newDispatchCmd() *cobra.Command {
 			"runs a file alone with; an eval line sends those examples through the backend as the test key against\n" +
 			"the app's main, from a host that holds the grist test key. If the check passes, a story that landed\n" +
 			"since the bug was filed has fixed it: the bug is closed (\"already fixed on main at <sha>: <check>\n" +
-			"passes\") with the end of the run in a comment, and no session is started. If it fails, or cannot be\n" +
+			"passes\") with the end of the run in a comment, and no session is started, unless the main it passes\n" +
+			"at is the very sha the bug says it failed at (mw-gq6.993): no story has landed, so it is flaky, not\n" +
+			"fixed, and the bug is held with a HELD: comment saying so. If it fails, or cannot be\n" +
 			"run, the story is dispatched as ever and its line says so; a bug that names no check is dispatched\n" +
 			"and its line says \"no check named\", and one that names an example on a host without the key says\n" +
 			"\"no key on this host\". A story that is not a bug, a flaky file's bug and a dry run are never re-run.\n\n" +
