@@ -120,3 +120,29 @@ func insideDataPaths(paths []string, file string) bool {
 	}
 	return false
 }
+
+// dataState is what a close-out knows of the story's data scope: the gate it read
+// (nil is an answer once read says so), and whether the check mw next trusts is of
+// the data scope, not of the rig's whole gate.
+type dataState struct {
+	data        *dataGate
+	dataRead    bool
+	trustedData bool
+}
+
+// landedOutcome is the outcome of a story that landed by itself: that mw next
+// re-ran the rig's tests, or, when the data's own check passed at the tip and was
+// trusted in place of the rig's gate in the worktree, that. A merge that was no
+// fast-forward was tested whole all the same, and the line says so.
+func (c *closeOut) landedOutcome(landed Landed, report *NextReport) string {
+	outcome := fmt.Sprintf("%s, %d commits, mw next re-ran the rig's tests: pass", landed.LandedAs(c.target), report.Commits)
+	said := c.parts.tested()
+	if said == "" || c.parts.data == nil {
+		return outcome
+	}
+	if !landed.FastForward {
+		said += "; the merged result was tested by mw next"
+	}
+	report.TestedParts = said
+	return fmt.Sprintf("%s, %d commits, %s", landed.LandedAs(c.target), report.Commits, said)
+}

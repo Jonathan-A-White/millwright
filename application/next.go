@@ -871,10 +871,7 @@ type closeOut struct {
 	// Checked when none did.
 	mergedFailed Checked
 
-	// data is the story's gate when every file it changes is inside its rig's data
-	// paths (datascope.go); dataRead says it was read, so that nil is an answer.
-	data     *dataGate
-	dataRead bool
+	dataState // what the close-out knows of the story's data scope (datascope.go)
 
 	// worktreeFailed says the rig's tests failed in the worktree and the
 	// close-out went on to the merged result (mw-gq6.552): a merge that is a
@@ -960,9 +957,6 @@ type closeOut struct {
 	batch   bool
 	tip     string
 	trusted string
-	// trustedData says what trusted is of a check in the data scope (datascope.go),
-	// not of the rig's whole gate.
-	trustedData bool
 	// parts is what the part records said of tip when no whole check passed
 	// there; nil when they said nothing (nextparts.go).
 	parts *partsAtTip
@@ -1585,16 +1579,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// tells a later run that this story is landed — the close did fail, on the
 	// run it was written for — and a run that cannot tell a landed story from
 	// an unlanded one would merge it all over again.
-	s.outcome = fmt.Sprintf("%s, %d commits, mw next re-ran the rig's tests: pass", landed.LandedAs(c.target), report.Commits)
-	if said := c.parts.tested(); said != "" && c.parts.data != nil {
-		// The data's own check passed at the tip and was trusted in place of the
-		// rig's gate in the worktree; a merge that was no fast-forward was tested whole.
-		if !landed.FastForward {
-			said += "; the merged result was tested by mw next"
-		}
-		s.outcome = fmt.Sprintf("%s, %d commits, %s", landed.LandedAs(c.target), report.Commits, said)
-		report.TestedParts = said
-	}
+	s.outcome = c.landedOutcome(landed, report)
 	if c.cappedAfterClosing {
 		s.outcome += "; " + LandedAfterTurnCap
 	}
