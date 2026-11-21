@@ -532,3 +532,76 @@ func TestAStrayClosingBacktickMakesAMemoryLineMalformed(t *testing.T) {
 		t.Errorf("common errors: want one malformed line, got %+v", errs.Lines)
 	}
 }
+
+// theLandedMailOfAStoryWithComments lands a story whose closing comments are
+// comments, oldest first, and returns the Landed mail's body (mw-gq6.1258).
+func theLandedMailOfAStoryWithComments(t *testing.T, comments ...string) string {
+	t.Helper()
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	for _, comment := range comments {
+		if err := tracker.CommentOnStory(ctx, "mw-x.1", comment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
+	mailbox := apptest.NewFakeMailbox()
+	report, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: &scriptedChecks{passes: []bool{true}}, Slot: aSlot{}, Mailbox: mailbox,
+		RetryWait: func(context.Context, time.Duration) error { return nil },
+		Seat:      "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	if err != nil || !report.Landed {
+		t.Fatalf("expected a landing, got err %v and %+v", err, report)
+	}
+	mail, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+	for _, m := range mail {
+		if strings.HasPrefix(m.Subject, application.MailLanded) {
+			return m.Body
+		}
+	}
+	t.Fatalf("no Landed mail in %+v", mail)
+	return ""
+}
+
+const firstAttemptMemory = "Done.\n\nFor the rig memory:\nmw memory add millwright --kind gotcha --subject nextmail --source mw-x.1 \"The first attempt fact.\"\n"
+
+func TestASentBackAttemptsNothingDoesNotHideTheFirstAttemptsMemoryLine(t *testing.T) {
+	body := theLandedMailOfAStoryWithComments(t, firstAttemptMemory, "Changed no code.\n\nFor the rig memory: nothing\n")
+	if !strings.Contains(body, "The first attempt fact.") {
+		t.Errorf("the Landed mail lost the first attempt's memory line:\n%s", body)
+	}
+}
+
+func TestASentBackAttemptsOwnMemoryLineStillWins(t *testing.T) {
+	body := theLandedMailOfAStoryWithComments(t, firstAttemptMemory,
+		"Again.\n\nFor the rig memory:\nmw memory add millwright --kind gotcha --subject nextmail --source mw-x.1 \"The second attempt fact.\"\n")
+	if !strings.Contains(body, "The second attempt fact.") || strings.Contains(body, "The first attempt fact.") {
+		t.Errorf("the newest comment's memory line does not win:\n%s", body)
+	}
+}
+
+func TestASentBackAttemptsNothingDoesNotHideTheFirstAttemptsCommonErrorsLine(t *testing.T) {
+	body := theLandedMailOfAStoryWithComments(t,
+		"Done.\n\nFor common errors:\nthe-first-class: the first attempt's symptom\n\nFor the rig memory: nothing\n",
+		"Changed no code.\n\nFor common errors:\nnothing\n\nFor the rig memory: nothing\n")
+	if !strings.Contains(body, "the-first-class") {
+		t.Errorf("the Landed mail lost the first attempt's common-errors line:\n%s", body)
+	}
+}
+
+func TestASentBackAttemptsOwnCommonErrorsLineStillWins(t *testing.T) {
+	body := theLandedMailOfAStoryWithComments(t,
+		"Done.\n\nFor common errors:\nthe-first-class: the first symptom\n\nFor the rig memory: nothing\n",
+		"Again.\n\nFor common errors:\nthe-second-class: the second symptom\n\nFor the rig memory: nothing\n")
+	if !strings.Contains(body, "the-second-class") || strings.Contains(body, "the-first-class") {
+		t.Errorf("the newest comment's common-errors line does not win:\n%s", body)
+	}
+}

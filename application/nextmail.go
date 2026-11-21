@@ -40,17 +40,42 @@ func (n Next) closingMail(ctx context.Context, c *closeOut, report *NextReport, 
 	return verdict, joinBlocks(unmet, found, n.commonErrors(ctx, c, comments), n.rigMemoryProposals(ctx, c, comments), closingDocs(comments).MailLine())
 }
 
-// rigMemoryProposals is the block from the story's newest closing comment that
-// has a 'For the rig memory:' section: the proposals as mw memory lines to
-// paste, or for a flat-file rig the lines to place by hand. It is empty when no
+// rigMemoryProposals is the block from the story's newest closing comment whose
+// 'For the rig memory:' section holds a line: the proposals as mw memory lines
+// to paste, or for a flat-file rig the lines to place by hand. A newer comment
+// whose section says nothing, or holds no line (a sent-back attempt that changed
+// no code), does not hide an older comment's lines (mw-gq6.1258); when no
+// comment holds a line the newest section is the block. It is empty when no
 // comment has the section; a line that does not parse is flagged in the block.
 func (n Next) rigMemoryProposals(ctx context.Context, c *closeOut, comments []Comment) string {
+	var newest *FactProposals
 	for i := len(comments) - 1; i >= 0; i-- {
-		if proposals := ParseFactProposals(comments[i].Text); proposals.Found {
+		proposals := ParseFactProposals(comments[i].Text)
+		if !proposals.Found {
+			continue
+		}
+		if proposals.saysSomething() {
 			return proposals.RigMemoryBlock(c.path.Rig, c.id, n.flatRigFile(ctx, c.path.Rig))
 		}
+		if newest == nil {
+			newest = &proposals
+		}
 	}
-	return ""
+	if newest == nil {
+		return ""
+	}
+	return newest.RigMemoryBlock(c.path.Rig, c.id, n.flatRigFile(ctx, c.path.Rig))
+}
+
+// saysSomething is whether the section holds a line that is not 'nothing':
+// a proposal, or a line that does not parse (which is flagged, not dropped).
+func (p FactProposals) saysSomething() bool {
+	for _, line := range p.Lines {
+		if line.Malformed != "" || line.Proposal.Verb != ProposeNothing {
+			return true
+		}
+	}
+	return false
 }
 
 // flatRigFile is the rig's flat memory file when the seat keeps no facts folder
@@ -70,9 +95,21 @@ func (n Next) flatRigFile(ctx context.Context, rig string) string {
 // whose comments have none, the line that says so (mw-gq6.420). A register
 // that cannot be read reads every class as new.
 func (n Next) commonErrors(ctx context.Context, c *closeOut, comments []Comment) string {
+	// The newest section that names a class wins; a newer one that says nothing
+	// does not hide it (mw-gq6.1258), and stands only when no section names one.
 	var proposals CommonErrorProposals
-	for i := len(comments) - 1; i >= 0 && !proposals.Found; i-- {
-		proposals = ParseCommonErrors(comments[i].Text)
+	for i := len(comments) - 1; i >= 0; i-- {
+		got := ParseCommonErrors(comments[i].Text)
+		if !got.Found {
+			continue
+		}
+		if !proposals.Found {
+			proposals = got
+		}
+		if got.saysSomething() {
+			proposals = got
+			break
+		}
 	}
 	known, kinds := map[string]bool{}, RigKinds{}
 	if n.Errors != nil && proposals.Found {
@@ -84,6 +121,17 @@ func (n Next) commonErrors(ctx context.Context, c *closeOut, comments []Comment)
 		}
 	}
 	return proposals.Block(c.path.Rig, c.id, isBugStory(c.detail), known, kinds[c.path.Rig])
+}
+
+// saysSomething is whether the section holds a line that is not 'nothing': a
+// class, or a line that does not parse (which is flagged, not dropped).
+func (p CommonErrorProposals) saysSomething() bool {
+	for _, line := range p.Lines {
+		if !line.Nothing {
+			return true
+		}
+	}
+	return false
 }
 
 // joinBlocks is the blocks that say something, a blank line apart.
