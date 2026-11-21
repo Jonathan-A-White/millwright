@@ -37,6 +37,7 @@ type factoryServer struct {
 	edges    [][3]string
 	comments map[string][][3]string // bead -> author, text, created_at
 	notes    map[string]string
+	reasons  map[string]string // bead -> the reason it was closed for
 
 	mu      sync.Mutex
 	unknown []string
@@ -103,6 +104,22 @@ func (c factoryConn) QueryContext(_ context.Context, query string, _ []driver.Na
 			rows = append(rows, []driver.Value{b[0], b[1], b[4], b[5], b[12], b[8]})
 		}
 		return &keptRows{cols: []string{"id", "title", "status", "issue_type", "priority", "created_at"}, rows: rows}, nil
+	case strings.Contains(q, "i.close_reason from issues i where i.id in ("):
+		rows := [][]driver.Value{}
+		for _, id := range sortedKeys(s.reasons) {
+			if s.listed(q, id) {
+				rows = append(rows, []driver.Value{id, s.reasons[id]})
+			}
+		}
+		return &keptRows{cols: []string{"id", "close_reason"}, rows: rows}, nil
+	case strings.Contains(q, "i.metadata from issues i where i.id in ("):
+		rows := [][]driver.Value{}
+		for _, b := range s.beads {
+			if s.listed(q, b[0].(string)) {
+				rows = append(rows, []driver.Value{b[0], b[13]})
+			}
+		}
+		return &keptRows{cols: []string{"id", "metadata"}, rows: rows}, nil
 	case strings.Contains(q, "from labels where issue_id = '"):
 		// One bead's labels under a dimension, as a story state asks.
 		asked := regexp.MustCompile(`issue_id = '([^']*)' and label like '([^']*)%'`).FindStringSubmatch(q)
@@ -197,7 +214,7 @@ func (s *factoryServer) listed(q, id string) bool {
 		}
 		return false
 	}
-	if strings.Contains(q, "d.issue_id in (") {
+	if strings.Contains(q, "i.id in ('") || strings.Contains(q, "l.issue_id in ('") || strings.Contains(q, "d.issue_id in (") {
 		return strings.Contains(q, "'"+strings.ToLower(id)+"'")
 	}
 	if hangs := stepsAsked.FindStringSubmatch(q); hangs != nil {
