@@ -221,11 +221,7 @@ func (r TesterReport) since() time.Time {
 	case !r.Trial.Until.IsZero():
 		return r.Trial.Until.AddDate(0, 0, -TesterTrialDays)
 	}
-	//mw:realclock the default of the injected Now, used where none is set
-	now := time.Now()
-	if r.Now != nil {
-		now = r.Now()
-	}
+	now := r.now()
 	return now.AddDate(0, 0, -TesterTrialDays)
 }
 
@@ -294,4 +290,11 @@ func orNone(text string) string {
 		return "(none named)"
 	}
 	return text
+}
+
+func (x TesterReport) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

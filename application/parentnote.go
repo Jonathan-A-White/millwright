@@ -43,10 +43,7 @@ type ParentNoteSend struct {
 // Run posts the note when it is due, and reports the txid; empty when nothing
 // was posted.
 func (s ParentNoteSend) Run(ctx context.Context) (string, error) {
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if s.Now != nil {
-		now = s.Now()
-	}
+	now := s.now()
 	if s.Hour < 0 || s.Hour > 23 {
 		return "", fmt.Errorf("mw report send: the parent's note hour is %d: it must be 0 to 23", s.Hour)
 	}
@@ -100,4 +97,11 @@ func (s ParentNoteSend) printf(format string, args ...any) {
 	if s.Out != nil {
 		fmt.Fprintf(s.Out, format, args...)
 	}
+}
+
+func (x ParentNoteSend) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

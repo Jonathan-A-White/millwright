@@ -13,7 +13,9 @@ import (
 // nil.
 func TestTimeNowOnlyInANowDefault(t *testing.T) {
 	for _, file := range []string{"pauseusage.go", "pause.go", "followerstall.go", "queue.go",
-		"doctor.go", "factoryreport.go", "fuelkinds.go", "gristtalks.go", "gristtidy.go", "hands.go", "ice.go", "loop.go", "loopsitting.go", "mayorneeds.go"} {
+		"doctor.go", "factoryreport.go", "fuelkinds.go", "gristtalks.go", "gristtidy.go", "hands.go", "ice.go", "loop.go", "loopsitting.go", "mayorneeds.go",
+		"parentnote.go", "pathrelease.go", "peek.go", "release.go", "reportsend.go", "sleepgather.go", "sleepledger.go",
+		"sleepneedsyou.go", "stuck.go", "testerreport.go", "tododue.go", "triage.go", "usageread.go", "verifyconfirm.go", "verifynotmet.go"} {
 		fset := token.NewFileSet()
 		f, err := parser.ParseFile(fset, file, nil, 0)
 		if err != nil {

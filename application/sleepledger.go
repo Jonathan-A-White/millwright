@@ -306,10 +306,7 @@ func (o SleepOutcome) Run(ctx context.Context, date string) (SleepScore, error) 
 	if err != nil {
 		return score, fmt.Errorf("mw sleep outcome: %q is not a date: %w", date, err)
 	}
-	now := time.Now().UTC() //mw:realclock the default clock, taken before an injected Now replaces it
-	if o.Now != nil {
-		now = o.Now().UTC()
-	}
+	now := o.now().UTC()
 	dir := SleepPlansPrefix + date
 	text, err := o.Vault.ReadPlanFile(ctx, dir, "recommendations.json")
 	if err != nil {
@@ -466,4 +463,11 @@ func parseCallPriority(raw json.RawMessage) (int, error) {
 		return 0, fmt.Errorf("%s is not a priority from P0 to P4", string(raw))
 	}
 	return n, nil
+}
+
+func (x SleepOutcome) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

@@ -129,10 +129,7 @@ type SleepGather struct {
 
 // Gather implements SleepGatherer.
 func (g SleepGather) Gather(ctx context.Context, window SleepWindow) (SleepBundle, error) {
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if g.Now != nil {
-		now = g.Now()
-	}
+	now := g.now()
 	var dump bytes.Buffer
 	if err := g.Dump(ctx, &dump); err != nil {
 		return nil, fmt.Errorf("the triage dump: %w", err)
@@ -1015,4 +1012,11 @@ func renderQueue(r QueueReport, left string) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+func (x SleepGather) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

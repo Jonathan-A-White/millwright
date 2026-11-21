@@ -487,10 +487,7 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("releasing a list: the list has no story ids")
 	}
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if r.Now != nil {
-		now = r.Now()
-	}
+	now := r.now()
 	now = now.UTC()
 
 	details, err := r.Tracker.ShowBeads(ctx, ids)
@@ -684,4 +681,11 @@ func listIDs(ids []string) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+func (x ReleasePaced) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -219,10 +218,7 @@ func (s PathSet) whyOverThePace(ctx context.Context, id string, story StoryDetai
 			}
 		}
 	}
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if s.Now != nil {
-		now = s.Now()
-	}
+	now := s.now()
 	pace, err := checkPace(ctx, s.Readings, s.UsageLine, now.UTC(), active, "its epic's model stories")
 	if err != nil {
 		return "", err

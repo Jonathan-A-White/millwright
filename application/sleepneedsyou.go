@@ -514,10 +514,7 @@ type NeedsYouSurvey struct {
 // Read reads the facts. The queue itself must be read: its failure is the
 // error; the rest is said to be missing by what it leaves out.
 func (s NeedsYouSurvey) Read(ctx context.Context) (NeedsYouFacts, error) {
-	now := time.Now() //mw:realclock the default clock, taken before an injected Now replaces it
-	if s.Now != nil {
-		now = s.Now()
-	}
+	now := s.now()
 	facts := NeedsYouFacts{DamperFacts: DamperFacts{Now: now, Notes: map[string]string{}}, Limit: s.Limit}
 	var err error
 	if facts.Work, err = s.Tracker.WorkInHand(ctx); err != nil {
@@ -562,4 +559,11 @@ func (s NeedsYouSurvey) Read(ctx context.Context) (NeedsYouFacts, error) {
 		}
 	}
 	return facts, nil
+}
+
+func (x NeedsYouSurvey) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }

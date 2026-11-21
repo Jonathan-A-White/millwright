@@ -124,11 +124,7 @@ func (d TriageDump) Run(ctx context.Context, w io.Writer) ([]TriageLine, error) 
 	if err != nil {
 		return nil, fmt.Errorf("triage dump: %w", err)
 	}
-	//mw:realclock the default of the injected Now, used where none is set
-	now := time.Now()
-	if d.Now != nil {
-		now = d.Now()
-	}
+	now := d.now()
 	lines := triageLines(beads, now)
 	if w != nil {
 		enc := json.NewEncoder(w)
@@ -483,4 +479,11 @@ func (o TriageOrphans) Run(ctx context.Context) ([]string, error) {
 		}
 	}
 	return found, nil
+}
+
+func (x TriageDump) now() time.Time {
+	if x.Now != nil {
+		return x.Now()
+	}
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
