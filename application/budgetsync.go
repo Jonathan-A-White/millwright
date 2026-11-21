@@ -200,7 +200,9 @@ func skippedItem(skipped []skippedRow, name string) bool {
 }
 
 // budgetAmounts reads the usable (Item, Total Per Month) rows under the
-// header row, and the rows left out with why. A blank Total, an error cell
+// header row (the row with Total Per Month; the item column is the one headed
+// Item, else the first when its header cell is blank), and the rows left out
+// with why. A blank Total, an error cell
 // such as #REF! and anything that is not an amount is left out, never read as
 // 0. An item that is on the sheet twice with different amounts is left out.
 func budgetAmounts(rows [][]string) ([]sheetAmount, []skippedRow, error) {
@@ -219,13 +221,19 @@ func budgetAmounts(rows [][]string) ([]sheetAmount, []skippedRow, error) {
 				}
 			}
 		}
+		// His real sheet leaves the item column's header blank: with no
+		// column headed Item, the first column is the item column when its
+		// header cell is blank.
+		if ic < 0 && tc > 0 && strings.TrimSpace(row[0]) == "" {
+			ic = 0
+		}
 		if ic >= 0 && tc >= 0 {
 			head, itemCol, totalCol = i, ic, tc
 			break
 		}
 	}
 	if head < 0 {
-		return nil, nil, fmt.Errorf("no row has both the columns %q and %q", budgetItemColumn, budgetTotalColumn)
+		return nil, nil, fmt.Errorf("no row has the column %q with either a column %q or a blank first column", budgetTotalColumn, budgetItemColumn)
 	}
 	var amounts []sheetAmount
 	var skipped []skippedRow
