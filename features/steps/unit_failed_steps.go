@@ -50,6 +50,7 @@ func InitializeUnitFailedScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the mail subject is "([^"]*)"$`, c.subjectIs)
 	ctx.Then(`^the mail is from "([^"]*)"$`, c.fromIs)
 	ctx.Then(`^the mail body says "([^"]*)"$`, c.bodySays)
+	ctx.Then(`^the mail body does not say "([^"]*)"$`, c.bodyDoesNotSay)
 	ctx.Then(`^one failure of "([^"]*)" is recorded$`, func(unit string) error { return c.recorded(unit, true) })
 	ctx.Then(`^no failure of "([^"]*)" is recorded$`, func(unit string) error { return c.recorded(unit, false) })
 	ctx.Then(`^the recorded journal of "([^"]*)" says "([^"]*)"$`, c.recordedJournalSays)
@@ -131,6 +132,17 @@ func (c *unitFailedContext) bodySays(want string) error {
 	}
 	if !strings.Contains(m.Body, want) {
 		return fmt.Errorf("the body does not say %q:\n%s", want, m.Body)
+	}
+	return nil
+}
+
+func (c *unitFailedContext) bodyDoesNotSay(unwanted string) error {
+	m, err := c.onlyMail()
+	if err != nil {
+		return err
+	}
+	if strings.Contains(m.Body, unwanted) {
+		return fmt.Errorf("the body says %q, which it should not:\n%s", unwanted, m.Body)
 	}
 	return nil
 }

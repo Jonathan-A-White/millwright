@@ -4365,8 +4365,8 @@ template runs `mw doctor unit-failed <unit>`: a unit a timer runs often fails
 once and is clean on its next run, so its first failure is only recorded (in the
 doctor's state directory, `unit-failed/<unit>`, with the last 20 lines of its
 journal); a second with no clean run between them sends the Mayor one mail from
-the seat `doctor@<host>` naming the unit and the host, with both journals' last
-lines, and a clean run between them starts the count again. A unit no timer runs
+the seat `doctor@<host>` naming the unit and the host, with the count and the
+command that prints its journal (not the journal), and a clean run between them starts the count again. A unit no timer runs
 is mailed at its first failure, as the system template's units all are.
 `features/unit_failed.feature` holds it. `install-units.sh` links the template
 along with whatever unit it is asked for. To try it:
