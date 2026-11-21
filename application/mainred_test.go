@@ -1,10 +1,16 @@
 package application_test
 
 import (
+	"context"
+	"io"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 func TestTestNamesOfNamesTheTopLevelTestsThatFailed(t *testing.T) {
@@ -76,5 +82,54 @@ func TestPackagesOutsideTheStoryAreThoseThatHoldNoChangedFile(t *testing.T) {
 func TestNoPackageIsOutsideTheStoryWhenTheOutputNamesNone(t *testing.T) {
 	if got := application.PackagesOutsideTheStory("--- FAIL: TestX (0.01s)\n", []string{"application/next.go"}); got != nil {
 		t.Errorf("PackagesOutsideTheStory = %q, want none: with no package named the failure may be the story's", got)
+	}
+}
+
+// mw-gq6.1412: the wait for room before the run on main alone judges the host by
+// the Next's own Room, so dispatch.min_drive_free_gb = 0 (NoDriveGuard) turns the
+// Windows-drive guard off there as it does for a story's start.
+func TestMainRedWaitHonoursTheDriveGuardOff(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		room    application.RoomLimits
+		wantRun bool
+	}{
+		{"the guard on, the drive under 10 GB", application.RoomLimits{}, false},
+		{"the guard off, the drive under 10 GB", application.RoomLimits{NoDriveGuard: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA (0.01s)\nFAIL\n")}
+			load := &apptest.FakeHostLoad{Reading: aDriveWith(10 << 30)}
+			tracker := apptest.NewFakeTracker()
+			tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+			tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+			vault := newFakeVault()
+			vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+			landing := &aMainLanding{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}}
+			mailbox := apptest.NewFakeMailbox()
+			report, err := application.Next{
+				Tracker: tracker, Vault: vault, Worktrees: landing, Landing: landing,
+				Checks: twoFailingTests{}, Slot: aSlot{}, Mailbox: mailbox,
+				NamedChecks: named, Load: load, Room: tc.room,
+				LoadWait: func(context.Context, time.Duration) error { return nil },
+				Seat:     "builder", Host: "laptop",
+				Rigs: map[string]string{"millwright": "/rigs/millwright"},
+				Out:  io.Discard, Err: io.Discard,
+			}.Run(context.Background(), "mw-x.1")
+			if report.Reason != application.ReasonTestsFail && report.Reason != application.ReasonMainRed {
+				t.Fatalf("expected a stop for the failing tests, got %q (%v)", report.Reason, err)
+			}
+			inbox, _ := mailbox.Inbox(context.Background(), application.MayorMailbox)
+			var mail string
+			for _, m := range inbox {
+				mail += m.Body + "\n"
+			}
+			if ran := len(named.asked) > 0; ran != tc.wantRun {
+				t.Errorf("run on main alone made = %v, want %v (asked %q)", ran, tc.wantRun, named.asked)
+			}
+			if said := strings.Contains(mail, "D: has 10.0 GB free"); said == tc.wantRun {
+				t.Errorf("mail says the drive has no room = %v, want %v:\n%s", said, !tc.wantRun, mail)
+			}
+		})
 	}
 }

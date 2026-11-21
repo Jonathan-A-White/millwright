@@ -471,7 +471,7 @@ func (n Next) waitForRoom(ctx context.Context, c *closeOut, report *NextReport) 
 	if !ok {
 		return ""
 	}
-	if reading.NoRoomBesidesPartWorkers(RoomLimits{}) == "" {
+	if reading.NoRoomBesidesPartWorkers(n.Room) == "" {
 		return ""
 	}
 	const what = mainAloneRun
@@ -483,7 +483,7 @@ func (n Next) waitForRoom(ctx context.Context, c *closeOut, report *NextReport) 
 			report.Notes = append(report.Notes, err.Error())
 		}
 	}
-	return reading.NoRoomBesidesPartWorkers(RoomLimits{})
+	return reading.NoRoomBesidesPartWorkers(n.Room)
 }
 
 // mainAlone runs the tests failed (a failed run of the rig's tests) names, by
