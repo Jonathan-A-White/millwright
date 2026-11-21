@@ -24,8 +24,8 @@ import (
 // "Not closed" is two ranges of the status on either side of 'closed', never
 // `status <> 'closed'`: the server cannot use the status index for a not-equal
 // joined with an or, and read every bead, 760 to 850 ms at load 12 to 13 for
-// 1,160 beads, where the three reads of ranges and the join by id take about a
-// quarter of that (mw-gq6.1446). A list of the statuses mw knows would be as
+// 1,160 beads, where the three reads of ranges and the join by id take a
+// quarter to a half of that (mw-gq6.1446). A list of the statuses mw knows would be as
 // quick, but would leave out one it does not. The three are disjoint (a
 // closed epic is neither below nor above 'closed'), so no bead is read twice.
 const liveIDs = "(select id from issues where status < 'closed' and issue_type not in ('mail', 'event')" +
