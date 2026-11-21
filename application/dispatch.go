@@ -1601,20 +1601,7 @@ func (d Dispatch) recheckBug(ctx context.Context, detail StoryDetail, path domai
 	case !found.Passed:
 		return fmt.Sprintf("re-run on main first: %s (%s) still fails at %s", check, check.Source, short(found.Sha)), false
 	}
-	one := FixedOnMain{StoryID: id, Spec: check.String(), Sha: found.Sha, Tests: found.Tests}
-	if err := d.closeStory(ctx, "closing a bug found fixed on main", id, one.reason()); err != nil {
-		said := fmt.Sprintf("%s passes on main but the story could not be closed: %v", check, oneLine(err.Error()))
-		d.noteRecheckSkip(ctx, report, id, said)
-		return said, false
-	}
-	comment := fmt.Sprintf("mw dispatch on %s ran %s (%s) on %s's main before dispatching this bug, and it passes at %s, "+
-		"so the bug was closed with no session (a story that landed after the bug was filed fixed it).\n\nThe end of the run:\n%s",
-		d.Host, check, check.Source, path.Rig, found.Sha, strings.TrimSpace(found.Tail))
-	if err := d.Tracker.CommentOnStory(ctx, id, comment); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s: it was closed as fixed on main, but the run's tail could not be commented on: %v", id, err))
-	}
-	report.FixedOnMain = append(report.FixedOnMain, one)
-	return "", true
+	return d.settlePassedBug(ctx, detail, path.Rig, check, found, report)
 }
 
 // closeStory closes the story id the way mw next closes one (CloseRetry,
