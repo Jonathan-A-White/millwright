@@ -6,6 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
 // hostPasteBlocks is each paste in what an `mw host` command printed: the lines
@@ -120,5 +123,42 @@ func TestHostHiddenPasteVariablesCarryThePrefix(t *testing.T) {
 	// and are named by their param(...) list; only the window's variables count
 	for _, m := range regexp.MustCompile(`\$(q|done|hide|back|todo|t|new)\b`).FindAllString(out, -1) {
 		t.Errorf("the hidden paste leaves %s, a name an earlier line may have set, in the window", m)
+	}
+}
+
+// mw-q0cblt6: every paste an `mw host` command prints is a paste the Mayor may
+// send to the Governor, so it passes the paste rules of mw postern send as
+// printed (no base64, a Windows paste on one line, one fenced block, a new
+// Windows PowerShell named). Each paste is sent as the Mayor would send it:
+// the words that open a new Windows PowerShell, then the paste in one fence.
+func TestHostPastesPassThePasteRules(t *testing.T) {
+	hostTrimStates(t, "laptop", map[string]string{"laptop": "lacks-dropin"})
+	giveWayPinned(t)
+	for _, args := range [][]string{
+		{"host", "trim-setup"},
+		{"host", "wsl-flag", "--install-line"},
+		{"host", "giveway", "--install-line"},
+		{"host", "giveway", "--uninstall-line"},
+		{"host", "giveway", "--mode-line", "freeze"},
+		{"host", "giveway", "--mode-line", "shutdown"},
+		{"host", "hidden"},
+	} {
+		name := "mw " + strings.Join(args, " ")
+		out, err := runMw(t, args...)
+		if err != nil {
+			t.Errorf("%s failed: %v\n%.300s", name, err, out)
+			continue
+		}
+		for _, block := range hostPasteBlocks(out) {
+			message := "Open a new Windows PowerShell and paste this:\n```\n" + block + "\n```"
+			if _, err := (application.PasteCheck{Surface: application.PasteSurfaceSend, Text: message}).Run(); err != nil {
+				t.Errorf("%s prints a paste the paste rules refuse:\n%v\n%.300s", name, err, block)
+			}
+		}
+	}
+	line := doctor.WSLTrimPowerShellLine()
+	message := "Open a new Windows PowerShell and paste this:\n```\n" + line + "\n```"
+	if _, err := (application.PasteCheck{Surface: application.PasteSurfaceSend, Text: message}).Run(); err != nil {
+		t.Errorf("the WSL trim PowerShell line is refused by the paste rules:\n%v", err)
 	}
 }
