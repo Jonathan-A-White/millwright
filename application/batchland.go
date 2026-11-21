@@ -376,6 +376,12 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		return report, fmt.Errorf("landing %s: the batch's records could not be begun: %w", rig, err)
 	}
 
+	// The batch's stories are held while it runs: their leases lapsed while they
+	// queued, and a sweep must not take a story the batch has landed for stuck
+	// before the batch has closed it (mw-5r3p30.1206).
+	unhold := b.holdQueue(ctx, report.Queue)
+	defer unhold()
+
 	// The landing is cut at the very commit read as the base, never at the
 	// branch's name: the version is raised from what the base holds, and a
 	// landing cut later than its base would take the version the batch before
@@ -2025,4 +2031,51 @@ func (d DetachedLand) Pending(ctx context.Context) ([]string, error) {
 // directory under runs/: batch-<rig>-<n>.
 func BatchFixerName(rig string, number int) string {
 	return fmt.Sprintf("batch-%s-%d", rig, number)
+}
+
+// holdQueue keeps the stories a batch took held for as long as it runs: the
+// lease of each claim is renewed, and each carries the batch's closing-out mark
+// the way a single close-out's story does (markClosingOut). A story queued for
+// hours has a lapsed lease by design; once the batch lands it, that lapsed lease
+// and its landed run are all mw sweep, mw dispatch and a close-out's look for
+// abandoned stories see of it, while the batch is still writing its close
+// (mw-5r3p30.1206). The renewal is best effort and says nothing of a story
+// already closed: the batch closes them one by one while it holds the rest. The
+// release it returns stops both and clears the marks.
+func (b BatchLand) holdQueue(ctx context.Context, queue []BatchStory) (release func() []string) {
+	n := b.Next
+	if n.Tracker == nil || len(queue) == 0 {
+		return func() []string { return nil }
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	beat := func() {
+		for _, s := range queue {
+			// A claim already closed, or one that is another host's, is no reason to stop.
+			_ = n.Tracker.HeartbeatClaim(ctx, s.ID)
+		}
+	}
+	beat()
+	var unmarks []func()
+	for _, s := range queue {
+		_, unmark := n.markClosingOut(ctx, s.ID)
+		unmarks = append(unmarks, unmark)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for n.wait(ctx, HeartbeatInterval) == nil {
+			if ctx.Err() != nil {
+				return
+			}
+			beat()
+		}
+	}()
+	return func() []string {
+		cancel()
+		<-done
+		for _, unmark := range unmarks {
+			unmark()
+		}
+		return nil
+	}
 }

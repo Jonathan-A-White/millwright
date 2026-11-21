@@ -29,6 +29,10 @@ func (d Dispatch) closeOutsAgain(ctx context.Context, details []StoryDetail, noR
 // the story holds a session now: one already running, or the one started.
 // Anything that fails is a note, and the story is left handed back for the
 // next tick to try again.
+//
+// It cannot race a batch's close (mw-5r3p30.1206): only a story whose run is
+// RunCloseOutAgain gets here, and a story a batch holds is RunQueued until the
+// batch records it landed, and RunLanded, which this passes over, after.
 func (d Dispatch) closeOutAgain(ctx context.Context, detail StoryDetail, noRoom string, report *DispatchReport) bool {
 	id := detail.Story.ID
 	name := SessionName(id)
