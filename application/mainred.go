@@ -84,8 +84,9 @@ var vitestFailure = regexp.MustCompile(`^FAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx
 // Playwright's `[shots] › tests/e2e/x.spec.ts:106:7 › title` as
 // `tests/e2e/x.spec.ts:106` (a retry is the same test), vitest's `FAIL file >
 // test` as the file, which `vitest run <file>` runs alone; any other line as it
-// is. A name the line can run alone on the target is what lets main's own red
-// be found (mw-gq6.934). One function names the tests of the story's run and of
+// is, except a title with no file and a name that starts with a dash, which a
+// command would read as an option. A name the line can run alone on the target
+// is what lets main's own red be found (mw-gq6.934). One function names the tests of the story's run and of
 // the run on the target, so the two are compared by one name.
 func TestNamesOf(output string) []string {
 	failing, _ := FailingTests(output, 1<<30)
@@ -111,8 +112,16 @@ func TestNamesOf(output string) []string {
 			name = m[1] + ":" + m[2]
 		case strings.HasPrefix(name, "FAIL "):
 			name = strings.TrimSpace(strings.TrimPrefix(name, "FAIL "))
+		case strings.HasPrefix(name, "× "), strings.HasPrefix(name, "✘ "):
+			// A title with no file: vitest's `× title` (its `FAIL file > title` line
+			// names the same test) and a Playwright line the pattern above did not
+			// read. A title is no name a command can run, and `--list` in one was
+			// read by vitest as its option (mw-gq6.1569).
+			name = ""
 		}
-		if name != "" && !seen[name] {
+		// A name that starts with a dash would be read as an option by the command
+		// it is given to.
+		if name != "" && !strings.HasPrefix(name, "-") && !seen[name] {
 			seen[name] = true
 			names = append(names, name)
 		}

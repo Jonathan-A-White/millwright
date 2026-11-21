@@ -71,8 +71,8 @@ func TestAMainRedWithLongTestNamesIsFiledWithATitleBdTakes(t *testing.T) {
 	if report.Reason != application.ReasonMainRed {
 		t.Fatalf("expected the story held on main's red, got %q (%v); notes %v", report.Reason, err, report.Notes)
 	}
-	if report.MainRed == nil || len(report.MainRed.Tests) != 2*len(longSteps) {
-		t.Fatalf("expected main's red to name all %d lines, got %+v; notes %v", 2*len(longSteps), report.MainRed, report.Notes)
+	if report.MainRed == nil || len(report.MainRed.Tests) != len(longSteps) {
+		t.Fatalf("expected main's red to name all %d tests (the × lines name none, mw-gq6.1569), got %+v; notes %v", len(longSteps), report.MainRed, report.Notes)
 	}
 	if all := strings.Join(report.MainRed.Tests, ", "); len(all) <= domain.MaxTitleLength {
 		t.Fatalf("the fixture's tests are only %d characters together, not over %d", len(all), domain.MaxTitleLength)
@@ -87,7 +87,7 @@ func TestAMainRedWithLongTestNamesIsFiledWithATitleBdTakes(t *testing.T) {
 	if n := len(title); n > domain.MaxTitleLength {
 		t.Errorf("expected a title of at most %d characters, got %d: %q", domain.MaxTitleLength, n, title)
 	}
-	if !strings.HasPrefix(title, "[bug] main is red: × "+longSteps[0]) {
+	if !strings.HasPrefix(title, "[bug] main is red: features/reading.feature > Reading a long book > Scenario: the reader turns every page > "+longSteps[0]) {
 		t.Errorf("expected the title to start with the first failing test, got %q", title)
 	}
 	if !strings.HasSuffix(title, " more)") {
