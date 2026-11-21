@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // The labels a bug found by the whole suite carries: bug, as every bug filed by
@@ -158,17 +161,31 @@ func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteRe
 	return SuiteFiled{ID: id, File: file.File, New: true, Notes: notes}, nil
 }
 
-// openSuiteBug is the open bead under the suite epic, labelled suite, whose
-// title names file: the one a run's failure of the file is written on, and the
-// one mw status names beside the failing count (fixedSuiteBug is the one it
-// names when that has been closed).
+// openSuiteBug is the open bead under the suite epic that holds file's failure:
+// the one a run's failure of the file is written on, and the one mw status names
+// beside the failing count (fixedSuiteBug is the one it names when that has been
+// closed). It is the bead labelled suite whose title names file or, failing
+// that, a story that is open, held or in progress and whose files key names file
+// as one of its entries, as the one that folded several per-file bugs into one
+// fix does (mw-gq6.1548).
 func openSuiteBug(epic EpicDetail, file string) (StoryDetail, bool) {
 	for _, story := range epic.Stories {
 		if story.Status != StatusClosed && carriesAny(story.Labels, []string{LabelSuite}) && namesFile(story.Story.Title, file) {
 			return story, true
 		}
 	}
+	for _, story := range epic.Stories {
+		if !story.IsEpic && story.Status != StatusClosed && filesKeyNames(story.Merged().Files, file) {
+			return story, true
+		}
+	}
 	return StoryDetail{}, false
+}
+
+// filesKeyNames reports whether a files key lists file itself as one of its
+// entries; a glob or a directory that covers it is not a story fixing it.
+func filesKeyNames(files, file string) bool {
+	return slices.Contains(domain.FileList(files), file)
 }
 
 // fixedSuiteBug is the bead under the suite epic, labelled suite, whose title
@@ -262,7 +279,7 @@ func suiteMail(host string, report SuiteReport, filed []SuiteFiled, failures []s
 		fmt.Fprintf(&b, "The whole suite of %s passed on main at %s.\n", result.Rig, result.Sha)
 	}
 	for _, one := range filed {
-		how := "commented (an open bug already names the file)"
+		how := "commented (an open bead already names the file)"
 		if one.New {
 			how = "new, held"
 		}

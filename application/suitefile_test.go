@@ -209,3 +209,62 @@ func TestTheHomesNightlyFilesAFlakyFileAndMailsAsBefore(t *testing.T) {
 		}
 	}
 }
+
+// foldingStory puts under the suite epic a story that is no suite bug (no label,
+// a title that names no file) but whose files key names specs, as the one that
+// folded the per-file bugs into a single fix does (mw-gq6.1548).
+func foldingStory(t *testing.T, tracker *apptest.FakeTracker, status, files string) string {
+	t.Helper()
+	tracker.AddStory("mw-s", domain.Story{ID: "mw-s.fold", Title: "One fix, four bugs folded", Overrides: domain.Path{Files: files}})
+	if err := tracker.SetStatus("mw-s.fold", status); err != nil {
+		t.Fatal(err)
+	}
+	return "mw-s.fold"
+}
+
+func TestAFailingSpecNamedInTheFilesKeyOfAStoryThatIsNotClosedIsCommentedOnNotFiledAgain(t *testing.T) {
+	for _, status := range []string{application.StatusInProgress, application.StatusOpen, application.StatusHeld} {
+		t.Run(status, func(t *testing.T) {
+			filer, tracker, _ := suiteHostFiling(t, "laptop", false)
+			id := foldingStory(t, tracker, status, "tests/e2e/open-in-app.spec.ts, tests/e2e/tutor-door.spec.ts")
+			report := application.SuiteReport{Result: application.SuiteResult{Rig: "lampas", Sha: "abc1234", Failing: []application.SuiteFile{
+				{File: "tests/e2e/open-in-app.spec.ts", Alone: "failed"},
+				{File: "tests/e2e/tutor-door.spec.ts", Alone: "failed"},
+			}}}
+			filed, err := filer.File(context.Background(), "mw-s", report)
+			if err != nil || len(filed) != 2 {
+				t.Fatalf("expected two results, got %+v, %v", filed, err)
+			}
+			for _, one := range filed {
+				if one.New || one.ID != id {
+					t.Errorf("expected a comment on %s for %s, got %+v", id, one.File, one)
+				}
+			}
+			if epic, _ := tracker.ShowEpic(context.Background(), "mw-s"); len(epic.Stories) != 1 {
+				t.Errorf("expected no new bead under the epic, got %d stories", len(epic.Stories))
+			}
+			if got := tracker.Comments(id); len(got) != 2 || !strings.Contains(got[0], "tests/e2e/open-in-app.spec.ts") {
+				t.Errorf("expected a dated comment for each spec on %s, got %q", id, got)
+			}
+		})
+	}
+}
+
+func TestAFailingSpecNamedInTheFilesKeyOfAClosedStoryOrNamedOnlyByAGlobIsFiledAsBefore(t *testing.T) {
+	for name, story := range map[string][2]string{
+		"closed":    {application.StatusClosed, "tests/e2e/a.spec.ts"},
+		"a glob":    {application.StatusInProgress, "tests/e2e/*.spec.ts"},
+		"a sibling": {application.StatusInProgress, "tests/e2e/a.spec.ts.snap"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			filer, tracker, _ := suiteHostFiling(t, "laptop", false)
+			foldingStory(t, tracker, story[0], story[1])
+			report := application.SuiteReport{Result: application.SuiteResult{Rig: "lampas", Sha: "abc1234", Failing: []application.SuiteFile{
+				{File: "tests/e2e/a.spec.ts", Alone: "failed"}}}}
+			filed, err := filer.File(context.Background(), "mw-s", report)
+			if err != nil || len(filed) != 1 || !filed[0].New {
+				t.Fatalf("expected a new bug, got %+v, %v", filed, err)
+			}
+		})
+	}
+}
