@@ -290,6 +290,15 @@ type Landing interface {
 	Advance(ctx context.Context, rigDir, branch, commit string) (Advanced, error)
 }
 
+// LeftoversKeeper is what a Landing may also do: keep what the worktree at dir
+// holds uncommitted, tracked and untracked alike, as a diff against HEAD in the
+// file dest (its directory made if it is not there), and then leave the worktree
+// exactly as HEAD has it, clean. It is how a failed fixer's files are discarded
+// without being lost (mw-qqxlwm3.1).
+type LeftoversKeeper interface {
+	KeepLeftovers(ctx context.Context, dir, dest string) error
+}
+
 // KeptOrigin is what Landing.KeepOrigin found: Remote the tip the remote holds
 // the branch at (empty when it holds none), Head the commit the worktree is at
 // once it was done, and Merged whether that tip was merged in to make it so.

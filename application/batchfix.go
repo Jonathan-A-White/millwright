@@ -789,15 +789,6 @@ func (r BatchReport) fixerBundleLines() string {
 	return f.leftoversLines()
 }
 
-// LeftoversKeeper is what a Landing may also do: keep what the worktree at dir
-// holds uncommitted, tracked and untracked alike, as a diff against HEAD in the
-// file dest (its directory made if it is not there), and then leave the worktree
-// exactly as HEAD has it, clean. It is how a failed fixer's files are discarded
-// without being lost (mw-qqxlwm3.1).
-type LeftoversKeeper interface {
-	KeepLeftovers(ctx context.Context, dir, dest string) error
-}
-
 // failedEnd is how the fixer ended in the words a hold opens with, when that was
 // not a success: it ran out of turns, ended in an error, or was killed. Empty
 // when it ended well, or the harness stopped it for a limit of the factory's,
