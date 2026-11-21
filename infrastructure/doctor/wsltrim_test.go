@@ -173,10 +173,30 @@ func TestWSLTrimRootScriptWritesPlainText(t *testing.T) {
 			t.Errorf("expected the script to write %s with a redirect, got %q", path, script)
 		}
 	}
-	// two printfs, each of the drop-in's own words: the [Unit] section and an
-	// empty ConditionVirtualization=
-	if got := strings.Count(script, `printf \[Unit]\\nConditionVirtualization=\\n > `); got != 2 {
-		t.Errorf("expected both drop-ins printed as written, got %d in %q", got, script)
+	// two printfs: the service's drop-in is the [Unit] section and an empty
+	// ConditionVirtualization=; the timer's adds its calendar (see the daily test)
+	if got := strings.Count(script, `printf \[Unit]\\nConditionVirtualization=\\n > `+doctor.WSLTrimDropIns[1]); got != 1 {
+		t.Errorf("expected the service drop-in printed as written, got %d in %q", got, script)
+	}
+	if got := strings.Count(script, `printf \[Unit]\\nConditionVirtualization=\\n`); got != 2 {
+		t.Errorf("expected both drop-ins to start with the [Unit] section, got %d in %q", got, script)
+	}
+}
+
+// mw-gq6.1614: a weekly fstrim is slower than the desktop's churn (about 60 GB
+// a day) on a vhdx that fills its drive, so the timer's drop-in resets the
+// calendar and sets it to daily.
+func TestWSLTrimRootScriptSetsTheTimerDaily(t *testing.T) {
+	script := doctor.WSLTrimRootScript()
+	want := `printf \[Unit]\\nConditionVirtualization=\\n\[Timer]\\nOnCalendar=\\nOnCalendar=daily\\n > ` + doctor.WSLTrimDropIns[0]
+	if !strings.Contains(script, want) {
+		t.Errorf("expected the timer drop-in to reset OnCalendar= and set OnCalendar=daily, want %q in %q", want, script)
+	}
+	if strings.Contains(script, "weekly") {
+		t.Errorf("expected no weekly calendar in %q", script)
+	}
+	if strings.ContainsAny(script, "'\"`$") {
+		t.Errorf("expected no quote, backtick or dollar in the script, got %q", script)
 	}
 }
 

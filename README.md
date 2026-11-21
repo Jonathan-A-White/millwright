@@ -4485,13 +4485,14 @@ drive that only ever grows.
 
 **Trim setup, once per host.** systemd skips `fstrim.timer` and
 `fstrim.service` on WSL (both carry `ConditionVirtualization=!container`, and
-`systemd-detect-virt` says `wsl`), so the weekly trim never runs, the blocks of
+`systemd-detect-virt` says `wsl`), so the weekly trim never runs (the timer's drop-in also
+makes it daily: the desktop's churn, about 60 GB a day, outran a weekly one, mw-gq6.1614), the blocks of
 every deleted file stay in the vhdx, and the Windows drive fills: the desktop's
 `D:` held a 305 GB vhdx around 131 GB of files (mw-6ww.156, 2026-11-06). `mw host
 trim-setup` prints the one Windows PowerShell line that fixes it:
 
 ```
-wsl -d Ubuntu-24.04 -u root -- sh -c '<writes /etc/systemd/system/fstrim.timer.d/wsl.conf and fstrim.service.d/wsl.conf, each "[Unit]" then an empty "ConditionVirtualization=", then systemctl daemon-reload, systemctl restart fstrim.timer and systemctl start fstrim.service>'
+wsl -d Ubuntu-24.04 -u root -- sh -c '<writes /etc/systemd/system/fstrim.timer.d/wsl.conf and fstrim.service.d/wsl.conf, each "[Unit]" then an empty "ConditionVirtualization=" (the timer's also "[Timer]" with an empty "OnCalendar=" and then "OnCalendar=daily"), then systemctl daemon-reload, systemctl restart fstrim.timer and systemctl start fstrim.service>'
 ```
 
 Paste the printed line, not this one. It needs root, which a Builder does not have,

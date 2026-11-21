@@ -52,8 +52,14 @@ var WSLTrimDropIns = [2]string{
 }
 
 // wslTrimDropInText is a drop-in's content: an empty ConditionVirtualization=
-// resets the list the unit file set.
-const wslTrimDropInText = "[Unit]\nConditionVirtualization=\n"
+// resets the list the unit file set. The timer's own adds its calendar:
+// an empty OnCalendar= resets the weekly one, and daily replaces it, since a
+// weekly trim is slower than the desktop's churn (about 60 GB a day) on a vhdx
+// that fills its drive (mw-gq6.1614).
+const (
+	wslTrimDropInText      = "[Unit]\nConditionVirtualization=\n"
+	wslTrimTimerDropInText = wslTrimDropInText + "[Timer]\nOnCalendar=\nOnCalendar=daily\n"
+)
 
 // WSLTrimDistro is the WSL distribution the PowerShell line runs in.
 const WSLTrimDistro = "Ubuntu-24.04"
@@ -70,9 +76,8 @@ const WSLTrimDistro = "Ubuntu-24.04"
 func WSLTrimRootScript() string {
 	var b strings.Builder
 	b.WriteString("mkdir -p /etc/systemd/system/fstrim.timer.d /etc/systemd/system/fstrim.service.d")
-	for _, path := range WSLTrimDropIns {
-		fmt.Fprintf(&b, " && printf %s > %s", wslTrimDropInPrintf, path)
-	}
+	fmt.Fprintf(&b, " && printf %s > %s", wslTrimTimerDropInPrintf, WSLTrimDropIns[0])
+	fmt.Fprintf(&b, " && printf %s > %s", wslTrimDropInPrintf, WSLTrimDropIns[1])
 	b.WriteString(" && systemctl daemon-reload && systemctl restart fstrim.timer && systemctl start fstrim.service")
 	return b.String()
 }
@@ -81,6 +86,9 @@ func WSLTrimRootScript() string {
 // the shell reads \[ as [ (so [Unit] is no glob) and \\n as \n, which printf
 // makes a newline.
 const wslTrimDropInPrintf = `\[Unit]\\nConditionVirtualization=\\n`
+
+// wslTrimTimerDropInPrintf is wslTrimTimerDropInText the same way.
+const wslTrimTimerDropInPrintf = wslTrimDropInPrintf + `\[Timer]\\nOnCalendar=\\nOnCalendar=daily\\n`
 
 // WSLTrimWayBack is the commands that undo WSLTrimRootScript.
 func WSLTrimWayBack() string {

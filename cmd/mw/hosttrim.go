@@ -81,7 +81,7 @@ func newHostTrimSetupCmd() *cobra.Command {
 		Long: "On WSL, systemd skips fstrim.timer and fstrim.service (ConditionVirtualization=!container), so the\n" +
 			"weekly trim never runs and the vhdx only grows until the Windows drive fills (the desktop's D:,\n" +
 			"mw-6ww.156). trim-setup prints the one Windows PowerShell line that, pasted once per WSL host,\n" +
-			"writes the two drop-ins that reset the conditions, reloads systemd, restarts fstrim.timer and runs one trim at once.\n\n" +
+			"writes the two drop-ins that reset the conditions (the timer's also runs it daily, not weekly), reloads systemd, restarts fstrim.timer and runs one trim at once.\n\n" +
 			"It then asks this host, and each host of [hands_hosts], whether it is WSL and has the drop-ins\n" +
 			"(--host limits it to the hosts named). With --bead it files, for each WSL host that lacks them,\n" +
 			"one `mw hands add` step as root on that bead (id " + hostTrimStepPrefix + "<host>), which the\n" +
