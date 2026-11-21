@@ -781,6 +781,12 @@ func KickoffPrompt(seat, storyID, vaultDir string, memory *RigMemoryAccess) stri
 		"On a rig whose gate is split into parts, mw check names each part not yet run: run "+
 		"`mw check %s --part N` for each, as its own foreground call, then `mw check %s` again for the verdict, "+
 		"rather than nohup and a wait. "+
+		// A whole check that queues past its wait limit is not a failure and not a
+		// hand-back: the line names the open gate step (mw-gq6.1557).
+		"If mw check ends with a line saying the wait limit was reached, do not run it again: the line names "+
+		"the open gate step and says to close it with --reason \"gate left to the close-out: <the check's log>\", "+
+		"to close the remaining steps your own runs prove, to write the closing comment and to end the turn: "+
+		"mw next runs the gate. "+
 		"This session is headless and ends when your turn ends. %s"+
 		"Commit before you stop.", seat, storyID, kickoffMemoryLine(memory), bdVault(vaultDir), storyID, storyID, storyID, longCommandAdvice)
 }
