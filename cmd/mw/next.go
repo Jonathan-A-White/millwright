@@ -86,6 +86,7 @@ func newNextCmd() *cobra.Command {
 			"Builder writes after it is not answered by it; a blank run is refused.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			surviveBrokenOutput()
 			if cmd.Flags().Changed("rescoped-by-mayor") && strings.TrimSpace(rescoped) == "" {
 				return fmt.Errorf("closing out %s: --rescoped-by-mayor needs a sentence on why the Mayor re-scoped the story", args[0])
 			}
