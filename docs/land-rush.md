@@ -98,6 +98,25 @@ the merged result, under the host's gate lock and calm rule. Main moves only
 when they pass, and as a fast-forward: a red main would refuse every Builder's
 close-out and is what the VPS serves.
 
+### A branch set aside does not hold the rest
+
+When some branches of a batch merge and others are set aside, the ones that
+merged land first: they are tested as merged, under the same gate, and pushed
+without waiting for anything. The green part is never held for a set-aside
+story, and nothing is pushed that has not passed the whole gate as merged. No
+fixer is started for the ones set aside before the push (batch 595 of lampas
+once held five clean stories about 13 hours for one fixer).
+
+A set-aside story stays queued (`run=queued`, open and claimed, its branch
+untouched and never pushed untested). A note says why, on the story itself
+("Set aside by batch N of the rig: ...", with the conflicted files) and in the
+batch's report; the Mayor's "Set aside" mail names it and its conflict. The next
+batch takes it with the others: when it then conflicts alone, every branch of
+that batch is set aside for its conflicts, and that batch is given its one
+fixer before the push (see [The fixer](#the-fixer)). A fixer that succeeds lands
+the story in that batch; one that fails holds only that batch, which has
+nothing else in it. Only a red gate on the merged part holds the merged part.
+
 Green with nothing set aside lands the batch: each story is closed
 `run=landed` with a ledger line naming the batch, a chain stamp and a Landed
 mail; the after-landing command and the grist smoke run once. No fixer is
@@ -144,7 +163,9 @@ puts it back.
 
 ## The fixer
 
-A batch with a branch set aside, or whose tests are red, is given one fixer: a
+A batch of which every branch was set aside for its conflicts, or whose tests
+are red, is given one fixer (a batch of which some branches merged lands them
+first, without a fixer: see above): a
 Builder session (`SeatBoot.BatchFix`) in the batch's landing worktree, named
 `batch-<rig>-<n>`, on the rig's fixer model, effort and turn cap. Its boot file
 names every branch, which merged, git's conflict list and the tests' last

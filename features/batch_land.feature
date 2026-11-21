@@ -5,11 +5,10 @@ Feature: mw land lands a batch rig's queue under one gate run
   target branch as the origin has it, it merges the queued branches oldest
   first by the rig's union rules, raises the version once, runs the rig's tests
   once on the batch under the gate lock and the calm rule, and only when that
-  run is green and no branch was set aside does it push the target branch, as
-  a fast-forward. Each story is then closed run=landed with a ledger line
+  run is green does it push the target branch, as a fast-forward. Each story is then closed run=landed with a ledger line
   naming the batch; one whose claim another host holds is closed by this host
-  taking the claim over, which a comment on the story records. A branch that conflicts is set aside and stays queued; a
-  red gate pushes nothing. Either way the batch is held, every story in it
+  taking the claim over, which a comment on the story records. A branch that conflicts is set aside and stays queued, and
+  the rest of the batch lands without it; a red gate pushes nothing: the batch is then held, every story in it
   stays queued, and one mail tells the Mayor each story and why. What the
   batch did is kept under runs/batch/<rig>/<n>/.
 
@@ -414,25 +413,41 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the check could take the merge slot while the batch waited for the host to calm
     And the check could not take the merge slot while the batch ran the rig's tests
 
-  Scenario: The fixer merges a branch that was set aside, keeping both sides, and mw's own run lands the whole batch
+  # mw-qqxlwm3.2: a batch some of whose branches merge lands them first, tested as
+  # merged; the ones set aside stay queued, and are not waited for. Only a batch
+  # of which every branch conflicts is given its fixer before a push.
+  Scenario: A batch that sets one branch aside lands the rest first, starts no fixer for it, and leaves it queued with a note on why (mw-qqxlwm3.2)
     Given these stories are queued for batch landing:
       | mw-gq6.1 |
       | mw-gq6.2 |
     And "mw-gq6.3" is queued for batch landing, writing "mw-gq6.1.md" with words of its own
     And mw land may start a fixer, which merges "mw-gq6.3" keeping both sides and says it touched "mw-gq6.3"
     When mw lands the batch of the rig
-    Then exactly one fixer was started, for batch 1, in a landing worktree holding the work of every story in it
-    And the fixer's prompt names "mw-gq6.1.md" in the conflict of "mw-gq6.3"
+    Then no fixer was started
     And the batch landed on "main" in one push, forcing nothing
     And the rig's tests were run once on the batch
     And these stories are on "main" at the rig's origin, closed and recorded as landed, each with a ledger line naming batch 1:
       | mw-gq6.1 |
       | mw-gq6.2 |
+    And the story "mw-gq6.3" is still queued for batch landing
+    And the comment on "mw-gq6.3" says: Set aside by batch 1 of millwright
+    And the Mayor's mail names "mw-gq6.3" and its conflict in "mw-gq6.1.md"
+
+  Scenario: The set-aside story's fixer then succeeds, and the story lands in the next batch (mw-qqxlwm3.2)
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And "mw-gq6.3" is queued for batch landing, writing "mw-gq6.1.md" with words of its own
+    And mw land may start a fixer, which merges "mw-gq6.3" keeping both sides and says it touched "mw-gq6.3"
+    When mw lands the batch of the rig
+    And mw lands the next batch of the rig
+    Then exactly one fixer was started, for batch 2, in a landing worktree holding the work of every story in it
+    And the fixer's prompt names "mw-gq6.1.md" in the conflict of "mw-gq6.3"
+    And the batch landed on "main" in one push, forcing nothing
     And "mw-gq6.3" is closed and recorded as landed, and "mw-gq6.1.md" at the rig's origin holds the words of both "mw-gq6.1" and "mw-gq6.3"
     And the ledger line of "mw-gq6.3" says "resolved by the fixer", and those of the others do not:
       | mw-gq6.1 |
       | mw-gq6.2 |
-    And the Mayor was sent no mail saying the batch was held
 
   Scenario: A batch of which every branch was set aside for its conflicts is given the one fixer too, and lands once it has merged them (mw-gq6.503)
     Given these stories are queued for batch landing:

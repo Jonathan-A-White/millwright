@@ -872,10 +872,17 @@ func (b BatchLand) keepLeftovers(ctx context.Context, dir string, report *BatchR
 	report.Records = append(report.Records, f.Leftovers)
 }
 
+// redForTheFixer says the fixer was given a batch whose tests were red: the story
+// set aside beside it was not what it was to mend, and not the cause of the hold
+// (mw-qqxlwm3.2).
+func (r BatchReport) redForTheFixer() bool {
+	return r.Fixer != nil && r.Fixer.Tested
+}
+
 // failedCause says, for the hold, what the failed fixer had been given to mend:
 // the stories set aside, or a red batch.
 func (r BatchReport) failedCause() string {
-	if len(r.SetAside) == 0 {
+	if len(r.SetAside) == 0 || r.redForTheFixer() {
 		return "the cause is the rig's tests failing on the batch, which it was to mend"
 	}
 	return "the cause is the story set aside that it was to merge: " + strings.Join(storyIDs(r.SetAside), ", ")
@@ -884,7 +891,7 @@ func (r BatchReport) failedCause() string {
 // failedCauseLine is the Held mail's line naming the cause of a failed fixer: each
 // story set aside, why, and the files it conflicted in.
 func (r BatchReport) failedCauseLine() string {
-	if len(r.SetAside) == 0 {
+	if len(r.SetAside) == 0 || r.redForTheFixer() {
 		return "The cause: the rig's tests failed on the batch, and the fixer that was to mend it did not end well.\n"
 	}
 	var b strings.Builder
