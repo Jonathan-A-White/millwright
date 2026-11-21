@@ -20,6 +20,7 @@ instead of a fresh Builder session each.
   - [A branch set aside does not hold the rest](#a-branch-set-aside-does-not-hold-the-rest)
   - [Rigs land side by side](#rigs-land-side-by-side)
   - [After a batch is held red](#after-a-batch-is-held-red)
+  - [When a batch is held](#when-a-batch-is-held)
 - [The fixer](#the-fixer)
 - [Records](#records)
 - [The stop rule](#the-stop-rule)
@@ -161,6 +162,32 @@ queue, `--only <story>[,<story>]` of just those, and `mw land <rig> --set-aside
 branch is kept, its claim is given back held, and a `SET-ASIDE` comment carries
 the why. The next `mw land` takes the rest as one batch; `mw release <story>`
 puts it back.
+
+### When a batch is held
+
+Every way a batch is held, who it holds and what frees them. "Held" means
+nothing was pushed and every story named stays queued (`run=queued`, open and
+claimed). The middle column says whether one story's trouble holds stories
+that are green: a batch that sets branches aside for conflicts lands the rest
+first (above); a red batch, or one whose fixer ends badly, still holds the green
+ones for one gate and then lands in parts (above), and one story's unreadable
+changelog entry holds the batch.
+
+| Case | Who is held | What frees it |
+|---|---|---|
+| Some branches merged, others set aside for conflicts or AI attribution | No one: the merged ones land; the set-aside ones stay queued with a note | The next batch takes them; when every branch of a batch conflicts it is given its one fixer |
+| Every branch set aside for conflicts, and no fixer is started (host gives way, no room, harness hold) | The stories set aside, which are all of that batch | The host calm again; the next batch, after `batch_every` |
+| Every branch set aside for conflicts, and the fixer fails (out of turns, error, killed, stopped by the harness) | The stories set aside, all of that batch; the fixer's uncommitted files are kept as `fixer-uncommitted.diff` | After a failure: the next batch gives them a fixer afresh, after `batch_every`; after a harness stop, once its hold has passed |
+| The rig's tests are red on the merged part | The whole merged part: one story's red holds the green ones for this one gate | The follower lands again at once, in parts: the suspect left out, else two halves, else one story at a time; the story held red alone is left out until the rig lands again |
+| The tests are red and the fixer ends badly (fails, leaves changes uncommitted, drops a merged story's change, or its re-gate is red) | The whole merged part, as above | The same parts rule; a fixer stopped by the harness is tried again once the stop has passed |
+| The tests are red and no fixer can start (host gives way, no room, harness hold) | The whole merged part | The host calm again, then the parts rule |
+| Main is red: the failing tests fail on the target branch alone | The whole batch, not the stories' fault | The bead that carries main's red is fixed; the next batch |
+| The rig's tests could not be run (host busy, host gives way, command did not start) | The whole batch, not the stories' fault | The next landing, when the host is calm |
+| The changelog entry of one merged story could not be read, or the version could not be raised | The whole batch: one story's unreadable comments hold the rest | The next landing, when the tracker or the files read again |
+| The push is refused (the target moved on) or fails | The whole batch, not the stories' fault | The next landing, made on the target as it now is |
+| A landing could not be opened, or its commit could not be read | The whole batch, not the stories' fault | The next landing |
+| A story is held red alone since the rig last landed | That story only: it is left out of later batches | A batch of the rig lands; or nothing else is queued |
+| `mw land <rig> --without <story>`, or `--set-aside <story>` | That story only: the rest land as one batch | A `--without` story is taken by the next batch; a `--set-aside` story by `mw release <story>` |
 
 ## The fixer
 
