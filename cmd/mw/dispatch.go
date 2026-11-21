@@ -543,6 +543,12 @@ func newDispatchCmd() *cobra.Command {
 				dispatch.RecheckSkips = logs.RecheckSkips
 			}
 			report, err := dispatch.Run(cmd.Context())
+			// The tick has synced, so what this host holds is level with the home's
+			// give-back: a session of a story another host holds now is ended
+			// (mw-6ww.185.10). A tick that failed ends none for the stale view it left.
+			if err == nil {
+				endLostSessions(cmd, gateway, host, dryRun)
+			}
 			if _, gaveUp := application.LocalFault(err); gaveUp {
 				// The one line naming it has been printed, so cobra is not to print
 				// the error too: only the status it leaves with says so.

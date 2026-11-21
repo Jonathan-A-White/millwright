@@ -31,6 +31,10 @@ type boostRig struct {
 	nextEm uint64
 	alarms []string
 	clears []clearCall
+	// gaveBack is each Boost the check had its claims given back, in order;
+	// giveBackErr is what the give-back fails with, when set.
+	gaveBack    []string
+	giveBackErr error
 }
 
 func newBoostRig(t *testing.T) *boostRig {
@@ -58,6 +62,10 @@ func (r *boostRig) run(minutes int) application.DoctorResult {
 	check.Clear = func(_ context.Context, text string, clears uint64) error {
 		r.clears = append(r.clears, clearCall{text, clears})
 		return nil
+	}
+	check.GiveBack = func(_ context.Context, boost string) error {
+		r.gaveBack = append(r.gaveBack, boost)
+		return r.giveBackErr
 	}
 	report, err := application.Doctor{
 		Checks: application.DoctorChecks{check}, State: r.store, Log: r.store, Host: "laptop",
@@ -182,5 +190,55 @@ func TestBoostReachSkipsARetiredBoostWithoutAskingIt(t *testing.T) {
 	}
 	if asked || len(r.alarms) != 0 {
 		t.Fatalf("expected no ssh and no alarm for a retired Boost, asked %v, alarms %v", asked, r.alarms)
+	}
+}
+
+// mw-6ww.185.10: the Boost's claims are given back once per outage, when the
+// alarm that it has not answered for 30 minutes goes out.
+func TestBoostDownGivesItsClaimsBackOncePerOutage(t *testing.T) {
+	r := newBoostRig(t)
+	r.up = false
+	r.run(0)
+	r.run(29)
+	if len(r.gaveBack) != 0 {
+		t.Fatalf("expected no give-back before the 30 minutes are up, got %v", r.gaveBack)
+	}
+	r.run(2)
+	if len(r.alarms) != 1 || len(r.gaveBack) != 1 || r.gaveBack[0] != "desktop" {
+		t.Fatalf("expected one give-back for desktop with the alarm, got alarms %q give-backs %v", r.alarms, r.gaveBack)
+	}
+	for i := 0; i < 5; i++ {
+		r.run(10)
+	}
+	if len(r.gaveBack) != 1 {
+		t.Errorf("expected the latch to keep the give-back to one for the outage, got %v", r.gaveBack)
+	}
+
+	// The Boost answers, goes down again, and that is a second outage.
+	r.up = true
+	r.run(5)
+	r.up = false
+	r.run(0)
+	r.run(31)
+	if len(r.gaveBack) != 2 {
+		t.Errorf("expected the next outage to give back once more, got %v", r.gaveBack)
+	}
+}
+
+func TestAGiveBackThatFailsDoesNotUnsendTheAlarmNorSendItAgain(t *testing.T) {
+	r := newBoostRig(t)
+	r.giveBackErr = errors.New("the tracker is down")
+	r.up = false
+	r.run(0)
+	res := r.run(31)
+	if len(r.alarms) != 1 || len(r.gaveBack) != 1 {
+		t.Fatalf("expected the alarm sent and the give-back tried, got %q %v", r.alarms, r.gaveBack)
+	}
+	if !strings.Contains(res.Reason, "tracker is down") {
+		t.Errorf("expected the failure said, got %+v", res)
+	}
+	r.run(2)
+	if len(r.alarms) != 1 {
+		t.Errorf("expected no second alarm, got %q", r.alarms)
 	}
 }

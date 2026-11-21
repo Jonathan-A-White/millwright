@@ -274,6 +274,7 @@ func newDoctorCmd() *cobra.Command {
 			boostReach := doctor.NewBoostReach(mwVault(vault, host), host, handsHosts, store)
 			boostReach.Retired = retired
 			boostReach.Alarm = alarm
+			boostReach.GiveBack = boostGiveBack(vault, host, retired, cmd.ErrOrStderr())
 			// The Boost answering again is still pushed to the phone, as its
 			// alarm was; it is the event that rides the normal lane.
 			boostReach.Clear = func(ctx context.Context, text string, clears uint64) error {

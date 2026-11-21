@@ -575,6 +575,11 @@ type HostWork struct {
 	// claimed stories are frozen, never stranded, and the host never asleep; a stale
 	// one is said and not believed.
 	GivesWay GiveWayRead
+	// GaveBack is the home's note that it gave this host's claims back when it
+	// stopped answering, and GivenBack says so of each of its stories that is
+	// open again, by story id (mw-6ww.185.10).
+	GaveBack  GaveBack
+	GivenBack map[string]string
 	// Ticks are the counts of that host's timers as it left them with its last
 	// sync: nothing known of a host that has left none.
 	Ticks HostTicks
@@ -669,6 +674,10 @@ type StatusReport struct {
 	// leaves there because the pin says why it must stay (PinWhy), by story id:
 	// "held by its pin: <why>" (mw-gq6.1165).
 	HeldByPin map[string]string
+	// GivenBack are the ready stories the home gave back when the host that held
+	// them stopped answering, by story id: 'given back at <T>: <host> did not
+	// answer for 30 min' (mw-6ww.185.10).
+	GivenBack map[string]string
 	// Waiting are the beads labelled hitl that are open and not blocked, on any
 	// host or none, and the stories labelled hitl this host has claimed: worked
 	// with the Governor present, so neither a dispatcher's to take nor a session
@@ -1057,6 +1066,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.NoGristKey = s.noGristKey(report.Ready)
 	report.NoHostTakes = s.noHostTakes(ctx, report.Ready)
 	report.HeldByPin = s.heldByPin(ctx, report.Ready)
+	report.GivenBack = givenBackLines(s.gaveBacks(ctx), report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by
 	// host finds it: ask for the label itself. A hitl story ready on this host
@@ -2120,8 +2130,11 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand, runs map[strin
 		}
 		work = append(work, held)
 	}
+	gaveBacks := s.gaveBacks(ctx)
 	for i := range work {
 		work[i].Pins = s.pinsOf(ctx, work[i])
+		work[i].GaveBack = gaveBacks[work[i].Host]
+		work[i].GivenBack = givenBackLines(gaveBacks, work[i].Stories)
 	}
 	return work, nil
 }

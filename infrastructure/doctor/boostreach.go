@@ -19,7 +19,7 @@ const BoostReachName = "boost-reach"
 
 // BoostReachAfter is how long the Boost must have failed to answer ssh,
 // straight, before the check alarms.
-const BoostReachAfter = 30 * time.Minute
+const BoostReachAfter = application.BoostSilentAfter
 
 // The boost-reach check's damper: a failed alarm is tried again a minute on,
 // at the next run, and given up on, for a person, after three.
@@ -67,7 +67,8 @@ const boostReachSSHTimeout = 30 * time.Second
 // `<prefix> -o BatchMode=yes -o ConnectTimeout=10 <command>`, the command
 // writing and removing one small file in the Boost's home, so a Boost that
 // answers ssh on a read-only disk is down too. Its cure is the
-// alarm itself: it changes nothing on either host.
+// alarm itself and, once, the give-back of the Boost's lapsed claims
+// (GiveBack); it changes nothing on the Boost.
 //
 // While the home's own wg hub check is faulty the home is offline, not the
 // Boost: the check then records nothing and alarms nothing, and forgets an
@@ -100,6 +101,10 @@ type BoostReach struct {
 	// naming in clears the emergency it ends (0 for none). A nil Clear cannot
 	// cure the "answers again" alarm.
 	Clear func(ctx context.Context, text string, clears uint64) error
+	// GiveBack gives the Boost's lapsed claims back, once the "down" alarm has
+	// been sent and latched, so once per outage (mw-6ww.185.10). A nil GiveBack
+	// gives none back.
+	GiveBack func(ctx context.Context, boost string) error
 
 	// due is the alarm Probe found owing, for Cure to send.
 	due boostReachDue
@@ -114,6 +119,7 @@ type boostReachDue struct {
 	clears  uint64
 	first   time.Time
 	pending bool
+	boost   string
 }
 
 // NewBoostReach is the check over the vault's home file, run on host, reaching
@@ -200,6 +206,7 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 		text:    text,
 		first:   episode.FirstFaulty,
 		pending: true,
+		boost:   boost,
 	}
 	return application.DoctorFaulty, b.due.text
 }
@@ -238,6 +245,13 @@ func (b *BoostReach) Cure(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("saving this check's own state: %w", err)
 	}
+	// The latch is kept first, so the give-back is tried once for the outage: what
+	// it could not give back is in its own mail, and the Mayor retries by hand.
+	if b.GiveBack != nil {
+		if err := b.GiveBack(ctx, due.boost); err != nil {
+			return fmt.Errorf("the alarm was sent, but the claims of %s could not be given back: %w", due.boost, err)
+		}
+	}
 	return nil
 }
 
@@ -246,7 +260,7 @@ func (b *BoostReach) Damper() (time.Duration, int) { return BoostReachDamperWait
 
 // WayBack implements application.DoctorCheck.
 func (b *BoostReach) WayBack() string {
-	return "none needed: the alarm only tells the Governor; look at the Boost's screen, and run wsl --shutdown there if WSL has stalled"
+	return "none needed: the alarm tells the Governor, and the home gives the Boost's lapsed claims back and mails the Mayor which; look at the Boost's screen, and run wsl --shutdown there if WSL has stalled"
 }
 
 func (b *BoostReach) now() time.Time {
