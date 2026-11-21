@@ -379,7 +379,7 @@ func TestWSLFlagWatchScriptMatchesTheCommand(t *testing.T) {
 		}
 	}
 	// the flag is deleted before the action runs
-	del, act := strings.Index(s, "Remove-Item -LiteralPath $flag"), strings.Index(s, "Log \"$want: begin\"")
+	del, act := strings.Index(s, "Remove-Item -LiteralPath $flag"), strings.Index(s, "Log \"${want}: begin\"")
 	if del < 0 || act < 0 || del > act {
 		t.Errorf("the flag must be deleted before acting (delete at %d, act at %d)", del, act)
 	}
