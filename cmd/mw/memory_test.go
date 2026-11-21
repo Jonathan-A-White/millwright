@@ -186,3 +186,19 @@ func TestMemoryAddTakesASentenceStartingWithDashDashAfterAnEndOfFlags(t *testing
 		t.Errorf("the fact is missing or wrong: %v\n%s", err, fact)
 	}
 }
+
+// make-room --help says what the Governor rule is now: his confirmation being
+// asked is not his word, and a phrase quoted as an example is not either; it no
+// longer says 'the Governor' is skipped anywhere (mw-gq6.1501).
+func TestMemoryMakeRoomHelpNamesTheConfirmationException(t *testing.T) {
+	help, _ := runMW(t, "memory", "make-room", "--help")
+	flat := strings.Join(strings.Fields(help), " ")
+	if strings.Contains(flat, "'the Governor', \"Governor's\" or 'his words' anywhere") {
+		t.Errorf("make-room --help still says the Governor is skipped anywhere:\n%s", help)
+	}
+	for _, want := range []string{"the Governor to confirm", "quoted", "asserted"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("make-room --help does not name %q:\n%s", want, help)
+		}
+	}
+}
