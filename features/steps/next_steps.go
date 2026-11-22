@@ -92,6 +92,9 @@ type nextContext struct {
 	// duringCloseOut, when set, runs once the close-out has marked its story in
 	// the tracker (mw-gq6.1498): a dispatch tick meanwhile.
 	duringCloseOut func()
+	// afterStoryRead, when set, runs once the close-out has read the story and
+	// begun on its run state (mw-gq6.1656): another dispatch's claim meanwhile.
+	afterStoryRead func()
 
 	gitProgram   string // a wrapper that logs what git was asked to do
 	gitLog       string
@@ -1122,8 +1125,8 @@ func (c *nextContext) nextUseCase() application.Next {
 	if c.lease != nil {
 		tracker, heartbeatWait = c.lease.watch(c.tracker), c.lease.wait
 	}
-	if c.duringCloseOut != nil {
-		tracker = &markedThenTick{WorkTracker: tracker, hook: c.duringCloseOut}
+	if c.duringCloseOut != nil || c.afterStoryRead != nil {
+		tracker = &markedThenTick{WorkTracker: tracker, hook: c.duringCloseOut, afterRead: c.afterStoryRead}
 	}
 
 	// Only mw next and mw land are given the related-tests line: mw check is

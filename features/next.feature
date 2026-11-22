@@ -600,6 +600,34 @@ Feature: Closing out a finished story and carrying on
     And the work of "mw-gq6.1" is on "main" at the rig's origin
     And the story "mw-gq6.1" is closed
 
+  # mw-gq6.1656: a close-out forwarded to a Boost races that Boost's dispatch. The
+  # dispatch read the story before the close-out's mark was written; it must look
+  # again just before it claims, and pass the story over.
+  Scenario: A dispatch that read the story before the closing-out mark passes it over at the claim, and no attempt is spent
+    Given the story "mw-gq6.1" was started once
+    And the claim on "mw-gq6.1" was given back by its refused close-out
+    And the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And mw next is run with --met-by-mayor "read the closing comment and ran the tests"
+    And a dispatch tick that read "mw-gq6.1" before its mark runs once the close-out of "mw-gq6.1" has left its mark
+    When mw closes out "mw-gq6.1"
+    Then that dispatch started nothing and named "mw-gq6.1" as being landed by the Mayor
+    And the story "mw-gq6.1" still records attempt 1 and carries no closing-out mark
+
+  # mw-gq6.1656: the other half. A close-out of attempt 1 that finds attempt 2
+  # started while it ran must stop and touch nothing of attempt 2: not its
+  # formula, not its session.
+  Scenario: A closing-out that finds a newer attempt started while it ran stops, judges no steps and closes no session
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And attempt 2 of "mw-gq6.1" is started once the close-out has read the story
+    When mw closes out "mw-gq6.1"
+    Then the report says it stopped for "attempt-moved"
+    And the report's reason names attempts 1 and 2
+    And the session of "mw-gq6.1" was not closed
+    And the formula poured for "mw-gq6.1" is still open
+
   Scenario: A story whose Mayor's landing ended is not held by it, and its attempts are as they were
     Given the story "mw-gq6.1" was started once
     And the session of "mw-gq6.1" reported a plain success

@@ -780,6 +780,7 @@ type NextReport struct {
 	Swept    int
 	SweptDir string
 	tester   bool
+	seen     attemptSeen // the story's attempt as the close-out read it (attemptMoved)
 
 	// Bench is what the close-out recorded of its gate, one line and the
 	// calibration of its kind under it; empty when it recorded none or has no
@@ -1039,6 +1040,8 @@ func (n Next) closeSession(ctx context.Context, report NextReport) {
 		// Sent back: the story's name is the fresh session's now, and the one
 		// this close-out ran in has been moved aside to be closed.
 		name = report.Aside
+	case report.Reason == ReasonAttemptMoved || n.attemptMoved(ctx, &report, false) != nil:
+		return // a later attempt's session carries the name (mw-gq6.1656)
 	case !report.Closed && !report.DemoHeld && !report.Queued && !n.finishedStory(ctx, report.StoryID) && !n.refusedWithLogKept(ctx, report.StoryID):
 		return
 	}
@@ -1293,7 +1296,7 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 	if err != nil {
 		return report, fmt.Errorf("closing out %s: %w", storyID, err)
 	}
-	report.Title, report.Assignee = detail.Story.Title, detail.Assignee
+	report.Title, report.Assignee, report.seen = detail.Story.Title, detail.Assignee, seenAttempt(detail)
 	report.tester = IsTesterStory(detail)
 	if detail.Closed() {
 		return report, fmt.Errorf("closing out %s: it is closed already, so nothing was landed, ledgered or dispatched", storyID)
@@ -1394,6 +1397,9 @@ func (n Next) ledgeredAsLanded(ctx context.Context, c *closeOut, report *NextRep
 // land takes one story from "its session has ended" to "it is on the target
 // branch and closed", stopping at the first thing that says it should not be.
 func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextReport, error) {
+	if err := n.attemptMoved(ctx, report, true); err != nil {
+		return *report, err
+	}
 	// What the session itself reported. A session that wrote nothing is not a
 	// session that succeeded quietly: it is one that died.
 	resultName := ResultFileNameForAttempt(c.attempt())
