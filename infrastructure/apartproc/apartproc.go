@@ -167,10 +167,12 @@ const script = `d=$1; shift; echo $$ > "$d/pid.tmp"; mv "$d/pid.tmp" "$d/pid"; "
 
 // begin starts args as the pass name, unless one begun earlier, by this
 // follower or another, is still running or has ended with no follower told
-// how: that one is the pass, and wait tells it.
+// how: that one is the pass, and wait tells it. Except a result owed from a pass
+// that began before the time ctx names (stale): that is cleared, its log kept as
+// log.1, and a pass of its own is begun.
 func (a apart) begin(ctx context.Context, name, what string, args ...string) error {
 	dir := a.dir(name)
-	if a.owed(dir) {
+	if a.owed(dir) && !a.stale(ctx, dir) {
 		return nil
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -218,6 +220,27 @@ func (a apart) begin(ctx context.Context, name, what string, args ...string) err
 		}
 	}
 	return fmt.Errorf("%s did not say it had started (%s)", what, filepath.Join(dir, "log"))
+}
+
+// stale says whether the pass whose state is in dir has ended, and its result is
+// owed from a run that began before ctx's application.RunNotBefore: the night's
+// run it was begun for is over, and a result no follower was told is not the run
+// begun now (mw-gq6.1639). The owed file is made when a pass begins, so its time
+// is when the pass began. A pass still running is the pass, whenever it began, and
+// so is any owed result when ctx names no time.
+func (a apart) stale(ctx context.Context, dir string) bool {
+	notBefore, ok := application.RunNotBefore(ctx)
+	if !ok {
+		return false
+	}
+	if running, _ := a.running(dir); running {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "status")); err != nil {
+		return false
+	}
+	owed, err := os.Stat(filepath.Join(dir, "owed"))
+	return err == nil && owed.ModTime().Before(notBefore)
 }
 
 // owed says whether the pass whose state is in dir is still running, or has

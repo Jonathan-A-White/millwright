@@ -152,13 +152,15 @@ func (n *NightlySuite) Job() SpringJob {
 // rules cannot be read, or whose results cannot be, is left out and the error
 // comes back beside the rest.
 func (n *NightlySuite) due(ctx context.Context) ([]string, error) {
-	due, _, err := n.dueAt(ctx)
+	due, _, _, err := n.dueAt(ctx)
 	return due, err
 }
 
 // dueAt is due, and which of the rigs are the home's own nightly: those a rig's
-// suite host does not run, and which a busy home may hand to another host.
-func (n *NightlySuite) dueAt(ctx context.Context) (due []string, home map[string]bool, err error) {
+// suite host does not run, and which a busy home may hand to another host; and,
+// for each, the earliest a run begun now may have begun to be the run due: a result
+// owed from an earlier run is not the night's (mw-gq6.1639).
+func (n *NightlySuite) dueAt(ctx context.Context) (due []string, home map[string]bool, since map[string]time.Time, err error) {
 	now := n.now()
 	day := now.Format("2006-01-02")
 	rigs := n.Rigs
@@ -177,6 +179,7 @@ func (n *NightlySuite) dueAt(ctx context.Context) (due []string, home map[string
 	defer n.mu.Unlock()
 	var atHome []string
 	var errs []error
+	since = map[string]time.Time{}
 	for _, name := range names {
 		rules, err := n.Rules.EpicRequirements(ctx, name)
 		if err != nil {
@@ -199,6 +202,7 @@ func (n *NightlySuite) dueAt(ctx context.Context) (due []string, home map[string
 			}
 			if moved {
 				due = append(due, name)
+				since[name] = now.Add(-rules.SuiteEvery)
 			}
 			continue
 		}
@@ -218,6 +222,7 @@ func (n *NightlySuite) dueAt(ctx context.Context) (due []string, home map[string
 			continue
 		}
 		atHome = append(atHome, name)
+		since[name] = time.Date(now.Year(), now.Month(), now.Day(), n.Hour, 0, 0, 0, time.UTC)
 	}
 	if len(atHome) > 0 {
 		// Home last, for it reads a file in the vault: asked only when a rig is due.
@@ -233,9 +238,9 @@ func (n *NightlySuite) dueAt(ctx context.Context) (due []string, home map[string
 		}
 	}
 	if len(due) == 0 {
-		return nil, nil, errors.Join(errs...)
+		return nil, nil, nil, errors.Join(errs...)
 	}
-	return due, home, errors.Join(errs...)
+	return due, home, since, errors.Join(errs...)
 }
 
 // movedSince says whether the suite host is to run the suite of rig now: no
@@ -267,7 +272,7 @@ func (n *NightlySuite) movedSince(ctx context.Context, rig, dir string, rules do
 // finds nothing more to do. A rig whose suite failed does not stop the next;
 // the pass then fails, naming each.
 func (n *NightlySuite) run(ctx context.Context) error {
-	due, home, err := n.dueAt(ctx)
+	due, home, since, err := n.dueAt(ctx)
 	if len(due) == 0 {
 		if err != nil {
 			return err
@@ -295,7 +300,7 @@ func (n *NightlySuite) run(ctx context.Context) error {
 			errs = append(errs, ctx.Err())
 			break
 		}
-		if err := n.runOne(ctx, name, home[name]); err != nil {
+		if err := n.runOne(WithRunNotBefore(ctx, since[name]), name, home[name]); err != nil {
 			errs = append(errs, fmt.Errorf("the suite of %s: %w", name, err))
 		}
 	}

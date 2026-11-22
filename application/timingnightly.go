@@ -641,7 +641,10 @@ func (n *NightlyTiming) run(ctx context.Context) error {
 // and its bugs filed there, as mw timing <rig> does.
 func (n *NightlyTiming) runHere(ctx context.Context, due TimingDue) (skipped string, err error) {
 	if host, elsewhere := n.Where.Choose(ctx, NightlyTimingKind, due.Rig); elsewhere {
-		return "", n.Where.RunOn(ctx, host, NightlyTimingKind, due.Rig)
+		// A result a run of an earlier day left owed is not today's (mw-gq6.1639).
+		day := n.now()
+		since := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)
+		return "", n.Where.RunOn(WithRunNotBefore(ctx, since), host, NightlyTimingKind, due.Rig)
 	}
 	return n.runRig(ctx, due)
 }

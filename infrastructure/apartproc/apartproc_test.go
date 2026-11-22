@@ -311,3 +311,85 @@ func TestATimingRunOnAnotherHostThatFailsIsToldInItsOwnWords(t *testing.T) {
 		t.Fatalf("expected the timing run's failure in its own words, got %v", err)
 	}
 }
+
+// leftOver makes the state of a suite of lampas that ended with status 1 on
+// 2026-11-21 and that no follower was told of: pid, status, owed and a log, all
+// from the evening before tonight's slot (mw-gq6.1639).
+func leftOver(t *testing.T, dir string, began time.Time) {
+	t.Helper()
+	run := filepath.Join(dir, "lampas")
+	if err := os.MkdirAll(run, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"pid": "1\n", "status": "1\n", "owed": "", "log": "the old run's failure\n"} {
+		path := filepath.Join(run, name)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, began, began); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestAResultOwedFromARunBegunBeforeTonightsSlotIsNotTonightsRun(t *testing.T) {
+	dir := t.TempDir()
+	slot := time.Now().Add(-time.Hour)
+	leftOver(t, dir, slot.Add(-17*time.Hour))
+	prog := standIn(t, "0.05", 0)
+	p := &apartproc.Processes{Dir: dir, Program: prog, Scope: noScope(t), Poll: 20 * time.Millisecond}
+	ctx := application.WithRunNotBefore(context.Background(), slot)
+	if err := p.Begin(ctx, "lampas"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Wait(ctx, "lampas"); err != nil {
+		t.Fatalf("the new run passed, but Wait told the old failure: %v", err)
+	}
+	args, _ := os.ReadFile(prog + ".args")
+	if got := strings.Count(string(args), "suite lampas --file"); got != 1 {
+		t.Errorf("expected a fresh run begun, got %d (%q)", got, args)
+	}
+	old, _ := os.ReadFile(filepath.Join(dir, "lampas", "log.1"))
+	if string(old) != "the old run's failure\n" {
+		t.Errorf("expected the old log rotated to log.1, got %q", old)
+	}
+}
+
+func TestAFailureOfARunBegunOnABoxAfterAStaleOwedResultIsTheNewRunsOwn(t *testing.T) {
+	dir := t.TempDir()
+	slot := time.Now().Add(-time.Hour)
+	leftOver(t, dir, slot.Add(-17*time.Hour))
+	ssh := standIn(t, "0", 2) // stands for the ssh to cloud19: the run there fails, as the old one (1) did not
+	p := &apartproc.Processes{Dir: dir, Program: "unused", Scope: noScope(t), Poll: 20 * time.Millisecond}
+	ctx := application.WithRunNotBefore(context.Background(), slot)
+	if err := p.BeginOn(ctx, "lampas", "cloud19", []string{ssh, "mw@10.0.0.19", "mw suite lampas --file"}); err != nil {
+		t.Fatal(err)
+	}
+	err := p.Wait(ctx, "lampas")
+	if err == nil || !strings.Contains(err.Error(), "exit status 2") {
+		t.Fatalf("expected the new run's failure on cloud19 (exit status 2), got %v", err)
+	}
+	args, _ := os.ReadFile(ssh + ".args")
+	if got := strings.Count(string(args), "mw@10.0.0.19"); got != 1 {
+		t.Errorf("expected the run begun on cloud19, got %d (%q)", got, args)
+	}
+}
+
+func TestAResultOwedFromARunBegunInTonightsSlotIsTheRunAFollowerThatComesBackTells(t *testing.T) {
+	dir := t.TempDir()
+	slot := time.Now().Add(-time.Hour)
+	leftOver(t, dir, slot.Add(10*time.Minute))
+	prog := standIn(t, "0", 0)
+	p := &apartproc.Processes{Dir: dir, Program: prog, Scope: noScope(t), Poll: 20 * time.Millisecond}
+	ctx := application.WithRunNotBefore(context.Background(), slot)
+	if err := p.Begin(ctx, "lampas"); err != nil {
+		t.Fatal(err)
+	}
+	err := p.Wait(ctx, "lampas")
+	if err == nil || !strings.Contains(err.Error(), "exit status 1") {
+		t.Fatalf("expected the owed failure of tonight's run told, got %v", err)
+	}
+	if args, _ := os.ReadFile(prog + ".args"); len(args) != 0 {
+		t.Errorf("expected no second run begun, got %q", args)
+	}
+}

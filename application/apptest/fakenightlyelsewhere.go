@@ -3,6 +3,7 @@ package apptest
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -21,7 +22,8 @@ type FakeNightlyElsewhere struct {
 	// OnRun, when set, runs for each run begun on a host, before it ends.
 	OnRun func(host, kind, rig string)
 
-	ran []string
+	ran   []string
+	since []time.Time
 }
 
 var _ application.NightlyElsewhere = (*FakeNightlyElsewhere)(nil)
@@ -37,9 +39,11 @@ func (f *FakeNightlyElsewhere) Rooms(context.Context, string) ([]application.Bat
 }
 
 // Run implements application.NightlyElsewhere.
-func (f *FakeNightlyElsewhere) Run(_ context.Context, host, kind, rig string) error {
+func (f *FakeNightlyElsewhere) Run(ctx context.Context, host, kind, rig string) error {
 	f.mu.Lock()
 	f.ran = append(f.ran, host+" "+kind+" "+rig)
+	at, _ := application.RunNotBefore(ctx)
+	f.since = append(f.since, at)
 	on, err := f.OnRun, f.RunErr
 	f.mu.Unlock()
 	if on != nil {
@@ -53,4 +57,13 @@ func (f *FakeNightlyElsewhere) Ran() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.ran...)
+}
+
+// NotBefore is, for each run begun on another host (in the order of Ran), the
+// earliest begin the run was told to take a leftover result for its own
+// (application.RunNotBefore); the zero time when it was told none.
+func (f *FakeNightlyElsewhere) NotBefore() []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.since...)
 }

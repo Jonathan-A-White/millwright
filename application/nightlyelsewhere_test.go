@@ -379,3 +379,51 @@ func TestStatusSaysWhereTheNightlySuiteAndTimingRunOfARigAre(t *testing.T) {
 		t.Fatalf("expected the report to say the suite is on cloud9 and no timing run is away:\n%s", text)
 	}
 }
+
+// mw-gq6.1639: a result the box's state still holds from the night before is not
+// tonight's: the run begun elsewhere is told the slot it must have begun in.
+func TestTheNightlySuiteHandedToABoxIsToldTheSlotAnOwedResultMustHaveBegunIn(t *testing.T) {
+	a := newNightlySuite(t)
+	a.holder = "mw-6ww.185.18 check"
+	a.elsewhere.Hosts = []application.BatchRoom{free("cloud19", 2)}
+	a.run()
+	if got, want := a.elsewhere.Ran(), []string{"cloud19 suite lampas"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected the suite run on cloud19, got %v", got)
+	}
+	want := []time.Time{time.Date(2026, 11, 21, 8, 0, 0, 0, time.UTC)}
+	if got := a.elsewhere.NotBefore(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected the run told to take no result of a run begun before %v, got %v", want, got)
+	}
+}
+
+func TestTheNightlySuiteRunOnTheHomeIsToldTheSlotAnOwedResultMustHaveBegunIn(t *testing.T) {
+	var got time.Time
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("lampas", domain.EpicRequirements{NightlySuite: true})
+	suite := &application.NightlySuite{
+		Hour: 8, Rigs: map[string]string{"lampas": "/rigs/lampas"}, Host: "desktop",
+		Rules: rules, History: &apptest.FakeSuiteRecords{},
+		Home: func(context.Context) (bool, error) { return true, nil },
+		Run:  func(ctx context.Context, _ string) error { got, _ = application.RunNotBefore(ctx); return nil },
+		Now:  func() time.Time { return time.Date(2026, 11, 22, 8, 0, 6, 0, time.UTC) },
+	}
+	mustDo(t, suite.Job().Run(context.Background()))
+	if want := time.Date(2026, 11, 22, 8, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("expected the run told the slot began at %v, got %v", want, got)
+	}
+}
+
+func TestTheNightlyTimingRunHandedToABoxIsToldTheDayAnOwedResultMustHaveBegunIn(t *testing.T) {
+	f := newTimingNight(t)
+	elsewhere := &apptest.FakeNightlyElsewhere{Hosts: []application.BatchRoom{free("cloud9", 1)}}
+	f.load.Reading = busyHome()
+	f.place(elsewhere, func() string { return "" })
+	mustDo(t, f.night.Job().Run(context.Background()))
+	if got := elsewhere.Ran(); len(got) != 1 {
+		t.Fatalf("expected the timing run on cloud9, got %v", got)
+	}
+	got := elsewhere.NotBefore()
+	if len(got) != 1 || got[0].IsZero() || got[0].Hour() != 0 || got[0].After(f.night.Now()) {
+		t.Fatalf("expected the timing run told the start of its day, got %v", got)
+	}
+}
