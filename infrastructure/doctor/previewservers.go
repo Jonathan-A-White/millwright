@@ -147,8 +147,9 @@ func portOf(tokens []string) int {
 
 // Stop implements application.PreviewServers: it stops the process only while
 // it is still the preview server it was listed as (a pid is reused), asks it to
-// end and, when it has not gone in the time given, kills it.
-func (p PreviewServers) Stop(_ context.Context, server application.PreviewServer) error {
+// end and, when it has not gone in the time given, kills it. The wait ends with
+// ctx: a cut stop returns an error and leaves the process asked, not killed.
+func (p PreviewServers) Stop(ctx context.Context, server application.PreviewServer) error {
 	now, ok := p.read(server.Pid)
 	if !ok || now.Cmd != server.Cmd || now.Cwd != server.Cwd {
 		return nil
@@ -169,7 +170,9 @@ func (p PreviewServers) Stop(_ context.Context, server application.PreviewServer
 		if p.gone(server) {
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		if err := waitCtx(ctx, 50*time.Millisecond, nil); err != nil {
+			return cutError(ctx, fmt.Sprintf("waiting for preview server %d to go after SIGTERM", server.Pid), "it was asked to end and not killed")
+		}
 	}
 	if p.gone(server) {
 		return nil

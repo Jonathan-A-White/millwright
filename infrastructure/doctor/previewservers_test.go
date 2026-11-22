@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,5 +113,30 @@ func TestPreviewServersKillsOneThatIgnoresTheFirstSignal(t *testing.T) {
 	}
 	if len(signals) != 2 || signals[1] != syscall.SIGKILL {
 		t.Errorf("expected SIGTERM then SIGKILL, got %v", signals)
+	}
+}
+
+func TestPreviewServersStopEndsWithTheRunsCtxNotAfterThePatience(t *testing.T) {
+	proc := t.TempDir()
+	aFakeProcess(t, proc, "10", "/w/mw-a.1", "vite", "preview", "--port", "5205")
+	var signals []syscall.Signal
+	servers := PreviewServers{ProcDir: proc, Patience: 30 * time.Second, Signal: func(pid int, sig syscall.Signal) error {
+		signals = append(signals, sig)
+		return nil // the process ignores both
+	}}
+	listed, _ := servers.List(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := servers.Stop(ctx, listed[0])
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("a stop whose ctx ended after 100ms took %v; it must end with the ctx, not wait out the patience", took)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected an error that keeps the ctx's deadline, got %v", err)
+	}
+	if len(signals) != 1 || signals[0] != syscall.SIGTERM {
+		t.Errorf("expected only the SIGTERM before the cut, got %v", signals)
 	}
 }
