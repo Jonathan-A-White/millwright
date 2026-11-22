@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -856,5 +857,27 @@ func TestAFindingsWaitThatWouldMakeACycleIsNotTriedAgain(t *testing.T) {
 	}
 	if tracker.adds["mw-e.4"] != 1 {
 		t.Errorf("expected one try at mw-e.4, got %d", tracker.adds["mw-e.4"])
+	}
+}
+
+// A story filed from a Tester's finding runs on the factory's default route,
+// not on the landed story's (mw-gq6.1551, folded into mw-gq6.1640).
+func TestAStoryFiledFromAFindingGetsItsOwnModelAndEffortNotTheLandedStorys(t *testing.T) {
+	tracker, rules := testerFileEpic(t)
+	mustDo(t, tracker.SetStoryMetadata(context.Background(), "mw-e.1", map[string]string{
+		"model": string(domain.ModelFable), "effort": string(domain.EffortXHigh)}))
+	landed, err := tracker.ShowStory(context.Background(), "mw-e.1")
+	mustDo(t, err)
+	if got := landed.Merged(); got.Model != domain.ModelFable || got.Effort != domain.EffortXHigh {
+		t.Fatalf("the fixture's landed story is not fable at xhigh: %s at %s", got.Model, got.Effort)
+	}
+	filer := application.TesterFiler{Tracker: tracker, Rules: rules, Out: io.Discard}
+
+	filed, err := filer.File(context.Background(), "mw-e.2", testerFinding())
+	mustDo(t, err)
+	story, err := tracker.ShowStory(context.Background(), filed.ID)
+	mustDo(t, err)
+	if got := story.Merged(); got.Model != domain.ModelSonnet || got.Effort != domain.EffortHigh {
+		t.Errorf("expected the finding's story on sonnet at high, got %s at %s", got.Model, got.Effort)
 	}
 }

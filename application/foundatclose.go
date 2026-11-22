@@ -533,15 +533,6 @@ func foundNamesRig(text, lowerName string) bool {
 	return false
 }
 
-// The route a bug filed from a finding runs on: Sonnet at high effort, the
-// factory's default. The finder's model and effort are about the finder's own
-// work, so they are not copied; a dearer model needs its reason written on the
-// bug, by the Mayor (mw-gq6.1426).
-const (
-	foundBugModel  = domain.ModelSonnet
-	foundBugEffort = domain.EffortHigh
-)
-
 // foundNoRigPlace is the path of a bug whose rig cannot be told: no rig, branch
 // or formula, which are a rig's, and the finder's harness, which is about the
 // work and not the repo; its model and effort are the default route's.
@@ -1317,12 +1308,11 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		// The finder's size, bump and callers_ok are about the finder's own files
 		// and change, so none is copied, as mw path set --from copies none
 		// (mw-gq6.672, mw-gq6.1195); the Builder's size for the finding is set below.
-		overrides := c.path.WithoutSourceKeys()
+		overrides := FiledPath(c.path, "", TesterKindBug)
 		overrides.Files = foundFiles(bug.said(), c.path.Files)
 		// The finder's model and effort are its own too: the bug runs on the
 		// default route, and the description says what the finder ran on
-		// (mw-gq6.1426).
-		overrides.Model, overrides.Effort = foundBugModel, foundBugEffort
+		// (mw-gq6.1426, mw-gq6.1640).
 		// The finder's host is about the finder's work, so the bug goes to any host
 		// (mw-gq6.1255).
 		overrides.Host = domain.HostAuto
