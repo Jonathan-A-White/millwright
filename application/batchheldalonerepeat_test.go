@@ -78,3 +78,58 @@ func TestAStoryHeldRedAloneOnceStaysQueued(t *testing.T) {
 		t.Errorf("expected %s left queued after one batch held it red alone, got run=%q", id, got)
 	}
 }
+
+// aLandedLine is a batch of the rig that landed the stories given.
+func aLandedLine(batch int, ids ...string) application.BatchMetric {
+	return application.BatchMetric{Kind: application.BatchKind, At: time.Date(2026, 11, 20, 10, batch%60, 0, 0, time.UTC),
+		Rig: "millwright", Batch: batch, Stories: len(ids), IDs: ids, Outcome: application.BatchGreen}
+}
+
+// mw-gq6.1637: a story held red alone, left out while others landed, and taken
+// alone later started its count again, because the count stopped at the rig's
+// last landing, so it could be held red alone every time the queue emptied.
+func TestAStoryHeldRedAloneAcrossALandingIsHandedBack(t *testing.T) {
+	const id = "mw-e.1"
+	a, _ := aRedAloneBatch(t, aHeldRedAloneLine(594), aLandedLine(595, "mw-e.9"))
+	a.run(t)
+
+	if got := a.tracker.State(id, application.RunState); got == application.RunQueued {
+		t.Fatalf("expected %s handed back after it was held red alone again across a landing, got run=%q", id, got)
+	}
+	comments := strings.Join(a.tracker.Comments(id), "\n---\n")
+	for _, want := range []string{"Handed back", "batch 594"} {
+		if !strings.Contains(comments, want) {
+			t.Errorf("expected a comment on %s naming %q, got:\n%s", id, want, comments)
+		}
+	}
+}
+
+// A landing of the story itself, or a hand-back of it, starts its count again:
+// what was red before it was mended is not what is red now.
+func TestAStoryLandedOrHandedBackAfterBeingHeldRedAloneStartsItsCountAgain(t *testing.T) {
+	const id = "mw-e.1"
+	handed := aHeldRedAloneLine(595)
+	handed.HandedBack = []string{id}
+	for name, after := range map[string]application.BatchMetric{
+		"landed":     aLandedLine(595, id),
+		"handedback": handed,
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, _ := aRedAloneBatch(t, aHeldRedAloneLine(594), after)
+			a.run(t)
+			if got := a.tracker.State(id, application.RunState); got != application.RunQueued {
+				t.Errorf("expected %s left queued, its count started again, got run=%q", id, got)
+			}
+		})
+	}
+}
+
+func TestHeldRedAloneBeforeReadsAcrossLandingsOfOtherStories(t *testing.T) {
+	lines := []application.BatchMetric{aHeldRedAloneLine(1), aLandedLine(2, "mw-x.1"), aHeldRedAloneLine(3)}
+	if batch, ok := application.HeldRedAloneBefore(lines, "mw-e.1"); !ok || batch != 3 {
+		t.Errorf("expected batch 3, got %d, %v", batch, ok)
+	}
+	if _, ok := application.HeldRedAloneBefore(lines, "mw-x.1"); ok {
+		t.Errorf("expected no hold for a story never held red alone")
+	}
+}

@@ -21,7 +21,7 @@ func (b BatchLand) handBackRedAlone(ctx context.Context, report *BatchReport) {
 		return
 	}
 	s := report.Queue[0]
-	before, again := HeldRedAlone(rigBatches(readBatches(ctx, b.Metrics), report.Rig))[s.ID]
+	before, again := HeldRedAloneBefore(rigBatches(readBatches(ctx, b.Metrics), report.Rig), s.ID)
 	if !again {
 		return
 	}
