@@ -297,11 +297,13 @@ func (d Dispatch) keepStarved(ctx context.Context, ready []StoryDetail, running 
 func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAlarm {
 	oldest := map[string]StarvedRig{}
 	holding := map[string][]StarvedRig{}
+	leftOut := map[string][]string{}
 	for _, r := range rigs {
 		// A host that gives way holds nothing back: it takes nothing new while the
 		// person is at the screen, and what it noted before the freeze is not a
 		// rig left to starve (mw-2891blf.3).
-		if r.GivesWay || !r.current(now) {
+		if why := r.notCurrentWhy(now); why != "" {
+			leftOut[r.Rig] = append(leftOut[r.Rig], why)
 			continue
 		}
 		holding[r.Rig] = append(holding[r.Rig], r)
@@ -350,6 +352,11 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		}
 		if way != "" {
 			text += ". " + way
+		}
+		// A host whose note was passed over as not current is named with why, so
+		// the hold above is not read as the whole of what held the rig (mw-gq6.1660).
+		if words := leftOutWords(leftOut[rig]); words != "" {
+			text += ". " + words
 		}
 		// The rig and the stories ready are the alarm; how long it has lasted, the
 		// hold and the reason's words differ from one host's reading to the next. A

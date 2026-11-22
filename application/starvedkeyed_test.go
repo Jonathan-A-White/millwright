@@ -92,3 +92,42 @@ func TestAStarvedAlarmNamesThePinnedHostsNoRoomNotAnotherHostsPassingItOver(t *t
 		t.Errorf("expected the pinned host's no room as a wait, got %+v", alarms)
 	}
 }
+
+// mw-gq6.1660: a host whose last good dispatch run is over StarvedPassStale old
+// has its note left out of the alarm as not current, and the alarm named only the
+// other host's hold, as if it were the whole of what held the rig.
+func TestAStarvedAlarmSaysWhenAHostsHoldWasLeftOutAsNotCurrent(t *testing.T) {
+	tracker := twoHostsOneKeylessOneFull(t, laptopHolding("no-room", "laptop has no room: load 20.4 of 20 cores"))
+	held := application.HostTicks{Dispatch: application.TickCount{Known: true, LastGood: statusNow.Add(-application.StarvedPassStale - time.Hour)}}
+	if err := tracker.SetNote(context.Background(), application.TicksKey("laptop"), held.Note()); err != nil {
+		t.Fatal(err)
+	}
+	alarms := starvedAlarms(t, tracker)
+	if len(alarms) != 1 {
+		t.Fatalf("expected one alarm, got %+v", alarms)
+	}
+	for _, want := range []string{"held by no grist key", "left out", "laptop", "no good dispatch run for 2h"} {
+		if !strings.Contains(alarms[0].Text, want) {
+			t.Errorf("expected %q in the alarm, got %q", want, alarms[0].Text)
+		}
+	}
+	if strings.Contains(alarms[0].Text, "load 20.4") {
+		t.Errorf("expected the left-out host's reason not named as a hold, got %q", alarms[0].Text)
+	}
+	if alarms[0].Wait {
+		t.Errorf("expected a fault, the keyless host's hold standing alone: %+v", alarms[0])
+	}
+}
+
+// A host that gives way is left out too, and the alarm says that, not that it
+// has made no pass.
+func TestAStarvedAlarmSaysWhenAHostThatGivesWayWasLeftOut(t *testing.T) {
+	tracker := twoHostsOneKeylessOneFull(t, laptopHolding("no-room", "laptop has no room: load 20.4 of 20 cores"))
+	if err := tracker.SetNote(context.Background(), application.GiveWayKey("laptop"), application.GiveWayNote{Since: statusNow.Add(-time.Hour), By: "person", Seen: statusNow}.String()); err != nil {
+		t.Fatal(err)
+	}
+	alarms := starvedAlarms(t, tracker)
+	if len(alarms) != 1 || !strings.Contains(alarms[0].Text, "left out") || !strings.Contains(alarms[0].Text, "laptop gives way") {
+		t.Errorf("expected the alarm to say laptop gives way and was left out, got %+v", alarms)
+	}
+}
