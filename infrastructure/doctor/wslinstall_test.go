@@ -109,8 +109,8 @@ func TestAWSLHostMissingBothInstallsWritesTheMayorOneNoteEachDamperWait(t *testi
 		now = trimNow.Add(at)
 		report, _ := runner.Run(context.Background(), "", false)
 		for _, result := range report.Results {
-			if result.Verdict != "cured" && result.Verdict != "damped" {
-				t.Errorf("at +%s: %s is %q, want cured (the note) or damped, never ok or cannot-tell", at, result.Check, result.Verdict)
+			if result.Verdict != "faulty" && result.Verdict != "damped" {
+				t.Errorf("at +%s: %s is %q, want faulty (the note) or damped, never cured, ok or cannot-tell", at, result.Check, result.Verdict)
 			}
 		}
 		// What the other hosts read: both installs still missing, on the tick

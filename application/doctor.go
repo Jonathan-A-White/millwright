@@ -100,8 +100,9 @@ type DoctorCoolingQuiet interface {
 // only tells somebody (a note to the Mayor) and changes nothing on the host: the
 // fault it found stands after the cure, so the verdict the run leaves for the
 // other hosts still says it faulty, as it does on every other tick, and does not
-// flicker to ok on the tick that wrote the note (mw-gq6.1429). The result is not
-// Faulty, as for any cure that ran, so the run's exit status is as it was.
+// flicker to ok on the tick that wrote the note (mw-gq6.1429). The result's
+// verdict is "faulty", never "cured": nothing was put right (mw-6ww.185.21). Its
+// Faulty is not set, as for any cure that ran, so the run's exit status is as it was.
 type DoctorStandsAfterCure interface {
 	CureLeavesFault() bool
 }
@@ -317,6 +318,8 @@ func (r DoctorResult) String() string {
 		return r.Check + ": cured (" + r.Reason + ") — way back: " + r.WayBack
 	case "damped":
 		return r.Check + ": damped (" + r.Reason + ") — way back: " + r.WayBack
+	case "faulty":
+		return r.Check + ": faulty (" + r.Reason + ") — its cure only told the Mayor and the fault stands; way back: " + r.WayBack
 	case "cure-failed":
 		return r.Check + ": cure-failed (" + r.Reason + ")"
 	case "would-cure":
@@ -960,7 +963,9 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 
 	result := DoctorResult{Check: name, Verdict: "cured", Reason: reason, WayBack: check.WayBack()}
 	if stands, ok := check.(DoctorStandsAfterCure); ok && stands.CureLeavesFault() {
-		result.Standing, result.Found = true, reason
+		// The cure told somebody and changed nothing, so the fault is still
+		// there: the result says faulty, never cured (mw-6ww.185.21).
+		result.Verdict, result.Standing, result.Found = "faulty", true, reason
 	}
 	if err := d.append(ctx, result); err != nil {
 		return DoctorResult{}, err

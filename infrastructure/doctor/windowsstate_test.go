@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -282,5 +283,44 @@ func TestWindowsStateActsLineComesEvenWhenAnActIsInTheFuture(t *testing.T) {
 	w := windowsActsCheck(t, []string{actAt(-2*time.Minute, "not running: started")})
 	if _, reason := w.Probe(context.Background()); !strings.Contains(reason, "not running: started") {
 		t.Fatalf("expected the act named, got %q", reason)
+	}
+}
+
+// On the desktop (2026-11-22) a WSL host with no windows-state file was reported
+// 'cured', way back 'nothing was changed on the host', while the file was still
+// absent: the cure is a note, and a note puts nothing right. Run through the
+// doctor with its cure, the check is faulty (the note written) and then damped,
+// never cured, and the other hosts read it faulty on every tick.
+func TestWindowsStateWithNoFileIsNeverReportedCuredByTheDoctor(t *testing.T) {
+	check := windowsStateCheck(t, "wsl", nil)
+	notes := 0
+	check.Note = func(context.Context, string) error { notes++; return nil }
+	now := windowsStateNow
+	verdicts := apptest.NewFakeTracker()
+	runner := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  apptest.NewFakeDoctorState(), Log: &apptest.FakeDoctorLog{}, Verdicts: verdicts,
+		Host: "desktop", Now: func() time.Time { return now },
+	}
+	for _, at := range []time.Duration{0, 5 * time.Minute, 7 * time.Hour} {
+		now = windowsStateNow.Add(at)
+		report, _ := runner.Run(context.Background(), "", false)
+		if len(report.Results) != 1 {
+			t.Fatalf("at +%s: expected one result, got %+v", at, report.Results)
+		}
+		got := report.Results[0]
+		if got.Verdict != "faulty" && got.Verdict != "damped" {
+			t.Errorf("at +%s: expected faulty or damped, got %q (%s)", at, got.Verdict, got.String())
+		}
+		if strings.Contains(got.String(), "cured") {
+			t.Errorf("at +%s: the report says cured: %s", at, got.String())
+		}
+		said, _ := verdicts.Note(context.Background(), application.DoctorVerdictKey("desktop"))
+		if verdict, ok := application.ParseDoctorVerdict(said); !ok || len(verdict.Faulty) != 1 || verdict.Faulty[0].Check != doctor.WindowsStateName {
+			t.Errorf("at +%s: expected the verdict to hold windows-state faulty, got %q", at, said)
+		}
+	}
+	if notes != 2 {
+		t.Errorf("expected one note at the start and one after the 6 hour damper, got %d", notes)
 	}
 }
