@@ -44,6 +44,14 @@ const (
 // boostFitCommand is what the Boost is asked, in one ssh call.
 const boostFitCommand = "mw host fit --json"
 
+// boostFitShellNotFound is the exit status a shell ends with when it cannot find
+// the command it was told to run: here, mw not on the PATH of the ssh shell.
+const boostFitShellNotFound = 127
+
+// boostFitNotOnPathCure is the cure for mw not being found over ssh: not an
+// update of mw, which is there, but its directory on the login shell's PATH.
+const boostFitNotOnPathCure = "put the directory mw is installed in (~/.local/bin) on PATH in that host's login shell (~/.profile)"
+
 // boostFitSSHTimeout bounds one whole ask: a margin over ssh's own
 // ConnectTimeout and a git read or two on the far end.
 const boostFitSSHTimeout = 40 * time.Second
@@ -58,7 +66,9 @@ const boostFitSSHFailed = 255
 // each host's gaps, each with its cure (mw-6ww.185.9). It adds no fix of its
 // own: it is the list, checked every hour. A host that does not answer ssh is
 // boost-reach's to say, and is left out. A host whose mw has no `host fit` is
-// itself a gap: mw there is behind main. On a Boost the check is ok, asked by
+// itself a gap: mw there is behind main. The command runs in a login shell
+// (bash -lc), as a plain ssh command has no ~/.local/bin on its PATH; an exit
+// 127 says mw was not found there, not that it is behind. On a Boost the check is ok, asked by
 // the home, and so it is where there is no Boost to ask.
 type BoostFit struct {
 	// Home and Host are the vault's home file and this host's name.
@@ -195,10 +205,13 @@ func (b *BoostFit) askAll(ctx context.Context, hosts []string) []string {
 
 // askOne is the one line for a host, "" when it is fit or does not answer.
 func (b *BoostFit) askOne(ctx context.Context, host string) string {
-	argv := append(append([]string{}, strings.Fields(b.Reach[host])...), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", boostFitCommand)
+	argv := append(append([]string{}, strings.Fields(b.Reach[host])...), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "bash -lc "+fitQuote(boostFitCommand))
 	out, exit, err := b.ask(ctx, argv)
 	if err != nil || exit == boostFitSSHFailed {
 		return ""
+	}
+	if exit == boostFitShellNotFound {
+		return fmt.Sprintf("%s: mw not found on PATH over ssh (`%s` ended with exit 127) (cure: %s)", host, boostFitCommand, boostFitNotOnPathCure)
 	}
 	if exit != 0 {
 		first := strings.TrimSpace(strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0])
@@ -218,6 +231,9 @@ func (b *BoostFit) askOne(ctx context.Context, host string) string {
 	}
 	return fmt.Sprintf("%s is not fit, %d gaps: %s", host, len(gaps), strings.Join(parts, "; "))
 }
+
+// fitQuote is s as one word of a POSIX shell.
+func fitQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func fitOneLine(s string) string {
 	return strings.NewReplacer("\t", " ", "|", "/").Replace(strings.Join(strings.Fields(s), " "))

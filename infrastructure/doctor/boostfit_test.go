@@ -84,7 +84,7 @@ func TestBoostFitAFitHostIsOkAndIsAskedOverSsh(t *testing.T) {
 	if verdict != application.DoctorOK || reason != "" {
 		t.Fatalf("a fit Boost: %v %q", verdict, reason)
 	}
-	want := "desktop: mw host fit --json"
+	want := "desktop: bash -lc 'mw host fit --json'"
 	if len(r.asked) != 1 || r.asked[0] != want {
 		t.Fatalf("asked %v, want [%s]", r.asked, want)
 	}
@@ -170,6 +170,31 @@ func TestBoostFitAHostWhoseMwHasNoHostFitIsAGapWithTheUpdateCure(t *testing.T) {
 	}
 	if strings.Contains(reason, "Run 'mw --help'") {
 		t.Errorf("only the first line of the error is said: %s", reason)
+	}
+}
+
+func TestBoostFitRunsMwThroughALoginShellSoMwIsOnItsPath(t *testing.T) {
+	r := newBoostFitRig(t)
+	r.probe("laptop")
+	if len(r.asked) != 1 || !strings.Contains(r.asked[0], "bash -lc 'mw host fit --json'") {
+		t.Fatalf("the command is not run through a login shell: %v", r.asked)
+	}
+}
+
+func TestBoostFitExit127IsMwNotOnThePathOverSshNotMwBehindMain(t *testing.T) {
+	r := newBoostFitRig(t)
+	r.answers["desktop"] = fitAnswer{exit: 127, out: "bash: mw: command not found"}
+	verdict, reason := r.probe("laptop")
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("verdict %v, reason %q", verdict, reason)
+	}
+	if !strings.Contains(reason, "mw not found on PATH over ssh") {
+		t.Errorf("reason lacks the gap: %s", reason)
+	}
+	for _, not := range []string{"git pull", "make build", "behind"} {
+		if strings.Contains(reason, not) {
+			t.Errorf("reason names %q, a cure for an old mw: %s", not, reason)
+		}
 	}
 }
 
