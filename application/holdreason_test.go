@@ -64,6 +64,7 @@ var holdSites = map[string]string{
 	"application/dispatchrecheck.go:HoldStory":     "reason",
 	"application/next.go:HoldClaimHeldBy":          "reason",
 	"application/batchsetaside.go:HoldClaimHeldBy": "reason",
+	"application/batchsetaside.go:HoldStory":       "reason",
 	"application/retry.go:HoldStory":               "reason",
 	"application/retry.go:HoldClaimHeldBy":         "reason",
 	"application/postern.go:HoldStory":             "reason",

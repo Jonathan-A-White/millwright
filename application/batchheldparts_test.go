@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -275,5 +276,64 @@ func TestSetAsideTakesAQueuedStoryOutOfTheBatchQueue(t *testing.T) {
 	}
 	if want := []string{"mw-gq6.2", "mw-gq6.1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("expected the next batch made of the rest, got %v", got)
+	}
+}
+
+// mw-gq6.1661: a story queued for batch landing that nobody holds (status open,
+// run=queued, no assignee) is set aside all the same. Its give-back was guarded
+// on this host's actor when the holder was empty, and bd refused, so nothing was
+// written (mw-u2w5klk.349.40 after batch 632 of lampas).
+func TestSetAsideTakesAQueuedStoryNobodyHoldsOutOfTheBatchQueue(t *testing.T) {
+	land, tracker, _ := aBatchRig(t)
+	ctx := context.Background()
+	mustDo(t, tracker.ReleaseClaim(ctx, "mw-gq6.4"))
+	before, err := tracker.ShowStory(ctx, "mw-gq6.4")
+	mustDo(t, err)
+	if before.Assignee != "" || before.Status != application.StatusOpen || !application.QueuedForBatch(before) {
+		t.Fatalf("expected mw-gq6.4 open, queued and held by nobody, got %q held by %q with %v", before.Status, before.Assignee, before.Labels)
+	}
+
+	var out strings.Builder
+	set := application.SetAside{Tracker: tracker, Host: "laptop", Out: &out}
+	mustDo(t, set.Run(ctx, "millwright", "mw-gq6.4", "its spec fails on main"))
+
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.4")
+	mustDo(t, err)
+	if detail.Status != application.StatusHeld || detail.Assignee != "" {
+		t.Errorf("expected mw-gq6.4 held and unclaimed, got %q held by %q", detail.Status, detail.Assignee)
+	}
+	if !application.QueuedForBatch(detail) {
+		t.Errorf("expected the run state kept, so that releasing the story queues it again, got %v", detail.Labels)
+	}
+	comments, err := tracker.StoryComments(ctx, "mw-gq6.4")
+	mustDo(t, err)
+	if len(comments) == 0 || !strings.HasPrefix(comments[len(comments)-1].Text, "HELD: SET-ASIDE: its spec fails on main") {
+		t.Errorf("expected a SET-ASIDE comment carrying the why, got %+v", comments)
+	}
+
+	report, err := land.Run(ctx, "millwright")
+	mustDo(t, err)
+	var got []string
+	for _, s := range report.Queue {
+		got = append(got, s.ID)
+	}
+	if want := []string{"mw-gq6.2", "mw-gq6.1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected the next batch made of the rest, got %v", got)
+	}
+}
+
+// A queued story another host claims is still set aside under that host's name.
+func TestSetAsideTakesAQueuedStoryAnotherHostClaimsOutOfTheBatchQueue(t *testing.T) {
+	_, tracker, _ := aBatchRig(t)
+	ctx := context.Background()
+	mustDo(t, tracker.ReleaseClaim(ctx, "mw-gq6.4"))
+	mustDo(t, tracker.ClaimAs("mw-gq6.4", "mw@desktop", time.Now().Add(time.Hour)))
+
+	set := application.SetAside{Tracker: tracker, Host: "laptop", Out: io.Discard}
+	mustDo(t, set.Run(ctx, "millwright", "mw-gq6.4", "its spec fails on main"))
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.4")
+	mustDo(t, err)
+	if detail.Status != application.StatusHeld || detail.Assignee != "" {
+		t.Errorf("expected mw-gq6.4 held and given back, got %q held by %q", detail.Status, detail.Assignee)
 	}
 }

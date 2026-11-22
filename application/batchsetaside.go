@@ -49,8 +49,7 @@ func (s SetAside) Run(ctx context.Context, rig, id, why string) error {
 	if strings.EqualFold(strings.TrimSpace(detail.Status), StatusHeld) {
 		return fmt.Errorf("setting %s aside: it is held already: mw release %s puts it back in the queue", id, id)
 	}
-	holder := detail.Assignee
-	if err := givenBackAs(ctx, s.Tracker, id, StatusHeld, s.Tracker.HoldClaimHeldBy(ctx, id, holder)); err != nil {
+	if err := givenBackAs(ctx, s.Tracker, id, StatusHeld, holdQueued(ctx, s.Tracker, id, detail.Assignee)); err != nil {
 		return fmt.Errorf("setting %s aside: its claim could not be given back held: %w", id, err)
 	}
 	comment := fmt.Sprintf(HeldCommentPrefix+" %s %s\nmw land %s --set-aside on %s took it out of the batch queue. Its branch %s is kept at the origin, its claim was given back and the story is held: the next batch is made of the rest. mw release %s puts it back in the queue.",
@@ -62,6 +61,19 @@ func (s SetAside) Run(ctx context.Context, rig, id, why string) error {
 		fmt.Fprintf(s.Out, "%s is set aside: held, its branch %s kept; the next mw land %s makes its batch of the rest. mw release %s puts it back.\n", id, StoryBranch(id), rig, id)
 	}
 	return nil
+}
+
+// holdQueued holds story id whoever holds its claim: a claim held by holder is
+// given back held, guarded on holder, as another host's claim is. A story nobody
+// holds has no claim to give back, and an empty holder would be read as this
+// host's actor, so bd would refuse a guard naming one that is not there
+// (mw-gq6.1661): it is held with HoldStory, which asks for the story to be
+// unassigned.
+func holdQueued(ctx context.Context, tracker WorkTracker, id, holder string) error {
+	if holder == "" {
+		return tracker.HoldStory(ctx, id)
+	}
+	return tracker.HoldClaimHeldBy(ctx, id, holder)
 }
 
 // countConflictSetAside is how many batches have set story id aside for a
@@ -187,7 +199,7 @@ func (b BatchLand) giveBack(ctx context.Context, s BatchStory) string {
 		holder = detail.Assignee
 	}
 	if err := writeRetrying(ctx, n, nil, "the give-back of the claim on "+s.ID, func() error {
-		return givenBackAs(ctx, n.Tracker, s.ID, StatusOpen, n.Tracker.ReleaseClaimHeldBy(ctx, s.ID, holder))
+		return givenBackAs(ctx, n.Tracker, s.ID, StatusOpen, releaseQueued(ctx, n.Tracker, s.ID, holder))
 	}); err != nil {
 		// Queued again, so that it is not left claimed with no run state for the sweep to find.
 		if serr := n.Tracker.SetStoryState(ctx, s.ID, RunState, RunQueued, "handing it back failed: "+firstLine(err.Error())); serr != nil {
@@ -196,6 +208,18 @@ func (b BatchLand) giveBack(ctx context.Context, s BatchStory) string {
 		return fmt.Sprintf("its claim could not be given back: %v", err)
 	}
 	return ""
+}
+
+// releaseQueued gives back the claim of story id held by holder, guarded on
+// holder. A story nobody holds has no claim to give back, and an empty holder
+// would be read as this host's actor, so bd would refuse (mw-gq6.1661): nothing
+// is written, and givenBackAs reads the story to say whether it is open and
+// unclaimed.
+func releaseQueued(ctx context.Context, tracker WorkTracker, id, holder string) error {
+	if holder == "" {
+		return nil
+	}
+	return tracker.ReleaseClaimHeldBy(ctx, id, holder)
 }
 
 // ordinal says a count as a word: "second", "third", "4th".
