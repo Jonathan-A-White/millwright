@@ -142,7 +142,7 @@ func (m *MayorGone) Probe(ctx context.Context) (application.Verdict, string) {
 // Its last output line, on success, is the window id it started, printed the
 // way the real script does; WayBack reads it once Cure has set it.
 func (m *MayorGone) Cure(ctx context.Context) error {
-	cctx, cancel := context.WithTimeout(ctx, m.timeout())
+	cctx, cancel := cureContext(ctx, m.timeout())
 	defer cancel()
 
 	cmd := exec.CommandContext(cctx, m.mayorUpPath())
@@ -155,6 +155,10 @@ func (m *MayorGone) Cure(ctx context.Context) error {
 	lines := nonEmptyLines(string(out))
 
 	if err != nil {
+		if cut := cutError(cctx, "bin/mayor-up ran",
+			"a window that was closed stays closed and the Mayor-gone check starts the Mayor again"); cut != nil {
+			return fmt.Errorf("%w (%s)", cut, strings.Join(lines, "; "))
+		}
 		return fmt.Errorf("%s: %v (%s)", m.mayorUpPath(), err, strings.Join(lines, "; "))
 	}
 	if len(lines) > 0 {
