@@ -115,7 +115,7 @@ func (c *configExportBoostContext) ensureDir() error {
 	if c.dir != "" {
 		return nil
 	}
-	dir, err := os.MkdirTemp("", "mw-config-export-boost-")
+	dir, err := scenarioTempDir("", "mw-config-export-boost-")
 	c.dir = dir
 	return err
 }

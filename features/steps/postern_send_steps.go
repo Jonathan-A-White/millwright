@@ -160,7 +160,7 @@ func splitOptions(csv string) []string {
 }
 
 func (c *posternSendContext) aThrowawayPosternKey() error {
-	home, err := os.MkdirTemp("", "mw-postern-send-")
+	home, err := scenarioTempDir("", "mw-postern-send-")
 	if err != nil {
 		return err
 	}

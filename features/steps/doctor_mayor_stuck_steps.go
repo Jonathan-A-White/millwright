@@ -90,7 +90,7 @@ func (c *doctorContext) stuckFixture() (*mayorStuckFixture, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.MkdirTemp("", "mw-doctor-mayor-stuck")
+	root, err := scenarioTempDir("", "mw-doctor-mayor-stuck")
 	if err != nil {
 		return nil, err
 	}

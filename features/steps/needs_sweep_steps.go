@@ -96,7 +96,7 @@ func InitializeNeedsSweepScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *needsSweepContext) rig() error {
-	root, err := os.MkdirTemp("", "mw-sweep-")
+	root, err := scenarioTempDir("", "mw-sweep-")
 	if err != nil {
 		return err
 	}

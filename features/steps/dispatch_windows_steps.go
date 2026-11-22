@@ -48,7 +48,7 @@ func InitializeDispatchWindowsScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *dispatchWindowsContext) aHostConfigFileHolding(doc *godog.DocString) error {
-	home, err := os.MkdirTemp("", "mw-dispatch-windows-")
+	home, err := scenarioTempDir("", "mw-dispatch-windows-")
 	if err != nil {
 		return err
 	}

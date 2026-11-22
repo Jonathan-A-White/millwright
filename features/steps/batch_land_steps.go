@@ -678,7 +678,7 @@ func (c *nextContext) aStoryIsQueuedThenSigned(id, line string) error {
 	if err := c.queueByCloseOut(id); err != nil {
 		return err
 	}
-	clone, err := os.MkdirTemp(c.root, "signer-")
+	clone, err := scenarioTempDir(c.root, "signer-")
 	if err != nil {
 		return err
 	}

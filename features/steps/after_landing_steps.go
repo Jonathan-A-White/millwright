@@ -92,7 +92,7 @@ func InitializeAfterLandingScenario(ctx *godog.ScenarioContext) {
 // in to after.log and then does what body says.
 func (c *afterLandingContext) script(name, body string) error {
 	if c.root == "" {
-		root, err := os.MkdirTemp("", "mw-after-landing-*")
+		root, err := scenarioTempDir("", "mw-after-landing-*")
 		if err != nil {
 			return err
 		}
@@ -292,7 +292,7 @@ func (c *afterLandingContext) theHostNamesTheDeployStep(step int) error {
 func (c *afterLandingContext) builtMarks() application.BuiltMarks {
 	if c.marks == nil {
 		if c.root == "" {
-			root, err := os.MkdirTemp("", "mw-after-landing-*")
+			root, err := scenarioTempDir("", "mw-after-landing-*")
 			if err != nil {
 				return nil
 			}

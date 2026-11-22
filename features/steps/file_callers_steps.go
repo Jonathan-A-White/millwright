@@ -73,7 +73,7 @@ func InitializeFileCallersScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *callersContext) theRigIsACheckout(name string, calling int, word string, others int) error {
-	dir, err := os.MkdirTemp("", "mw-callers-")
+	dir, err := scenarioTempDir("", "mw-callers-")
 	if err != nil {
 		return err
 	}

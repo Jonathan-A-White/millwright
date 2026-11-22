@@ -89,7 +89,7 @@ const evalInstructions = "List the kinds of things you can see kept at the Place
 
 func (c *gristEvalContext) aRigCheckout(kind, model, effort string) error {
 	var err error
-	if c.root, err = os.MkdirTemp("", "mw-eval-feature-"); err != nil {
+	if c.root, err = scenarioTempDir("", "mw-eval-feature-"); err != nil {
 		return err
 	}
 	c.rig = filepath.Join(c.root, "Cairn")

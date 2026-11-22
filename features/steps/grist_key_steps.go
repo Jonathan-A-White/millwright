@@ -59,7 +59,7 @@ func InitializeGristKeyScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *gristKeyContext) aThrowawayMillKeyFile() error {
-	dir, err := os.MkdirTemp("", "mw-grist-key-")
+	dir, err := scenarioTempDir("", "mw-grist-key-")
 	if err != nil {
 		return err
 	}

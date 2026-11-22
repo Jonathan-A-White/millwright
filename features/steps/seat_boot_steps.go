@@ -95,7 +95,7 @@ const (
 )
 
 func (c *seatBootContext) aVault() error {
-	dir, err := os.MkdirTemp("", "mw-vault-")
+	dir, err := scenarioTempDir("", "mw-vault-")
 	if err != nil {
 		return fmt.Errorf("making a vault: %w", err)
 	}

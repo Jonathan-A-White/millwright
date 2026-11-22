@@ -142,7 +142,7 @@ func InitializeInitScenario(ctx *godog.ScenarioContext) {
 func (c *initContext) configPath() string { return filepath.Join(c.home, config.File) }
 
 func (c *initContext) aThrowawayHome() error {
-	home, err := os.MkdirTemp("", "mw-init-")
+	home, err := scenarioTempDir("", "mw-init-")
 	if err != nil {
 		return err
 	}
@@ -210,7 +210,7 @@ func (c *initContext) runRequest(req application.InitRequest) error {
 // then pushes it to a bare repository: a stand-in for a vault that already
 // exists on another host, to clone from in a join scenario.
 func (c *initContext) aBareGitRemoteHoldingAVault() error {
-	root, err := os.MkdirTemp("", "mw-init-remote-")
+	root, err := scenarioTempDir("", "mw-init-remote-")
 	if err != nil {
 		return err
 	}

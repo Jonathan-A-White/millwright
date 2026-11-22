@@ -39,7 +39,7 @@ func InitializeBuilderJobsScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *builderJobsContext) aConfigFileHolding(doc *godog.DocString) error {
-	home, err := os.MkdirTemp("", "mw-builder-jobs-")
+	home, err := scenarioTempDir("", "mw-builder-jobs-")
 	if err != nil {
 		return err
 	}

@@ -74,7 +74,7 @@ func (c *noteContext) aBeadIsOpen(id string) error {
 }
 
 func (c *noteContext) aFileHolds(text string) error {
-	dir, err := os.MkdirTemp("", "mw-note-")
+	dir, err := scenarioTempDir("", "mw-note-")
 	if err != nil {
 		return err
 	}

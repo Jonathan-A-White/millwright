@@ -113,7 +113,7 @@ func (c *gristLevelContext) makeRig(name string) (*levelRig, error) {
 		return nil, fmt.Errorf("%s is not on PATH", rig.Program)
 	}
 	if c.root == "" {
-		root, err := os.MkdirTemp("", "mw-grist-level-")
+		root, err := scenarioTempDir("", "mw-grist-level-")
 		if err != nil {
 			return nil, err
 		}

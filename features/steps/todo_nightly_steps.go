@@ -378,7 +378,7 @@ func (c *todoNightlyContext) theCardIsClosedByHand(id string) error {
 // heAnswers sends the Governor's tap on the weekly card to a postern inbox and
 // applies it.
 func (c *todoNightlyContext) heAnswers(answer string) error {
-	dir, err := os.MkdirTemp("", "mw-todo-nightly-")
+	dir, err := scenarioTempDir("", "mw-todo-nightly-")
 	if err != nil {
 		return err
 	}

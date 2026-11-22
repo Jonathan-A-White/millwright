@@ -114,7 +114,7 @@ func (c *mailBeadsContext) start() error {
 			return godog.ErrSkip
 		}
 	}
-	root, err := os.MkdirTemp("", "mw-mail-beads-")
+	root, err := scenarioTempDir("", "mw-mail-beads-")
 	if err != nil {
 		return err
 	}

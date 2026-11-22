@@ -105,7 +105,7 @@ func InitializeChainStampScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *chainStampContext) aQueueHolding(list string) error {
-	dir, err := os.MkdirTemp("", "mw-chain-stamp-")
+	dir, err := scenarioTempDir("", "mw-chain-stamp-")
 	if err != nil {
 		return err
 	}

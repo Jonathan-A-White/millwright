@@ -70,7 +70,7 @@ func registerAfterLandingSmokeSteps(ctx *godog.ScenarioContext, c *afterLandingC
 // answers the smoke as the changed code does, and otherwise no bin/mw is there.
 func (s *smokeAfterLanding) rig(c *afterLandingContext, name, app string, built bool) error {
 	if c.root == "" {
-		root, err := os.MkdirTemp("", "mw-after-landing-*")
+		root, err := scenarioTempDir("", "mw-after-landing-*")
 		if err != nil {
 			return err
 		}

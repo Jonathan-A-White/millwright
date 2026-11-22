@@ -31,7 +31,7 @@ func (c *seatUpContext) isolateConfig() error {
 	if c.home != "" {
 		return nil
 	}
-	home, err := os.MkdirTemp("", "mw-millhand-home-")
+	home, err := scenarioTempDir("", "mw-millhand-home-")
 	if err != nil {
 		return fmt.Errorf("making a home directory: %w", err)
 	}

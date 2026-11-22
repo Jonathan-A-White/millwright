@@ -406,7 +406,7 @@ func (c *doctorContext) aFakeSystemctlThatSaysNeedsAReload(unit string) error {
 	if runtime.GOOS == "windows" {
 		return fmt.Errorf("the stand-in for systemctl is a shell script; this scenario does not run on windows")
 	}
-	dir, err := os.MkdirTemp("", "mw-doctor-systemctl")
+	dir, err := scenarioTempDir("", "mw-doctor-systemctl")
 	if err != nil {
 		return err
 	}
@@ -447,7 +447,7 @@ func (c *doctorContext) aFakeSystemctlReportingTheTimerEnabledAndInactive(timer 
 	if runtime.GOOS == "windows" {
 		return fmt.Errorf("the stand-in for systemctl is a shell script; this scenario does not run on windows")
 	}
-	dir, err := os.MkdirTemp("", "mw-doctor-timers-systemctl")
+	dir, err := scenarioTempDir("", "mw-doctor-timers-systemctl")
 	if err != nil {
 		return err
 	}
@@ -494,7 +494,7 @@ func (c *doctorContext) aVaultWhoseBeadsIsBytesPastABudget(sizeText, budgetText 
 		return fmt.Errorf("parsing %q as a byte count: %w", budgetText, err)
 	}
 
-	dir, err := os.MkdirTemp("", "mw-doctor-beads-size")
+	dir, err := scenarioTempDir("", "mw-doctor-beads-size")
 	if err != nil {
 		return err
 	}
@@ -516,7 +516,7 @@ func (c *doctorContext) mwDoctorsBeadsSizeCheckRunsForReal() error { return c.ru
 // .beads holds both a dolt and an embeddeddolt store, and wires up the real
 // infrastructure/doctor.BeadsStores check against it.
 func (c *doctorContext) aVaultHoldingBothBeadsStores() error {
-	dir, err := os.MkdirTemp("", "mw-doctor-beads-stores")
+	dir, err := scenarioTempDir("", "mw-doctor-beads-stores")
 	if err != nil {
 		return err
 	}
@@ -556,7 +556,7 @@ func (c *doctorContext) aFakeNetshReportingTheNetwork(ssid string) error {
 	if runtime.GOOS == "windows" {
 		return fmt.Errorf("the stand-in for netsh is a shell script; this scenario does not run on windows")
 	}
-	dir, err := os.MkdirTemp("", "mw-doctor-netsh")
+	dir, err := scenarioTempDir("", "mw-doctor-netsh")
 	if err != nil {
 		return err
 	}
@@ -602,7 +602,7 @@ func (c *doctorContext) aFakePowershellThatExists() error {
 	if c.wifi == nil {
 		return fmt.Errorf("no fake netsh was set up in this scenario")
 	}
-	dir, err := os.MkdirTemp("", "mw-doctor-powershell")
+	dir, err := scenarioTempDir("", "mw-doctor-powershell")
 	if err != nil {
 		return err
 	}
@@ -669,7 +669,7 @@ func (c *doctorContext) aVaultWithAModifiedTrackedFile(path string) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git is not on PATH; this scenario needs a real git clone")
 	}
-	root, err := os.MkdirTemp("", "mw-doctor-vault-dirty")
+	root, err := scenarioTempDir("", "mw-doctor-vault-dirty")
 	if err != nil {
 		return err
 	}
@@ -776,7 +776,7 @@ func (c *doctorContext) ensureMayorGoneVault() (string, error) {
 	if c.mayorGoneVault != "" {
 		return c.mayorGoneVault, nil
 	}
-	dir, err := os.MkdirTemp("", "mw-doctor-mayor-gone")
+	dir, err := scenarioTempDir("", "mw-doctor-mayor-gone")
 	if err != nil {
 		return "", err
 	}
@@ -820,7 +820,7 @@ func (c *doctorContext) writeMayorGoneTmux(body string) error {
 	if err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp("", "mw-doctor-mayor-gone-tmux")
+	dir, err := scenarioTempDir("", "mw-doctor-mayor-gone-tmux")
 	if err != nil {
 		return err
 	}
@@ -915,7 +915,7 @@ func (c *doctorContext) ensureTmpLeftoversHost() (tmp, proc string, err error) {
 	if c.tmpLeftoversTmp != "" {
 		return c.tmpLeftoversTmp, c.tmpLeftoversProc, nil
 	}
-	root, err := os.MkdirTemp("", "mw-doctor-tmp-leftovers")
+	root, err := scenarioTempDir("", "mw-doctor-tmp-leftovers")
 	if err != nil {
 		return "", "", err
 	}
@@ -1166,7 +1166,7 @@ func (c *doctorContext) mayorUpCallCount(want int) error {
 // real postern-channel check to a vault home file naming home. What the
 // process's environment was is kept for the After hook to put back.
 func (c *doctorContext) posternChannelHost(home, config string) error {
-	dir, err := os.MkdirTemp("", "mw-doctor-postern-channel")
+	dir, err := scenarioTempDir("", "mw-doctor-postern-channel")
 	if err != nil {
 		return err
 	}

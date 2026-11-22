@@ -117,7 +117,7 @@ func keyFromVectors(v gristVectors, name string) (pub, wif string, err error) {
 
 func (c *gristSendContext) aKeyFileHoldingThePhonesKey() error {
 	var err error
-	if c.dir, err = os.MkdirTemp("", "mw-grist-send-"); err != nil {
+	if c.dir, err = scenarioTempDir("", "mw-grist-send-"); err != nil {
 		return err
 	}
 	pub, wif, err := keyFromVectors(c.vectors, "cairnPhone")

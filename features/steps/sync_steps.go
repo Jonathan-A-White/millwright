@@ -188,7 +188,7 @@ func (c *syncContext) aVaultSharedByBothHosts() error {
 	if _, err := exec.LookPath(vault.Git); err != nil {
 		return fmt.Errorf("%s is not on PATH: %w", vault.Git, err)
 	}
-	root, err := os.MkdirTemp("", "mw-sync-")
+	root, err := scenarioTempDir("", "mw-sync-")
 	if err != nil {
 		return fmt.Errorf("making the vaults: %w", err)
 	}

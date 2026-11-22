@@ -87,7 +87,7 @@ func InitializeGristCreditsCommandScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *creditsCommandContext) aWorkbench(host, home string) error {
-	dir, err := os.MkdirTemp("", "mw-grist-credits-")
+	dir, err := scenarioTempDir("", "mw-grist-credits-")
 	if err != nil {
 		return err
 	}

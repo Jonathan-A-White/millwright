@@ -228,7 +228,7 @@ func (c *gristContext) vectorKey(name string) (pub, wif string, err error) {
 }
 
 func (c *gristContext) aMill(host string) error {
-	home, err := os.MkdirTemp("", "mw-grist-")
+	home, err := scenarioTempDir("", "mw-grist-")
 	if err != nil {
 		return err
 	}

@@ -116,7 +116,7 @@ func (c *reportContext) aFactory(now string) error {
 		return err
 	}
 	c.now = at
-	dir, err := os.MkdirTemp("", "mw-report-")
+	dir, err := scenarioTempDir("", "mw-report-")
 	if err != nil {
 		return err
 	}
@@ -837,7 +837,7 @@ func (c *reportContext) giveSeatMeans(report *application.FactoryReport) {
 // subagent's file lies under the session's directory.
 func (c *reportContext) theSessionTranscripts(table *godog.Table) error {
 	if c.transcripts == "" {
-		dir, err := os.MkdirTemp("", "mw-report-transcripts-")
+		dir, err := scenarioTempDir("", "mw-report-transcripts-")
 		if err != nil {
 			return err
 		}

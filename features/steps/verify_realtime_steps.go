@@ -97,7 +97,7 @@ func InitializeVerifyRealtimeScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *verifyRealtimeContext) fixture(demo string) error {
-	dir, err := os.MkdirTemp("", "mw-verify-realtime-")
+	dir, err := scenarioTempDir("", "mw-verify-realtime-")
 	if err != nil {
 		return err
 	}

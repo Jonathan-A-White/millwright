@@ -73,7 +73,7 @@ func InitializeTalkModelScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *talkModelContext) aThrowawayMayorKey() error {
-	home, err := os.MkdirTemp("", "mw-talk-model-")
+	home, err := scenarioTempDir("", "mw-talk-model-")
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (c *talkModelContext) aThrowawayGovernorKey() error {
 }
 
 func (c *talkModelContext) aVault() error {
-	dir, err := os.MkdirTemp("", "mw-talk-model-vault-")
+	dir, err := scenarioTempDir("", "mw-talk-model-vault-")
 	c.vault = dir
 	return err
 }

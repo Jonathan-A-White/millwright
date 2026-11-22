@@ -139,7 +139,7 @@ func (c *todoRankContext) theCardIsDueAt(id, due string) error {
 }
 
 func (c *todoRankContext) theAboutFileSays(text string) error {
-	dir, err := os.MkdirTemp("", "mw-todo-rank-about-")
+	dir, err := scenarioTempDir("", "mw-todo-rank-about-")
 	if err != nil {
 		return err
 	}

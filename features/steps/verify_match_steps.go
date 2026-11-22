@@ -142,10 +142,10 @@ func (c *verifyMatchContext) landingAgo(id string, ago time.Duration) error {
 
 func (c *verifyMatchContext) evidence(message, picture string) error {
 	var err error
-	if c.inbox, err = os.MkdirTemp("", "mw-verify-inbox-"); err != nil {
+	if c.inbox, err = scenarioTempDir("", "mw-verify-inbox-"); err != nil {
 		return err
 	}
-	if c.runs, err = os.MkdirTemp("", "mw-verify-runs-"); err != nil {
+	if c.runs, err = scenarioTempDir("", "mw-verify-runs-"); err != nil {
 		return err
 	}
 	for name, age := range map[string]time.Duration{message + ".txt": time.Hour, picture + ".jpg": 2 * time.Hour} {
@@ -320,10 +320,10 @@ func (c *verifyMatchContext) ensureInbox() error {
 		return nil
 	}
 	var err error
-	if c.inbox, err = os.MkdirTemp("", "mw-verify-inbox-"); err != nil {
+	if c.inbox, err = scenarioTempDir("", "mw-verify-inbox-"); err != nil {
 		return err
 	}
-	c.runs, err = os.MkdirTemp("", "mw-verify-runs-")
+	c.runs, err = scenarioTempDir("", "mw-verify-runs-")
 	return err
 }
 
