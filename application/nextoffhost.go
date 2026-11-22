@@ -25,7 +25,7 @@ func (n Next) offHostCloseOut(ctx context.Context, c *closeOut) string {
 	if host == "" || host == n.Host {
 		return branchNotHereWhy(ctx, n.Landing, "next", c.id, c.rigDir, n.Host, host, c.path)
 	}
-	if _, err := n.Vault.ReadRunFile(ctx, c.id, ResultFileNameForAttempt(c.attempt())); !errors.Is(err, fs.ErrNotExist) {
+	if _, err, _ := n.readResultPulled(ctx, c.id, ResultFileNameForAttempt(c.attempt())); !errors.Is(err, fs.ErrNotExist) {
 		return branchNotHereWhy(ctx, n.Landing, "next", c.id, c.rigDir, n.Host, host, c.path)
 	}
 	return fmt.Sprintf("its claim is %s, so its run record is on %s, not %s: run `mw next %s` on %s, or %s, where nothing was written here",

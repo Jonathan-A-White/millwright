@@ -1398,7 +1398,10 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// session that succeeded quietly: it is one that died.
 	resultName := ResultFileNameForAttempt(c.attempt())
 	resultPath := n.Vault.RunFile(c.id, resultName)
-	printed, err := n.Vault.ReadRunFile(ctx, c.id, resultName)
+	printed, err, pullNote := n.readResultPulled(ctx, c.id, resultName)
+	if pullNote != "" {
+		report.Notes = append(report.Notes, pullNote)
+	}
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), n.paneTailSaid(ctx, c))
 	}
@@ -2525,7 +2528,7 @@ func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, report *Ne
 				"If the Mayor ran the criterion himself and it passed, " + MetRecipe(c.id) + " answers the comment without changing the acceptance."}, true
 	}
 	if written {
-		return n.gristExampleRefusal(ctx, c, report, text)
+		return n.gristExampleRefusal(ctx, c, report, gristProofText(text, comments, at))
 	}
 	stub, found, readErr := n.stubCommentOnStory(ctx, c, report, base)
 	if readErr != nil {

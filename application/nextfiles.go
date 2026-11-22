@@ -295,6 +295,33 @@ func provedGristExamples(comment string) map[string]bool {
 	return proved
 }
 
+// gristProofText is the words the proof of a grind example is read from: the
+// closing comment, at position at among comments, and each comment after it that
+// is not a Builder's (mw-gq6.1620). The Mayor runs `mw grist eval` from the home
+// when the host that worked the story holds no grist test key, and says so in a
+// comment of his own after the Builder's, as he answers an unmet criterion with
+// MET-BY-MAYOR: he does not restate the Builder's whole comment. A Builder's
+// later comment that is not a closing comment proves nothing: the live run is
+// the home's to vouch for, not the session's that built the example.
+func gristProofText(text string, comments []Comment, at int) string {
+	if at < 0 || at >= len(comments) {
+		return text
+	}
+	var proof strings.Builder
+	proof.WriteString(text)
+	for _, comment := range comments[at+1:] {
+		if !builderAuthor(comment.Author) {
+			proof.WriteString("\n" + comment.Text)
+		}
+	}
+	return proof.String()
+}
+
+// gristProofWhere is where the line that proves an example is written, in the
+// refusal's words: the Builder's closing comment, or a comment of the Mayor's on
+// the story after it (mw-gq6.1620).
+const gristProofWhere = "the closing comment, or in a comment of the Mayor's on the story after it (a Builder's own later comment does not count)"
+
 // branchDeletesFile reports that the branch, which the diff from its target
 // lists as changing file, no longer has it: a grind example a branch deletes has
 // no grind left to evaluate it with (mw-gq6.838). A Changes port that cannot
@@ -372,7 +399,7 @@ func (n Next) gristExampleRefusal(ctx context.Context, c *closeOut, report *Next
 		return Refusal{ReasonGristExampleUnproved, why + "; " + headline, said}, true
 	}
 	said := fmt.Sprintf("A grind example that passes the fake mill can fail the live grist (mw-fu7dqf.12 landed one that failed 2 of 2). "+
-		"Run each on the branch against the real mill (add --ref %s) and write a line for it in the closing comment, "+
+		"Run each on the branch against the real mill (add --ref %s) and write a line for it in "+gristProofWhere+", "+
 		"%q, with the app, kind and example as run:\n\n%s\n\n"+
 		"Nothing was merged: the branch is still the session's to amend. Run the evals, write the closing comment again after the last commit, and run `mw next %s` again. "+
 		"An eval that does not pass is a criterion not met: say so, and the story is handed back.",
@@ -414,7 +441,7 @@ func (n Next) unprovedFromAHostWithNoMill(ctx context.Context, c *closeOut, repo
 		}
 	}
 	said = where + pushed + " From the home, run each against the real mill:\n\n" + strings.Join(evals, "\n") + "\n\n" +
-		"and write a line for each in the closing comment, " + fmt.Sprintf("%q", GristEvalProofLine) + ", then run `mw next " + c.id + "` again. " +
+		"and write a line for each in " + gristProofWhere + ", " + fmt.Sprintf("%q", GristEvalProofLine) + ", then run `mw next " + c.id + "` again. " +
 		"Nothing was merged. An eval that does not pass is a criterion not met: say so, and the story is handed back."
 	return said, headline
 }
