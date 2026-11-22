@@ -288,6 +288,14 @@ func newDoctorCmd() *cobra.Command {
 				verdict, _ := wg.Probe(ctx)
 				return verdict == application.DoctorFaulty
 			}
+			// Each Boost asked what a fit Boost has, once an hour, over ssh; each gap
+			// is named with its cure (mw-6ww.185.9).
+			boostFit := doctor.NewBoostFit(mwVault(vault, host), host, handsHosts, store)
+			boostFit.Retired = retired
+			boostFit.Cloud = cloudBoxNames(vault, host)
+			boostFit.Note = func(ctx context.Context, text string) error {
+				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.BoostFitName), text)
+			}
 			// The threshold is mw status's own, read here but judged by the check:
 			// a host_silent_hours this host cannot read is its to say.
 			boostAsleep := doctor.NewBoostAsleep(mwVault(vault, host), host, mwGateway(vault, host))
@@ -619,6 +627,7 @@ func newDoctorCmd() *cobra.Command {
 				posternChannel,
 				battery,
 				boostReach,
+				boostFit,
 				boostAsleep,
 				starvedRigs,
 				recheckSkips,

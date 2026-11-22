@@ -67,6 +67,7 @@ func newHostCmd() *cobra.Command {
 	root.AddCommand(newHostSweepCmd())
 	root.AddCommand(newHostHiddenCmd())
 	root.AddCommand(newHostTidyCmd())
+	root.AddCommand(newHostFitCmd())
 	return root
 }
 
