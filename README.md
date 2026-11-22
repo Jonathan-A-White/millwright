@@ -482,7 +482,7 @@ the Windows task writes into WSL (`~/.local/state/mw/windows-drive-free`). A hos
 whose kernel says it is WSL (`/proc/version`) and has no current report starts nothing,
 and says so under DAMPERS: the desktop filled its D: that way (mw-gq6.1527);
 `mw host wsl-flag --install-line` prints the line that installs the task, and
-`min_drive_free_gb = 0` turns this off too. `mw status` names a refusal for the drive under DAMPERS, with the free space and the floor, and
+`min_drive_free_gb = 0` turns this off too. Every host, WSL or not, also needs `min_root_free_gb` (default 15, `0` turns it off) free on its own root filesystem (`statfs /`): once a WSL disk is shrunk to fit its drive, or on a cloud box, the root is the real limit (mw-6ww.185.6); a root that cannot be read holds nothing back, and a `[[dispatch.windows]]` entry may carry the key. `mw status` names a refusal for the drive or the root under DAMPERS, with the free space and the floor, and
 `mw doctor wsl-drive-free` warns, 'low, not yet refusing', under `drive_warn_gb` (default 30, `0` is off). A host can also decline rigs: `skip_rigs = ["millwright"]` in the same table leaves that rig's `host=auto` stories to the other hosts (gate `skip-rigs`, docs/dispatch-gates.md), taking one itself once none has in `skip_rigs_wait_min` minutes (default 20); a story pathed to the host by name is still taken. The cap on sessions is still the ceiling: room only holds
 back a story the cap would have let through, which stays ready and claimed by
 nobody. A load or memory that cannot be read holds nothing back. A host that loses
@@ -1785,7 +1785,7 @@ name = "night"                     # optional: mw status shows "cap 4: night win
 from = "23:00"
 to   = "06:00"
 tz   = "America/New_York"          # a tz database zone, so a change of clocks is read; the first window that holds the moment wins
-cap  = 4                           # and any of builder_jobs, builder_nice, room_load_per_core, room_min_free_mb, min_drive_free_gb; a key it leaves out keeps its root value
+cap  = 4                           # and any of builder_jobs, builder_nice, room_load_per_core, room_min_free_mb, min_drive_free_gb, min_root_free_gb; a key it leaves out keeps its root value
 # A story running when a window closes is not stopped; the lower cap holds back new starts. A malformed window is skipped, the root values apply, and mw doctor dispatch-windows names the key.
 
 [rigs]

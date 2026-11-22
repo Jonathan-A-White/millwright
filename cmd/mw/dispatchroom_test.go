@@ -49,9 +49,9 @@ func TestEveryDispatchCmdMwBuildsIsGivenTheHostRoom(t *testing.T) {
 // the same limits the timer's dispatch and mw status read.
 func TestWithHostRoomGivesADispatchTheConfigsRoomLimits(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	room := config.RoomSettings{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12}
+	room := config.RoomSettings{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12, MinRootFreeGB: 9}
 	got := withHostRoom(application.Dispatch{Host: "laptop"}, room)
-	want := application.RoomLimits{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12, NoDriveGuard: false}
+	want := application.RoomLimits{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12, NoDriveGuard: false, MinRootFreeGB: 9}
 	if got.Room != want {
 		t.Errorf("Room = %+v, want %+v", got.Room, want)
 	}
@@ -65,8 +65,8 @@ func TestWithHostRoomGivesADispatchTheConfigsRoomLimits(t *testing.T) {
 	}
 
 	off := withHostRoom(application.Dispatch{Host: "laptop"}, config.RoomSettings{LoadPerCore: 1, MinFreeMB: 500})
-	if !off.Room.NoDriveGuard {
-		t.Errorf("min_drive_free_gb = 0 must turn the drive guard off, got %+v", off.Room)
+	if !off.Room.NoDriveGuard || !off.Room.NoRootGuard {
+		t.Errorf("min_drive_free_gb = 0 and min_root_free_gb = 0 must turn the guards off, got %+v", off.Room)
 	}
 }
 
@@ -110,8 +110,8 @@ func TestEveryNextCmdMwRunsAfterALandingIsGivenTheHostRoom(t *testing.T) {
 			t.Errorf("%s builds the Next of a landing with no room: wrap it in withHostNextRoom(..., room)", file)
 		}
 	}
-	got := withHostNextRoom(application.Next{Host: "laptop"}, config.RoomSettings{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12})
-	if want := (application.RoomLimits{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12}); got.Room != want {
+	got := withHostNextRoom(application.Next{Host: "laptop"}, config.RoomSettings{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12, MinRootFreeGB: 9})
+	if want := (application.RoomLimits{LoadPerCore: 0.7, MinFreeMB: 900, MinDriveFreeGB: 12, MinRootFreeGB: 9}); got.Room != want {
 		t.Errorf("Room = %+v, want %+v", got.Room, want)
 	}
 }
@@ -136,6 +136,31 @@ func TestNextCarriesTheRoomLimits(t *testing.T) {
 		}
 		if got.Room.LoadPerCore != 0.6 || got.Room.MinFreeMB != 700 {
 			t.Errorf("Next.Room = %+v, want the [dispatch] table's load and memory keys", got.Room)
+		}
+	}
+}
+
+// mw-6ww.185.6: min_root_free_gb of the [dispatch] table reaches the dispatch mw next
+// runs after a close-out and the Next's own wait for room, as min_drive_free_gb
+// does: 15 by default, 0 turns the root-filesystem floor off.
+func TestDispatchRoomTakesTheRootFloorKey(t *testing.T) {
+	for _, tc := range []struct {
+		table   string
+		wantGB  int64
+		noGuard bool
+	}{{"", 15, false}, {"min_root_free_gb = 25\n", 25, false}, {"min_root_free_gb = 0\n", 0, true}} {
+		mwConfig(t, "[dispatch]\nroom_load_per_core = 0.6\n"+tc.table)
+		room, err := config.Room()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := withHostDispatchLocks(withHostRoom(withHostRechecks(application.Dispatch{Host: "laptop"}, application.Suite{}), room), t.TempDir())
+		if got.Room.MinRootFreeGB != tc.wantGB || got.Room.NoRootGuard != tc.noGuard {
+			t.Errorf("%q: Dispatch.Room = %+v, want MinRootFreeGB %d, NoRootGuard %v", tc.table, got.Room, tc.wantGB, tc.noGuard)
+		}
+		next := withHostNextRoom(application.Next{Host: "laptop"}, room)
+		if next.Room.MinRootFreeGB != tc.wantGB || next.Room.NoRootGuard != tc.noGuard {
+			t.Errorf("%q: Next.Room = %+v, want MinRootFreeGB %d, NoRootGuard %v", tc.table, next.Room, tc.wantGB, tc.noGuard)
 		}
 	}
 }

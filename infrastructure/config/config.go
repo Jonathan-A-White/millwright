@@ -1505,6 +1505,7 @@ type RoomSettings struct {
 	// MinDriveFreeGB is the free space, in gigabytes, the Windows drive of a WSL
 	// host must have; 0 is the guard off (mw-gq6.1381).
 	MinDriveFreeGB int64
+	MinRootFreeGB  int64 // the root filesystem's floor, min_root_free_gb; 0 is off (mw-6ww.185.6)
 	// DriveWarnGB is the free space, in gigabytes, under which mw doctor warns
 	// that the drive is low though dispatch is not yet refusing; 0 is off
 	// (mw-gq6.1428).
@@ -1546,13 +1547,13 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 		return RoomSettings{}, err
 	}
 	if window := activeWindow(path, now); window != nil {
-		for _, key := range []string{"room_load_per_core", "room_min_free_mb", "min_drive_free_gb"} {
+		for _, key := range []string{"room_load_per_core", "room_min_free_mb", "min_drive_free_gb", "min_root_free_gb"} {
 			if said := window.Values[key]; said != "" {
 				table[key] = said
 			}
 		}
 	}
-	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB, MinDriveFreeGB: DefaultRoomMinDriveFreeGB, DriveWarnGB: DefaultDriveWarnGB}
+	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB, MinDriveFreeGB: DefaultRoomMinDriveFreeGB, MinRootFreeGB: DefaultRoomMinRootFreeGB, DriveWarnGB: DefaultDriveWarnGB}
 	if said := strings.TrimSpace(table["room_load_per_core"]); said != "" {
 		n, err := strconv.ParseFloat(said, 64)
 		if err != nil || n <= 0 || math.IsInf(n, 0) || math.IsNaN(n) {
@@ -1567,19 +1568,8 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 		}
 		settings.MinFreeMB = n
 	}
-	if said := strings.TrimSpace(table["min_drive_free_gb"]); said != "" {
-		n, err := strconv.ParseInt(said, 10, 64)
-		if err != nil || n < 0 {
-			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says min_drive_free_gb = %q: it must be a whole number of gigabytes, 0 (the guard off) or more", DispatchTable, path, said)
-		}
-		settings.MinDriveFreeGB = n
-	}
-	if said := strings.TrimSpace(table["drive_warn_gb"]); said != "" {
-		n, err := strconv.ParseInt(said, 10, 64)
-		if err != nil || n < 0 {
-			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says drive_warn_gb = %q: it must be a whole number of gigabytes, 0 (the warning off) or more", DispatchTable, path, said)
-		}
-		settings.DriveWarnGB = n
+	if err := roomFloorsIn(table, path, &settings); err != nil {
+		return RoomSettings{}, err
 	}
 	var skipErr error
 	if settings.Skip, skipErr = skipRigsIn(path, table); skipErr != nil {

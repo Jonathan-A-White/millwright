@@ -213,6 +213,10 @@ const (
 	// free than the floor: dispatch starts no new Builder there while it lasts
 	// (mw-gq6.1428).
 	DamperDriveFloor = "drive floor"
+	// DamperRootFloor is the alarm for a host whose own root filesystem has less
+	// free than the floor: dispatch starts no new Builder there while it lasts
+	// (mw-6ww.185.6).
+	DamperRootFloor = "root floor"
 	// DamperOwed is the alarm for his posts that have only a receipt of ours
 	// past OwedGrace: mw postern owed lists them (mw-gq6.1539).
 	DamperOwed = "owed"

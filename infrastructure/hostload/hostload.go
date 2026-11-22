@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -52,6 +53,9 @@ type Proc struct {
 	// VersionFile is the kernel's version line, read to know a WSL host
 	// (LoadReading.WSL, mw-gq6.1527); empty is /proc/version.
 	VersionFile string
+	// RootFree is the free bytes of the host's root filesystem, read for
+	// LoadReading.RootFree* (mw-6ww.185.6); nil reads statfs of "/".
+	RootFree func() (int64, error)
 }
 
 var _ application.HostLoad = Proc{}
@@ -84,6 +88,7 @@ func (p Proc) Load(_ context.Context) (application.LoadReading, error) {
 	reading.SwapInKBPerS, reading.SwapOutKBPerS, reading.SwapKnown = p.swapRate()
 	reading.PartWorkers = p.partWorkers()
 	reading.WSL = p.wsl()
+	reading.RootFreeBytes, reading.RootKnown = p.rootFree()
 	return reading, nil
 }
 
@@ -207,4 +212,19 @@ func (p Proc) driveFree() (name string, free int64, known bool) {
 		return "", 0, false
 	}
 	return drive, free, true
+}
+
+// rootFree is the bytes free to an ordinary user on the root filesystem, and
+// whether it could be read: a statfs that fails leaves it unknown rather than
+// failing the whole reading, and no floor applies (mw-6ww.185.6).
+func (p Proc) rootFree() (int64, bool) {
+	if p.RootFree != nil {
+		free, err := p.RootFree()
+		return free, err == nil
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs("/", &st); err != nil {
+		return 0, false
+	}
+	return int64(st.Bavail) * int64(st.Bsize), true
 }
