@@ -249,3 +249,47 @@ func TestGrindsAreReadAtARefOrAWorktreeNotAtMain(t *testing.T) {
 		t.Error("expected a ref naming no commit to be an error")
 	}
 }
+
+// A story's branch pushed to origin and never fetched into the mill's checkout
+// still resolves, by its name or by origin/ and its name, to its commit: the
+// ref is fetched once from origin, into FETCH_HEAD only, and the checkout's
+// HEAD, branches and working tree stay as they were (mw-gq6.1655).
+func TestResolveRefFetchesABranchTheCheckoutNeverFetched(t *testing.T) {
+	here, other := aRig(t)
+	run(t, other, "git", "checkout", "-q", "-b", "mw/x")
+	write(t, other, "grinds/sweep.md", "SAY PUSHED\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "Pushed, never fetched")
+	pushed := run(t, other, "git", "rev-parse", "HEAD")
+	run(t, other, "git", "push", "-q", "origin", "mw/x")
+
+	state := func() string {
+		return run(t, here, "git", "rev-parse", "HEAD") + "|" +
+			run(t, here, "git", "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads") + "|" +
+			run(t, here, "git", "status", "--porcelain")
+	}
+	before := state()
+
+	ctx := context.Background()
+	grinds := rig.NewGrinds()
+	for _, name := range []string{"mw/x", "origin/mw/x"} {
+		from, commit, _, err := grinds.ResolveRef(ctx, here, name)
+		if err != nil || commit != pushed || from != here {
+			t.Fatalf("%s: expected %s read from %s, got %q from %q, %v", name, pushed, here, commit, from, err)
+		}
+		if data, found, err := grinds.ReadAt(ctx, from, commit, "grinds/sweep.md"); err != nil || !found || string(data) != "SAY PUSHED\n" {
+			t.Fatalf("%s: expected the pushed file, got %q %v %v", name, data, found, err)
+		}
+	}
+	if after := state(); after != before {
+		t.Errorf("expected the checkout's HEAD, local branches and tree unchanged, before:\n%s\nafter:\n%s", before, after)
+	}
+
+	_, _, _, err := grinds.ResolveRef(ctx, here, "mw/nowhere")
+	if err == nil || !strings.Contains(err.Error(), "mw/nowhere") {
+		t.Errorf("expected an error naming the ref that is on neither, got %v", err)
+	}
+	if _, _, _, err := grinds.ResolveRef(ctx, here, "origin/mw/nowhere"); err == nil || !strings.Contains(err.Error(), "origin/mw/nowhere") {
+		t.Errorf("expected an error naming origin/mw/nowhere, got %v", err)
+	}
+}
