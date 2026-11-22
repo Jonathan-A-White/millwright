@@ -147,3 +147,55 @@ func TestWSLDiskFitsCureIsOneNoteNamingTheShrink(t *testing.T) {
 		t.Errorf("a note has no cure to cap, got %d", cap)
 	}
 }
+
+// A home whose drive is seen through a mount (the Laptop's /mnt/c) and which has
+// no windows-state says both numbers, as the one with a state does (mw-6ww.185.38).
+func TestWSLDiskFitsHomeReadsItsMount(t *testing.T) {
+	c := wslDiskFitsCheck(t, "wsl", "", 1007, true)
+	c.Mount = t.TempDir()
+	c.MountSize = func(path string) (int64, error) {
+		if path != c.Mount {
+			t.Errorf("expected the mount %q read, got %q", c.Mount, path)
+		}
+		return fitDriveBytes, nil
+	}
+	verdict, reason := c.Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("expected ok on the home, got %v %q", verdict, reason)
+	}
+	for _, want := range []string{"1007", "286", "watched by wsl-drive-free"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("expected %q in the ok line, got %q", want, reason)
+		}
+	}
+	if strings.Contains(reason, "not read here") {
+		t.Errorf("the drive's size is read from the mount, got %q", reason)
+	}
+}
+
+// Off the home, a mount stands for the windows-state too: the disk too big for
+// the drive it reads is faulty, and one that fits is ok.
+func TestWSLDiskFitsAHostWithAMountNeedsNoWindowsState(t *testing.T) {
+	for _, tc := range []struct {
+		rootGB int64
+		want   application.Verdict
+	}{{1007, application.DoctorFaulty}, {220, application.DoctorOK}} {
+		c := wslDiskFitsCheck(t, "wsl", "", tc.rootGB, false)
+		c.Mount = t.TempDir()
+		c.MountSize = func(string) (int64, error) { return fitDriveBytes, nil }
+		if v, r := c.Probe(context.Background()); v != tc.want || !strings.Contains(r, "286") {
+			t.Errorf("root %d GB: expected %v naming 286, got %v %q", tc.rootGB, tc.want, v, r)
+		}
+	}
+}
+
+// A mount that is not there (the desktop's sealed drive) leaves the windows-state
+// to be read, as before.
+func TestWSLDiskFitsAMountThatIsNotThereReadsTheState(t *testing.T) {
+	c := wslDiskFitsCheck(t, "wsl", desktopState, 1007, true)
+	c.Mount = filepath.Join(t.TempDir(), "absent")
+	c.MountSize = func(string) (int64, error) { t.Error("an absent mount is not read"); return 0, nil }
+	if v, r := c.Probe(context.Background()); v != application.DoctorOK || !strings.Contains(r, "286") {
+		t.Errorf("expected the state's 286 GB, got %v %q", v, r)
+	}
+}
