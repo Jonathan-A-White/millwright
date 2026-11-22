@@ -115,7 +115,9 @@ func TestFollowerStalledReadsTheSameWhileTheStallGrowsByAMinute(t *testing.T) {
 // faultyStall is the stall check with a Probe that says faulty, as a later
 // edit that made the stall a fault would: Doctor then runs its Cure, which
 // changes nothing.
-type faultyStall struct{ *application.FollowerStallCheck }
+type faultyStall struct {
+	*application.FollowerStallCheck
+}
 
 func (f faultyStall) Probe(ctx context.Context) (application.Verdict, string) {
 	v, why := f.FollowerStallCheck.Probe(ctx)
