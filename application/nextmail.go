@@ -207,7 +207,7 @@ func (n Next) mayorMail(c *closeOut, report *NextReport, verdict, said string) N
 	if verdict == MailTested {
 		title = c.tested + ": " + c.findings.Counted()
 	}
-	slim := verdict != MailRefused && verdict != MailBlocked
+	slim := verdict != MailRefused && verdict != MailBlocked && verdict != MailHandedBack
 	body := report.String()
 	if slim {
 		body = report.mailBody()

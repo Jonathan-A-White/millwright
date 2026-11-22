@@ -3420,6 +3420,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	report.Why, report.Reason = why, reason
 	n.recordBenchmark(ctx, c, report, false)
 	giveBack := false
+	handedBack := n.handedBackOnStop(ctx, c, report, reason)
 	if reason == ReasonWorkflowScope || reason == ReasonGateWait {
 		// Before the story is commented on and its claim given back: the
 		// attempt is tooling's and the story goes where the scope is held.
@@ -3438,7 +3439,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 
 	// Written before the claim can be given back, so that the dispatch that
 	// takes the story again finds it (mw-1ljpo9.7).
-	continues := n.handOn(ctx, c, report, reason)
+	continues := !handedBack && n.handOn(ctx, c, report, reason)
 
 	var trouble []string
 	// A story whose work is committed and whose formula was left unfinished is
@@ -3451,15 +3452,16 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// Mayor can bd close it. Every other stop keeps the claim, because the claim
 	// is the evidence.
 	given, cleared := false, false
-	if reason == ReasonStubClosingComment {
+	if reason == ReasonStubClosingComment || handedBack {
 		// Its work is done, so another attempt would redo it: the claim is
-		// given back and the story held for the Mayor (mw-gq6.1045).
+		// given back and the story held for the Mayor (mw-gq6.1045). A hand-back
+		// is held the same way: another attempt meets the same dead end.
 		if err := n.holdOnStop(ctx, c.id, c.detail.Assignee, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("%s could not be held: %v", c.id, err))
 		} else {
 			given = true
 			// The reason the story is held, in the words mw stuck and mw release read.
-			held := HeldCommentPrefix + " " + why + ". " + StubHeldSaid
+			held := heldCommentOnStop(handedBack, c.id, why)
 			if err := writeRetrying(ctx, n, report, "the reason it is held", func() error { return n.Tracker.CommentOnStory(ctx, c.id, held) }); err != nil {
 				trouble = append(trouble, fmt.Sprintf("the reason %s is held could not be written on it: %v", c.id, err))
 			}
@@ -3473,7 +3475,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		// A Tester story that left nothing to land (mw-gq6.594): its claim is not
 		// the evidence, so it is given back and the Mayor can bd close it.
 		claim = "the claim was given back and it is open again, so it can be closed with a plain bd close"
-	} else if given && reason == ReasonStubClosingComment {
+	} else if given && (reason == ReasonStubClosingComment || handedBack) {
 		claim = "the claim was given back and it is held, not open: no dispatch tick takes it until mw release lets it through"
 	} else if given && continues {
 		claim = fmt.Sprintf("the claim was given back and it is open again: the next dispatch tick takes it as attempt %d "+
@@ -3530,6 +3532,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	if report.Refused {
 		verdict = MailRefused
 	}
+	verdict = handedBackVerdict(handedBack, verdict)
 	mail := n.mayorMail(c, report, verdict, said)
 	if reason == ReasonLoginExpired && c.loginTold {
 		// Once per host per expiry, not per story (mw-gq6.781): the Mayor has the
