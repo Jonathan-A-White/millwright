@@ -111,3 +111,48 @@ func TestFollowerStalledReadsTheSameWhileTheStallGrowsByAMinute(t *testing.T) {
 		t.Fatalf("the reason moved with the minute, so the note would be rewritten each run:\n%q\n%q", a, b)
 	}
 }
+
+// faultyStall is the stall check with a Probe that says faulty, as a later
+// edit that made the stall a fault would: Doctor then runs its Cure, which
+// changes nothing.
+type faultyStall struct{ *application.FollowerStallCheck }
+
+func (f faultyStall) Probe(ctx context.Context) (application.Verdict, string) {
+	v, why := f.FollowerStallCheck.Probe(ctx)
+	if v == application.DoctorCannotTell {
+		return application.DoctorFaulty, why
+	}
+	return v, why
+}
+
+func TestFollowerStalledNeverReportsCuredWithTheStallStanding(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		check func(*stallWorld) application.DoctorCheck
+		want  string
+	}{
+		{"as it is, the stall is cannot-tell", func(w *stallWorld) application.DoctorCheck { return w.check }, "cannot-tell"},
+		{"were it faulty, the cure that tells nobody leaves it faulty", func(w *stallWorld) application.DoctorCheck { return faultyStall{w.check} }, "faulty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newStallWorld(t)
+			w.change("c1", 12)
+			d := application.Doctor{
+				Checks: application.DoctorChecks{tc.check(w)},
+				State:  apptest.NewFakeDoctorState(), Log: &apptest.FakeDoctorLog{}, Notes: apptest.NewFakeDoctorNotes(),
+				Host: "vps", Now: func() time.Time { return w.t0.Add(30 * time.Minute) },
+			}
+			report, err := d.Run(context.Background(), "", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(report.Results) != 1 {
+				t.Fatalf("results: %+v", report.Results)
+			}
+			got := report.Results[0]
+			if got.Verdict == "cured" || got.Verdict != tc.want {
+				t.Fatalf("a stall standing is reported %q (%s), want %q", got.Verdict, got.Reason, tc.want)
+			}
+		})
+	}
+}

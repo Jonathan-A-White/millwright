@@ -137,8 +137,14 @@ func joinWithAnd(parts []string) string {
 	return out
 }
 
-// Cure implements DoctorCheck. Nothing is cured: Probe never says faulty.
+// Cure implements DoctorCheck. Nothing is cured: Probe never says faulty, and
+// were it to, the cure changes nothing (CureLeavesFault says so).
 func (c *FollowerStallCheck) Cure(context.Context) error { return nil }
+
+// CureLeavesFault implements DoctorStandsAfterCure: the cure does nothing, so a
+// stall found stands after it and is reported faulty, never cured
+// (mw-6ww.185.36).
+func (c *FollowerStallCheck) CureLeavesFault() bool { return true }
 
 // Damper implements DoctorCheck.
 func (c *FollowerStallCheck) Damper() (time.Duration, int) { return time.Hour, 1 }

@@ -27,7 +27,7 @@ var tellNames = map[string]bool{
 // cure also does real work says CureLeavesFault for the branch that only tells
 // (the two-branch shape), so it has the method too.
 func TestEveryCureThatTellsSaysWhetherTheFaultStands(t *testing.T) {
-	var missing []string
+	var missing, noop []string
 	for _, dir := range []string{".", filepath.Join("..", "..", "application")} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
@@ -68,11 +68,42 @@ func TestEveryCureThatTellsSaysWhetherTheFaultStands(t *testing.T) {
 				missing = append(missing, dir+": "+typ)
 			}
 		}
+		for typ, own := range methods {
+			cure := own["Cure"]
+			if cure == nil || own["CureLeavesFault"] != nil || !onlyReturnsNil(cure) {
+				continue
+			}
+			if _, ok := noopCureLeftToAPerson[typ]; !ok {
+				noop = append(noop, dir+": "+typ)
+			}
+		}
 	}
 	sort.Strings(missing)
 	for _, m := range missing {
 		t.Errorf("%s: Cure sends an alarm, note or mail but the type has no CureLeavesFault (application.DoctorStandsAfterCure)", m)
 	}
+	sort.Strings(noop)
+	for _, m := range noop {
+		t.Errorf("%s: Cure only returns nil and the type has no CureLeavesFault: a fault found would be logged cured with it standing (mw-6ww.185.36); add CureLeavesFault, or list the type in noopCureLeftToAPerson with its reason", m)
+	}
+}
+
+// noopCureLeftToAPerson lists the checks whose Cure rightly does nothing at
+// all and has no CureLeavesFault, each with its reason: a fault found stays
+// for a person, and the doctor never calls Cure for it.
+var noopCureLeftToAPerson = map[string]string{}
+
+// onlyReturnsNil is whether fn's body is the one statement 'return nil'.
+func onlyReturnsNil(fn *ast.FuncDecl) bool {
+	if fn.Body == nil || len(fn.Body.List) != 1 {
+		return false
+	}
+	ret, ok := fn.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return false
+	}
+	id, ok := ret.Results[0].(*ast.Ident)
+	return ok && id.Name == "nil"
 }
 
 // tells is whether fn's body calls a tell, directly or through a method of the

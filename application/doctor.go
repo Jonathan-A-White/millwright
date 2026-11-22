@@ -1930,6 +1930,11 @@ func (c *RigKindsCheck) Probe(ctx context.Context) (Verdict, string) {
 // Cure implements DoctorCheck: there is none, since Probe never says faulty.
 func (c *RigKindsCheck) Cure(context.Context) error { return nil }
 
+// CureLeavesFault implements DoctorStandsAfterCure: the cure does nothing, so a
+// rig with no kinds stands after it, reported faulty, never cured
+// (mw-6ww.185.36).
+func (c *RigKindsCheck) CureLeavesFault() bool { return true }
+
 // Damper implements DoctorCheck.
 func (c *RigKindsCheck) Damper() (time.Duration, int) { return time.Hour, 1 }
 
