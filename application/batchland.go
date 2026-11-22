@@ -245,6 +245,9 @@ type BatchReport struct {
 	// RedAt is when the rig's tests first failed on the batch; zero when they
 	// never did.
 	RedAt time.Time
+	// RedAloneBack is the story of a batch of one whose tests were red, handed
+	// back to a Builder because a batch held it red alone before (mw-gq6.1634).
+	RedAloneBack []BatchStory
 	// gate is what the batch's gate runs measured of the rig's tests and the
 	// host, as a close-out's does: each story the batch lands has it written
 	// into its result file as its benchmark (mw-gq6.966).
@@ -437,6 +440,7 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 	}
 
 	b.handBackRepeaters(ctx, &report)
+	b.handBackRedAlone(ctx, &report)
 	if report.Landed {
 		b.noteSetAside(ctx, &report)
 	}
@@ -577,7 +581,8 @@ func (b BatchLand) narrow(queue []BatchStory, report *BatchReport) []BatchStory 
 // it was landed alone since the rig last landed a batch: it made the batch it
 // was in red, and with it at the head every later batch would be red too, the
 // rest of the queue waiting behind it (mw-gq6.1246). Its hold was mailed; it is
-// taken again once a batch of the rig lands, or when nothing else is queued.
+// taken again once a batch of the rig lands, or when nothing else is queued; a batch of it
+// alone that is red again hands it back to a Builder (handBackRedAlone).
 func (b BatchLand) leaveOutHeldAlone(ctx context.Context, rig string, queue []BatchStory, report *BatchReport) []BatchStory {
 	if b.Metrics == nil {
 		return queue
@@ -1216,6 +1221,9 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 	queued, back := report.setAsideSplit()
 	if len(queued) > 0 {
 		outcome += fmt.Sprintf("set aside, still queued: %s\n", strings.Join(storyIDs(queued), ", "))
+	}
+	if len(report.RedAloneBack) > 0 {
+		outcome += fmt.Sprintf("held red alone again, handed back to a Builder: %s\n", strings.Join(storyIDs(report.RedAloneBack), ", "))
 	}
 	if len(back) > 0 {
 		outcome += fmt.Sprintf("set aside for a conflict again, handed back to a Builder to rebase: %s\n", strings.Join(storyIDs(back), ", "))
