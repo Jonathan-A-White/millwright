@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -368,8 +367,8 @@ func TestWSLFlagInstallLineTakesNoAction(t *testing.T) {
 // PowerShell 5.1, which reads a BOM-less file as ANSI.
 func TestWSLFlagWatchScriptMatchesTheCommand(t *testing.T) {
 	s := millwright.WSLFlagWatch
-	for _, want := range []string{`\home\jwhite\.local\state\mw`, `\wsl-flag"`, `\wsl-flag.result"`, "'restart'", "'compact'",
-		"fstrim -av", "wsl.exe --shutdown", "Start WSL (millwright)", `D:\wsl\Ubuntu-24.04\ext4.vhdx`,
+	for _, want := range []string{`/home/jwhite/.local/state/mw`, `/wsl-flag"`, `/wsl-flag.result"`, "'restart'", "'compact'",
+		"fstrim -av", "--shutdown", `D:\wsl\Ubuntu-24.04\ext4.vhdx`,
 		"attach vdisk readonly", "compact vdisk", "detach vdisk"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the watcher script lacks %q", want)
@@ -381,7 +380,7 @@ func TestWSLFlagWatchScriptMatchesTheCommand(t *testing.T) {
 		}
 	}
 	// the flag is deleted before the action runs
-	del, act := strings.Index(s, "Remove-Item -LiteralPath $flag"), strings.Index(s, "Log \"${want}: begin\"")
+	del, act := strings.Index(s, "Wsl-Delete $flag"), strings.Index(s, "Log \"${want}: begin\"")
 	if del < 0 || act < 0 || del > act {
 		t.Errorf("the flag must be deleted before acting (delete at %d, act at %d)", del, act)
 	}
@@ -409,42 +408,6 @@ func TestWSLFlagInstallLinesCheckElevationBeforeWritingAnything(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertElevationFirst(t, "wsl-flag short line", short)
-}
-
-// The wsl-flag task runs powershell.exe under conhost.exe --headless, as give way's
-// tasks do, so that no console flashes every 2 minutes and at logon; on a Windows
-// build older than give way's minimum the line keeps -WindowStyle Hidden (mw-gq6.1430).
-func TestWSLFlagTaskLaunchesHeadless(t *testing.T) {
-	wslFlagPinned(t, wslFlagTestCommit)
-	out, err := runMw(t, "host", "wsl-flag", "--install-line")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reg string
-	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "Register-ScheduledTask") && strings.Contains(l, "-Force") {
-			reg = l
-		}
-	}
-	if reg == "" {
-		t.Fatalf("no Register-ScheduledTask line in:\n%s", out)
-	}
-	// the Register-ScheduledTask statement is the headless one; the fallback for an old build follows it
-	headless := reg[strings.Index(reg, "Register-ScheduledTask"):]
-	headless = headless[:strings.Index(headless, "-Force")]
-	if !strings.Contains(headless, "-Execute conhost.exe") || !strings.Contains(headless, `-Argument "--headless powershell.exe `) {
-		t.Errorf("the task must run conhost.exe with an Argument starting --headless powershell.exe:\n%s", headless)
-	}
-	if strings.Contains(headless, "-WindowStyle Hidden") {
-		t.Errorf("the headless task must not rely on -WindowStyle Hidden:\n%s", headless)
-	}
-	if !strings.Contains(reg, fmt.Sprintf("Version.Build -lt %d", giveWayMinBuild)) {
-		t.Errorf("the old-build fallback needs the build check (%d):\n%s", giveWayMinBuild, reg)
-	}
-	// older builds keep the hidden window
-	if !strings.Contains(reg, "-Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden") {
-		t.Errorf("an older build keeps powershell.exe -WindowStyle Hidden:\n%s", reg)
-	}
 }
 
 // Every variable the install paste makes starts $mwwf_, so that none can
@@ -490,7 +453,7 @@ var wslFlagStateKeys = []string{
 
 func TestWSLFlagWatchScriptWritesTheWindowsState(t *testing.T) {
 	s := millwright.WSLFlagWatch
-	if !strings.Contains(s, `\windows-state"`) {
+	if !strings.Contains(s, `/windows-state"`) {
 		t.Errorf("the watcher script does not write windows-state beside windows-drive-free")
 	}
 	for _, key := range wslFlagStateKeys {
@@ -505,7 +468,7 @@ func TestWSLFlagWatchScriptWritesTheWindowsState(t *testing.T) {
 		}
 	}
 	// the state is written before the flag is looked at
-	state, flagRead := strings.Index(s, `$windowsState`), strings.Index(s, "$read = Within 60")
+	state, flagRead := strings.Index(s, `$windowsState`), strings.Index(s, "$want = Wsl-Read")
 	if state < 0 || flagRead < 0 || state > flagRead {
 		t.Errorf("the state must be written before the flag is read (state at %d, flag read at %d)", state, flagRead)
 	}
@@ -587,7 +550,7 @@ func TestWindowsPowerShellParsesTheWSLFlagScriptAndLine(t *testing.T) {
 // state. Any other content is still ignored and logged.
 func TestWSLFlagWatchScriptTakesTheInventoryWord(t *testing.T) {
 	s := millwright.WSLFlagWatch
-	for _, want := range []string{"'inventory'", `\windows-inventory.txt"`, "Get-WinEvent", "LogName = 'System'", "AddDays(-7)",
+	for _, want := range []string{"'inventory'", `/windows-inventory.txt"`, "Get-WinEvent", "LogName = 'System'", "AddDays(-7)",
 		"Get-PhysicalDisk", "MediaType", "HealthStatus", "-Tail 40", "ignored flag content"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the watcher script lacks %q", want)
@@ -600,7 +563,7 @@ func TestWSLFlagWatchScriptTakesTheInventoryWord(t *testing.T) {
 		}
 	}
 	// the flag is deleted before the inventory is taken, as before any action
-	del, inv := strings.Index(s, "Remove-Item -LiteralPath $flag"), strings.Index(s, "$want -eq 'inventory'")
+	del, inv := strings.Index(s, "Wsl-Delete $flag"), strings.Index(s, "$want -eq 'inventory'")
 	if del < 0 || inv < 0 || del > inv {
 		t.Errorf("the flag must be deleted (%d) before the inventory is taken (%d)", del, inv)
 	}

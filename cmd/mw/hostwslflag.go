@@ -29,7 +29,14 @@ const (
 // wslFlagActions is the fixed set of things the Windows task will do; the
 // task ignores any other content. inventory changes nothing: the task writes
 // windows-inventory.txt and the wait is for that file, not for wsl-flag.result.
-var wslFlagActions = []string{"restart", "compact", "inventory"}
+// down is written as 'down <seconds>' and is not waited for: WSL is down.
+var wslFlagActions = []string{"restart", "compact", "inventory", "down"}
+
+// The lengths `down --for` takes: the task ignores any other (mw-6ww.185.3).
+const (
+	wslFlagDownMin = 5 * time.Minute
+	wslFlagDownMax = 24 * time.Hour
+)
 
 // wslFlagInventoryLimit is how long mw host wsl-flag inventory waits when --limit
 // is not given: the task looks every 2 minutes and the read takes seconds.
@@ -78,8 +85,17 @@ func wslFlagWriteScript(action string) string {
 		clear += " " + wslFlagPath(wslFlagInventory)
 	}
 	return `mkdir -p "$HOME/` + wslFlagDir + `" && rm -f ` + clear + " " + wslFlagPath(wslFlagFile+".tmp") +
-		` && printf %s ` + action + " > " + wslFlagPath(wslFlagFile+".tmp") +
+		` && printf %s ` + wslFlagShellWord(action) + " > " + wslFlagPath(wslFlagFile+".tmp") +
 		" && mv " + wslFlagPath(wslFlagFile+".tmp") + " " + wslFlagPath(wslFlagFile)
+}
+
+// wslFlagShellWord is an action as one shell word: quoted when it holds a space
+// ('down 600'). It is never single-quoted, which the script may not hold over ssh.
+func wslFlagShellWord(action string) string {
+	if strings.Contains(action, " ") {
+		return `"` + action + `"`
+	}
+	return action
 }
 
 // wslFlagResultScript prints the result file, or nothing.
@@ -119,22 +135,25 @@ var wslFlagCommit = func() string {
 }
 
 // wslFlagRegister is the part of the install line that registers the task
-// with the script already under $mwwf_d. The task runs powershell.exe under
-// conhost.exe --headless, as give way's tasks do, so that no console shows every
-// 2 minutes and at logon. On a Windows build older than giveWayMinBuild, whose
-// conhost.exe does not take --headless, the action is then replaced by
-// powershell.exe -WindowStyle Hidden, which still flashes one but runs. (The
-// line goes to a phone: the second action is a short Set-ScheduledTask, not a
-// second Register-ScheduledTask.)
+// with the script already under $mwwf_d, runs it once, and, when it has had a
+// good tick, takes away the tasks it replaces. The task runs at startup and every
+// 2 minutes whether or not anyone is signed in (logon type S4U: no password is
+// stored), as the Windows user who ran the line, so that a Windows restart for an
+// update does not leave WSL down until someone signs in. With no session there is
+// no window to hide. It waits up to 3 minutes for last-good-tick, which the script
+// writes after a tick that reached WSL (mw-6ww.185.3); without it the keeper and
+// the watchdog stay and the line says so.
 func wslFlagRegister() string {
-	return "$mwwf_f=\"-ExecutionPolicy Bypass -File `\"$mwwf_d\\wsl-flag-watch.ps1`\"\"; " +
+	return "$mwwf_f=\"-NoProfile -ExecutionPolicy Bypass -File `\"$mwwf_d\\wsl-flag-watch.ps1`\"\"; " +
 		`Register-ScheduledTask -TaskName '` + wslFlagTask + `' ` +
-		"-Action (New-ScheduledTaskAction -Execute conhost.exe -Argument \"--headless powershell.exe -NoProfile $mwwf_f\") " +
-		`-Trigger @((New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)),(New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)) ` +
-		`-Principal (New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest) ` +
-		`-Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force; ` +
-		fmt.Sprintf("if ([Environment]::OSVersion.Version.Build -lt %d) { ", giveWayMinBuild) +
-		"Set-ScheduledTask -TaskName '" + wslFlagTask + "' -Action (New-ScheduledTaskAction -Execute powershell.exe -Argument \"-NoProfile -WindowStyle Hidden $mwwf_f\") | Out-Null }"
+		"-Action (New-ScheduledTaskAction -Execute powershell.exe -Argument $mwwf_f) " +
+		`-Trigger @((New-ScheduledTaskTrigger -AtStartup),(New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2))) ` +
+		`-Principal (New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U -RunLevel Highest) ` +
+		`-Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 3) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) -Force; ` +
+		`$mwwf_g="$mwwf_d\last-good-tick"; Remove-Item $mwwf_g -EA 0; Start-ScheduledTask ` + wslFlagTask + `; ` +
+		`for ($mwwf_i=0; $mwwf_i -lt 36 -and !(Test-Path $mwwf_g); $mwwf_i++) { sleep 5 }; ` +
+		`if (Test-Path $mwwf_g) { Unregister-ScheduledTask -TaskName millwright-wsl-keeper,millwright-wsl-watchdog -Confirm:$false -EA 0 } ` +
+		`else { Write-Warning 'no good tick in 3 min: keeper and watchdog left' }`
 }
 
 // wslFlagScriptSHA256 is the upper-case SHA-256 of the watcher script this
@@ -149,21 +168,23 @@ func wslFlagScriptSHA256() string {
 // watcher script from the public repo, pinned at the commit this binary was
 // built from, refuses it unless its SHA-256 is that of the script this binary
 // carries, puts it under ProgramData and registers the scheduled task that
-// runs it every 2 minutes and at logon, as the Windows user who ran the line.
-// It is short enough (well under 2000 bytes) to be sent to a phone.
+// runs it at startup and every 2 minutes with nobody signed in, as the Windows
+// user who ran the line, and, after the task's first good tick, removes the
+// keeper and watchdog tasks it replaces. It is short enough (well under 2000 bytes) to be sent to a phone.
 func WSLFlagInstallLine() (string, error) {
 	commit := wslFlagCommit()
 	if len(commit) != 40 {
 		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build)")
 	}
-	return windowsElevationCheck + `; $mwwf_d="$env:ProgramData\millwright"; New-Item -ItemType Directory -Force $mwwf_d | Out-Null; ` +
+	return windowsElevationCheck + `; $mwwf_d="$env:ProgramData\millwright"; mkdir -Force $mwwf_d | Out-Null; ` +
 		`[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $mwwf_t="$mwwf_d\wsl-flag-watch.ps1.new"; ` +
 		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + wslFlagScriptPath + `' -OutFile $mwwf_t; ` +
 		`if ((Get-FileHash -Algorithm SHA256 $mwwf_t).Hash -ne '` + wslFlagScriptSHA256() + `') { Remove-Item $mwwf_t; throw 'wsl-flag-watch.ps1 does not match its expected SHA-256: nothing installed' }; ` +
 		`Move-Item -Force $mwwf_t "$mwwf_d\wsl-flag-watch.ps1"; ` + wslFlagRegister(), nil
 }
 
-// WSLFlagWayBack is the one line that takes the task and its script away. It
+// WSLFlagWayBack is the one line that takes the task and its script away, and
+// only those: the keeper and the watchdog it removed are not put back. It
 // changes nothing inside WSL. It checks for an elevated session first, as the
 // install lines do: the task is at RunLevel Highest and its script is under
 // ProgramData.
@@ -175,9 +196,10 @@ func WSLFlagWayBack() string {
 func newHostWSLFlagCmd() *cobra.Command {
 	var host string
 	var limit time.Duration
-	var installLine bool
+	var installLine, dryRun bool
+	var downFor time.Duration
 	cmd := &cobra.Command{
-		Use:   "wsl-flag restart|compact|inventory [--host <host>] [--limit <duration>] | --install-line",
+		Use:   "wsl-flag restart|compact|inventory [--host <host>] [--limit <duration>] | down --for <5m..24h> [--host <host>] [--dry-run] | --install-line",
 		Short: "Ask a WSL host's Windows side to restart WSL, or to trim and compact its disk, with no visit to the desk",
 		Long: "WSL on the desktop is sealed from Windows (interop and /mnt/c off), so nothing inside it can start a\n" +
 			"Windows program. A Windows scheduled task (contrib/windows/wsl-flag-watch.ps1), run as the Windows user\n" +
@@ -186,11 +208,17 @@ func newHostWSLFlagCmd() *cobra.Command {
 			"the disk (fstrim) and compacts the vhdx with diskpart; `inventory` changes nothing and has the task write\n" +
 			"a long report of the Windows side (windows-inventory.txt beside the flag). WSL can ask, never command:\n" +
 			"any other content is ignored.\n\n" +
+			"`mw host wsl-flag down --for D` (D from 5 minutes to 24 hours, any other length is refused here and ignored\n" +
+			"by the task) has the task shut WSL down, start nothing until D has passed ('down until T' in its log), and\n" +
+			"start WSL again, writing the act 'down: started again' to windows-acts. It writes the flag and returns: WSL\n" +
+			"is down meanwhile, so nothing here could wait. --dry-run prints the three moments and writes nothing.\n\n" +
 			"`mw host wsl-flag restart|compact|inventory` writes the flag on the host (this host, or --host, reached over\n" +
 			"[hands_hosts]) and waits, up to --limit, for the task to write " + wslFlagResult + " beside it after WSL is\n" +
 			"back, and prints it (for inventory, it waits for " + wslFlagInventory + " and prints that, 10 minutes by default). The wait outlives the restart: a host that does not answer meanwhile is asked again.\n\n" +
 			"`mw host wsl-flag --install-line` prints the one line of admin PowerShell, run once at the desk, that\n" +
-			"installs the task, and the line that takes it away. The line downloads the script from the public repo\n" +
+			"installs the task (it runs at startup and every 2 minutes with nobody signed in, no password stored, and\n" +
+			"after its first good tick removes the tasks millwright-wsl-keeper and millwright-wsl-watchdog), and the\n" +
+			"line that takes it away (only the task and its script). The line downloads the script from the public repo\n" +
 			"pinned at the commit this mw was built from and installs it only if its SHA-256 is the one mw carries;\n" +
 			"it is short enough to send to a phone. There is no form that carries the script in the line: it would have to be encoded.",
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -202,7 +230,7 @@ func newHostWSLFlagCmd() *cobra.Command {
 			}
 			for _, a := range wslFlagActions {
 				if args[0] == a {
-					return nil
+					return wslFlagCheckFor(cmd, a, downFor)
 				}
 			}
 			return fmt.Errorf("%q is not one of %s: the Windows side does only those", args[0], strings.Join(wslFlagActions, ", "))
@@ -236,6 +264,13 @@ func newHostWSLFlagCmd() *cobra.Command {
 					return fmt.Errorf("host %q is neither this host (%s) nor in [hands_hosts], so it cannot be reached", host, here)
 				}
 			}
+			if args[0] == "down" {
+				return askWSLDown(cmd, host, ssh, downFor, dryRun)
+			}
+			if dryRun {
+				fmt.Fprintf(out, "%s: would write the flag %q into ~/%s/%s (nothing written)\n", host, args[0], wslFlagDir, wslFlagFile)
+				return nil
+			}
 			if args[0] == "inventory" && !cmd.Flags().Changed("limit") {
 				limit = wslFlagInventoryLimit
 			}
@@ -244,6 +279,8 @@ func newHostWSLFlagCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&host, "host", "", "the host whose WSL to ask about (default: this host)")
 	cmd.Flags().DurationVar(&limit, "limit", wslFlagLimit, "how long to wait for the result")
+	cmd.Flags().DurationVar(&downFor, "for", 0, "down only: how long WSL stays down, from 5m to 24h in whole seconds")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be written and when, and write nothing")
 	cmd.Flags().BoolVar(&installLine, "install-line", false, "print the one admin-PowerShell line that installs the Windows task, and its way back")
 	return cmd
 }
@@ -324,4 +361,54 @@ func wslFlagUnanswered(ctx context.Context, host, ssh, action string, limit time
 		msg += fmt.Sprintf(" (last answer: %v)", lastErr)
 	}
 	return fmt.Errorf("%s", msg)
+}
+
+// wslFlagCheckFor refuses --for on anything but down, down with no --for, and a
+// length the task would ignore: before the flag is written.
+func wslFlagCheckFor(cmd *cobra.Command, action string, d time.Duration) error {
+	if action != "down" {
+		if cmd.Flags().Changed("for") {
+			return fmt.Errorf("--for belongs to down only, not %s", action)
+		}
+		return nil
+	}
+	if !cmd.Flags().Changed("for") {
+		return fmt.Errorf("say how long: mw host wsl-flag down --for <%s to %s>", wslFlagDownMin, wslFlagDownMax)
+	}
+	_, err := wslFlagDownSeconds(d)
+	return err
+}
+
+// wslFlagDownSeconds is d in whole seconds when it is a length the task takes:
+// 5 minutes to 24 hours, with no fraction of a second.
+func wslFlagDownSeconds(d time.Duration) (int, error) {
+	if d < wslFlagDownMin || d > wslFlagDownMax || d%time.Second != 0 {
+		return 0, fmt.Errorf("--for %s is not from %s to %s in whole seconds: the Windows side takes only those and nothing was written", d, wslFlagDownMin, wslFlagDownMax)
+	}
+	return int(d / time.Second), nil
+}
+
+// askWSLDown writes the flag 'down <seconds>' and returns: WSL goes down under
+// whoever asks, so there is no result to wait for. With dryRun it prints the
+// three moments and writes nothing.
+func askWSLDown(cmd *cobra.Command, host, ssh string, d time.Duration, dryRun bool) error {
+	out := cmd.OutOrStdout()
+	secs, err := wslFlagDownSeconds(d)
+	if err != nil {
+		return err
+	}
+	if dryRun {
+		fmt.Fprintf(out, "%s: down for %s (nothing written; the flag would be 'down %d'):\n"+
+			"  taken: within 2 minutes the Windows task deletes the flag, shuts WSL down and logs 'down until <now + %s>'\n"+
+			"  still down: each tick until then starts nothing and asks WSL nothing\n"+
+			"  started again: the first tick after that starts WSL and writes the act 'down: started again' to windows-acts\n", host, d, secs, d)
+		return nil
+	}
+	wctx, wcancel := context.WithTimeout(cmd.Context(), wslFlagWriteLimit)
+	defer wcancel()
+	if _, err := hostWSLFlagRun(wctx, host, ssh, wslFlagWriteScript(fmt.Sprintf("down %d", secs))); err != nil {
+		return fmt.Errorf("the flag was not written: %w", err)
+	}
+	fmt.Fprintf(out, "%s: asked for WSL down for %s. The Windows task looks every 2 minutes: it shuts WSL down, starts nothing for %s from then, and starts WSL again, writing the act 'down: started again' to windows-acts. WSL answers nothing meanwhile.\n", host, d, d)
+	return nil
 }

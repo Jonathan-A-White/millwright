@@ -222,3 +222,65 @@ func TestWindowsStateCureWritesOneNoteNamingTheFaults(t *testing.T) {
 		t.Errorf("expected the name windows-state, got %q", check.Name())
 	}
 }
+
+// windowsActsCheck is the check over a state file with a windows-acts file
+// beside it holding acts (nil: no such file).
+func windowsActsCheck(t *testing.T, acts []string) *doctor.WindowsState {
+	t.Helper()
+	w := windowsStateCheck(t, "wsl", goodWindowsState())
+	if acts != nil {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(w.Path), "windows-acts"), []byte(strings.Join(acts, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return w
+}
+
+func actAt(ago time.Duration, text string) string {
+	return windowsStateNow.Add(-ago).Format("2006-01-02T15:04:05Z") + " " + text
+}
+
+func TestWindowsStateNamesTheNewestActOfTheLast24HoursInItsOkLine(t *testing.T) {
+	w := windowsActsCheck(t, []string{
+		actAt(30*time.Hour, "hung: restarted"),
+		actAt(5*time.Hour, "not running: started"),
+		actAt(2*time.Hour, "hung: restarted"),
+	})
+	verdict, reason := w.Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("expected ok, got %v %q", verdict, reason)
+	}
+	if !strings.Contains(reason, "hung: restarted") || !strings.Contains(reason, "2026-11-21T10:00:00Z") {
+		t.Errorf("expected the newest act (hung: restarted at 10:00) named, got %q", reason)
+	}
+	if strings.Contains(reason, "not running: started") {
+		t.Errorf("only the newest act is named, got %q", reason)
+	}
+}
+
+func TestWindowsStateNamesNoActOlderThan24Hours(t *testing.T) {
+	w := windowsActsCheck(t, []string{actAt(25*time.Hour, "hung: restarted")})
+	verdict, reason := w.Probe(context.Background())
+	if verdict != application.DoctorOK || strings.Contains(reason, "hung: restarted") {
+		t.Fatalf("expected ok naming no act older than 24 hours, got %v %q", verdict, reason)
+	}
+}
+
+func TestWindowsStateIsOkWithNoActsFileAndSkipsGarbageLines(t *testing.T) {
+	if verdict, reason := windowsActsCheck(t, nil).Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok with no windows-acts, got %v %q", verdict, reason)
+	}
+	w := windowsActsCheck(t, []string{"garbage", actAt(time.Hour, "down: started again"), "not-a-time something"})
+	verdict, reason := w.Probe(context.Background())
+	if verdict != application.DoctorOK || !strings.Contains(reason, "down: started again") {
+		t.Fatalf("expected the one good act named, got %v %q", verdict, reason)
+	}
+}
+
+func TestWindowsStateActsLineComesEvenWhenAnActIsInTheFuture(t *testing.T) {
+	// a clock a little ahead of the writer's is not a reason to hide the act
+	w := windowsActsCheck(t, []string{actAt(-2*time.Minute, "not running: started")})
+	if _, reason := w.Probe(context.Background()); !strings.Contains(reason, "not running: started") {
+		t.Fatalf("expected the act named, got %q", reason)
+	}
+}
