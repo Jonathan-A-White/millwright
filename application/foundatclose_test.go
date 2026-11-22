@@ -1060,3 +1060,77 @@ func TestFoundAtCloseOverflowBeadWithNoACIsHeldForIt(t *testing.T) {
 		t.Fatalf("expected a held overflow bead with no acceptance, got %+v", filed)
 	}
 }
+
+// A finding whose fault a bead closed since the finder's branch forked holds
+// (landed, or closed as superseded naming the bead that carries it) is not filed
+// again: the finder's branch saw the fault unfixed, and it is not now. A bead
+// closed before the branch forked is no such bead, and the finding is filed
+// (mw-gq6.1638).
+func TestAFindingWhoseFaultAClosedBeadHoldsIsNotFiledAgain(t *testing.T) {
+	forked := time.Date(2026, 11, 22, 4, 0, 0, 0, time.UTC)
+	const finding = "`CureLeavesFault` leaves the claude login fault standing after the cure (infrastructure/doctor/claudelogin.go:40)"
+	const fixed = "Make the claude login cure change what it names: `CureLeavesFault` left the claude login fault standing after the cure."
+	cases := []struct {
+		name      string
+		closedAt  time.Time
+		reason    string
+		carrier   bool
+		wantFiled bool
+		wantID    string
+	}{
+		{"landed since the branch forked", forked.Add(48 * time.Minute), "landed", false, false, "mw-x.18"},
+		{"superseded since the branch forked, by a bead that carries it", forked.Add(50 * time.Minute), "Superseded by mw-x.17", true, false, "mw-x.17"},
+		{"closed before the branch forked", forked.Add(-time.Hour), "landed", false, true, ""},
+		{"closed with no time known", time.Time{}, "landed", false, true, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			tracker := apptest.NewFakeTracker()
+			tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+			tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story", Overrides: domain.Path{Files: "application/next.go"}})
+			tracker.AddStory("mw-x", domain.Story{ID: "mw-x.18", Title: "Make the claude login cure change what it names"})
+			mustDo(t, tracker.SetDescription("mw-x.18", fixed))
+			if c.carrier {
+				tracker.AddStory("mw-x", domain.Story{ID: "mw-x.17", Title: "Fold the claude login and battery cures"})
+				mustDo(t, tracker.SetDescription("mw-x.17", fixed))
+				mustDo(t, tracker.SetStatus("mw-x.17", apptest.StatusClosed))
+				mustDo(t, tracker.SetClosedAt("mw-x.17", c.closedAt))
+			}
+			mustDo(t, tracker.CloseStory(ctx, "mw-x.18", c.reason))
+			mustDo(t, tracker.SetClosedAt("mw-x.18", c.closedAt))
+			mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+			mustDo(t, tracker.SetStarted("mw-x.1", forked))
+			mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+			mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done.\nFound, not fixed:\n"+finding+"\nFor the rig memory: nothing"))
+			before := tracker.Stories()
+			vault := newFakeVault()
+			vault.written["mw-x.1/next-1.log"] = "close-out started 2026-11-22T04:57:00Z\n"
+			lands := &fakeRetryLanding{}
+
+			report, err := application.Next{
+				Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+				Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+				Seat: "builder", Host: "laptop",
+				Rigs: map[string]string{"millwright": "/rigs/millwright"},
+				Out:  io.Discard, Err: io.Discard,
+			}.Run(ctx, "mw-x.1")
+			mustDo(t, err)
+
+			filed := theTestersFiled(t, tracker, before)
+			if c.wantFiled != (len(filed) == 1) {
+				t.Fatalf("expected filed=%v, got %d filed: %+v", c.wantFiled, len(filed), filed)
+			}
+			if c.wantFiled {
+				return
+			}
+			want := "already filed as " + c.wantID
+			if !slices.ContainsFunc(report.Notes, func(n string) bool { return strings.Contains(n, want) }) {
+				t.Errorf("expected a note %q, got %v", want, report.Notes)
+			}
+			if log := vault.written["mw-x.1/next-1.log"]; !strings.Contains(log, c.wantID) || !strings.Contains(log, "closed since its branch forked") {
+				t.Errorf("expected the close-out's log to say the join to %s, got %q", c.wantID, log)
+			}
+		})
+	}
+}
