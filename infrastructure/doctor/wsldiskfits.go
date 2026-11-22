@@ -41,8 +41,9 @@ const (
 // file only grows. Faulty, on a WSL host that is not the home, when the root
 // filesystem's size is larger than the drive's size less 20 GB (WSLDiskFitsMargin),
 // both numbers said and the cure named: `mw host wsl-flag shrink`. The drive's
-// size is the vhdx_drive line of windows-state, which the Windows task writes;
-// with none, cannot-tell. On the home it is never faulty (its disk is not shrunk
+// size is that of the Windows drive's Mount where the host sees one (the Laptop's
+// /mnt/c), else the vhdx_drive line of windows-state, which the Windows task
+// writes; with neither, cannot-tell. On the home it is never faulty (its disk is not shrunk
 // without the Governor's word): the ok line says the two numbers and that the
 // drive is watched by wsl-drive-free. Ok on a host that is not WSL. Its cure is
 // one note to the Mayor: the shrink is a Windows task's, behind a drained host.
@@ -52,6 +53,15 @@ type WSLDiskFits struct {
 	Path string
 	// DetectVirt says what systemd-detect-virt prints. Nil runs the real one.
 	DetectVirt func(ctx context.Context) (string, error)
+	// Mount is where this host sees the Windows drive holding its vhdx (the
+	// Laptop's /mnt/c; config.DoctorWindowsDrive). With a Mount that is there, the
+	// drive's size is read from it, as wsl-drive-free reads its free space, before
+	// the windows-state is tried (mw-6ww.185.38). Empty, or absent (the desktop's
+	// sealed drive), the windows-state is read as before.
+	Mount string
+	// MountSize is the size, in bytes, of the filesystem at a path. Nil reads the
+	// real statfs.
+	MountSize func(path string) (int64, error)
 	// Home says whether this host is the home. Nil reads as not the home.
 	Home func(ctx context.Context) (bool, error)
 	// RootSize is the size, in bytes, of the root filesystem as df says it. Nil
@@ -149,9 +159,42 @@ func RootSizeBytes() (int64, error) {
 	return int64(st.Blocks) * int64(st.Bsize), nil
 }
 
-// driveSize is the size of the vhdx's drive from the vhdx_drive line of
-// windows-state, '<letter> <size bytes> <free bytes>'.
+// mountSize is the size of the drive as statfs of Mount says it, and false when
+// there is no Mount, it is not there or cannot be read: the windows-state is
+// tried then, as on a host whose drive is sealed from WSL.
+func (w *WSLDiskFits) mountSize() (int64, bool) {
+	if w.Mount == "" {
+		return 0, false
+	}
+	if info, err := os.Stat(w.Mount); err != nil || !info.IsDir() {
+		return 0, false
+	}
+	size := w.MountSize
+	if size == nil {
+		size = totalBytesOf
+	}
+	n, err := size(w.Mount)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// totalBytesOf is the size of the filesystem at path: blocks x block size.
+func totalBytesOf(path string) (int64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, fmt.Errorf("statfs %s: %w", path, err)
+	}
+	return int64(st.Blocks) * int64(st.Bsize), nil
+}
+
+// driveSize is the size of the vhdx's drive: that of Mount when it is there,
+// else from the vhdx_drive line of windows-state, '<letter> <size bytes> <free bytes>'.
 func (w *WSLDiskFits) driveSize() (int64, error) {
+	if size, ok := w.mountSize(); ok {
+		return size, nil
+	}
 	path := w.Path
 	if path == "" {
 		home, err := os.UserHomeDir()

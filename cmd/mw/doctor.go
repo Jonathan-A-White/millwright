@@ -484,6 +484,7 @@ func newDoctorCmd() *cobra.Command {
 			// The Linux disk against its Windows drive (mw-6ww.185.5): never faulty
 			// on the home, whose disk is not shrunk without the Governor's word.
 			wslDiskFits := doctor.NewWSLDiskFits()
+			wslDiskFits.Mount, _, _ = config.DoctorWindowsDrive()
 			wslDiskFits.Home = func(ctx context.Context) (bool, error) {
 				return application.IsHome(ctx, mwVault(vault, host), host)
 			}
