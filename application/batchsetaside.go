@@ -143,27 +143,12 @@ func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
 	}
 }
 
-// handBack takes story s off the batch queue and gives its claim back; what it
-// returns is why it could not, empty when it did.
+// handBack takes story s off the batch queue, gives its claim back and says on
+// it why; what it returns is why it could not, empty when it did.
 func (b BatchLand) handBack(ctx context.Context, s BatchStory, report *BatchReport) string {
 	n := b.Next
-	// The run state first, as the harness-stop give-back does it (mw-gq6.1382):
-	// no open story is ever seen carrying run:queued.
-	if err := writeRetrying(ctx, n, nil, "the clearing of the run state", func() error { return n.Tracker.ClearRunState(ctx, s.ID) }); err != nil {
-		return fmt.Sprintf("its run state could not be cleared: %v", err)
-	}
-	holder := s.detail.Assignee
-	if detail, err := n.Tracker.ShowStory(ctx, s.ID); err == nil {
-		holder = detail.Assignee
-	}
-	if err := writeRetrying(ctx, n, nil, "the give-back of the claim on "+s.ID, func() error {
-		return givenBackAs(ctx, n.Tracker, s.ID, StatusOpen, n.Tracker.ReleaseClaimHeldBy(ctx, s.ID, holder))
-	}); err != nil {
-		// Queued again, so that it is not left claimed with no run state for the sweep to find.
-		if serr := n.Tracker.SetStoryState(ctx, s.ID, RunState, RunQueued, "handing it back failed: "+firstLine(err.Error())); serr != nil {
-			return fmt.Sprintf("its claim could not be given back: %v (and run=%s could not be written again: %v)", err, RunQueued, serr)
-		}
-		return fmt.Sprintf("its claim could not be given back: %v", err)
+	if why := b.giveBack(ctx, s); why != "" {
+		return why
 	}
 	var comment string
 	if len(s.Conflicts) == 0 {
@@ -183,6 +168,32 @@ func (b BatchLand) handBack(ctx context.Context, s BatchStory, report *BatchRepo
 	}
 	if err := writeRetrying(ctx, n, nil, "the hand-back note", func() error { return n.Tracker.CommentOnStory(ctx, s.ID, comment) }); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s was handed back, but the comment naming the conflicted files could not be written on it: %v", s.ID, err))
+	}
+	return ""
+}
+
+// giveBack takes story s off the batch queue: its run state is cleared and its
+// claim given back, so that the next dispatch tick takes it as a new attempt;
+// what it returns is why it could not, empty when it did.
+func (b BatchLand) giveBack(ctx context.Context, s BatchStory) string {
+	n := b.Next
+	// The run state first, as the harness-stop give-back does it (mw-gq6.1382):
+	// no open story is ever seen carrying run:queued.
+	if err := writeRetrying(ctx, n, nil, "the clearing of the run state", func() error { return n.Tracker.ClearRunState(ctx, s.ID) }); err != nil {
+		return fmt.Sprintf("its run state could not be cleared: %v", err)
+	}
+	holder := s.detail.Assignee
+	if detail, err := n.Tracker.ShowStory(ctx, s.ID); err == nil {
+		holder = detail.Assignee
+	}
+	if err := writeRetrying(ctx, n, nil, "the give-back of the claim on "+s.ID, func() error {
+		return givenBackAs(ctx, n.Tracker, s.ID, StatusOpen, n.Tracker.ReleaseClaimHeldBy(ctx, s.ID, holder))
+	}); err != nil {
+		// Queued again, so that it is not left claimed with no run state for the sweep to find.
+		if serr := n.Tracker.SetStoryState(ctx, s.ID, RunState, RunQueued, "handing it back failed: "+firstLine(err.Error())); serr != nil {
+			return fmt.Sprintf("its claim could not be given back: %v (and run=%s could not be written again: %v)", err, RunQueued, serr)
+		}
+		return fmt.Sprintf("its claim could not be given back: %v", err)
 	}
 	return ""
 }

@@ -116,6 +116,7 @@ func (b BatchLand) LandTheBatchIn(ctx context.Context, dir string, report *Batch
 	var nr NextReport
 	b.landIn(ctx, dir, dir, domain.EpicRequirements{}, report, &nr)
 	b.handBackRepeaters(ctx, report)
+	b.handBackRedAlone(ctx, report)
 	if report.Landed {
 		b.noteSetAside(ctx, report)
 	}
