@@ -11,6 +11,7 @@
 | EpicRules | application/epicrules.go | vault/epicrules.go |
 | Pause{Fleet,Book,Timer,Git} | application/pause.go | pause, rig |
 | GiveWay{Processes,Panes,Markers,Log} | application/giveway.go | giveway, procs/freeze.go |
+| DiskFreeUp, DiskHolders (the stop floor, DiskGuard) | application/diskguard.go | diskguard |
 | Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | {tmux,bdprogram} |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go, application/seattake.go | {vault/{seat,reaplog},tmux/window,claude/claude}.go |
