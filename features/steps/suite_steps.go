@@ -38,6 +38,8 @@ type suiteContext struct {
 	whole    map[string]string // what the whole run of tests/specs printed
 	failed   map[string]bool   // whether the whole run of tests/specs failed
 	alone    map[string]bool   // file -> fails when run alone
+	movesTo  string            // the head main moves on to when the whole run of the tests is run
+	atNew    map[string]bool   // file -> fails when run alone at the moved main
 	rerun    map[string]string // file -> what a passing re-run of it prints
 	readsAt1 int               // load reads made before the first command was run
 
@@ -78,6 +80,7 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 			whole:    map[string]string{},
 			failed:   map[string]bool{},
 			alone:    map[string]bool{},
+			atNew:    map[string]bool{},
 			rerun:    map[string]string{},
 			tracker:  apptest.NewFakeTracker(),
 			mailbox:  apptest.NewFakeMailbox(),
@@ -95,6 +98,8 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the whole run of the (tests|specs) prints:$`, c.theWholeRunPrints)
 	ctx.Given(`^the (tests|specs) fail$`, c.theWholeRunFails)
 	ctx.Given(`^alone, "([^"]*)" (fails again|passes)$`, c.aloneItGoes)
+	ctx.Given(`^main moves on to "([^"]*)" while the suite runs$`, c.mainMovesOn)
+	ctx.Given(`^at the new main, "([^"]*)" (fails again|passes) alone$`, c.atTheNewMainItGoes)
 	ctx.Given(`^the re-run of "([^"]*)" on main prints "([^"]*)" and passes$`, c.aRerunPasses)
 	ctx.Given(`^the suite epic "([^"]*)" holds the ready bug "([^"]*)" labelled "([^"]*)", whose files key is "([^"]*)"$`, c.theEpicHoldsAReadyBug)
 	ctx.When(`^mw dispatch runs on "([^"]*)" for "([^"]*)"$`, c.mwDispatchRuns)
@@ -144,6 +149,7 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^"([^"]*)" has no comment$`, c.theBugHasNoComment)
 	ctx.Then(`^the suite sent one mail to the mayor, subject "([^"]*)"$`, c.theSuiteSentOneMail)
 	ctx.Then(`^the suite sent no mail$`, c.theSuiteSentNoMail)
+	ctx.Then(`^the mail says "([^"]*)"$`, c.theMailSays)
 	ctx.Then(`^the mail names each new story with its file$`, c.theMailNamesEachNewStory)
 	ctx.Then(`^the mail says "([^"]*)" with "([^"]*)" was commented and the other file was new$`, c.theMailSaysWhichIsWhich)
 }
@@ -193,6 +199,27 @@ func (c *suiteContext) aloneItGoes(file, how string) error {
 	return nil
 }
 
+func (c *suiteContext) mainMovesOn(sha string) error {
+	c.movesTo = sha
+	return nil
+}
+
+func (c *suiteContext) atTheNewMainItGoes(file, how string) error {
+	c.atNew[file] = how == "fails again"
+	return nil
+}
+
+func (c *suiteContext) theMailSays(want string) error {
+	mail, err := c.mailed()
+	if err != nil {
+		return err
+	}
+	if len(mail) != 1 || !strings.Contains(strings.Join(strings.Fields(mail[0].Body), " "), want) {
+		return fmt.Errorf("expected the mail to say %q, got %+v", want, mail)
+	}
+	return nil
+}
+
 func (c *suiteContext) theHostCalms(first float64, cores int, second, third float64) error {
 	c.hasLoad = true
 	for _, load := range []float64{first, second, third} {
@@ -219,6 +246,18 @@ func (c *suiteContext) respond(rig string) func(dir, command string) (applicatio
 		if c.readsAt1 == 0 {
 			c.readsAt1 = c.load.Reads
 		}
+		if len(c.atNew) > 0 && strings.Contains(dir, application.RecheckTreePrefix) {
+			for file, fails := range c.atNew {
+				if c.unitRerun(command, file) {
+					out := "at the new main: " + file + "\n"
+					if fails {
+						out += "FAIL  " + file + " > again\n"
+					}
+					return application.Checked{Passed: !fails, Output: out}, nil
+				}
+			}
+			return application.Checked{}, fmt.Errorf("the fake runner was not told of %q at the new main", command)
+		}
 		for file, out := range c.rerun {
 			if c.unitRerun(command, file) || (c.specs[rig] != "" && command == strings.ReplaceAll(c.specs[rig], application.SpecsPlaceholder, file)) {
 				return application.Checked{Passed: true, Output: out + "\n"}, nil
@@ -235,6 +274,9 @@ func (c *suiteContext) respond(rig string) func(dir, command string) (applicatio
 		}
 		switch {
 		case command == c.tests[rig]:
+			if c.movesTo != "" {
+				c.heads.SetHead(path.Join(suiteRigsDir, rig), c.movesTo)
+			}
 			return application.Checked{Passed: !c.failed["tests"], Output: c.whole["tests"]}, nil
 		case c.specs[rig] != "" && command == strings.ReplaceAll(c.specs[rig], application.SpecsPlaceholder, ""):
 			return application.Checked{Passed: !c.failed["specs"], Output: c.whole["specs"]}, nil

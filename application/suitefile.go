@@ -32,8 +32,21 @@ type SuiteFiled struct {
 	ID   string
 	File string
 	New  bool
+	// Mended, when it is set, says the file was filed as nothing: it passed alone
+	// at a main that had moved on since the run (mw-gq6.1654). ID is then empty.
+	Mended string
 	// Notes are what could not be done after the bead was filed.
 	Notes []string
+}
+
+// SuiteAgain is what a filer runs a failing file alone at the rig's main as it
+// is now with, when main has moved on since the suite ran: the head of the
+// rig's origin and the file run alone there (Suite is it).
+type SuiteAgain interface {
+	// Head is the commit at the head of the rig's origin's default branch now.
+	Head(ctx context.Context, rig string) (string, error)
+	// Alone runs file alone at that head and says how it went.
+	Alone(ctx context.Context, rig, file string) (SpecRecheck, error)
 }
 
 // SuiteFiler is what mw suite --file does after a run: one held bug under the
@@ -44,6 +57,11 @@ type SuiteFiler struct {
 	Rules   EpicRules
 	Mailbox Mailbox
 	Host    string
+	// Again, when it is set, is how a file that failed twice is run alone once
+	// more at the rig's main when main is no longer the sha the suite ran at,
+	// before a new bug is filed for it: a file that passes there is filed as
+	// nothing (mw-gq6.1654). nil files every failing file as it stands.
+	Again SuiteAgain
 }
 
 // Epic is the rig's suite_epic, or the refusal that it names none. It reads
@@ -140,6 +158,11 @@ func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteRe
 		return SuiteFiled{ID: story.Story.ID, File: file.File}, nil
 	}
 
+	movedTo, notes := f.movedOn(ctx, report, file)
+	if movedTo.passed {
+		return SuiteFiled{File: file.File, Mended: fmt.Sprintf("passed at %s (main moved since %s), not filed", short(movedTo.sha), short(report.Result.Sha))}, nil
+	}
+
 	// The bug takes its path from the epic as a hand-filed story does: the
 	// epic's seven keys copied on, and the file it is about as its own.
 	path := epic.Defaults
@@ -147,7 +170,7 @@ func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteRe
 	id, err := f.Tracker.CreateStory(ctx, NewStory{
 		EpicID:      epic.ID,
 		Title:       suiteBugTitle(report.Result.Rig, file),
-		Description: suiteBugDescription(report, file),
+		Description: suiteBugDescription(report, file, movedTo.sha),
 		Acceptance:  fmt.Sprintf("1. %s passes on main 5 runs in a row (a shell loop, uptime beside each). 2. The rig's gate passes.\n3. Sweep: none, because the nightly whole suite (mw suite) already runs every file of the rig and found this one.", file.File),
 		Overrides:   path,
 		Labels:      []string{LabelBug, LabelSuite},
@@ -157,8 +180,43 @@ func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteRe
 	}
 	// The epic's last story waits on the new bug, as it does on a Tester's
 	// (mw-gq6.498); a failure of that is no failure of the filing.
-	_, notes := KeepDemoLast(ctx, f.Tracker, f.Rules, report.Result.Rig, epic.ID, id)
-	return SuiteFiled{ID: id, File: file.File, New: true, Notes: notes}, nil
+	_, demoNotes := KeepDemoLast(ctx, f.Tracker, f.Rules, report.Result.Rig, epic.ID, id)
+	return SuiteFiled{ID: id, File: file.File, New: true, Notes: append(notes, demoNotes...)}, nil
+}
+
+// atMain is what running a file alone at a main that moved on says: the head it
+// ran at (empty when it did not run) and whether the file passed there.
+type atMain struct {
+	sha    string
+	passed bool
+}
+
+// movedOn runs a file that failed twice alone at the rig's origin's main when
+// main is no longer the sha the suite ran at (mw-gq6.1654), the same run alone
+// that a suite bug's recheck makes. A main that has not moved is not run again;
+// a file that failed once and passed alone is not either, for one more pass
+// says nothing of a flake. A head that cannot be read or a run that cannot be
+// made files the bug as it stands, with a note saying so.
+func (f SuiteFiler) movedOn(ctx context.Context, report SuiteReport, file SuiteFile) (atMain, []string) {
+	rig := report.Result.Rig
+	if f.Again == nil || file.Flaky {
+		return atMain{}, nil
+	}
+	head, err := f.Again.Head(ctx, rig)
+	if err != nil {
+		return atMain{}, []string{fmt.Sprintf("the head of %s's main could not be read to see whether it moved: %v", rig, err)}
+	}
+	if head == "" || head == report.Result.Sha {
+		return atMain{}, nil
+	}
+	again, err := f.Again.Alone(ctx, rig, file.File)
+	if err != nil {
+		return atMain{}, []string{fmt.Sprintf("main moved to %s since %s but %s could not be run alone there: %v", short(head), short(report.Result.Sha), file.File, err)}
+	}
+	if again.Sha == "" {
+		again.Sha = head
+	}
+	return atMain{sha: again.Sha, passed: again.Passed}, nil
 }
 
 // openSuiteBug is the open bead under the suite epic that holds file's failure:
@@ -239,9 +297,15 @@ func suiteDay(report SuiteReport) string {
 	return report.Result.Started
 }
 
-func suiteBugDescription(report SuiteReport, file SuiteFile) string {
+// suiteBugDescription is the description of a new bug. movedTo, when it is not
+// empty, is the head main had moved on to when the file was run alone again
+// there and failed (mw-gq6.1654).
+func suiteBugDescription(report SuiteReport, file SuiteFile, movedTo string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s on %s main at %s: %s.\n\n", file.File, report.Result.Rig, report.Result.Sha, suiteHow(file))
+	if movedTo != "" {
+		fmt.Fprintf(&b, "Main moved on from %s (the run's sha) to %s; the file was run alone at %s as well and failed there too.\n\n", report.Result.Sha, movedTo, movedTo)
+	}
 	if file.Test != "" {
 		fmt.Fprintf(&b, "First failing test: %s\n\n", file.Test)
 	}
@@ -279,6 +343,10 @@ func suiteMail(host string, report SuiteReport, filed []SuiteFiled, failures []s
 		fmt.Fprintf(&b, "The whole suite of %s passed on main at %s.\n", result.Rig, result.Sha)
 	}
 	for _, one := range filed {
+		if one.Mended != "" {
+			fmt.Fprintf(&b, "%s  %s\n", one.File, one.Mended)
+			continue
+		}
 		how := "commented (an open bead already names the file)"
 		if one.New {
 			how = "new, held"

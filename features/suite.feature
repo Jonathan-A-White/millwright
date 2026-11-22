@@ -162,6 +162,23 @@ Feature: Running a rig's whole test suite on its main
     Then the new story for "src/config.test.ts" is titled "[bug] lampas main: src/config.test.ts is flaky on main (failed, then passed alone)"
     And the suite sent one mail to the mayor, subject "Suite: lampas main 9f3c2ab: 1 failing"
 
+  Scenario: A file that fails twice but passes alone at a main that moved on is not filed
+    Given the rig "lampas" says its suite epic is "mw-suite", whose path is lampas/main/claude/sonnet/high/tdd-feature/laptop
+    And the whole run of the tests prints:
+      """
+      FAIL  src/dates.test.ts > parses dates
+      AssertionError: expected 1 to be 2
+      """
+    And the tests fail
+    And alone, "src/dates.test.ts" fails again
+    And main moves on to "82a89e71c" while the suite runs
+    And at the new main, "src/dates.test.ts" passes alone
+    When mw suite runs "lampas" with --file
+    Then the suite exits 1
+    And the suite epic "mw-suite" holds 0 new stories
+    And the suite sent one mail to the mayor, subject "Suite: lampas main 9f3c2ab: 1 failing"
+    And the mail says "src/dates.test.ts passed at 82a89e71c (main moved since 9f3c2ab), not filed"
+
   Scenario: A file that already has an open suite bug gets a dated comment, not a second bug
     Given the rig "lampas" says its suite epic is "mw-suite", whose path is lampas/main/claude/sonnet/high/tdd-feature/laptop
     And the suite epic holds the held bug "mw-suite.1" titled "[bug] lampas main: src/dates.test.ts fails on main", labelled bug and suite

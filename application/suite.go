@@ -263,6 +263,10 @@ func (r SuiteReport) String() string {
 		fmt.Fprintf(&b, "  note    %s\n", note)
 	}
 	for _, one := range r.Filed {
+		if one.Mended != "" {
+			fmt.Fprintf(&b, "  not filed: %s %s\n", one.File, one.Mended)
+			continue
+		}
 		how := "commented on"
 		if one.New {
 			how = "filed, held:"
@@ -851,7 +855,11 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		}
 	}
 	if s.Filer != nil {
-		filed, err := s.Filer.File(ctx, epic, report)
+		filer := *s.Filer
+		if filer.Again == nil {
+			filer.Again = s
+		}
+		filed, err := filer.File(ctx, epic, report)
 		report.Filed = filed
 		if err != nil {
 			s.say("%s", report.String())
@@ -951,6 +959,59 @@ func unitStepFor(tests, file string) string {
 		return step + " " + shellWord(file)
 	}
 	return ""
+}
+
+// Head is the commit at the head of rig's origin's default branch now, read
+// after a fetch: what a filer compares the run's sha with to see whether main
+// has moved on (mw-gq6.1654).
+func (s Suite) Head(ctx context.Context, rig string) (string, error) {
+	rigDir, known := s.Rigs[rig]
+	if !known {
+		return "", fmt.Errorf("%s is no rig of this host: the config file's [rigs] table does not name it", rig)
+	}
+	head, err := s.Heads.Resolve(ctx, rigDir, "")
+	if err != nil {
+		return "", fmt.Errorf("reading %s's origin: %w", rig, err)
+	}
+	return head.Commit, nil
+}
+
+// Alone runs file alone at the head of rig's origin, as Recheck does, under the
+// host's gate lock when the suite has one: the run of a suite's end comes after
+// every command line of it, when the lock is no longer held. The lock is given
+// back for a wait for a calm host and taken again after it, as a re-run does.
+func (s Suite) Alone(ctx context.Context, rig, file string) (SpecRecheck, error) {
+	if s.GateLock == nil {
+		return s.Recheck(ctx, rig, file)
+	}
+	what := "the re-run of " + file + " at main"
+	give, err := s.takeGateLock(ctx, rig, what, []string{"the suite"})
+	if err != nil {
+		return SpecRecheck{}, err
+	}
+	gate := &suiteRecheckGate{s: s, rig: rig, what: what, give: give}
+	defer func() { gate.give() }()
+	return s.RecheckBetween(ctx, rig, file, gate)
+}
+
+// suiteRecheckGate lends the gate lock a suite holds for one re-run to
+// RecheckBetween: Free gives it back and Retake takes it again.
+type suiteRecheckGate struct {
+	s    Suite
+	rig  string
+	what string
+	give func()
+}
+
+func (g *suiteRecheckGate) Free() { g.give() }
+
+func (g *suiteRecheckGate) Retake(ctx context.Context) error {
+	give, err := g.s.takeGateLock(ctx, g.rig, g.what+" again", []string{"the suite"})
+	if err != nil {
+		return err
+	}
+	g.give = give
+	return nil
 }
 
 var passedCount = regexp.MustCompile(`(\d+) passed`)

@@ -268,3 +268,121 @@ func TestAFailingSpecNamedInTheFilesKeyOfAClosedStoryOrNamedOnlyByAGlobIsFiledAs
 		})
 	}
 }
+
+// movedSuite is the lampas suite of the run of 2026-11-22 (mw-gq6.1654): the
+// whole run of `npm test` fails src/dates.test.ts and the file fails alone in
+// the run's own tree, and when moves is set main has moved on to newSha by the time
+// the run ends. The file's run alone in a recheck tree, at the head it was cut
+// at, says atHead, and each such run is counted.
+func movedSuite(t *testing.T, moves bool, atHead application.Checked) (application.Suite, *apptest.FakeTracker, *apptest.FakeMailbox, *int) {
+	t.Helper()
+	const file = "src/dates.test.ts"
+	failed := "FAIL  " + file + " > parses dates\nAssertionError: expected 1 to be 2\n"
+	suite, _, tracker, mailbox := lampasSuite(t, nil)
+	heads := suite.Heads.(*apptest.FakeRigHeads)
+	again := 0
+	suite.Runner.(*apptest.FakeSuiteRunner).Respond = func(dir, command string) (application.Checked, error) {
+		switch {
+		case strings.Contains(dir, application.RecheckTreePrefix):
+			again++
+			return atHead, nil
+		case command == "npm test":
+			if moves {
+				heads.SetHead("/rigs/lampas", "82a89e71c")
+			}
+			return application.Checked{Output: failed}, nil
+		case command == "npm test -- "+file:
+			return application.Checked{Output: failed}, nil
+		case command == "npx playwright test ":
+			return application.Checked{Passed: true}, nil
+		}
+		t.Errorf("the suite ran %q, which the test did not expect", command)
+		return application.Checked{Passed: true}, nil
+	}
+	return suite, tracker, mailbox, &again
+}
+
+func mailBody(t *testing.T, mailbox *apptest.FakeMailbox) string {
+	t.Helper()
+	mail, _ := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if len(mail) != 1 {
+		t.Fatalf("expected one mail to the Mayor, got %d", len(mail))
+	}
+	return mail[0].Body
+}
+
+func TestAFileThatPassesAloneAtTheNewHeadOfMainIsNotFiledAndTheMailSaysSo(t *testing.T) {
+	suite, tracker, mailbox, again := movedSuite(t, true, application.Checked{Passed: true, Output: "ok\n"})
+	if _, err := suite.Run(context.Background(), "lampas"); err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if *again != 1 {
+		t.Errorf("expected the file run alone once at the new head, got %d runs", *again)
+	}
+	if stories := tracker.Stories(); len(stories) != 0 {
+		t.Errorf("expected no bug filed for a file that passes at the new head, got %v", stories)
+	}
+	body := mailBody(t, mailbox)
+	for _, want := range []string{"src/dates.test.ts", "passed at 82a89e71c (main moved since 11541bc0d), not filed"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected the mail to say %q, got:\n%s", want, body)
+		}
+	}
+}
+
+func TestAFileThatFailsAloneAtTheNewHeadOfMainIsFiledNamingBothShas(t *testing.T) {
+	failed := "FAIL  src/dates.test.ts > parses dates\nAssertionError: expected 1 to be 2\n"
+	suite, tracker, _, again := movedSuite(t, true, application.Checked{Output: failed})
+	if _, err := suite.Run(context.Background(), "lampas"); err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if *again != 1 {
+		t.Errorf("expected one run alone at the new head, got %d", *again)
+	}
+	stories := tracker.Stories()
+	if len(stories) != 1 {
+		t.Fatalf("expected one bug filed, got %v", stories)
+	}
+	story, _ := tracker.ShowStory(context.Background(), stories[0])
+	for _, want := range []string{"11541bc0d", "82a89e71c"} {
+		if !strings.Contains(story.Description, want) {
+			t.Errorf("expected the bug to name %s, got:\n%s", want, story.Description)
+		}
+	}
+}
+
+func TestNoSecondRunAloneWhenMainHasNotMoved(t *testing.T) {
+	suite, tracker, mailbox, again := movedSuite(t, false, application.Checked{Passed: true})
+	if _, err := suite.Run(context.Background(), "lampas"); err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if *again != 0 {
+		t.Errorf("expected no run at a new head when main has not moved, got %d", *again)
+	}
+	if stories := tracker.Stories(); len(stories) != 1 {
+		t.Errorf("expected the bug filed as today, got %v", stories)
+	}
+	if body := mailBody(t, mailbox); strings.Contains(body, "not filed") {
+		t.Errorf("expected nothing said of a file not filed, got:\n%s", body)
+	}
+}
+
+func TestAFileWithAnOpenBugIsCommentedOnWithNoRunAtTheNewHead(t *testing.T) {
+	suite, tracker, _, again := movedSuite(t, true, application.Checked{Passed: true})
+	tracker.AddStory("mw-suite", domain.Story{ID: "mw-suite.1", Title: "[bug] lampas main: src/dates.test.ts fails on main"})
+	if err := tracker.SetLabels("mw-suite.1", application.LabelBug, application.LabelSuite); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := suite.Run(context.Background(), "lampas"); err != nil {
+		t.Fatalf("running the suite: %v", err)
+	}
+	if *again != 0 {
+		t.Errorf("expected no run at the new head for a file with an open bug, got %d", *again)
+	}
+	if comments := tracker.Comments("mw-suite.1"); len(comments) != 1 {
+		t.Errorf("expected the open bug commented on once, got %v", comments)
+	}
+	if len(tracker.Stories()) != 1 {
+		t.Errorf("expected no new bug, got %v", tracker.Stories())
+	}
+}
