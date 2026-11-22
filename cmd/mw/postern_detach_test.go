@@ -18,6 +18,7 @@ import (
 // ran record is.
 type detachRig struct {
 	dir, ran, out, pgid string
+	tmp                 string // TMPDIR of the mw the service started, where a stray marker would land
 	env                 []string
 }
 
@@ -42,7 +43,7 @@ exec setsid -w "$@"
 	// the stand-in mw: it says it started, runs the step, and records the
 	// step's exit and what it printed, as mw's ran record and mail do
 	mw := fmt.Sprintf(`#!/bin/sh
-: > "$MW_APPLY_DETACHED"
+echo started > "$MW_APPLY_DETACHED"
 ( %s ) > %q 2>&1
 code=$?
 sleep 1
@@ -50,6 +51,10 @@ echo "at=1 exit=$code host=laptop $(cat %q)" > %q
 cat %q
 exit $code
 `, step, r.out, r.out, r.ran, r.out)
+	r.tmp = filepath.Join(dir, "tmp")
+	if err := os.Mkdir(r.tmp, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for name, body := range map[string]string{"systemd-run": systemdRun, "mw": mw} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 			t.Fatal(err)
@@ -57,7 +62,7 @@ exit $code
 	}
 	r.env = append(os.Environ(),
 		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"INVOCATION_ID=1234", "MW_TEST_HANDOFF="+filepath.Join(dir, "mw"),
+		"TMPDIR="+r.tmp, "INVOCATION_ID=1234", "MW_TEST_HANDOFF="+filepath.Join(dir, "mw"),
 		"MW_APPLY_DETACHED=")
 	return r
 }
@@ -103,6 +108,36 @@ func TestApplyPassSurvivesItsStepKillingTheProcessThatStartedIt(t *testing.T) {
 	}
 	if got := r.ranWithin(t, 10*time.Second); !strings.Contains(got, "exit=0") || !strings.Contains(got, "restarted") {
 		t.Fatalf("expected a ran record with the step's exit and output, got %q", got)
+	}
+}
+
+// strays lists what a hand-off left in the temp directory of the mw that made it.
+func (r *detachRig) strays(t *testing.T) []string {
+	t.Helper()
+	left, err := filepath.Glob(filepath.Join(r.tmp, "mw-apply-started-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return left
+}
+
+// The file a hand-off makes to learn that its unit started is never left in the
+// temp directory: not when the pass ends in order, and not when the mw that made
+// it is killed while the pass lives on and writes to it (mw-0jx70bj).
+func TestHandOffLeavesNoMarkerFileInTheTempDirectory(t *testing.T) {
+	for name, step := range map[string]string{
+		"the parent killed by the step": "kill -s KILL -- -$(cat $MW_TEST_PGID_FILE); echo restarted",
+		"the pass ending in order":      "echo applied",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newDetachRig(t, step)
+			r.runHandOff(t)
+			r.ranWithin(t, 10*time.Second)
+			time.Sleep(200 * time.Millisecond) // the pass's last writes
+			if left := r.strays(t); len(left) != 0 {
+				t.Fatalf("expected no mw-apply-started file left in %s, found %v", r.tmp, left)
+			}
+		})
 	}
 }
 
