@@ -118,6 +118,10 @@ func newCheckCmd() *cobra.Command {
 			"larger than the default 600 seconds spends the call less 50 seconds: every wait above (the slot, the\n" +
 			"gate lock, a calm host, a part or the specs still running) may take as much, and the 540 seconds and\n" +
 			"nine minutes are what it keeps to when the variable is unset. A place is kept ten minutes either way.\n\n" +
+			"A story worked on another host (named so by its claim or its path) whose branch is not in this host's\n" +
+			"checkout is checked there instead (mw-gq6.1623): mw check <story> with the same --part, --wait and\n" +
+			"--no-slot is run on that host over ssh, as mw retry reaches it, and what it printed is shown; nothing is\n" +
+			"checked or kept here, and the exit is non-zero when the check there did not pass.\n\n" +
 			"The formula's last step is normally still open when a session runs check, so a session runs it\n" +
 			"after committing and closes that step once nothing else is refused.",
 		Args: cobra.ExactArgs(1),
@@ -226,6 +230,8 @@ func newCheckCmd() *cobra.Command {
 				Host:           host,
 				Rigs:           rigs,
 				Out:            cmd.OutOrStdout(),
+				There:          sshChecks{out: cmd.ErrOrStderr()},
+				ThereFlags:     checkThereFlags(cmd, part, noSlot),
 			}
 			if !logIsStdout {
 				k.Logs = mwVault(dir, host)

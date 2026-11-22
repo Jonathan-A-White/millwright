@@ -218,3 +218,24 @@ func TestNextThereRunsMwNextWithTheMayorsWordOnTheHostAndKeepsWhatItPrints(t *te
 		t.Fatalf("expected the refusal and the report, got %q, %v", got, err)
 	}
 }
+
+func TestCheckThereRunsMwCheckWithItsFlagsOnTheHostAndReturnsWhatItPrints(t *testing.T) {
+	log := standIn(t, 0)
+	got, err := Remote{Reach: map[string]string{"cloud9": "ssh cloud9"}}.CheckThere(context.Background(), "cloud9", "mw-1", []string{"--part", "2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "host: desktop\n" {
+		t.Fatalf("printed %q", got)
+	}
+	args, _ := os.ReadFile(log)
+	want := "bash -lc 'mw check '\\''--part'\\'' '\\''2'\\'' '\\''mw-1'\\'''\n"
+	if !strings.HasSuffix(string(args), want) {
+		t.Fatalf("ssh got\n%s\nwant it to end with\n%s", args, want)
+	}
+	standIn(t, 1)
+	out, err := Remote{Reach: map[string]string{"cloud9": "ssh cloud9"}}.CheckThere(context.Background(), "cloud9", "mw-1", nil)
+	if err == nil || !strings.Contains(err.Error(), "oops") || out != "host: desktop\n" {
+		t.Fatalf("expected ssh's stderr in the error and what it printed, got %q, %v", out, err)
+	}
+}

@@ -30,6 +30,7 @@ var (
 	_ application.WorktreeRemote = Remote{}
 	_ application.NamedElsewhere = Remote{}
 	_ application.MayorAnswers   = Remote{}
+	_ application.CheckElsewhere = Remote{}
 )
 
 // unattendedSSH keeps ssh from stopping to ask a question nobody is there to
@@ -73,6 +74,17 @@ func (r Remote) NextThere(ctx context.Context, host, storyID string, flags []str
 		command += " " + quote(flag)
 	}
 	return r.runOut(ctx, host, command)
+}
+
+// CheckThere implements application.CheckElsewhere: it runs mw check on host,
+// which checks the story where its worktree and branch are, with the flags of the
+// call, and returns what it printed, also when the check did not pass (mw-gq6.1623).
+func (r Remote) CheckThere(ctx context.Context, host, storyID string, flags []string) (string, error) {
+	command := "mw check"
+	for _, flag := range flags {
+		command += " " + quote(flag)
+	}
+	return r.runOut(ctx, host, command+" "+quote(storyID))
 }
 
 // RunNamedOn implements application.NamedElsewhere: it runs mw named-here on
