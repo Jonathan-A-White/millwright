@@ -168,7 +168,7 @@ func (b BatchLand) handBack(ctx context.Context, s BatchStory, report *BatchRepo
 	var comment string
 	if len(s.Conflicts) == 0 {
 		comment = fmt.Sprintf("Handed back by %s to a Builder: this story was set aside by %d batches, for a reason other than a merge conflict (%s)\n"+
-			"A batch takes a story's branch %s from the rig's origin and merges it as it stands, and could not. Mend what is said above (a branch not at the origin is pushed again, commits signed as a machine's are written again without it), run the suite and commit. "+
+			"A batch takes a story's branch %s from the rig's origin and merges it as it stands, and could not. Mend what is said above (a branch not at the origin is pushed again, a commit signed as a machine's work is reworded without its Co-Authored-By trailer or Generated-with line), run the suite and commit. "+
 			"Its run state %s is cleared and its claim given back, so the next dispatch tick takes it as a new attempt, and once its work is committed `mw next` queues it for the next batch again.",
 			report.Label(), s.ConflictSetAsides, firstLine(s.Why), StartPoint(n.remote(), StoryBranch(s.ID)), RunState+":"+RunQueued)
 	} else {
