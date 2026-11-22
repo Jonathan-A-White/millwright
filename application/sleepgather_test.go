@@ -755,3 +755,25 @@ func TestAQueueThatFitsItsBudgetIsLeftAsItIs(t *testing.T) {
 		t.Errorf("a queue under its budget was changed: cut %q", part.Cut)
 	}
 }
+
+// A doc comment is a sentence about the name under it: the half-sentence lines
+// '// X accepts.' and '// X gives.' that once sat above sleepNoHoldReason say
+// nothing about it (mw-gq6.1649).
+func TestNoOrphanHalfSentenceDocCommentInApplication(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no source files read: %v", err)
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			words := strings.Fields(line)
+			if len(words) == 3 && words[0] == "//" && (words[2] == "accepts." || words[2] == "gives.") {
+				t.Errorf("%s:%d is an orphan half-sentence doc comment: %q", f, i+1, line)
+			}
+		}
+	}
+}

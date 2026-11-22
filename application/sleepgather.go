@@ -848,8 +848,8 @@ const SleepHoldDays = 7
 // sleepHoldReasonRunes is the most of a hold's reason the line of stale.md holds.
 const sleepHoldReasonRunes = 200
 
-// IsHoldComment accepts.
-// HeldCommentPrefix gives.
+// sleepNoHoldReason is what stale.md says of a hold when no comment on the bead
+// is one IsHoldComment accepts.
 const sleepNoHoldReason = "no reason on the bead"
 
 // SleepHolds is what the old-holds sweep reads: every bead, and the comments of
