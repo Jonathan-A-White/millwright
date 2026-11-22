@@ -291,3 +291,40 @@ func TestUsageFreshSaysWhetherTheTimerIsInstalled(t *testing.T) {
 		})
 	}
 }
+
+// A stale reading is not put right by the alarm to the Governor: run through the
+// doctor with its cure, the check is faulty (the alarm sent) and then damped,
+// never cured, and the other hosts read it faulty on every tick (mw-6ww.185.30).
+func TestUsageFreshIsNeverReportedCuredByTheDoctor(t *testing.T) {
+	check := usageFreshCheck(t, 11*time.Hour, 24*time.Hour)
+	alarms := 0
+	check.Alarm = func(context.Context, string) (uint64, error) { alarms++; return 0, nil }
+	now := usageFreshNow
+	verdicts := apptest.NewFakeTracker()
+	runner := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  apptest.NewFakeDoctorState(), Log: &apptest.FakeDoctorLog{}, Verdicts: verdicts,
+		Host: "home", Now: func() time.Time { return now },
+	}
+	for _, at := range []time.Duration{0, 5 * time.Minute, 4 * time.Hour} {
+		now = usageFreshNow.Add(at)
+		report, _ := runner.Run(context.Background(), "", false)
+		if len(report.Results) != 1 {
+			t.Fatalf("at +%s: expected one result, got %+v", at, report.Results)
+		}
+		got := report.Results[0]
+		if got.Verdict != "faulty" && got.Verdict != "damped" {
+			t.Errorf("at +%s: expected faulty or damped, got %q (%s)", at, got.Verdict, got.String())
+		}
+		if strings.Contains(got.String(), "cured") {
+			t.Errorf("at +%s: the report says cured: %s", at, got.String())
+		}
+		said, _ := verdicts.Note(context.Background(), application.DoctorVerdictKey("home"))
+		if verdict, ok := application.ParseDoctorVerdict(said); !ok || len(verdict.Faulty) != 1 || verdict.Faulty[0].Check != doctor.UsageFreshName {
+			t.Errorf("at +%s: expected the verdict to hold usage-fresh faulty, got %q", at, said)
+		}
+	}
+	if alarms == 0 {
+		t.Errorf("expected the alarm to be sent, got none")
+	}
+}

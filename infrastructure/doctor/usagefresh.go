@@ -291,6 +291,11 @@ func SystemctlUsageTimer(ctx context.Context) (UsageTimerState, error) {
 	return state, nil
 }
 
+// CureLeavesFault implements application.DoctorStandsAfterCure: the alarm only
+// tells the Governor and the stale reading stands until the timer takes a new
+// one, so the run logs the check faulty, never cured (mw-6ww.185.30).
+func (u *UsageFresh) CureLeavesFault() bool { return true }
+
 // Damper implements application.DoctorCheck.
 func (u *UsageFresh) Damper() (time.Duration, int) { return UsageFreshDamperWait, UsageFreshDamperCap }
 
