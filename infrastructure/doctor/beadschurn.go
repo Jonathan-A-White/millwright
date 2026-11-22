@@ -117,10 +117,14 @@ func (b *BeadsChurn) Probe(ctx context.Context) (application.Verdict, string) {
 	if before >= 0 && !last.FirstFaulty.IsZero() && elapsed >= 0 && elapsed < beadsChurnShortest {
 		return application.DoctorOK, ""
 	}
-	if err := b.State.Save(ctx, beadsChurnSampleName, application.DoctorEpisode{
-		FirstFaulty: now, SeenPaths: []string{strconv.FormatInt(count, 10)},
-	}); err != nil {
-		return application.DoctorCannotTell, fmt.Sprintf("keeping the sample: %v", err)
+	// A dry run changes nothing, the kept sample included: the next real run
+	// judges against the sample it last took itself.
+	if !application.DoctorDryRun(ctx) {
+		if err := b.State.Save(ctx, beadsChurnSampleName, application.DoctorEpisode{
+			FirstFaulty: now, SeenPaths: []string{strconv.FormatInt(count, 10)},
+		}); err != nil {
+			return application.DoctorCannotTell, fmt.Sprintf("keeping the sample: %v", err)
+		}
 	}
 	if before < 0 || last.FirstFaulty.IsZero() || elapsed < 0 || elapsed > beadsChurnStale || count < before {
 		return application.DoctorOK, ""

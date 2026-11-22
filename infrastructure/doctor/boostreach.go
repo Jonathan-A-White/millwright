@@ -166,7 +166,7 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 	alarmed := len(episode.SeenPaths) >= 1 && episode.SeenPaths[0] == BoostReachAlarmed
 
 	if b.WgFaulty != nil && b.WgFaulty(ctx) {
-		if !alarmed && !episode.FirstFaulty.IsZero() {
+		if !alarmed && !episode.FirstFaulty.IsZero() && !application.DoctorDryRun(ctx) {
 			if err := b.State.Reset(ctx, BoostReachSeenStateName); err != nil {
 				return application.DoctorCannotTell, fmt.Sprintf("forgetting this check's own state: %v", err)
 			}
@@ -181,7 +181,7 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 		case alarmed:
 			b.due = boostReachDue{text: fmt.Sprintf("The %s (Boost) answers again (down %s to %s UTC)", boost, stamp(episode.FirstFaulty), stamp(b.now())), back: true, clears: seqAt(episode.SeenPaths, 1), pending: true}
 			return application.DoctorFaulty, b.due.text
-		case !episode.FirstFaulty.IsZero():
+		case !episode.FirstFaulty.IsZero() && !application.DoctorDryRun(ctx):
 			if err := b.State.Reset(ctx, BoostReachSeenStateName); err != nil {
 				return application.DoctorCannotTell, fmt.Sprintf("forgetting this check's own state: %v", err)
 			}
@@ -190,8 +190,10 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 	}
 
 	if episode.FirstFaulty.IsZero() {
-		if err := b.State.Save(ctx, BoostReachSeenStateName, application.DoctorEpisode{FirstFaulty: b.now()}); err != nil {
-			return application.DoctorCannotTell, fmt.Sprintf("saving this check's own state: %v", err)
+		if !application.DoctorDryRun(ctx) {
+			if err := b.State.Save(ctx, BoostReachSeenStateName, application.DoctorEpisode{FirstFaulty: b.now()}); err != nil {
+				return application.DoctorCannotTell, fmt.Sprintf("saving this check's own state: %v", err)
+			}
 		}
 		return application.DoctorOK, ""
 	}
