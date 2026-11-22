@@ -149,6 +149,13 @@ type Check struct {
 	Host string
 	Rigs map[string]string
 
+	// There runs the check on the host that worked the story, when this one did
+	// not and holds neither its worktree nor its branch (checkthere.go). Nil
+	// refuses, naming the command to run there. ThereFlags are the flags of this
+	// call that go with it (--part, --wait, --no-slot).
+	There      CheckElsewhere
+	ThereFlags []string
+
 	// Remote is the remote the target branch is read from. Empty is
 	// DefaultRemote.
 	Remote string
@@ -299,6 +306,9 @@ type CheckReport struct {
 	Host    string
 	Branch  string
 	Target  string
+	// DelegatedTo is the host that worked the story, where mw check was run in
+	// place of here, and Delegated what it printed (checkthere.go, mw-gq6.1623).
+	DelegatedTo, Delegated string
 	// Commits is how many commits the branch holds that the target branch does
 	// not.
 	Commits int
@@ -442,6 +452,10 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		return report, fmt.Errorf("checking %s: %w", storyID, err)
 	}
 	report.Title = detail.Story.Title
+	// A story another host worked is checked there, before any log is begun here.
+	if host := k.thereHost(ctx, storyID, detail); host != "" {
+		return k.checkThere(ctx, report, host)
+	}
 	report.Attempt = max(detail.Attempts, 1)
 	// Said to the Builder too, so that the log holds what the check printed.
 	if k.Out != nil {
