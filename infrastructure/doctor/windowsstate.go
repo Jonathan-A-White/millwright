@@ -52,7 +52,7 @@ const windowsStateTime = "2006-01-02T15:04:05Z"
 // task has stopped, or the PC is off or asleep); when the AC standby timeout is
 // not 0; when a 'millwright' scheduled task is disabled or its last result is a
 // failure; when a physical disk's health is not Healthy; and when the installed
-// script is not the one this mw carries. A restart pending for over 3 days, and the newest
+// script is not the one this mw carries; and for 24 hours after a 'drive full' act, when the watcher freed a full drive itself (mw-6ww.185.4). A restart pending for over 3 days, and the newest
 // act of the last 24 hours in windows-acts beside the file, are said in its ok line. Ok, 'not WSL', on a host that is not WSL. Its cure is one
 // note to the Mayor: nothing on Windows can be changed from WSL.
 type WindowsState struct {
@@ -157,7 +157,56 @@ func (w *WindowsState) faults(st windowsStateLines) []string {
 			faults = append(faults, fmt.Sprintf("the installed watcher script (SHA-256 %s) is not the one this mw carries (%s): paste `mw host wsl-flag --install-line` again", shown, strings.ToUpper(want[:min(12, len(want))])))
 		}
 	}
+	if f := w.driveFullFault(); f != "" {
+		faults = append(faults, f)
+	}
 	return faults
+}
+
+// WindowsActDriveFull is the act the watcher writes when WSL would not start on a
+// full drive and it freed the drive itself: 'drive full: freed (...)' or
+// 'drive full: failed: ...' (mw-6ww.185.4).
+const WindowsActDriveFull = "drive full"
+
+// driveFullFault is the fault that a drive filled and the watcher freed it (or
+// could not), for 24 hours after the newest such act: a filled drive is never
+// healed in silence, and what filled it is still to be found. "" when there is none.
+func (w *WindowsState) driveFullFault() string {
+	path, err := w.path()
+	if err != nil {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), WindowsActsFile))
+	if err != nil {
+		return ""
+	}
+	var best time.Time
+	var outcome string
+	for _, l := range strings.Split(string(raw), "\n") {
+		stamp, what, ok := strings.Cut(strings.TrimSpace(l), " ")
+		if !ok {
+			continue
+		}
+		rest, isDriveFull := strings.CutPrefix(strings.TrimSpace(what), WindowsActDriveFull+": ")
+		if !isDriveFull {
+			continue
+		}
+		at, err := time.Parse(windowsStateTime, stamp)
+		if err != nil || w.now().Sub(at) > WindowsStateActsWindow {
+			continue
+		}
+		if at.After(best) {
+			best, outcome = at, rest
+		}
+	}
+	if outcome == "" {
+		return ""
+	}
+	when := best.Format(windowsStateTime)
+	if strings.HasPrefix(outcome, "failed") {
+		return fmt.Sprintf("the drive filled and could not be freed at %s (%s): WSL will not start until it is; find what filled it", when, outcome)
+	}
+	return fmt.Sprintf("the drive filled and was freed at %s (%s): find what filled it", when, outcome)
 }
 
 // taskResultIsFine is whether a scheduled task's last result is not a failure:

@@ -648,3 +648,94 @@ func TestWSLFlagStillAsksForOnlyTheFixedWords(t *testing.T) {
 		}
 	}
 }
+
+// D4 (mw-6ww.185.4): when WSL will not start and its drive is full, the watcher
+// compacts, starts, trims, shuts down, compacts and starts, and says so.
+
+func TestWSLFlagWatchScriptFreesAFullDrive(t *testing.T) {
+	s := millwright.WSLFlagWatch
+	for _, want := range []string{"drive full", "drive-freed-at", "not freeing: ", "Get-DiskImage", "-DriveFreeGB", "-FreedHoursAgo", "-AssumeAttached"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the watcher script lacks %q", want)
+		}
+	}
+}
+
+func indexOfLine(lines []string, from int, sub string) int {
+	for i := from; i < len(lines); i++ {
+		if strings.Contains(lines[i], sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestWSLFlagWatchDryRunFreesAFullDriveInOrder(t *testing.T) {
+	lines := runWatchDryRun(t, "-Assume full -DriveFreeGB 1 -Ticks 1")
+	text := strings.Join(lines, "\n")
+	steps := []string{"DRYRUN diskpart compact", "sleep infinity", "-u root --exec fstrim -av", "--shutdown", "DRYRUN diskpart compact", "sleep infinity"}
+	at := indexOfLine(lines, 0, "not running") // the start that did not take comes first
+	if at < 0 {
+		t.Fatalf("expected the failed start first:\n%s", text)
+	}
+	for _, step := range steps {
+		i := indexOfLine(lines, at+1, step)
+		if i < 0 {
+			t.Fatalf("expected %q after line %d, in the order detach?, compact, start, fstrim, shutdown, compact, start:\n%s", step, at, text)
+		}
+		at = i
+	}
+	if strings.Contains(text, "DRYRUN diskpart detach") {
+		t.Errorf("a vhdx that is not attached is not detached first:\n%s", text)
+	}
+	if strings.Contains(text, "not freeing") {
+		t.Errorf("it freed the drive, so it says nothing of not freeing:\n%s", text)
+	}
+	acts := actLines(lines)
+	last := acts[len(acts)-1]
+	// the outcome holds a colon of its own (D:), so the act is cut at the first ': '
+	_, act, _ := strings.Cut(last, "Z ")
+	what, outcome, _ := strings.Cut(act, ": ")
+	if what != "drive full" || !strings.HasPrefix(outcome, "freed (vhdx ") || !strings.Contains(outcome, "GB -> ") || !strings.Contains(outcome, "D: free 1 GB -> ") {
+		t.Errorf("expected the act 'drive full: freed (vhdx A GB -> B GB; D: free X GB -> Y GB)', got %q", last)
+	}
+}
+
+func TestWSLFlagWatchDryRunDetachesAnAttachedVhdxFirst(t *testing.T) {
+	lines := runWatchDryRun(t, "-Assume full -DriveFreeGB 1 -AssumeAttached -Ticks 1")
+	det := indexOfLine(lines, 0, "DRYRUN diskpart detach")
+	comp := indexOfLine(lines, 0, "DRYRUN diskpart compact")
+	if det < 0 || comp < 0 || det > comp {
+		t.Errorf("expected the detach (%d) before the first compact (%d):\n%s", det, comp, strings.Join(lines, "\n"))
+	}
+}
+
+func TestWSLFlagWatchDryRunDoesNotFreeWhenItShouldNot(t *testing.T) {
+	for name, tc := range map[string]struct{ args, why string }{
+		"the distro answers":    {"-Assume running -DriveFreeGB 1", "not freeing: the distro answers"},
+		"the drive has room":    {"-Assume full -DriveFreeGB 2", "not freeing: the drive has 2 GB free"},
+		"done less than 6h ago": {"-Assume full -DriveFreeGB 1 -FreedHoursAgo 5", "not freeing: it was done less than 6 hours ago"},
+	} {
+		lines := runWatchDryRun(t, tc.args+" -Ticks 1")
+		text := strings.Join(lines, "\n")
+		if !strings.Contains(text, tc.why) {
+			t.Errorf("%s: expected %q:\n%s", name, tc.why, text)
+		}
+		for _, bad := range []string{"fstrim", "diskpart", "drive full"} {
+			if strings.Contains(text, bad) {
+				t.Errorf("%s: it must do none of it, but %q is in:\n%s", name, bad, text)
+			}
+		}
+	}
+	// 6 hours or more after, it frees again
+	if text := strings.Join(runWatchDryRun(t, "-Assume full -DriveFreeGB 1 -FreedHoursAgo 7 -Ticks 1"), "\n"); !strings.Contains(text, "fstrim -av") {
+		t.Errorf("expected it to free again 7 hours after:\n%s", text)
+	}
+}
+
+func TestWSLFlagWatchDryRunFreesTheDriveOnceInTwoTicks(t *testing.T) {
+	text := strings.Join(runWatchDryRun(t, "-Assume full -DriveFreeGB 1 -Ticks 2"), "\n")
+	if n := strings.Count(text, "fstrim -av"); n != 1 {
+		t.Errorf("expected one freeing in two ticks, got %d:\n%s", n, text)
+	}
+}

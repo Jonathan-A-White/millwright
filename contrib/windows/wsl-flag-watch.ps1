@@ -16,6 +16,15 @@
 #   hung              a distro that fails, or does not answer 'wsl.exe -d <distro>
 #                     --exec true' in 40 seconds, on two ticks in a row is shut down
 #                     and started again: 'hung: restarted'
+#   drive full        when WSL still will not start after that and the vhdx's drive has
+#                     under 2 GB free, nothing inside can trim, so the task frees the
+#                     drive itself (mw-6ww.185.4): detach the vhdx if it is attached,
+#                     diskpart compact it, start WSL, fstrim -av as root, shut WSL down,
+#                     compact again, start WSL. At most once in 6 hours (the stamp
+#                     drive-freed-at beside the log), and never when WSL answers. One
+#                     act, 'drive full: freed (vhdx A GB -> B GB; D: free X GB -> Y GB)'
+#                     or 'drive full: failed: ...'; `mw doctor windows-state` is faulty
+#                     for 24 hours after it: a filled drive is never healed in silence.
 # To start the distro it runs 'wsl.exe -d <distro> --exec sleep infinity' as a
 # process of its own (Win32_Process.Create, so that the task's job object does not
 # end it with the tick): that process holds the distro up.
@@ -59,16 +68,22 @@
 #
 # -StateDryRun prints the state lines and does nothing else: no file is written
 # and no directory made. -DryRun runs -Ticks ticks (default 1) against a stand-in
-# for wsl.exe and prints what each would do, writing nothing: -Assume running (WSL
-# answers), stopped (not running), hung (listed, never answers) or down (the flag
-# holds 'down' -DownFor seconds on the first tick). The tests run both under
-# Windows PowerShell 5.1.
+# for wsl.exe and diskpart and prints what each would do, writing nothing: -Assume
+# running (WSL answers), stopped (not running), hung (listed, never answers), down
+# (the flag holds 'down' -DownFor seconds on the first tick) or full (WSL will not
+# start until the vhdx is compacted; -DriveFreeGB is the drive's free space, default
+# 100, -FreedHoursAgo that many hours since the drive was last freed, -AssumeAttached
+# a vhdx left attached). A drive it does not free prints 'not freeing: <why>'. The
+# tests run both under Windows PowerShell 5.1.
 
 param([switch]$StateDryRun,
       [switch]$DryRun,
-      [ValidateSet('running', 'stopped', 'hung', 'down')][string]$Assume = 'running',
+      [ValidateSet('running', 'stopped', 'hung', 'down', 'full')][string]$Assume = 'running',
       [ValidateRange(1, 20)][int]$Ticks = 1,
-      [int]$DownFor = 600)
+      [int]$DownFor = 600,
+      [double]$DriveFreeGB = 100,
+      [double]$FreedHoursAgo = 0,
+      [switch]$AssumeAttached)
 $env:WSL_UTF8 = '1'
 $distro    = 'Ubuntu-24.04'
 $wslUser   = 'jwhite'
@@ -253,8 +268,12 @@ function Get-Inventory {
     return $o.ToArray()
 }
 
-if ($DryRun) { $script:dryUp = ($Assume -ne 'stopped'); $script:dryCured = $false; $script:tick = 0 }
+if ($DryRun) {
+    $script:dryUp = ($Assume -ne 'stopped' -and $Assume -ne 'full'); $script:dryCured = $false; $script:tick = 0
+    $script:dryCompacted = $false; $script:dryVhdx = [int64](300GB); $script:dryFree = [int64]($DriveFreeGB * 1GB)
+}
 $script:mem = @{}
+if ($DryRun -and $FreedHoursAgo -gt 0) { $script:mem['drive-freed-at'] = (Now-Utc).AddHours(-$FreedHoursAgo).ToString('yyyy-MM-dd''T''HH:mm:ss') + 'Z' }
 
 function Say([string]$m) { if ($DryRun) { Write-Host $m } }
 function Pause([int]$seconds) { if (-not $DryRun) { Start-Sleep $seconds } }
@@ -351,7 +370,7 @@ function Wait-WslAnswers([int]$seconds) {
     $until = (Get-Date).AddSeconds($seconds)
     while ($true) {
         if (Wsl-Answers) { return $true }
-        if ((Get-Date) -ge $until) { return $false }
+        if ($DryRun -or (Get-Date) -ge $until) { return $false }
         Pause 5
     }
 }
@@ -367,7 +386,7 @@ function Wsl-Listed {
 # Win32_Process.Create makes it a process of WMI's, so the task's job object does not end it
 # when the tick ends; -Plain starts it as a child of this script instead.
 function Start-Wsl([switch]$Plain) {
-    if ($DryRun) { Write-Host "DRYRUN wsl.exe -d $distro --exec sleep infinity"; $script:dryUp = $true; return }
+    if ($DryRun) { Write-Host "DRYRUN wsl.exe -d $distro --exec sleep infinity"; if ($Assume -ne 'full' -or $script:dryCompacted) { $script:dryUp = $true }; return }
     if (-not $Plain) {
         try {
             $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = "`"$env:SystemRoot\System32\wsl.exe`" -d $distro --exec sleep infinity" } -ErrorAction Stop
@@ -384,6 +403,96 @@ function Bring-Up {
     Log 'WSL did not answer 45 seconds after it was started; starting it again as a child of this task'
     Start-Wsl -Plain
     return (Wait-WslAnswers 45)
+}
+
+function Gb([double]$bytes) { return [math]::Round($bytes / 1GB, 1) }
+function Vhdx-Size {
+    if ($DryRun) { return $script:dryVhdx }
+    if (Test-Path -LiteralPath $vhdx) { return (Get-Item -LiteralPath $vhdx).Length }
+    return 0
+}
+function Drive-Free {
+    if ($DryRun) { return $script:dryFree }
+    try { return [int64](Get-PSDrive (Split-Path -Qualifier $vhdx).TrimEnd(':') -ErrorAction Stop).Free } catch { return [int64]::MaxValue }
+}
+
+# Run diskpart over the given lines. Returns Code and Out.
+function Run-Diskpart([string[]]$lines) {
+    $sc = Join-Path $env:TEMP 'mw-wsl-compact.txt'
+    $lines | Set-Content -Encoding ASCII $sc
+    $o = (diskpart.exe /s $sc 2>&1) -join ' '
+    $code = $LASTEXITCODE
+    Remove-Item $sc -ErrorAction SilentlyContinue
+    return @{ Code = $code; Out = $o }
+}
+
+# Release the vhdx when it is left attached (by a hand line that stopped at an error): WSL
+# cannot start on an attached disk. Not attached, nothing is run.
+function Detach-Vhdx {
+    $attached = $true
+    if ($DryRun) { $attached = $AssumeAttached.IsPresent }
+    else { try { $attached = [bool](Get-DiskImage -ImagePath $vhdx -ErrorAction Stop).Attached } catch { $attached = $true } }
+    if (-not $attached) { return }
+    if ($DryRun) { Write-Host 'DRYRUN diskpart detach'; return }
+    $r = Run-Diskpart @(('select vdisk file="' + $vhdx + '"'), 'detach vdisk', 'exit')
+    Log "diskpart detach exit $($r.Code) : $($r.Out)"
+}
+
+# Compact the vhdx with WSL shut down: attach readonly, compact, detach. Returns $null when it
+# worked, else what failed; after an error it detaches again, as an error stops diskpart's
+# script before its own detach.
+function Compact-Vhdx {
+    if ($DryRun) {
+        Write-Host 'DRYRUN diskpart compact'
+        $script:dryCompacted = $true
+        $script:dryFree += [int64]($script:dryVhdx / 2); $script:dryVhdx = [int64]($script:dryVhdx / 2)
+        return $null
+    }
+    if (-not (Test-Path -LiteralPath $vhdx)) { return "$vhdx not found" }
+    $r = Run-Diskpart @(('select vdisk file="' + $vhdx + '"'), 'attach vdisk readonly', 'compact vdisk', 'detach vdisk', 'exit')
+    Log "diskpart exit $($r.Code) : $($r.Out)"
+    if ($r.Code -ne 0 -or $r.Out -match 'DiskPart has encountered an error') {
+        [void](Run-Diskpart @(('select vdisk file="' + $vhdx + '"'), 'detach vdisk', 'exit'))
+        return "diskpart exit $($r.Code)"
+    }
+    return $null
+}
+
+# WSL will not start. When the vhdx's drive is full (under 2 GB free) nothing inside can trim, so
+# free it from here: detach if attached, compact, start, fstrim as root, shut down, compact, start.
+# Never when WSL answers (the caller has just seen it not), and once in 6 hours at most. Returns
+# $true when WSL answers at the end.
+function Free-FullDrive {
+    $letter = (Split-Path -Qualifier $vhdx).TrimEnd(':')
+    $free = Drive-Free
+    $why = $null
+    if ($free -ge 2GB) { $why = "the drive has $(Gb $free) GB free, 2 GB or more" }
+    else {
+        $last = ConvertTo-Utc (Store-Get 'drive-freed-at')
+        if ($last -and ((Now-Utc) - $last).TotalHours -lt 6) { $why = "it was done less than 6 hours ago (at $(Store-Get 'drive-freed-at'))" }
+    }
+    if ($why) { if ($DryRun) { Say "not freeing: $why" } else { Log "not freeing: $why" }; return $false }
+
+    Log "drive full: $letter has $(Gb $free) GB free and WSL will not start; freeing it"
+    # the stamp first, so that a freeing that fails is not tried again every 2 minutes
+    Store-Set 'drive-freed-at' (Now)
+    $sizeBefore = Vhdx-Size
+    Detach-Vhdx
+    $failure = Compact-Vhdx
+    $up = Bring-Up
+    if ($up) {
+        $t = Run-Native "wsl.exe -d $distro -u root --exec fstrim -av" 600 $null
+        $trim = if ($t.Done) { ("$($t.Out)" -split "[\r\n]+" | Where-Object { $_.Trim() }) -join ' ' } else { 'did not finish in 10 minutes' }
+        Log "fstrim exit $($t.Code) : $trim"
+        [void](Run-Native 'wsl.exe --shutdown' 60 $null)
+        Pause 15
+        $second = Compact-Vhdx
+        if ($second -and -not $failure) { $failure = $second }
+        $up = Bring-Up
+    } elseif (-not $failure) { $failure = 'WSL did not start after the compact' }
+    $sizes = "vhdx $(Gb $sizeBefore) GB -> $(Gb (Vhdx-Size)) GB; ${letter}: free $(Gb $free) GB -> $(Gb (Drive-Free)) GB"
+    if ($failure) { Act 'drive full' "failed: $failure ($sizes)" } else { Act 'drive full' "freed ($sizes)" }
+    return $up
 }
 
 # Keep WSL up: at most ONE act a tick, before the flag is looked at. Returns $true when WSL
@@ -410,6 +519,7 @@ function Keep-WslUp {
             $acted = $true
         } elseif (Wsl-Answers) {
             Store-Del 'hung-since'
+            Say 'not freeing: the distro answers'
             return $true
         } else {
             $first = ConvertTo-Utc (Store-Get 'hung-since')
@@ -431,7 +541,8 @@ function Keep-WslUp {
     if (Wait-WslAnswers 45) { return $true }
     Log 'WSL did not answer 45 seconds after it was started; starting it again as a child of this task'
     Start-Wsl -Plain
-    return (Wait-WslAnswers 45)
+    if (Wait-WslAnswers 45) { return $true }
+    return (Free-FullDrive)
 }
 
 # Wait up to 5 minutes for WSL to answer, then write the act and the result file into it.
@@ -516,30 +627,14 @@ function Invoke-Tick {
     }
 
     # compact
-    $before = if (Test-Path -LiteralPath $vhdx) { (Get-Item -LiteralPath $vhdx).Length } else { 0 }
+    $before = Vhdx-Size
     $t = Run-Native "wsl.exe -d $distro -u root --exec fstrim -av" 600 $null
     $trim = if ($t.Done) { ("$($t.Out)" -split "[\r\n]+" | Where-Object { $_.Trim() }) -join ' ' } else { 'did not finish in 10 minutes' }
     $trimExit = $t.Code
     Log "fstrim exit $trimExit : $trim"
     [void](Run-Native 'wsl.exe --shutdown' 60 $null)
     Pause 15
-    $failure = $null
-    if (-not (Test-Path -LiteralPath $vhdx)) {
-        $failure = "$vhdx not found"
-    } else {
-        $sc = Join-Path $env:TEMP 'mw-wsl-compact.txt'
-        @('select vdisk file="' + $vhdx + '"', 'attach vdisk readonly', 'compact vdisk', 'detach vdisk', 'exit') | Set-Content -Encoding ASCII $sc
-        $o = (diskpart.exe /s $sc 2>&1) -join ' '
-        $code = $LASTEXITCODE
-        Log "diskpart exit $code : $o"
-        if ($code -ne 0 -or $o -match 'DiskPart has encountered an error') {
-            $failure = "diskpart exit $code"
-            # an error stops the script before detach: release the disk
-            @('select vdisk file="' + $vhdx + '"', 'detach vdisk', 'exit') | Set-Content -Encoding ASCII $sc
-            diskpart.exe /s $sc | Out-Null
-        }
-        Remove-Item $sc -ErrorAction SilentlyContinue
-    }
+    $failure = Compact-Vhdx
     $after = if (Test-Path -LiteralPath $vhdx) { (Get-Item -LiteralPath $vhdx).Length } else { 0 }
     [void](Bring-Up)
     $gb = { param($b) [math]::Round($b / 1GB, 1) }

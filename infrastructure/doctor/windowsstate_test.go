@@ -324,3 +324,42 @@ func TestWindowsStateWithNoFileIsNeverReportedCuredByTheDoctor(t *testing.T) {
 		t.Errorf("expected one note at the start and one after the 6 hour damper, got %d", notes)
 	}
 }
+
+// A drive that filled and was freed by the watcher (mw-6ww.185.4) is never healed
+// in silence: the check is faulty for 24 hours after the act, so the Mayor is told
+// to find what filled the drive.
+func TestWindowsStateIsFaultyFor24HoursAfterTheDriveFilledAndWasFreed(t *testing.T) {
+	freed := "drive full: freed (vhdx 305.0 GB -> 140.0 GB; D: free 0.5 GB -> 165.0 GB)"
+	w := windowsActsCheck(t, []string{actAt(3*time.Hour, freed)})
+	verdict, reason := w.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty after the drive was freed, got %v %q", verdict, reason)
+	}
+	for _, want := range []string{"the drive filled and was freed at 2026-11-21T09:00:00Z", "find what filled it"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("expected %q in %q", want, reason)
+		}
+	}
+}
+
+func TestWindowsStateIsOkAgain24HoursAfterTheDriveWasFreed(t *testing.T) {
+	w := windowsActsCheck(t, []string{actAt(25*time.Hour, "drive full: freed (vhdx 305.0 GB -> 140.0 GB; D: free 0.5 GB -> 165.0 GB)")})
+	if verdict, reason := w.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok after 24 hours, got %v %q", verdict, reason)
+	}
+}
+
+func TestWindowsStateSaysAFailedFreeingOfTheDriveToo(t *testing.T) {
+	w := windowsActsCheck(t, []string{actAt(time.Hour, "drive full: failed: diskpart exit 1 (vhdx 305.0 GB -> 305.0 GB; D: free 0.5 GB -> 0.5 GB)")})
+	verdict, reason := w.Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "the drive filled and could not be freed at 2026-11-21T11:00:00Z") {
+		t.Fatalf("expected faulty naming the failed freeing, got %v %q", verdict, reason)
+	}
+}
+
+func TestWindowsStateOtherActsLeaveItOk(t *testing.T) {
+	w := windowsActsCheck(t, []string{actAt(time.Hour, "hung: restarted")})
+	if verdict, reason := w.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok, got %v %q", verdict, reason)
+	}
+}
