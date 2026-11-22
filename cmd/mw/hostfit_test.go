@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
 func fitGit(t *testing.T, dir string, args ...string) {
@@ -95,5 +98,31 @@ func TestHostFitIsOneCommandOfMwHostAndTakesJSON(t *testing.T) {
 	}
 	if found.Flags().Lookup("json") == nil {
 		t.Fatal("mw host fit has no --json")
+	}
+}
+
+// [cloud.caps] is the per-host cap table (laptop = 5, desktop = 2): its names
+// are hosts, not cloud boxes, so the desktop, the one Boost, is still asked
+// (mw-6ww.185.22).
+func TestBoostFitAsksTheDesktopWhenCloudCapsNamesIt(t *testing.T) {
+	book := func(context.Context) (application.CloudState, error) {
+		return application.CloudState{Boxes: []application.CloudBox{{Name: "cloud9"}}}, nil
+	}
+	reach := map[string]string{"vps": "ssh vps", "desktop": "ssh desktop", "laptop": "ssh laptop", "cloud9": "ssh cloud9"}
+	check := doctor.NewBoostFit(&apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop"}, "laptop", reach, doctor.New(t.TempDir()))
+	check.Retired = []string{"vps"}
+	check.Cloud = cloudBoxNamesFrom(book)
+	var asked []string
+	check.Ask = func(_ context.Context, argv []string) ([]byte, int, error) {
+		asked = append(asked, argv[1])
+		out, _ := json.Marshal(application.HostFitReport{Commit: "abc1234"})
+		return out, 0, nil
+	}
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK || strings.Contains(reason, "no Boost") {
+		t.Fatalf("verdict %v %q", verdict, reason)
+	}
+	if !reflect.DeepEqual(asked, []string{"desktop"}) {
+		t.Fatalf("asked %v, want [desktop]", asked)
 	}
 }
