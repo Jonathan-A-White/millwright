@@ -35,9 +35,10 @@ func (f fewBeads) ShowBeads(ctx context.Context, ids []string) ([]application.St
 
 // hostUpkeepCheck is mw doctor's host-upkeep check for this host: its worktrees
 // are the .mw-worktrees beside each rig, its stories are read from the tracker,
-// the gateway tracker, which the damper survey reads too: both keep the one
-// list of every bead and the one read of the dependencies the run makes
-// (mw-gq6.1626).
+// the gateway the damper survey reads too, so that the run's one read of the
+// dependencies is shared (mw-gq6.1626). The stories are read by id, and from the
+// run's list of every bead only when the survey has already read it
+// (mw-gq6.1625).
 func hostUpkeepCheck(tracker *beads.Gateway, rigs map[string]string) *doctor.HostUpkeep {
 	check := &doctor.HostUpkeep{Stories: fewBeads{tracker}}
 	if home, err := os.UserHomeDir(); err == nil {
