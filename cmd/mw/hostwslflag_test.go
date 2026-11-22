@@ -739,3 +739,245 @@ func TestWSLFlagWatchDryRunFreesTheDriveOnceInTwoTicks(t *testing.T) {
 		t.Errorf("expected one freeing in two ticks, got %d:\n%s", n, text)
 	}
 }
+
+// D5 (mw-6ww.185.5): the Linux disk is made smaller than its Windows drive,
+// once, by the fixed flag word 'shrink'.
+
+func TestWSLFlagInstallLineKeepsTheShrinkSizeInTheTasksFolder(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	out, err := runMw(t, "host", "wsl-flag", "--install-line", "--shrink-gb", "220")
+	if err != nil {
+		t.Fatalf("mw host wsl-flag --install-line --shrink-gb 220 failed: %v\n%s", err, out)
+	}
+	var line string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "Register-ScheduledTask") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("no install line in:\n%s", out)
+	}
+	if len(line) >= 2000 {
+		t.Errorf("the install line must stay under 2000 bytes, got %d", len(line))
+	}
+	if !strings.Contains(line, `"$mwwf_d\shrink-gb"`) || !strings.Contains(line, "'220'") {
+		t.Errorf("expected the size 220 kept in $mwwf_d\\shrink-gb:\n%s", line)
+	}
+	// the size is kept before the task is registered, and the hash is checked first
+	chk, keep, reg := strings.Index(line, "Get-FileHash"), strings.Index(line, "shrink-gb"), strings.Index(line, "Register-ScheduledTask")
+	if chk < 0 || keep < chk || reg < keep {
+		t.Errorf("expected the hash check (%d), then the size kept (%d), then the task registered (%d)", chk, keep, reg)
+	}
+}
+
+func TestWSLFlagInstallLineWithNoShrinkSizeKeepsNothing(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	out, err := runMw(t, "host", "wsl-flag", "--install-line")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "shrink-gb") {
+		t.Errorf("an install line given no size must not touch the kept one:\n%s", out)
+	}
+}
+
+func TestWSLFlagShrinkSizeBelongsToTheInstallLineAndIsASensibleNumber(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	wslFlagHere(t, nil)
+	if out, err := runMw(t, "host", "wsl-flag", "restart", "--shrink-gb", "220"); err == nil {
+		t.Errorf("--shrink-gb belongs to --install-line only, got:\n%s", out)
+	}
+	for _, bad := range []string{"0", "-5", "9", "abc", "100000"} {
+		if out, err := runMw(t, "host", "wsl-flag", "--install-line", "--shrink-gb="+bad); err == nil {
+			t.Errorf("--shrink-gb %s must be refused, got:\n%s", bad, out)
+		}
+	}
+}
+
+func TestWSLFlagShrinkWritesTheFlagAndPrintsTheResult(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	wslFlagCapIs(t, "0")
+	got := fakeWatcher(t, dir, "2026-11-21T12:00:00Z shrink ok: df / 1007.0 GB -> 216.0 GB")
+	out, err := runMw(t, "host", "wsl-flag", "shrink", "--limit", "10s")
+	if err != nil {
+		t.Fatalf("mw host wsl-flag shrink failed: %v\n%s", err, out)
+	}
+	if flag := <-got; flag != "shrink" {
+		t.Errorf("expected the flag to hold %q, got %q", "shrink", flag)
+	}
+	if !strings.Contains(out, "1007.0 GB -> 216.0 GB") {
+		t.Errorf("expected the result printed, got %q", out)
+	}
+}
+
+func TestWSLFlagShrinkFailsWhenTheWindowsSideSaysItFailed(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	wslFlagCapIs(t, "0")
+	fakeWatcher(t, dir, "2026-11-21T12:00:00Z shrink failed: no size was installed")
+	out, err := runMw(t, "host", "wsl-flag", "shrink", "--limit", "10s")
+	if err == nil || !strings.Contains(out, "no size was installed") {
+		t.Errorf("expected a failure that says why, got %v\n%s", err, out)
+	}
+}
+
+func TestWSLFlagShrinkWaitsThreeHoursByDefault(t *testing.T) {
+	if wslFlagShrinkLimit != 3*time.Hour {
+		t.Errorf("the shrink waits 3h by default, the task's own limit; got %s", wslFlagShrinkLimit)
+	}
+}
+
+func TestWSLFlagShrinkRefusesWhileTheCapIsNotZero(t *testing.T) {
+	for _, cap := range []string{"1", "3", "unset"} {
+		dir := wslFlagHere(t, nil)
+		wslFlagCapIs(t, cap)
+		out, err := runMw(t, "host", "wsl-flag", "shrink", "--limit", "300ms")
+		if err == nil {
+			t.Fatalf("cap %s: expected a refusal, got:\n%s", cap, out)
+		}
+		if !strings.Contains(err.Error(), "drain it first: mw config set cap 0") {
+			t.Errorf("cap %s: expected the refusal to say how to drain, got %v", cap, err)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, "wsl-flag")); statErr == nil {
+			t.Errorf("cap %s: a refused shrink must write no flag", cap)
+		}
+	}
+}
+
+func TestWSLFlagShrinkRunningSkipsTheCapCheck(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	wslFlagCapIs(t, "3")
+	got := fakeWatcher(t, dir, "2026-11-21T12:00:00Z shrink ok: df / 1007.0 GB -> 216.0 GB")
+	out, err := runMw(t, "host", "wsl-flag", "shrink", "--running", "--limit", "10s")
+	if err != nil {
+		t.Fatalf("expected --running to go ahead, got %v\n%s", err, out)
+	}
+	if flag := <-got; flag != "shrink" {
+		t.Errorf("expected the flag %q, got %q", "shrink", flag)
+	}
+}
+
+func TestWSLFlagShrinkRefusesWhenTheCapCannotBeRead(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	real := hostWSLFlagRun
+	hostWSLFlagRun = func(ctx context.Context, host, ssh, script string) (string, error) {
+		if strings.Contains(script, "config get cap") {
+			return "", os.ErrDeadlineExceeded
+		}
+		return real(ctx, host, ssh, script)
+	}
+	t.Cleanup(func() { hostWSLFlagRun = real })
+	if out, err := runMw(t, "host", "wsl-flag", "shrink", "--limit", "300ms"); err == nil {
+		t.Errorf("a cap that cannot be read is not known to be 0, got:\n%s", out)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "wsl-flag")); statErr == nil {
+		t.Errorf("no flag may be written")
+	}
+}
+
+// wslFlagCapIs makes the read of the host's cap answer cap ('unset' is the
+// answer of a host whose config has none: mw config get fails there).
+func wslFlagCapIs(t *testing.T, cap string) {
+	t.Helper()
+	real := hostWSLFlagRun
+	hostWSLFlagRun = func(ctx context.Context, host, ssh, script string) (string, error) {
+		if strings.Contains(script, "config get cap") {
+			return cap, nil
+		}
+		return real(ctx, host, ssh, script)
+	}
+	t.Cleanup(func() { hostWSLFlagRun = real })
+}
+
+func TestWSLFlagStillIgnoresAnyOtherWordThanTheFixedOnes(t *testing.T) {
+	if !strings.Contains(millwright.WSLFlagWatch, "$want -ne 'shrink'") {
+		t.Errorf("the watcher script must take shrink among its fixed words")
+	}
+}
+
+// The script's shrink, run under Windows PowerShell 5.1 against stand-ins.
+const shrinkGood = "-FlagWord shrink -ShrinkGB 220 -WslVersion 3.0.3.0 -DriveSizeGB 286 -RootSizeGB 1007 -RootUsedGB 150 -Ticks 1"
+
+func shrinkActs(lines []string) string { return strings.Join(actLines(lines), "\n") }
+
+func TestWSLFlagWatchDryRunShrinksInOrder(t *testing.T) {
+	lines := runWatchDryRun(t, shrinkGood)
+	text := strings.Join(lines, "\n")
+	steps := []string{"df -B1", "--shutdown", "--manage Ubuntu-24.04 --resize 220GB", "sleep infinity", "df -B1"}
+	at := -1
+	for _, step := range steps {
+		i := indexOfLine(lines, at+1, step)
+		if i < 0 {
+			t.Fatalf("expected %q after line %d, in the order df, shutdown, resize, start, df:\n%s", step, at, text)
+		}
+		at = i
+	}
+	acts := actLines(lines)
+	if len(acts) != 1 {
+		t.Fatalf("expected one act, got:\n%s", text)
+	}
+	// the outcome holds colons of its own, so the act is cut at the first ': '
+	_, act, _ := strings.Cut(acts[0], "Z ")
+	what, outcome, _ := strings.Cut(act, ": ")
+	if what != "shrink" || !strings.HasPrefix(outcome, "ok") {
+		t.Fatalf("expected the act 'shrink: ok ...', got %q", acts[0])
+	}
+	for _, want := range []string{"1007.0 GB -> 220.0 GB", "completed successfully"} {
+		if !strings.Contains(outcome, want) {
+			t.Errorf("expected %q in the result (df's size before and after, the tool's last lines), got %q", want, outcome)
+		}
+	}
+	if !strings.Contains(text, "result ") {
+		t.Errorf("expected the result line to be written:\n%s", text)
+	}
+}
+
+func TestWSLFlagWatchDryRunRefusesAndLeavesWSLAsItIs(t *testing.T) {
+	for name, tc := range map[string]struct{ args, why string }{
+		"no size installed":  {"-FlagWord shrink -Ticks 1", "failed: no size was installed"},
+		"WSL older than 2.5": {strings.Replace(shrinkGood, "3.0.3.0", "2.4.13.0", 1), "failed: WSL 2.4.13.0 is older than 2.5"},
+		"over 80% of drive":  {strings.Replace(shrinkGood, "-DriveSizeGB 286", "-DriveSizeGB 270", 1), "is not under 80% of the drive's 270 GB"},
+		"root over 70% of N": {strings.Replace(shrinkGood, "-RootUsedGB 150", "-RootUsedGB 155", 1), "is not under 70% of 220 GB"},
+	} {
+		lines := runWatchDryRun(t, tc.args)
+		text := strings.Join(lines, "\n")
+		if acts := shrinkActs(lines); !strings.Contains(acts, "shrink: ") || !strings.Contains(acts, tc.why) {
+			t.Errorf("%s: expected an act holding %q, got:\n%s", name, tc.why, text)
+		}
+		for _, bad := range []string{"--shutdown", "--manage", "sleep infinity"} {
+			if strings.Contains(text, bad) {
+				t.Errorf("%s: a refusal must leave WSL as it is, but %q is in:\n%s", name, bad, text)
+			}
+		}
+	}
+}
+
+func TestWSLFlagWatchDryRunSaysEachRefusalAtOnce(t *testing.T) {
+	lines := runWatchDryRun(t, "-FlagWord shrink -ShrinkGB 220 -WslVersion 2.4.1 -DriveSizeGB 250 -RootSizeGB 1007 -RootUsedGB 200 -Ticks 1")
+	acts := shrinkActs(lines)
+	for _, want := range []string{"older than 2.5", "not under 80%", "not under 70%"} {
+		if !strings.Contains(acts, want) {
+			t.Errorf("expected %q among the refusals:\n%s", want, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+func TestWSLFlagWatchDryRunStartsWSLAgainWhenTheResizeFails(t *testing.T) {
+	lines := runWatchDryRun(t, shrinkGood+" -ResizeFails")
+	text := strings.Join(lines, "\n")
+	resize := indexOfLine(lines, 0, "--manage")
+	start := indexOfLine(lines, resize+1, "sleep infinity")
+	if resize < 0 || start < 0 {
+		t.Fatalf("expected WSL started again after the failed resize:\n%s", text)
+	}
+	acts := shrinkActs(lines)
+	if !strings.Contains(acts, "shrink: failed: ") || !strings.Contains(acts, "WSL started again") || !strings.Contains(acts, "Wsl/Service/E_FAIL") {
+		t.Errorf("expected 'failed: ...' with the tool's last lines and WSL started again, got:\n%s", text)
+	}
+}
+
+func TestWSLFlagWatchScriptKeepsTheShrinkSizeInItsOwnFolder(t *testing.T) {
+	if !strings.Contains(millwright.WSLFlagWatch, "Store-Get 'shrink-gb'") {
+		t.Errorf("the script must read the size from shrink-gb beside its log")
+	}
+}
