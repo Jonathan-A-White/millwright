@@ -1290,9 +1290,10 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			if !there {
 				// A bead closed since the finder's branch forked has fixed the fault the
 				// branch saw unfixed (mw-gq6.1638).
-				id, why = foundClosedSince(bug, beads, c.id, c.detail.ClaimStarted())
-				if id != "" {
-					n.keepJoin(ctx, c, report, fmt.Sprintf("joined the finding %q of %s to %s, closed since its branch forked, by %s", strings.Join(bug.said(), " "), c.id, id, why))
+				closedID, closedWhy := foundClosedSince(bug, beads, c.id, c.detail.ClaimStarted())
+				if closedID != "" {
+					id = closedID
+					n.keepJoin(ctx, c, report, fmt.Sprintf("joined the finding %q of %s to %s, closed since its branch forked, by %s", strings.Join(bug.said(), " "), c.id, id, closedWhy))
 					report.Notes = append(report.Notes, fmt.Sprintf("already filed as %s, closed since the branch of %s forked: %s", id, c.id, bug.title))
 					block = append(block, fmt.Sprintf("Already filed: %s (closed since the branch forked). %s", id, strings.Join(bug.lines, " ")))
 					continue
