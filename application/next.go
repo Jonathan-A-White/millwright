@@ -421,6 +421,9 @@ type Next struct {
 	MetByMayor      string
 	MetByMayorGiven bool
 
+	// Answers runs the Mayor's word on the host that worked the story (nextremote.go).
+	Answers MayorAnswers
+
 	// HasGristTestKey says whether this host holds the factory's grist test key,
 	// and so can reach the live mill a grind example is proved on. A host that
 	// holds none and stops a branch grist-example-unproved pushes the branch to
@@ -635,8 +638,10 @@ type NextReport struct {
 	// was merged, tested or pushed again.
 	Landed        bool
 	LandedEarlier bool
-	How           Landed
-	Target        string
+	// Delegated is what mw next printed on DelegatedTo, which ran the Mayor's word there.
+	Delegated, DelegatedTo string
+	How                    Landed
+	Target                 string
 	// Queued says the story passed its close-out on a rig that lands in
 	// batches, and was queued for its batch rather than landed: its branch is
 	// at the remote as QueuedAs, and Trusted is the commit whose mw check run
@@ -1345,6 +1350,9 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 	}
 	if why := n.offHostCloseOut(ctx, c); why != "" {
 		report.tester = false
+		if host := n.answerHost(c); host != "" {
+			return n.answerThere(ctx, c, &report, host)
+		}
 		return report, fmt.Errorf("closing out %s: %s", storyID, why)
 	}
 	if err := n.recordRescope(ctx, c, &report); err != nil {

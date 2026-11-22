@@ -83,7 +83,10 @@ func newNextCmd() *cobra.Command {
 			"Tester) ran himself and found met, lands without the acceptance changing: `mw next <story> --no-dispatch\n" +
 			"--met-by-mayor \"<what he ran and what it printed>\"` writes a MET-BY-MAYOR: comment on the bead naming the\n" +
 			"criteria, the run and the time, and that comment answers the closing comment it follows. A closing comment a\n" +
-			"Builder writes after it is not answered by it; a blank run is refused.",
+			"Builder writes after it is not answered by it; a blank run is refused.\n\n" +
+			"Either flag, run on a host the story was not worked on, is run there instead: mw next <story> --no-dispatch\n" +
+			"with the same flag is run on the host the claim names, over ssh as mw retry reaches it, and what it\n" +
+			"printed is reported; nothing is written here.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			surviveBrokenOutput()
@@ -365,6 +368,7 @@ func newNextCmd() *cobra.Command {
 				RescopedByMayor: rescoped,
 				MetByMayor:      metBy,
 				MetByMayorGiven: cmd.Flags().Changed("met-by-mayor"),
+				Answers:         sshMayorAnswers{out: cmd.ErrOrStderr()},
 			}, room).Run(cmd.Context(), args[0])
 			return err
 		},

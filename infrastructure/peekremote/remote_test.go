@@ -197,3 +197,24 @@ func TestNightlyArgvIsTheSshCommandThatRunsTheNightlyRunOnTheHost(t *testing.T) 
 		t.Fatal("expected a host with no way to be reached to be an error")
 	}
 }
+
+func TestNextThereRunsMwNextWithTheMayorsWordOnTheHostAndKeepsWhatItPrints(t *testing.T) {
+	log := standIn(t, 0)
+	flags := []string{"--no-dispatch", "--met-by-mayor", "ran AC 1: it's 1.68 s"}
+	got, err := Remote{Reach: map[string]string{"cloud9": "ssh mw@10.0.0.9"}}.NextThere(context.Background(), "cloud9", "mw-gq6.1619", flags)
+	if err != nil || got != "host: desktop\n" {
+		t.Fatalf("printed %q, %v", got, err)
+	}
+	args, _ := os.ReadFile(log)
+	want := "-o\nBatchMode=yes\nmw@10.0.0.9\nbash -lc 'mw next '\\''mw-gq6.1619'\\'' '\\''--no-dispatch'\\'' '\\''--met-by-mayor'\\'' '\\''ran AC 1: it'\\''\\'\\'''\\''s 1.68 s'\\'''\n"
+	if string(args) != want {
+		t.Fatalf("ssh got\n%s\nwant\n%s", args, want)
+	}
+
+	// A mw next that refuses has still printed its report: it is kept with the error.
+	standIn(t, 1)
+	got, err = Remote{Reach: map[string]string{"cloud9": "ssh cloud9"}}.NextThere(context.Background(), "cloud9", "mw-gq6.1619", flags)
+	if err == nil || !strings.Contains(err.Error(), "oops") || got != "host: desktop\n" {
+		t.Fatalf("expected the refusal and the report, got %q, %v", got, err)
+	}
+}

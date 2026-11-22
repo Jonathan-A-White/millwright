@@ -29,6 +29,7 @@ var (
 	_ application.PeekRemote     = Remote{}
 	_ application.WorktreeRemote = Remote{}
 	_ application.NamedElsewhere = Remote{}
+	_ application.MayorAnswers   = Remote{}
 )
 
 // unattendedSSH keeps ssh from stopping to ask a question nobody is there to
@@ -60,6 +61,18 @@ func (r Remote) RetryThere(ctx context.Context, host, storyID string, flags []st
 		command += " " + quote(flag)
 	}
 	return r.run(ctx, host, command+" "+quote(storyID))
+}
+
+// NextThere implements application.MayorAnswers: it runs mw next on host, which
+// closes the story out where its branch, worktree and run record are, with the
+// flags that carry the Mayor's word, and returns what it printed, also when it
+// refused (its report is on its standard output, the refusal on its error).
+func (r Remote) NextThere(ctx context.Context, host, storyID string, flags []string) (string, error) {
+	command := "mw next " + quote(storyID)
+	for _, flag := range flags {
+		command += " " + quote(flag)
+	}
+	return r.runOut(ctx, host, command)
 }
 
 // RunNamedOn implements application.NamedElsewhere: it runs mw named-here on
@@ -134,6 +147,15 @@ func (r Remote) argv(host, command string) ([]string, error) {
 
 // run runs command on host over its ssh line and returns what it printed.
 func (r Remote) run(ctx context.Context, host, command string) (string, error) {
+	out, err := r.runOut(ctx, host, command)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// runOut is run that keeps what the command printed when it fails.
+func (r Remote) runOut(ctx context.Context, host, command string) (string, error) {
 	argv, err := r.argv(host, command)
 	if err != nil {
 		return "", err
@@ -143,7 +165,7 @@ func (r Remote) run(ctx context.Context, host, command string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s: %w: %s", strings.Join(prefix, " "), err, strings.TrimSpace(stderr.String()))
+		return stdout.String(), fmt.Errorf("%s: %w: %s", strings.Join(prefix, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
 }
