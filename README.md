@@ -1127,6 +1127,16 @@ Dispatch keeps when it first held each such story in the host's note
 20 files in the rig's checkout here, saying how many it matches, or a whole
 directory (`src/`, `src/**`) or a glob ending in a wildcard (`dir/*.ext`,
 `dir/*`) where the rig is not checked out to count it: name the files instead.
+When a host has had room (the same room its no-room and cap gates read) for 15
+minutes and has started nothing, dispatch mails the Mayor one line of counts
+(`Idle: <host> has had room for <time> with nothing to start`): how many ready
+stories are held on a files key, with each file and its holder, how many wait on
+him (`hitl`, `needs-files-key`, `handed-back`, `attempts-exhausted`, `no-sweep`,
+`tester-no-landed-story`), and how many are thawable (parked behind a
+`held-for-<event>` label). It is sent once for an idle spell, kept in the note
+`host.<host>.idle_spell`; the spell ends when a story starts or the host has no
+room. `thawable = false` in a `[stuck]` table of the config file turns the mail off
+(it is on when the key is missing). See `application/idlehostmail.go`.
 See the files scenarios of `features/dispatch.feature`.
 
 ## Booting a session into a seat
