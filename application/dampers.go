@@ -168,6 +168,9 @@ type DamperCounts struct {
 	// NeedsYou is the count of needs waiting on him in the view's counts file;
 	// zero when there is none or it is stale.
 	NeedsYou int
+	// NeedsYouSplit is the badge's number split by kind, printed beside the review
+	// queue; it judges nothing (mw-gq6.1643).
+	NeedsYouSplit NeedsYouSplit
 }
 
 // DampersHeading heads the section naming the alarms that are tripped: the
@@ -306,6 +309,15 @@ func (r DampersReport) FullList() string {
 		}
 	}
 	return out.String()
+}
+
+// QueueLines are the review queue against its limit and, beside it, the number
+// Postern's Needs you badge shows, split by kind: what mw stuck --dampers
+// prints after the alarms, tripped or not. The limit is judged on the review
+// queue alone.
+func (r DampersReport) QueueLines() string {
+	return fmt.Sprintf("his review queue %d (limit %d)\n%s\n",
+		r.Counts.ReviewQueue, r.Limits.orDefaults().ReviewQueue, r.Counts.NeedsYouSplit.Line())
 }
 
 // MeteredPinned is the alarm for the ready stories pinned to host whose rig is
@@ -516,6 +528,7 @@ func ReadDampers(facts DamperFacts, limits DamperLimits) DampersReport {
 	}
 	alarm, count, ring := needsYouAlarm(facts.NeedsCounts, facts.Now, limits.NeedsYou)
 	report.Counts.NeedsYou = count
+	report.Counts.NeedsYouSplit = NeedsYouSplitOf(facts.NeedsCounts, facts.Now)
 	if ring {
 		report.Alarms = append(report.Alarms, alarm)
 	}

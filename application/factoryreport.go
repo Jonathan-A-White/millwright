@@ -157,6 +157,10 @@ type ReviewTime struct {
 	// CloudMake are the cloud make alarms, a line for each box whose make has run
 	// past its limit, as mw status says them (mw-gq6.1128).
 	CloudMake []string `json:"cloud_make,omitempty"`
+	// NeedsYou is the number Postern's Needs you badge shows, split by kind,
+	// printed beside the review queue; the limit is judged on Queue alone
+	// (mw-gq6.1643).
+	NeedsYou NeedsYouSplit `json:"needs_you"`
 }
 
 // FactoryCommits reads a commit of a rig's checkout as the checkout has it,
@@ -615,7 +619,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		limits := counted.Limits.orDefaults()
 		result.Review = &ReviewTime{Queue: counted.Counts.ReviewQueue, QueueLimit: limits.ReviewQueue,
 			DemosWaiting: counted.Counts.DemosWaiting, DemoDays: limits.DemoWaitingDays,
-			CloudMake: cloudMakeLines(counted.Alarms)}
+			CloudMake: cloudMakeLines(counted.Alarms), NeedsYou: counted.Counts.NeedsYouSplit}
 	}
 	result.Changes = factoryChanges(all, kept, byID, escapedBy(escapes), now)
 	result.EpicsMoved = result.epicsMoved(stories)
@@ -991,6 +995,7 @@ func (t *ReviewTime) write(b *strings.Builder) {
 	}
 	b.WriteString("\nHIS TIME\n")
 	fmt.Fprintf(b, "  review queue %d (limit %d)\n", t.Queue, t.QueueLimit)
+	wrapInto(b, "  ", t.NeedsYou.Line())
 	fmt.Fprintf(b, "  demos waiting %d (%d days or more)\n", t.DemosWaiting, t.DemoDays)
 	for _, line := range t.CloudMake {
 		wrapInto(b, "  ", line)
