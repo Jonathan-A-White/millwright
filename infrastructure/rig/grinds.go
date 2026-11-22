@@ -133,6 +133,14 @@ func (g *Grinds) ResolveRef(ctx context.Context, checkout, ref string) (readFrom
 		readFrom, rev, worktree = ref, "HEAD", true
 	}
 	out, err := g.git(ctx, readFrom, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	if err != nil && !worktree {
+		var fetchErr error
+		if out, fetchErr = g.fetchRef(ctx, readFrom, ref); fetchErr == nil {
+			err = nil
+		} else {
+			return "", "", "", fmt.Errorf("the ref %q names no commit in %s, and fetching it from %s did not find it: %w", ref, readFrom, g.remote, fetchErr)
+		}
+	}
 	if err != nil {
 		return "", "", "", fmt.Errorf("the ref %q names no commit in %s: %w", ref, readFrom, err)
 	}
@@ -143,6 +151,18 @@ func (g *Grinds) ResolveRef(ctx context.Context, checkout, ref string) (readFrom
 		}
 	}
 	return readFrom, commit, note, nil
+}
+
+// fetchRef fetches a ref the checkout does not hold, once, from the remote (a
+// leading "<remote>/" is dropped, the mill's checkout never fetches a story's
+// mw/* branch), and says the commit FETCH_HEAD names. It writes no local branch
+// and moves no checked-out ref (mw-gq6.1655).
+func (g *Grinds) fetchRef(ctx context.Context, checkout, ref string) (string, error) {
+	name := strings.TrimPrefix(ref, g.remote+"/")
+	if _, err := g.git(ctx, checkout, "fetch", "--quiet", g.remote, name); err != nil {
+		return "", err
+	}
+	return g.git(ctx, checkout, "rev-parse", "--verify", "--quiet", "FETCH_HEAD^{commit}")
 }
 
 // ReadAt implements application.GrindSource: `git ls-tree` says whether the
