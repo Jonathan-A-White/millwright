@@ -28,7 +28,11 @@ func newStuckCmd() *cobra.Command {
 			"  - a claimed bead whose lease ran out over " + strconv.Itoa(int(application.StuckClaimAge/time.Hour)) + " hours ago with no heartbeat since: a claim with no\n" +
 			"    session (a claim bd shows no lease for is not seen)\n\n" +
 			"Each root is printed with the count and the ids of the live beads behind it; a root with nothing live\n" +
-			"behind it is not listed. mw status shows the same as a 'stuck:' line in its DAMPERS section, and the\n" +
+			"behind it is not listed.\n\n" +
+			"After the roots, it lists the held stories past their reason, grouped by epic, with the count: held (not\n" +
+			"iced, no reason label, no blocker unfinished), whose newest '" + application.HeldCommentPrefix + "' comment names beads (mw-...) that have all\n" +
+			"closed. One whose reason names a bead still open, or none, is not listed; mw release puts one back.\n\n" +
+			"mw status shows the roots as a 'stuck:' line in its DAMPERS section, and the\n" +
 			"sleep pass reads this output. It reads and writes nothing, runs no model and always exits 0 when it\n" +
 			"could read the beads.\n\n" +
 			"With --inversions it prints instead every priority inversion, one a line, with no cut (mw status cuts\n" +
