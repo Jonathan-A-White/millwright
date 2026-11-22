@@ -32,7 +32,9 @@ Feature: mw doctor's mayor-stale check on a Mayor parked on a harness prompt
     When mw doctor's mayor-stale check runs
     And 20 minutes go by
     And mw doctor's mayor-stale check runs
-    Then the doctor log holds "left the Mayor's window alone"
+    Then mw doctor printed "left the Mayor's window alone"
+    And mw doctor printed "the fault stands"
+    And the doctor log does not hold "mayor-stale cured"
     And the doctor log does not hold "would close"
 
   Scenario: A dry run says it would leave a parked prompt alone and sends nothing

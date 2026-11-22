@@ -55,6 +55,9 @@ type VPSNginx struct {
 
 	// due is the alarm Probe found owing, for Cure to send.
 	due vpsNginxDue
+	// told is whether the last Cure sent the "wrong upstream" alarm, read by
+	// CureLeavesFault.
+	told bool
 }
 
 // vpsNginxDue is an alarm Probe found owing: its text, the fault it told (the
@@ -151,6 +154,7 @@ func (v *VPSNginx) Probe(ctx context.Context) (application.Verdict, string) {
 // then remember it. The state is changed only once the alarm is sent, so one
 // that could not be sent is tried again.
 func (v *VPSNginx) Cure(ctx context.Context) error {
+	v.told = false
 	if !v.due.pending {
 		return nil
 	}
@@ -186,6 +190,7 @@ func (v *VPSNginx) Cure(ctx context.Context) error {
 		return fmt.Errorf("the vps-nginx alarm could not be sent: %w", err)
 	}
 	v.due = vpsNginxDue{}
+	v.told = true
 	paths := []string{due.fault}
 	for _, earlier := range due.seqs {
 		paths = append(paths, strconv.FormatUint(earlier, 10))
@@ -196,6 +201,12 @@ func (v *VPSNginx) Cure(ctx context.Context) error {
 	}
 	return nil
 }
+
+// CureLeavesFault implements application.DoctorStandsAfterCure for the "wrong
+// upstream" alarm only: it tells the Governor and the upstream stays wrong
+// (mw-6ww.185.33). The "right again" event follows an upstream that is right,
+// and is cured.
+func (v *VPSNginx) CureLeavesFault() bool { return v.told }
 
 // Damper implements application.DoctorCheck.
 func (v *VPSNginx) Damper() (time.Duration, int) { return VPSNginxDamperWait, VPSNginxDamperCap }

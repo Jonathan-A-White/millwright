@@ -65,6 +65,9 @@ type Battery struct {
 	// Clear tells the Governor the battery has recovered, in the normal lane,
 	// naming in clears the emergency of the last alarm. A nil Clear sends none.
 	Clear func(ctx context.Context, text string, clears uint64) error
+
+	// told is whether the last Cure sent the alarm, read by CureLeavesFault.
+	told bool
 }
 
 // NewBattery is the check over the power_supply directory dir, remembering
@@ -118,6 +121,7 @@ func (b *Battery) Probe(ctx context.Context) (application.Verdict, string) {
 // no alarm. The threshold is kept only once the alarm is sent, so one that
 // could not be sent is tried again.
 func (b *Battery) Cure(ctx context.Context) error {
+	b.told = false
 	reading, err := b.read()
 	if err != nil {
 		return err
@@ -132,6 +136,7 @@ func (b *Battery) Cure(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("the battery alarm could not be sent: %w", err)
 	}
+	b.told = true
 	if b.State == nil {
 		return nil
 	}
@@ -148,6 +153,12 @@ func (b *Battery) Cure(ctx context.Context) error {
 	}
 	return nil
 }
+
+// CureLeavesFault implements application.DoctorStandsAfterCure: the alarm only
+// tells the Governor, so a battery still low and discharging stands after it
+// (mw-6ww.185.32). A Cure that found the battery plugged in since Probe sent no
+// alarm and left nothing standing.
+func (b *Battery) CureLeavesFault() bool { return b.told }
 
 // Damper implements application.DoctorCheck.
 func (b *Battery) Damper() (time.Duration, int) { return BatteryDamperWait, BatteryDamperCap }

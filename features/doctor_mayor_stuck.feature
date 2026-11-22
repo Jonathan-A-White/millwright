@@ -108,6 +108,7 @@ Feature: mw doctor's mayor-stuck check
     And 40 minutes go by
     And mw doctor's mayor-stuck check runs
     Then the doctor log holds "stopped at the usage limit"
+    And the doctor log does not hold "mayor-stuck cured"
     And exactly 1 alarm was sent
     And the alarm says "the factory is stopped"
     And the alarm says "Switch to usage credits"
