@@ -147,7 +147,7 @@ func (m *MayorStale) held() *MayorGone {
 // look, has stood still less than Limit, or shows an idle Mayor at an empty
 // prompt; faulty, naming the minutes, once a pane in a state that should
 // redraw (see paneStalls) has stood still that long. It writes one thing: the pane it saw, in its
-// own state key, as vault-dirty remembers its sightings. Once the Mayor is
+// own state key, as vault-dirty remembers its sightings, except in a dry run. Once the Mayor is
 // fresh again after an alarm it also sends the one event that ends it (see
 // ended), except in a dry run.
 func (m *MayorStale) Probe(ctx context.Context) (application.Verdict, string) {
@@ -271,7 +271,8 @@ func paneStalls(pane string) bool {
 var mayorStaleMenuChoice = regexp.MustCompile(`^\d+\.\s`)
 
 // since is when the pane of window last changed, as far as this check has
-// looked: now, for a pane or window it has not seen before, which it saves.
+// looked: now, for a pane or window it has not seen before, which it saves
+// except in a dry run, which only reads what a real run saved.
 func (m *MayorStale) since(ctx context.Context, window, pane string) (time.Time, error) {
 	if m.State == nil {
 		return m.now(), nil
@@ -288,6 +289,9 @@ func (m *MayorStale) since(ctx context.Context, window, pane string) (time.Time,
 		}
 	}
 	at := m.now()
+	if application.DoctorDryRun(ctx) {
+		return at, nil
+	}
 	err = m.State.Save(ctx, mayorStaleSeenStateName, application.DoctorEpisode{SeenPaths: []string{window, seen, at.UTC().Format(time.RFC3339)}})
 	if err != nil {
 		return time.Time{}, fmt.Errorf("saving this check's own state: %w", err)

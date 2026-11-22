@@ -548,3 +548,35 @@ func TestAMayorParkedOnTheUsageLimitIsLeftToMayorStuck(t *testing.T) {
 		t.Errorf("a Mayor at the usage limit raises nothing here: kills %d, mayor-up %d, alarms %d", r.lines(r.kills), r.lines(r.upRuns), len(r.alarms))
 	}
 }
+
+// A dry run reads the pane's last sighting but never writes one: the first real
+// run after it must still be the one that starts the clock (mw-6ww.185.29).
+func TestADryRunOverAPaneItHasNotSeenLeavesTheSeenStateUnchanged(t *testing.T) {
+	r := newStaleRig(t)
+	seen := filepath.Join(r.check.State.(*doctor.Store).Dir, "mayor-stale-seen")
+
+	for i := 0; i < 2; i++ {
+		r.now = r.now.Add(time.Minute)
+		if _, err := r.doc.Run(context.Background(), "mayor-stale", true); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(seen); !os.IsNotExist(err) {
+			t.Fatalf("dry run %d saved the pane's sighting (stat err %v)", i+1, err)
+		}
+	}
+
+	r.run(0)
+	before, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatalf("a real run remembers the pane: %v", err)
+	}
+	r.now = r.now.Add(5 * time.Minute)
+	r.write(r.pane, frozenPane(2))
+	if _, err := r.doc.Run(context.Background(), "mayor-stale", true); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(seen)
+	if string(before) != string(after) {
+		t.Fatalf("a dry run over a new pane changed the seen state:\nbefore %q\nafter  %q", before, after)
+	}
+}
