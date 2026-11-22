@@ -10,18 +10,27 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
 var _ application.BatchRecords = (*Vault)(nil)
 
+// BatchNumberingNoteFile is the file NewBatch writes in a batch's directory when
+// it could not fetch the vault's origin to number the batch above every host's.
+const BatchNumberingNoteFile = "numbering-note.txt"
+
 // NewBatch implements application.BatchRecords: the directory
-// runs/batch/<rig>/<n>, n one more than the highest number already there (1
-// for the rig's first batch), made empty. Mkdir rather than MkdirAll for the
-// last step, so that two landings that pick the same number do not share it:
-// the second takes the next.
-func (v *Vault) NewBatch(_ context.Context, rig string) (int, error) {
+// runs/batch/<rig>/<n>, n one more than the highest number any host has recorded
+// (1 for the rig's first batch), made empty. The vault's origin is fetched first
+// and its main tree read, so that a checkout that lags another host's landing
+// does not reuse that landing's number (mw-gq6.1662); a fetch that fails is
+// written in the batch's directory as BatchNumberingNoteFile and the local
+// folders number the batch, as they did before. Mkdir rather than MkdirAll for
+// the last step, so that two landings that pick the same number do not share
+// it: the second takes the next.
+func (v *Vault) NewBatch(ctx context.Context, rig string) (int, error) {
 	if err := safeName("rig", rig); err != nil {
 		return 0, err
 	}
@@ -39,15 +48,55 @@ func (v *Vault) NewBatch(_ context.Context, rig string) (int, error) {
 			highest = n
 		}
 	}
+	elsewhere, said := v.batchesInOrigin(ctx, rig)
+	if elsewhere > highest {
+		highest = elsewhere
+	}
 	for n := highest + 1; ; n++ {
 		err := os.Mkdir(filepath.Join(dir, strconv.Itoa(n)), 0o755)
 		if err == nil {
+			if said != "" {
+				note := filepath.Join(dir, strconv.Itoa(n), BatchNumberingNoteFile)
+				_ = os.WriteFile(note, []byte(said+"\n"), 0o644)
+			}
 			return n, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
 			return 0, fmt.Errorf("making batch %d of %s: %w", n, rig, err)
 		}
 	}
+}
+
+// originFetchBound is how long NewBatch waits for the vault's origin: a landing
+// holds the merge slot while it numbers its batch.
+const originFetchBound = time.Minute
+
+// batchesInOrigin is the highest number among the folders of runs/batch/<rig> in
+// the main tree of the vault's origin, read after a fetch. A vault with no
+// upstream has no other host to be level with: it reads 0 and says nothing. A
+// fetch or a read that fails reads 0 and says why, for the batch's notes.
+func (v *Vault) batchesInOrigin(ctx context.Context, rig string) (int, string) {
+	if _, err := v.upstream(ctx); err != nil {
+		return 0, ""
+	}
+	fetching, cancel := context.WithTimeout(ctx, originFetchBound)
+	defer cancel()
+	if _, err := v.git(fetching, "fetch"); err != nil {
+		return 0, fmt.Sprintf("the vault's origin could not be fetched, so this batch is numbered from this checkout's folders alone "+
+			"and may share its number with another host's batch: %s", oneLineOf(err.Error()))
+	}
+	listed, err := v.git(ctx, "ls-tree", "--name-only", "@{upstream}", path.Join(application.BatchDir, rig)+"/")
+	if err != nil {
+		return 0, fmt.Sprintf("the batches of %s in the vault's origin could not be read, so this batch is numbered from this checkout's folders alone "+
+			"and may share its number with another host's batch: %s", rig, oneLineOf(err.Error()))
+	}
+	highest := 0
+	for _, line := range strings.Split(listed, "\n") {
+		if n, err := strconv.Atoi(path.Base(strings.TrimSpace(line))); err == nil && n > highest {
+			highest = n
+		}
+	}
+	return highest, ""
 }
 
 // PutBatchFile implements application.BatchRecords: runs/batch/<rig>/<n>/<name>,
