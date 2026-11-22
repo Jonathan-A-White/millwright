@@ -144,6 +144,11 @@ func (c *ClaudeLogin) Cure(ctx context.Context) error {
 	return nil
 }
 
+// CureLeavesFault implements application.DoctorStandsAfterCure: the alarm
+// changes nothing on the host, so the login warning stands after it
+// (mw-6ww.185.31).
+func (c *ClaudeLogin) CureLeavesFault() bool { return true }
+
 // Damper implements application.DoctorCheck.
 func (c *ClaudeLogin) Damper() (time.Duration, int) {
 	return ClaudeLoginDamperWait, ClaudeLoginDamperCap

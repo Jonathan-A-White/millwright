@@ -164,3 +164,39 @@ func TestClaudeLoginAuthStatusReadsTheProgramsJSON(t *testing.T) {
 		}
 	}
 }
+
+// A login problem is not put right by an alarm to the Governor: run through the
+// doctor with an alarm that succeeds, the check is faulty (the alarm sent) and
+// then damped, never cured (mw-6ww.185.31).
+func TestClaudeLoginIsNeverReportedCuredByTheDoctor(t *testing.T) {
+	check := doctor.NewClaudeLogin(claudeEnvAged(t, 336))
+	check.AuthStatus = loggedIn
+	alarms := 0
+	check.Alarm = func(context.Context, string) (uint64, error) { alarms++; return 1, nil }
+	now := claudeLoginNow
+	store := doctor.New(t.TempDir())
+	runner := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  store, Log: store,
+		Now: func() time.Time { return now },
+	}
+	check.Now = func() time.Time { return claudeLoginNow }
+	for _, at := range []time.Duration{0, 5 * time.Minute, 25 * time.Hour} {
+		now = claudeLoginNow.Add(at)
+		// The run's error says the fault was left standing: that is the point.
+		report, _ := runner.Run(context.Background(), "", false)
+		if len(report.Results) != 1 {
+			t.Fatalf("at +%s: expected one result, got %+v", at, report.Results)
+		}
+		got := report.Results[0]
+		if got.Verdict != "faulty" && got.Verdict != "damped" {
+			t.Errorf("at +%s: expected faulty or damped, got %q (%s)", at, got.Verdict, got.String())
+		}
+		if strings.Contains(got.String(), "cured") {
+			t.Errorf("at +%s: the report says cured: %s", at, got.String())
+		}
+	}
+	if alarms != 2 {
+		t.Errorf("expected one alarm at the start and one after the day's damper, got %d", alarms)
+	}
+}
