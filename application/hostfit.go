@@ -134,7 +134,7 @@ func (h HostFit) now() time.Time {
 	if h.Now != nil {
 		return h.Now()
 	}
-	return time.Now()
+	return time.Now() //mw:realclock the default of the injected Now, used where none is set
 }
 
 // Run reads the host and returns one item each. Nothing is changed.
