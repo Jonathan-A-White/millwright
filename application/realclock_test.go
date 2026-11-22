@@ -285,3 +285,51 @@ func TestRealclockCheckPassesATimeNowKeptForElapsedTime(t *testing.T) {
 		t.Fatalf("a time.Now() kept for elapsed time, never replaced, was refused: %v\n%s", err, out)
 	}
 }
+
+// checkRealclockArgs runs the script with args before the root.
+func checkRealclockArgs(t *testing.T, root string, args ...string) (string, error) {
+	t.Helper()
+	script, err := filepath.Abs("../scripts/check-realclock.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", append(append([]string{script}, args...), root)...)
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// The script holds the wall-clock reads of non-test code; --tests is the list
+// of the tests that read the wall clock (mw-6ww.185.24).
+func TestRealclockTestsListsEachTestFileThatReadsTheWallClock(t *testing.T) {
+	root := aRealclockTree(t, map[string]string{
+		"application/wait_test.go":   aWaitOnTheRealClock,
+		"infrastructure/x/x_test.go": "package x\n\nimport \"time\"\n\nvar _ = time.Now()\n",
+		"application/clean_test.go":  "package application\n\n// time.Now() only in a comment\n",
+		"application/wait.go":        aWaitOnTheRealClock,
+		realclockBaselinePath:        "",
+	})
+	out, err := checkRealclockArgs(t, root, "--tests")
+	if err != nil {
+		t.Fatalf("--tests failed: %v\n%s", err, out)
+	}
+	for _, want := range []string{"application/wait_test.go", "infrastructure/x/x_test.go"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--tests left out %s:\n%s", want, out)
+		}
+	}
+	for _, not := range []string{"clean_test.go", "application/wait.go"} {
+		if strings.Contains(out, not+" ") || strings.Contains(out, not+"\n") {
+			t.Errorf("--tests named %s, which holds no test read of the wall clock:\n%s", not, out)
+		}
+	}
+}
+
+func TestRealclockTestsExitsZeroWhenNoTestReadsTheClock(t *testing.T) {
+	root := aRealclockTree(t, map[string]string{"application/a_test.go": "package application\n"})
+	if out, err := checkRealclockArgs(t, root, "--tests"); err != nil {
+		t.Fatalf("--tests failed on a tree with no such test: %v\n%s", err, out)
+	}
+}
