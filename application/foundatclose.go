@@ -761,6 +761,81 @@ func foundMatch(bug foundBug, beads []StoryDetail, finder string) (same, near, w
 	return "", near, nearWhy
 }
 
+// foundClosedSince is the bead closed after forked, when the finder's branch was
+// made, that holds the fault of the finding: the finder's branch saw the fault
+// unfixed, and a bead closed since (landed, or closed as superseded) has fixed it
+// or carries it on, so filing it again files a second bug for a fault no longer
+// there (mw-gq6.1638). It names the same fault as foundMatch does, the same line
+// of a file or the same symbol and the same fault words, and needs no found-at-close
+// label, since it is the story that fixed the fault that holds it. A bead closed
+// before the branch forked, or when it is not known, is not it: the finder saw the
+// fault with that bead's work in its branch. A bead closed as superseded by another
+// bead is the other bead's to carry: id is that bead's then. why says what was shared.
+func foundClosedSince(bug foundBug, beads []StoryDetail, finder string, forked time.Time) (id, why string) {
+	if forked.IsZero() {
+		return "", ""
+	}
+	text := strings.Join(bug.said(), "\n")
+	refs, symbols, words := foundRefs(text), foundSymbols(text), foundFaultWords(text)
+	if len(refs) == 0 && len(symbols) == 0 {
+		return "", ""
+	}
+	for _, d := range beads {
+		if !d.Closed() || d.IsParent() || d.Story.ID == finder || d.ClosedAt.IsZero() || !d.ClosedAt.After(forked) || strings.Contains(d.Description, "Seen by: "+finder+"\n") {
+			continue
+		}
+		other := foundBeadText(d)
+		otherRefs, otherSymbols, otherWords := foundRefs(other), foundSymbols(other), foundFaultWords(other)
+		holds := ""
+		for _, ref := range refs {
+			for _, o := range otherRefs {
+				if foundOverlap(ref, o) && holds == "" {
+					holds = "the same line of " + foundRefText(ref) + " as " + foundRefText(o)
+				}
+			}
+		}
+		for _, symbol := range slices.Sorted(maps.Keys(symbols)) {
+			if holds == "" && otherSymbols[symbol] && foundSameWords(words, otherWords) {
+				holds = fmt.Sprintf("the symbol %s and the fault words %s", symbol, strings.Join(foundSharedWords(words, otherWords), ", "))
+			}
+		}
+		if holds == "" {
+			continue
+		}
+		why = fmt.Sprintf("%s, closed %s after the branch forked at %s", holds, d.ClosedAt.UTC().Format("15:04Z"), forked.UTC().Format("15:04Z"))
+		if strings.Contains(strings.ToLower(d.CloseReason), "supersed") {
+			for _, carrier := range beads {
+				if carrier.Story.ID != d.Story.ID && carrier.Story.ID != finder && foundNamesBead(d.CloseReason, carrier.Story.ID) {
+					return carrier.Story.ID, why + "; " + d.Story.ID + " was closed as superseded by it"
+				}
+			}
+		}
+		return d.Story.ID, why
+	}
+	return "", ""
+}
+
+// foundNamesBead says whether text names the bead id as a whole id: mw-6ww.185.3
+// is not named by a text that names mw-6ww.185.33.
+func foundNamesBead(text, id string) bool {
+	idChar := func(c byte) bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_'
+	}
+	for start := 0; ; {
+		at := strings.Index(text[start:], id)
+		if at < 0 {
+			return false
+		}
+		end := start + at + len(id)
+		// A '.' that ends a sentence closes the id; one that goes on to a digit or a
+		// letter is a longer id.
+		if end == len(text) || (!idChar(text[end]) && (text[end] != '.' || end+1 == len(text) || !idChar(text[end+1]))) {
+			return true
+		}
+		start = end
+	}
+}
+
 // foundInFlight is the story of the finding's own rig that is being worked now
 // (in progress, so claimed) and names the same file or symbol as the finding and
 // says the same fault in its title or description: the bug filed for the finding
@@ -1151,7 +1226,8 @@ func thisOrThese(n int) string {
 // (mw-t5shinh.24); so is a bead not closed that another story's finding filed
 // for the same fault, worded as it likes (mw-gq6.1068); a bead that shares only a
 // file or symbol is not, and the bug filed names it as one it may overlap
-// (mw-gq6.1103). A bug's files key is the
+// (mw-gq6.1103). A bead closed since the finder's branch forked that holds the
+// fault is the one already filed too (foundClosedSince, mw-gq6.1638). A bug's files key is the
 // files its lines name, else the finder's.
 func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *NextReport, again bool, comments []Comment) string {
 	section := closingFoundNotFixed(comments)
@@ -1211,6 +1287,17 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 		if !there {
 			id, near, why = foundMatch(bug, beads, c.id)
 			there = id != ""
+			if !there {
+				// A bead closed since the finder's branch forked has fixed the fault the
+				// branch saw unfixed (mw-gq6.1638).
+				id, why = foundClosedSince(bug, beads, c.id, c.detail.ClaimStarted())
+				if id != "" {
+					n.keepJoin(ctx, c, report, fmt.Sprintf("joined the finding %q of %s to %s, closed since its branch forked, by %s", strings.Join(bug.said(), " "), c.id, id, why))
+					report.Notes = append(report.Notes, fmt.Sprintf("already filed as %s, closed since the branch of %s forked: %s", id, c.id, bug.title))
+					block = append(block, fmt.Sprintf("Already filed: %s (closed since the branch forked). %s", id, strings.Join(bug.lines, " ")))
+					continue
+				}
+			}
 		}
 		if there {
 			n.keepJoin(ctx, c, report, fmt.Sprintf("joined the finding %q of %s to %s by %s", strings.Join(bug.said(), " "), c.id, id, why))
