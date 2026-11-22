@@ -498,6 +498,11 @@ func newDispatchCmd() *cobra.Command {
 				HasGristTestKey: hostHasGristTestKey,
 			}, recheckSuite), room)
 			dispatch.CloudBook, dispatch.CloudPlan = cloudStatus(dir, host)
+			// [stuck] thawable = false turns off the mail to the Mayor of a host that has had
+			// room for 15 minutes with nothing to start (mw-gq6.1645).
+			if dispatch.IdleHostMail, err = config.StuckThawable(); err != nil {
+				return err
+			}
 			// The mill answers what it left waiting, on the host that is home and
 			// where a [grist] table says so. A mill that cannot be set up costs
 			// the tick its grist pass and nothing else.
