@@ -233,6 +233,10 @@ func alarmUnitEnv(missing []string) string {
 	return "Unit without beads.env: " + strings.Join(missing, ", ") + " runs mw and reads no ~/.config/mw/beads.env, so its bd cannot reach the served beads. " + unitEnvFix
 }
 
+// CureLeavesFault implements application.DoctorStandsAfterCure: the mail adds no
+// beads.env to a unit, so it is still without one after it (mw-6ww.185.28).
+func (u *UnitEnv) CureLeavesFault() bool { return true }
+
 // Cure implements application.DoctorCheck: mail the Mayor.
 func (u *UnitEnv) Cure(ctx context.Context) error {
 	missing, _ := u.missing(ctx)

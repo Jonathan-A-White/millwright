@@ -128,6 +128,10 @@ func (c *RecheckSkipCheck) Probe(ctx context.Context) (Verdict, string) {
 		plural(len(c.found), "re-run", "re-runs"), strings.Join(lines, "; "))
 }
 
+// CureLeavesFault implements DoctorStandsAfterCure: the mail makes no re-run, so
+// the skips stand after it (mw-6ww.185.28).
+func (c *RecheckSkipCheck) CureLeavesFault() bool { return true }
+
 // Cure implements DoctorCheck: it mails the Mayor, the skips one line each.
 func (c *RecheckSkipCheck) Cure(ctx context.Context) error {
 	if len(c.found) == 0 {

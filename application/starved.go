@@ -854,6 +854,10 @@ func (c *StarvedRigCheck) mailMayor(ctx context.Context, alarms []DamperAlarm, l
 	})
 }
 
+// CureLeavesFault implements DoctorStandsAfterCure: the mail releases no rig, so
+// it stays starved after it (mw-6ww.185.28).
+func (c *StarvedRigCheck) CureLeavesFault() bool { return true }
+
 // Cure implements DoctorCheck: it mails the Mayor, the starved rigs one line each.
 func (c *StarvedRigCheck) Cure(ctx context.Context) error {
 	if len(c.found) == 0 {
