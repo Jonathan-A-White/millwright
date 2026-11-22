@@ -36,7 +36,7 @@ func (c *doctorContext) staleFixture() (*doctor.MayorStale, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	root, err := os.MkdirTemp("", "mw-doctor-mayor-stale")
+	root, err := scenarioTempDir("", "mw-doctor-mayor-stale")
 	if err != nil {
 		return nil, "", err
 	}

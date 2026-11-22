@@ -299,7 +299,7 @@ func (c *dispatchContext) workspace() (string, error) {
 	if c.root != "" {
 		return c.root, nil
 	}
-	root, err := os.MkdirTemp("", "mw-dispatch-")
+	root, err := scenarioTempDir("", "mw-dispatch-")
 	if err != nil {
 		return "", fmt.Errorf("making a workspace: %w", err)
 	}

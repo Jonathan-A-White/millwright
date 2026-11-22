@@ -27,7 +27,7 @@ func (c *doctorContext) landingPath() string {
 }
 
 func (c *doctorContext) aRigWithALandingLeftHoursAgo(hours int) error {
-	root, err := os.MkdirTemp("", "mw-doctor-stale-landings")
+	root, err := scenarioTempDir("", "mw-doctor-stale-landings")
 	if err != nil {
 		return err
 	}

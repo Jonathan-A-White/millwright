@@ -589,7 +589,7 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *talkWaitContext) aBackendThatStreams() error {
-	home, err := os.MkdirTemp("", "mw-talk-wait-")
+	home, err := scenarioTempDir("", "mw-talk-wait-")
 	if err != nil {
 		return err
 	}

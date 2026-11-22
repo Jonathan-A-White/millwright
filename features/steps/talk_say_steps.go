@@ -86,7 +86,7 @@ func InitializeTalkSayScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *talkSayContext) aThrowawayMayorKey() error {
-	home, err := os.MkdirTemp("", "mw-talk-say-")
+	home, err := scenarioTempDir("", "mw-talk-say-")
 	if err != nil {
 		return err
 	}

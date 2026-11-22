@@ -366,7 +366,7 @@ func (c *readyContext) mwSweepOnAtFindsNothingNewlyStuck(host, clock string) err
 // alongside the harness and is killed the moment the harness's own command
 // line finishes, before this call returns.
 func (c *readyContext) aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt() error {
-	dir, err := os.MkdirTemp("", "mw-heartbeat-shell-line")
+	dir, err := scenarioTempDir("", "mw-heartbeat-shell-line")
 	if err != nil {
 		return fmt.Errorf("making a scratch directory: %w", err)
 	}

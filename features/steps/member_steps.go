@@ -171,7 +171,7 @@ func InitializeMemberScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *memberContext) aThrowawayHome() error {
-	home, err := os.MkdirTemp("", "mw-member-")
+	home, err := scenarioTempDir("", "mw-member-")
 	if err != nil {
 		return err
 	}

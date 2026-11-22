@@ -68,7 +68,7 @@ func (c *configSetContext) path() string { return filepath.Join(c.dir, "config.t
 
 func (c *configSetContext) aConfigFileHolding(doc *godog.DocString) error {
 	if c.dir == "" {
-		dir, err := os.MkdirTemp("", "mw-config-set-")
+		dir, err := scenarioTempDir("", "mw-config-set-")
 		if err != nil {
 			return err
 		}

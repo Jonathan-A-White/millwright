@@ -62,7 +62,7 @@ func InitializePosternRequestSignatureScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *posternSignatureContext) aCheckingBackend() error {
-	home, err := os.MkdirTemp("", "mw-postern-signature-")
+	home, err := scenarioTempDir("", "mw-postern-signature-")
 	if err != nil {
 		return err
 	}

@@ -61,7 +61,7 @@ func InitializePosternKeyScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *posternKeyContext) aThrowawayPosternKeyFile() error {
-	home, err := os.MkdirTemp("", "mw-postern-key-")
+	home, err := scenarioTempDir("", "mw-postern-key-")
 	if err != nil {
 		return err
 	}

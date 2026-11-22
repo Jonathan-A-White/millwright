@@ -66,7 +66,7 @@ func (c *doctorContext) registerBoostConfigSteps(ctx *godog.ScenarioContext) {
 
 func (c *doctorContext) boostConfigWrite(name, content string) error {
 	if c.boostConfigDir == "" {
-		dir, err := os.MkdirTemp("", "mw-doctor-boost-config")
+		dir, err := scenarioTempDir("", "mw-doctor-boost-config")
 		if err != nil {
 			return err
 		}

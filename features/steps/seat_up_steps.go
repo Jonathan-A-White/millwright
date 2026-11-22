@@ -180,7 +180,7 @@ func (c *seatUpContext) writeHandoffs(table *godog.Table, parts ...string) error
 }
 
 func (c *seatUpContext) aVaultHoldingTheSeat(seat string) error {
-	dir, err := os.MkdirTemp("", "mw-seat-up-")
+	dir, err := scenarioTempDir("", "mw-seat-up-")
 	if err != nil {
 		return fmt.Errorf("making a vault: %w", err)
 	}

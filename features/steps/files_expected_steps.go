@@ -94,7 +94,7 @@ func (c *filesExpectedContext) theRigFileSays(rig string, written *godog.DocStri
 
 func (c *filesExpectedContext) vaultDir() (string, error) {
 	if c.vault == "" {
-		dir, err := os.MkdirTemp("", "mw-files-expected-")
+		dir, err := scenarioTempDir("", "mw-files-expected-")
 		if err != nil {
 			return "", err
 		}

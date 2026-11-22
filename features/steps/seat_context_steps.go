@@ -42,7 +42,7 @@ func InitializeSeatContextScenario(ctx *godog.ScenarioContext) {
 	c := &seatContextContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		home, err := os.MkdirTemp("", "mw-seat-context-")
+		home, err := scenarioTempDir("", "mw-seat-context-")
 		if err != nil {
 			return ctx, err
 		}

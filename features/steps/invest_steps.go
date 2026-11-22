@@ -62,7 +62,7 @@ func (c *investContext) aLedger(now, actor string) error {
 	if err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp("", "mw-invest-")
+	dir, err := scenarioTempDir("", "mw-invest-")
 	if err != nil {
 		return err
 	}

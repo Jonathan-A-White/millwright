@@ -64,7 +64,7 @@ func InitializeErrorsScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *errorsContext) anEmptyRegister() error {
-	root, err := os.MkdirTemp("", "mw-errors-")
+	root, err := scenarioTempDir("", "mw-errors-")
 	if err != nil {
 		return err
 	}

@@ -93,7 +93,7 @@ func (c *secretsContext) aTempVaultWithAThrowawayAgeKey() error {
 			return godog.ErrSkip
 		}
 	}
-	dir, err := os.MkdirTemp("", "mw-secrets-")
+	dir, err := scenarioTempDir("", "mw-secrets-")
 	if err != nil {
 		return err
 	}

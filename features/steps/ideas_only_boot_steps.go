@@ -20,7 +20,7 @@ var bootIdeasClock = time.Date(2026, time.October, 12, 12, 0, 0, 0, time.UTC)
 // bootIdeasOnly makes the Ideas only a boot report is read with: the state and
 // held files of a throwaway host, no backend to ask. until is empty for off.
 func bootIdeasOnly(until string, held int) (*application.IdeasOnlyMode, string, error) {
-	dir, err := os.MkdirTemp("", "mw-ideas-only-boot-")
+	dir, err := scenarioTempDir("", "mw-ideas-only-boot-")
 	if err != nil {
 		return nil, "", err
 	}

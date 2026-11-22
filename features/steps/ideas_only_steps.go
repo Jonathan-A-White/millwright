@@ -53,7 +53,7 @@ func InitializeIdeasOnlyScenario(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Given(`^a host that has no note of the Governor's Ideas only$`, func() error {
-		dir, err := os.MkdirTemp("", "mw-ideas-only-")
+		dir, err := scenarioTempDir("", "mw-ideas-only-")
 		if err != nil {
 			return err
 		}

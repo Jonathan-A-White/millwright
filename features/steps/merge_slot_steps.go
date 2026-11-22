@@ -62,7 +62,7 @@ func InitializeMergeSlotScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *mergeSlotContext) aRigWhoseCloseOutsWait(minutes, hours int) error {
-	root, err := os.MkdirTemp("", "mw-merge-slot-")
+	root, err := scenarioTempDir("", "mw-merge-slot-")
 	if err != nil {
 		return err
 	}

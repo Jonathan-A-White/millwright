@@ -249,7 +249,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *posternInboxContext) aThrowawayPosternKey() error {
-	home, err := os.MkdirTemp("", "mw-postern-inbox-")
+	home, err := scenarioTempDir("", "mw-postern-inbox-")
 	if err != nil {
 		return err
 	}

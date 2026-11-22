@@ -72,7 +72,7 @@ func InitializeSeatTakeScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *seatTakeContext) aVaultForTheSeat(seat string) error {
-	dir, err := os.MkdirTemp("", "mw-seat-take-")
+	dir, err := scenarioTempDir("", "mw-seat-take-")
 	if err != nil {
 		return fmt.Errorf("making a vault: %w", err)
 	}

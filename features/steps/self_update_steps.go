@@ -124,7 +124,7 @@ func (c *selfUpdateContext) aRigBehindItsOrigin() error {
 	if !rig.Available() {
 		return fmt.Errorf("%s is not on PATH", rig.Program)
 	}
-	root, err := os.MkdirTemp("", "mw-selfupdate-")
+	root, err := scenarioTempDir("", "mw-selfupdate-")
 	if err != nil {
 		return err
 	}

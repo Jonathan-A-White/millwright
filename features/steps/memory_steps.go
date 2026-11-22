@@ -152,7 +152,7 @@ func (c *memoryContext) theClockSays(day string) error {
 		return fmt.Errorf("the day %q: %w", day, err)
 	}
 	c.day = at.Add(9 * time.Hour)
-	root, err := os.MkdirTemp("", "mw-memory-")
+	root, err := scenarioTempDir("", "mw-memory-")
 	if err != nil {
 		return err
 	}

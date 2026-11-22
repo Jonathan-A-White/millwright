@@ -233,4 +233,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeWatchScenario(ctx)
 	steps.InitializeSyncScenario(ctx)
 	steps.InitializeVPSNginxScenario(ctx)
+	// Last: its After hook removes the directories the others made, so it runs
+	// after theirs.
+	steps.InitializeTempDirScenario(ctx)
 }

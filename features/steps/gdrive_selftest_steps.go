@@ -65,7 +65,7 @@ func InitializeGdriveSelftestScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *gdriveSelftestContext) aSignedInDrive(name string) error {
-	dir, err := os.MkdirTemp("", "mw-gdrive-selftest-")
+	dir, err := scenarioTempDir("", "mw-gdrive-selftest-")
 	if err != nil {
 		return err
 	}

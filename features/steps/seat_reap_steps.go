@@ -117,7 +117,7 @@ func InitializeSeatReapScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *seatReapContext) aVaultForTheSeat(seat string) error {
-	dir, err := os.MkdirTemp("", "mw-seat-reap-")
+	dir, err := scenarioTempDir("", "mw-seat-reap-")
 	if err != nil {
 		return fmt.Errorf("making a vault: %w", err)
 	}

@@ -83,7 +83,7 @@ func freePort() (int, error) {
 }
 
 func (c *browserContext) aFakeLauncher() error {
-	root, err := os.MkdirTemp("", "mw-browser-feature-")
+	root, err := scenarioTempDir("", "mw-browser-feature-")
 	if err != nil {
 		return err
 	}

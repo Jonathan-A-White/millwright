@@ -93,7 +93,7 @@ func InitializeSessionEnvScenario(ctx *godog.ScenarioContext) {
 // aHome makes the scratch directory and its home, and says where beads.env
 // would be under it: where cmd/mw looks for it.
 func (c *sessionEnvContext) aHome() error {
-	dir, err := os.MkdirTemp("", "mw-session-env")
+	dir, err := scenarioTempDir("", "mw-session-env")
 	if err != nil {
 		return fmt.Errorf("making a scratch directory: %w", err)
 	}

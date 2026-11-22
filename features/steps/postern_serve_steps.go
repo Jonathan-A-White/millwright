@@ -104,7 +104,7 @@ func (c *posternServeContext) expand(text string) string {
 }
 
 func (c *posternServeContext) aThrowawayHome() error {
-	home, err := os.MkdirTemp("", "mw-postern-serve-")
+	home, err := scenarioTempDir("", "mw-postern-serve-")
 	if err != nil {
 		return err
 	}

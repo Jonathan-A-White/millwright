@@ -46,7 +46,7 @@ func octal(text string) os.FileMode {
 // or does not, and a temp key path holding a placeholder file of the given
 // mode, or nothing when mode is 0.
 func (c *doctorContext) ageKeyHost(home string, keepsSecrets bool, mode os.FileMode) error {
-	dir, err := os.MkdirTemp("", "mw-doctor-age-key")
+	dir, err := scenarioTempDir("", "mw-doctor-age-key")
 	if err != nil {
 		return err
 	}

@@ -95,7 +95,7 @@ func (c *reportSendContext) aFactory(now string) error {
 		return err
 	}
 	c.now = at
-	if c.dir, err = os.MkdirTemp("", "mw-report-send-"); err != nil {
+	if c.dir, err = scenarioTempDir("", "mw-report-send-"); err != nil {
 		return err
 	}
 	c.files = vault.New(filepath.Join(c.dir, "vault"))

@@ -53,7 +53,7 @@ func InitializeScorerScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *scorerContext) enginesConfigured(a, b string) error {
-	d, err := os.MkdirTemp("", "mw-scorer-")
+	d, err := scenarioTempDir("", "mw-scorer-")
 	if err != nil {
 		return err
 	}

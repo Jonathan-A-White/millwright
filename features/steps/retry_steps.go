@@ -204,7 +204,7 @@ func (c *retryContext) workspace() (string, error) {
 	if c.root != "" {
 		return c.root, nil
 	}
-	root, err := os.MkdirTemp("", "mw-retry-")
+	root, err := scenarioTempDir("", "mw-retry-")
 	if err != nil {
 		return "", fmt.Errorf("making a workspace: %w", err)
 	}

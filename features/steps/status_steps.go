@@ -285,7 +285,7 @@ func (c *statusContext) workspace() (string, error) {
 	if c.root != "" {
 		return c.root, nil
 	}
-	root, err := os.MkdirTemp("", "mw-status-")
+	root, err := scenarioTempDir("", "mw-status-")
 	if err != nil {
 		return "", fmt.Errorf("making a workspace: %w", err)
 	}
