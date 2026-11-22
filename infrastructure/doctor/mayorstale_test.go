@@ -240,8 +240,10 @@ func TestAHarnessPromptIsAlarmedWithItsTextAndTheWindowIsLeftAlone(t *testing.T)
 	r.write(r.pane, "cat /tmp/mayor154/talk.out\nAuto mode classifier requires confirmation for this command.\nDo you want to proceed?\n 1. Yes\n 2. Yes, allow reading from /tmp/mayor154\n 3. No\n")
 	r.run(0)
 	got := r.run(20)
-	if got.Verdict != "cured" {
-		t.Fatalf("expected the episode answered, got %+v", got)
+	// The alarm only tells the Governor and the Mayor still waits on the prompt,
+	// so the result is faulty, never cured (mw-6ww.185.33).
+	if got.Verdict != "faulty" || strings.Contains(got.String(), "cured") {
+		t.Fatalf("expected faulty (the alarm changed nothing), got %+v", got)
 	}
 	if r.lines(r.kills) != 0 || r.lines(r.upRuns) != 0 {
 		t.Errorf("a window waiting on the Governor's answer is not closed: kills %d, mayor-up %d", r.lines(r.kills), r.lines(r.upRuns))

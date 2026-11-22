@@ -242,3 +242,31 @@ func TestAGiveBackThatFailsDoesNotUnsendTheAlarmNorSendItAgain(t *testing.T) {
 		t.Errorf("expected no second alarm, got %q", r.alarms)
 	}
 }
+
+// The "down" alarm only tells the Governor: the Boost still does not answer, so
+// the result is faulty, never cured. The "answers again" event follows a Boost
+// that really is back, and is rightly cured (mw-6ww.185.33).
+func TestBoostDownAlarmIsNeverCuredButAnswersAgainIs(t *testing.T) {
+	r := newBoostRig(t)
+	r.up = false
+	r.run(0)
+	down := r.run(31)
+	if len(r.alarms) != 1 {
+		t.Fatalf("expected the down alarm, got %q", r.alarms)
+	}
+	if down.Verdict != "faulty" && down.Verdict != "damped" {
+		t.Errorf("the down alarm left the Boost down: expected faulty or damped, got %q (%s)", down.Verdict, down.String())
+	}
+	if strings.Contains(down.String(), "cured") {
+		t.Errorf("the report says cured: %s", down.String())
+	}
+
+	r.up = true
+	back := r.run(5)
+	if len(r.clears) != 1 {
+		t.Fatalf("expected the answers-again event, got %+v", r.clears)
+	}
+	if back.Verdict != "cured" {
+		t.Errorf("a Boost that answers again is put right: expected cured, got %q (%s)", back.Verdict, back.String())
+	}
+}

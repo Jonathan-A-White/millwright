@@ -108,6 +108,9 @@ type BoostReach struct {
 
 	// due is the alarm Probe found owing, for Cure to send.
 	due boostReachDue
+	// told is whether the last Cure sent the "down" alarm, read by
+	// CureLeavesFault.
+	told bool
 }
 
 // boostReachDue is an alarm Probe found owing: its text, and whether it is the
@@ -218,6 +221,7 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 // "answers again" one. The state is changed only once the alarm is sent, so
 // one that could not be sent is tried again.
 func (b *BoostReach) Cure(ctx context.Context) error {
+	b.told = false
 	if !b.due.pending {
 		return nil
 	}
@@ -243,6 +247,7 @@ func (b *BoostReach) Cure(ctx context.Context) error {
 		return fmt.Errorf("the boost-reach alarm could not be sent: %w", err)
 	}
 	b.due = boostReachDue{}
+	b.told = true
 	err = b.State.Save(ctx, BoostReachSeenStateName, application.DoctorEpisode{FirstFaulty: due.first, SeenPaths: withSeq([]string{BoostReachAlarmed}, seq)})
 	if err != nil {
 		return fmt.Errorf("saving this check's own state: %w", err)
@@ -256,6 +261,12 @@ func (b *BoostReach) Cure(ctx context.Context) error {
 	}
 	return nil
 }
+
+// CureLeavesFault implements application.DoctorStandsAfterCure for the "down"
+// alarm only: it tells the Governor (and gives the Boost's claims back) while
+// the Boost still does not answer (mw-6ww.185.33). The "answers again" event
+// follows a Boost that is back, and is cured.
+func (b *BoostReach) CureLeavesFault() bool { return b.told }
 
 // Damper implements application.DoctorCheck.
 func (b *BoostReach) Damper() (time.Duration, int) { return BoostReachDamperWait, BoostReachDamperCap }

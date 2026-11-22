@@ -122,6 +122,9 @@ type MayorStale struct {
 	// WayBack: a dry run reports from prompt, a real run from outcome.
 	prompt  bool
 	outcome string
+	// aloneTold is whether the last Cure left the window alone and only told the
+	// Governor of its prompt, read by CureLeavesFault.
+	aloneTold bool
 }
 
 // NewMayorStale is the check over the vault, run through the real tmux and the
@@ -298,6 +301,7 @@ func (m *MayorStale) since(ctx context.Context, window, pane string) (time.Time,
 // which Mayor took the seat, or that none could be started. The alarm is sent
 // whichever way the respawn went, once.
 func (m *MayorStale) Cure(ctx context.Context) error {
+	m.aloneTold = false
 	window, name, held, _, reason := m.window(ctx)
 	if !held {
 		return fmt.Errorf("the Mayor's window is no longer found (%s)", reason)
@@ -313,6 +317,7 @@ func (m *MayorStale) Cure(ctx context.Context) error {
 
 	if prompt, ok := promptOf(pane); ok {
 		m.outcome = "left the Mayor's window alone: it waits on a harness prompt for the Governor to answer, so there is nothing to undo"
+		m.aloneTold = true
 		if told, err := m.promptTold(ctx, window, prompt); err != nil {
 			return err
 		} else if told {
@@ -389,6 +394,12 @@ func (m *MayorStale) mayorUp(ctx context.Context) (string, error) {
 	}
 	return "", err
 }
+
+// CureLeavesFault implements application.DoctorStandsAfterCure for the prompt
+// branch only: the window is left alone and the Governor told, so the Mayor
+// still waits on the prompt (mw-6ww.185.33). The other branch closes the window
+// and starts a new Mayor, which does change the host, so it is cured.
+func (m *MayorStale) CureLeavesFault() bool { return m.aloneTold }
 
 // Damper implements application.DoctorCheck.
 func (m *MayorStale) Damper() (time.Duration, int) { return MayorStaleDamperWait, MayorStaleDamperCap }

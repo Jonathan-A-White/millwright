@@ -160,3 +160,28 @@ func TestAChangedFaultKeepsTheEmergencyOfTheFaultBeforeItAndPutRightClearsBoth(t
 		t.Errorf("clearing is said once, got %v", r.clears)
 	}
 }
+
+// The alarm for a wrong upstream only tells the Governor: the upstream is still
+// wrong, so the result is faulty, never cured. The "right again" event follows
+// an upstream that really is right, and is rightly cured (mw-6ww.185.33).
+func TestAWrongUpstreamAlarmIsNeverCuredButRightAgainIs(t *testing.T) {
+	r := newVPSRig(t)
+	wrong := r.run(vpsRoundRob)
+	if len(r.alarms) != 1 {
+		t.Fatalf("expected one alarm, got %q", r.alarms)
+	}
+	if wrong.Verdict != "faulty" && wrong.Verdict != "damped" {
+		t.Errorf("the alarm left the upstream wrong: expected faulty or damped, got %q (%s)", wrong.Verdict, wrong.String())
+	}
+	if strings.Contains(wrong.String(), "cured") {
+		t.Errorf("the report says cured: %s", wrong.String())
+	}
+
+	right := r.run(vpsOK)
+	if len(r.clears) != 1 {
+		t.Fatalf("expected the right-again event, got %v", r.clears)
+	}
+	if right.Verdict != "cured" {
+		t.Errorf("an upstream put right is cured: expected cured, got %q (%s)", right.Verdict, right.String())
+	}
+}

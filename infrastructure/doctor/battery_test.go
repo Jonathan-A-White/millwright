@@ -287,3 +287,26 @@ func TestBatteryAlarmWithNoSeqClearsNothingWhenItEnds(t *testing.T) {
 		t.Fatalf("an emergency that was never written has nothing to clear, got %+v", batteryClears)
 	}
 }
+
+// A low battery is not put right by an alarm to the Governor: run through the
+// doctor with an alarm that succeeds, the result is faulty, never cured
+// (mw-6ww.185.32).
+func TestBatteryIsNeverReportedCuredByTheDoctor(t *testing.T) {
+	host := newBatteryHost(t)
+	store := doctor.New(t.TempDir())
+	var alarms []string
+	now := time.Date(2026, 10, 1, 18, 0, 0, 0, time.UTC)
+
+	host.battery("Discharging", "20")
+	report := runBatteryDoctor(t, host, store, now, &alarms)
+	if len(alarms) != 1 || len(report.Results) != 1 {
+		t.Fatalf("expected one alarm and one result, got %q and %+v", alarms, report.Results)
+	}
+	got := report.Results[0]
+	if got.Verdict != "faulty" && got.Verdict != "damped" {
+		t.Errorf("expected faulty or damped after an alarm that only tells, got %q (%s)", got.Verdict, got.String())
+	}
+	if strings.Contains(got.String(), "cured") {
+		t.Errorf("the report says cured: %s", got.String())
+	}
+}

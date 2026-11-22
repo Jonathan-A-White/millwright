@@ -116,6 +116,9 @@ type MayorStuck struct {
 	// reset is whether that limit had reset by then, so that Cure restarts.
 	reset   bool
 	outcome string
+	// aloneTold is whether the last Cure left the window alone at the usage
+	// limit and only told the Governor, read by CureLeavesFault.
+	aloneTold bool
 }
 
 // NewMayorStuck is the check over the vault, run through the real tmux and the
@@ -257,6 +260,7 @@ func (m *MayorStuck) ended(ctx context.Context, name string) error {
 func (m *MayorStuck) Cure(ctx context.Context) error {
 	st := m.stale(nil)
 	m.outcome = ""
+	m.aloneTold = false
 	window, name, held, _, reason := st.window(ctx)
 	if !held {
 		return fmt.Errorf("the Mayor's window is no longer found (%s)", reason)
@@ -308,6 +312,7 @@ func (m *MayorStuck) Cure(ctx context.Context) error {
 // it is.
 func (m *MayorStuck) pageTheLimit(ctx context.Context, window, name, limit string) error {
 	m.outcome = "left the Mayor's window alone: it is stopped at the usage limit, which a new Mayor would meet too, so there is nothing to undo"
+	m.aloneTold = true
 	seen, err := m.loadLimit(ctx)
 	if err != nil {
 		return err
@@ -540,6 +545,12 @@ func (m *MayorStuck) alarm(ctx context.Context, text string, cause error) error 
 	}
 	return cause
 }
+
+// CureLeavesFault implements application.DoctorStandsAfterCure for the usage
+// limit branch only: the window is left alone and the Governor paged, so the
+// Mayor is still stopped at the limit (mw-6ww.185.33). The other branch closes
+// the window and starts a new Mayor, which does change the host, so it is cured.
+func (m *MayorStuck) CureLeavesFault() bool { return m.aloneTold }
 
 // Damper implements application.DoctorCheck.
 func (m *MayorStuck) Damper() (time.Duration, int) { return MayorStuckDamperWait, MayorStuckDamperCap }
