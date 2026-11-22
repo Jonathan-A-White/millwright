@@ -188,6 +188,11 @@ type BatchStory struct {
 	ConflictFiles []string
 	// ByFixer says the story was set aside and the batch's fixer merged it.
 	ByFixer bool
+	// ConflictSetAsides is how many batches, this one included, set the story
+	// aside for a conflict (BatchConflictsField); HandedBack says this one gave it
+	// back to a Builder to rebase, for the second time (MaxBatchConflicts).
+	ConflictSetAsides int
+	HandedBack        bool
 
 	detail StoryDetail
 	path   domain.Path
@@ -431,6 +436,7 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		}
 	}
 
+	b.handBackRepeaters(ctx, &report)
 	if report.Landed {
 		b.noteSetAside(ctx, &report)
 	}
@@ -783,11 +789,18 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 func (b BatchLand) noteSetAside(ctx context.Context, report *BatchReport) {
 	n := b.Next
 	for _, s := range report.SetAside {
+		if s.HandedBack {
+			continue // handBackRepeaters has said so on it
+		}
 		line := fmt.Sprintf("%s was set aside by %s (%s); the other %s landed on %s at %s without waiting for it, and it stays queued",
 			s.ID, report.Label(), firstLine(s.Why), countStories(len(report.Merged)), report.Target, shortCommit(report.Commit))
 		report.Notes = append(report.Notes, line)
-		comment := fmt.Sprintf("Set aside by %s: %s\nThe other %s landed on %s at %s without waiting for it. This story stays queued: the next batch that finds it conflicting on its own gives it the batch's fixer.",
-			report.Label(), s.Why, countStories(len(report.Merged)), report.Target, shortCommit(report.Commit))
+		next := "This story stays queued."
+		if len(s.Conflicts) > 0 {
+			next = fmt.Sprintf("This story stays queued; if the next batch sets it aside for a conflict too, it is handed back to a Builder to rebase it on %s.", report.Target)
+		}
+		comment := fmt.Sprintf("Set aside by %s: %s\nThe other %s landed on %s at %s without waiting for it. %s",
+			report.Label(), s.Why, countStories(len(report.Merged)), report.Target, shortCommit(report.Commit), next)
 		if err := writeRetrying(ctx, n, nil, "the note on a story set aside", func() error { return n.Tracker.CommentOnStory(ctx, s.ID, comment) }); err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the note saying why %s was set aside could not be written on it: %v", s.ID, err))
 		}
@@ -867,12 +880,19 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 			if Conflicted(err) {
 				s.Conflicts = ConflictLines(err.Error())
 				s.Why = "it conflicts with the batch: " + strings.Join(s.Conflicts, "; ")
-				if s.ConflictFiles = ConflictFiles(err); len(s.ConflictFiles) > 0 {
+				s.ConflictFiles = ConflictFiles(err)
+				if len(s.ConflictFiles) > 0 {
 					s.Why += ". " + ConflictedFilesLine(s.ConflictFiles)
-					fields := map[string]string{ConflictFilesField: strings.Join(s.ConflictFiles, ",")}
-					if werr := writeRetrying(ctx, n, nil, "the conflicted files", func() error { return n.Tracker.SetStoryMetadata(ctx, s.ID, fields) }); werr != nil {
-						report.Notes = append(report.Notes, fmt.Sprintf("the files %s conflicted in could not be recorded on it: %v", s.ID, werr))
-					}
+				}
+				// Counted on the story, so that a story the batches set aside
+				// again and again is handed back, not queued for ever (mw-gq6.1631).
+				s.ConflictSetAsides = b.countConflictSetAside(ctx, s.ID, report)
+				fields := map[string]string{BatchConflictsField: strconv.Itoa(s.ConflictSetAsides)}
+				if len(s.ConflictFiles) > 0 {
+					fields[ConflictFilesField] = strings.Join(s.ConflictFiles, ",")
+				}
+				if werr := writeRetrying(ctx, n, nil, "the conflicted files", func() error { return n.Tracker.SetStoryMetadata(ctx, s.ID, fields) }); werr != nil {
+					report.Notes = append(report.Notes, fmt.Sprintf("the files %s conflicted in, and how many batches set it aside, could not be recorded on it: %v", s.ID, werr))
 				}
 			} else {
 				s.Why = "it could not be merged: " + firstLine(err.Error())
@@ -1191,8 +1211,12 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 	if !report.Landed {
 		outcome += report.fixerBundleLines()
 	}
-	if len(report.SetAside) > 0 {
-		outcome += fmt.Sprintf("set aside, still queued: %s\n", strings.Join(storyIDs(report.SetAside), ", "))
+	queued, back := report.setAsideSplit()
+	if len(queued) > 0 {
+		outcome += fmt.Sprintf("set aside, still queued: %s\n", strings.Join(storyIDs(queued), ", "))
+	}
+	if len(back) > 0 {
+		outcome += fmt.Sprintf("set aside for a conflict again, handed back to a Builder to rebase: %s\n", strings.Join(storyIDs(back), ", "))
 	}
 	files := []struct{ name, contents string }{
 		{BatchOrderFile, report.mergeOrder()},
@@ -1298,7 +1322,7 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 		fmt.Fprintf(&body, "mw land on %s landed %s on %s at %s, but could not commit its records in the vault.\n\n", n.Host, report.Label(), report.Target, shortCommit(report.Commit))
 	} else if report.Landed {
 		verdict = MailSetAside
-		fmt.Fprintf(&body, "mw land on %s landed %s on %s at %s, but set these aside; each stays queued (run=queued, open and claimed) for a later batch:\n\n",
+		fmt.Fprintf(&body, "mw land on %s landed %s on %s at %s, but set these aside; each stays queued (run=queued, open and claimed) for a later batch, unless it says it was handed back to a Builder to rebase:\n\n",
 			n.Host, report.Label(), report.Target, shortCommit(report.Commit))
 	} else {
 		fmt.Fprintf(&body, "mw land on %s held %s: %s.\nNothing was pushed: %s stays at %s on %s. Every story below stays queued (run=queued, open and claimed).\n\n",

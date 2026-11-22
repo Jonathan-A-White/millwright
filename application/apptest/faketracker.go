@@ -1862,6 +1862,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.FilesChangedField {
 				s.detail.FilesChanged = domain.FileList(v)
 			}
+			if k == application.BatchConflictsField {
+				s.detail.BatchConflicts, _ = strconv.Atoi(v)
+			}
 			if k == application.ConflictFilesField {
 				s.detail.ConflictFiles = domain.FileList(v)
 			}

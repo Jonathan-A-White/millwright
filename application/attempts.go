@@ -65,6 +65,17 @@ const FilesChangedField = "files_changed"
 // commonest of them under a rig's merge-conflict refusals.
 const ConflictFilesField = "conflict_files"
 
+// BatchConflictsField is the metadata a story carries to count the batches that
+// set it aside because it conflicts with them, as mw land writes it (mw-gq6.1631).
+// A story that conflicts again after one batch set it aside is handed back to be
+// rebased (MaxBatchConflicts), and not queued for the next batch to set aside.
+const BatchConflictsField = "batch_conflicts"
+
+// MaxBatchConflicts is how many batches may set a story aside for a conflict
+// before the batch that sets it aside the last time hands it back to a Builder
+// to rebase on its target branch.
+const MaxBatchConflicts = 2
+
 // DefaultMaxAttempts is how many times a story is tried when the config file
 // says nothing: infrastructure/config.DefaultMaxAttempts is the same number.
 const DefaultMaxAttempts = 3
