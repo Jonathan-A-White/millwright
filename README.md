@@ -4547,6 +4547,33 @@ mw-gq6.1431); a binary built with no commit refuses and says to rebuild from the
 checkout. Test: `go test ./cmd/mw -run
 WSLFlag`.
 
+**The Windows side reports itself (mw-6ww.185.2).** When the desktop's WSL is down
+nothing can see Windows, so the same task writes three files into
+`~/.local/state/mw/` and a third fixed flag word asks for the long one.
+`windows-drive-free` (every tick) is one line, the vhdx's drive and its free
+bytes. `windows-state` (every tick, written whole) is one `key value` line each of:
+the time (UTC); the installed script's SHA-256; the boot time; whether a restart is
+pending, and since when; the vhdx's drive (letter, size, free); C:'s free space; the
+vhdx file's size; physical memory, total and free; the AC standby timeout in
+seconds; the WSL version; every scheduled task whose name holds `millwright` (state,
+last result, logon type); each physical disk's media type and health; and
+`.wslconfig`'s memory, processors and swap. `windows-inventory.txt` is written only
+when the flag holds `inventory`: the state lines, the sleeps, wakes, shutdowns and
+unexpected shutdowns of the last 7 days from the System log in UTC, each physical
+disk's media type and health, and the last 40 lines of the task's own log. `mw host
+wsl-flag inventory [--host <host>]` writes the flag, waits for that file (10
+minutes by default) and prints it; it changes nothing on Windows, and any other
+flag content is still ignored and logged. The script's `-StateDryRun` prints the
+state lines and writes nothing. `mw doctor windows-state` on a WSL host is faulty,
+naming each fault, when the state file is absent or over 10 minutes old, the AC
+standby timeout is not 0, a `millwright` task is disabled or its last result is a
+failure, a disk's health is not Healthy, or the installed script is not the one
+this mw carries (paste `mw host wsl-flag --install-line` again); a restart pending
+for over 3 days is said in its ok line; off WSL it is ok, `not WSL`. A task
+installed before this change writes no state until its line is run again. Tests:
+`go test ./cmd/mw -run WSLFlag`, `go test ./infrastructure/doctor -run
+WindowsState`.
+
 **Compact, monthly.** Trimming only marks the freed blocks; the vhdx file shrinks
 when Windows compacts it. About monthly, and whenever the drive runs low, in an
 admin Windows PowerShell with nothing running in WSL (it stops WSL; the last

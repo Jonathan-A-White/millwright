@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -473,6 +475,213 @@ func TestWSLFlagInstallLineVariablesCarryThePrefix(t *testing.T) {
 	for _, m := range varRe.FindAllStringSubmatch(WSLFlagWayBack(), -1) {
 		if !automatic[m[1]] {
 			t.Errorf("the way-back line makes no variable, but has $%s", m[1])
+		}
+	}
+}
+
+// The state the task writes each tick beside windows-drive-free: one 'key value'
+// line each (mw-6ww.185.2). Each key is held in the script's text as the start
+// of a double-quoted line, "<key> $value".
+var wslFlagStateKeys = []string{
+	"time", "script_sha256", "boot_time", "restart_pending", "restart_pending_since", "vhdx_drive", "c_free", "vhdx_size",
+	"memory_total", "memory_free", "ac_standby_timeout", "wsl_version", "task", "disk",
+	"wslconfig_memory", "wslconfig_processors", "wslconfig_swap",
+}
+
+func TestWSLFlagWatchScriptWritesTheWindowsState(t *testing.T) {
+	s := millwright.WSLFlagWatch
+	if !strings.Contains(s, `\windows-state"`) {
+		t.Errorf("the watcher script does not write windows-state beside windows-drive-free")
+	}
+	for _, key := range wslFlagStateKeys {
+		if !strings.Contains(s, `"`+key+` `) {
+			t.Errorf("the watcher script holds no state line %q", key)
+		}
+	}
+	for _, want := range []string{"Get-ScheduledTask", "*millwright*", "Get-ScheduledTaskInfo", "LogonType", "powercfg", "SUB_SLEEP", "STANDBYIDLE",
+		"wsl.exe --version", ".wslconfig", "Win32_OperatingSystem", "Get-FileHash", "RebootRequired", "LastBootUpTime"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the watcher script lacks %q", want)
+		}
+	}
+	// the state is written before the flag is looked at
+	state, flagRead := strings.Index(s, `$windowsState`), strings.Index(s, "$read = Within 60")
+	if state < 0 || flagRead < 0 || state > flagRead {
+		t.Errorf("the state must be written before the flag is read (state at %d, flag read at %d)", state, flagRead)
+	}
+	// the dry run comes before anything is created, written or logged
+	dry := strings.Index(s, "if ($StateDryRun)")
+	for _, first := range []string{"New-Item -ItemType Directory", "Add-Content", "Set-Content"} {
+		if i := strings.Index(s, first); dry < 0 || (i >= 0 && i < dry) {
+			t.Errorf("the state dry run (%d) must come before the first %s (%d)", dry, first, i)
+		}
+	}
+}
+
+// runStateDryRun runs the script's state step under the real Windows PowerShell
+// 5.1: it prints the lines and writes nothing. Skipped where there is none.
+func runStateDryRun(t *testing.T) string {
+	t.Helper()
+	if _, err := os.Stat(windowsPowerShell); err != nil {
+		t.Skip("no Windows PowerShell on this host")
+	}
+	cmd := exec.Command(windowsPowerShell, "-NoProfile", "-NonInteractive", "-Command",
+		`$t=[Console]::In.ReadToEnd(); & ([scriptblock]::Create($t)) -StateDryRun`)
+	cmd.Stdin = strings.NewReader(millwright.WSLFlagWatch)
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	if err := cmd.Run(); err != nil {
+		t.Skipf("Windows PowerShell is not usable here: %v: %s", err, errOut.String())
+	}
+	if errOut.Len() > 0 {
+		t.Errorf("the state dry run wrote to stderr:\n%s", errOut.String())
+	}
+	return out.String()
+}
+
+func TestWSLFlagWatchStateDryRunPrintsTheLinesAndWritesNothing(t *testing.T) {
+	out := runStateDryRun(t)
+	have := map[string]string{}
+	for _, l := range strings.Split(strings.ReplaceAll(out, "\r", ""), "\n") {
+		if l == "" {
+			continue
+		}
+		key, val, ok := strings.Cut(l, " ")
+		if !ok || val == "" {
+			t.Errorf("a state line is not 'key value': %q", l)
+			continue
+		}
+		have[key] = val
+	}
+	// task and disk lines are as many as the PC has (a PC may have no millwright task)
+	for _, key := range wslFlagStateKeys {
+		if key == "task" || key == "disk" {
+			continue
+		}
+		if have[key] == "" {
+			t.Errorf("the dry run printed no %q line:\n%s", key, out)
+		}
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05Z", have["time"]); err != nil {
+		t.Errorf("time is not UTC ISO-8601: %q", have["time"])
+	}
+	if got := have["script_sha256"]; got != "none" && len(got) != 64 {
+		t.Errorf("script_sha256 is neither 'none' nor a SHA-256: %q", got)
+	}
+}
+
+func TestWindowsPowerShellParsesTheWSLFlagScriptAndLine(t *testing.T) {
+	wslFlagPinned(t, wslFlagTestCommit)
+	line, err := WSLFlagInstallLine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"wsl-flag-watch.ps1": millwright.WSLFlagWatch, "install-line": line, "way-back": WSLFlagWayBack()} {
+		if got := parseWithWindowsPowerShell(t, text); !strings.HasPrefix(got, "PARSEERRORS=0") {
+			t.Errorf("%s: the real Windows PowerShell reports parse errors:\n%s", name, got)
+		}
+	}
+}
+
+// The inventory is a third fixed flag word: the long, read-only form of the
+// state. Any other content is still ignored and logged.
+func TestWSLFlagWatchScriptTakesTheInventoryWord(t *testing.T) {
+	s := millwright.WSLFlagWatch
+	for _, want := range []string{"'inventory'", `\windows-inventory.txt"`, "Get-WinEvent", "LogName = 'System'", "AddDays(-7)",
+		"Get-PhysicalDisk", "MediaType", "HealthStatus", "-Tail 40", "ignored flag content"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the watcher script lacks %q", want)
+		}
+	}
+	// the sleeps, wakes, shutdowns and unexpected shutdowns, by event id
+	for _, id := range []string{"42", "1", "1074", "6006", "6008", "41"} {
+		if !regexp.MustCompile(`\b` + id + `\b`).MatchString(s) {
+			t.Errorf("the watcher script names no event %s", id)
+		}
+	}
+	// the flag is deleted before the inventory is taken, as before any action
+	del, inv := strings.Index(s, "Remove-Item -LiteralPath $flag"), strings.Index(s, "$want -eq 'inventory'")
+	if del < 0 || inv < 0 || del > inv {
+		t.Errorf("the flag must be deleted (%d) before the inventory is taken (%d)", del, inv)
+	}
+}
+
+func TestWSLFlagInventoryWritesTheFlagWaitsForTheFileAndPrintsIt(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	got := make(chan string, 1)
+	go func() {
+		for i := 0; i < 2000; i++ {
+			b, err := os.ReadFile(filepath.Join(dir, "wsl-flag"))
+			if err != nil {
+				time.Sleep(5 * time.Millisecond)
+				continue
+			}
+			os.Remove(filepath.Join(dir, "wsl-flag"))
+			got <- string(b)
+			time.Sleep(30 * time.Millisecond)
+			os.WriteFile(filepath.Join(dir, "windows-inventory.txt"), []byte("== state ==\ntime 2026-11-21T10:00:00Z\n== disks ==\nSamsung|SSD|Healthy\n"), 0o644)
+			return
+		}
+	}()
+	out, err := runMw(t, "host", "wsl-flag", "inventory", "--limit", "10s")
+	if err != nil {
+		t.Fatalf("mw host wsl-flag inventory failed: %v\n%s", err, out)
+	}
+	if flag := <-got; flag != "inventory" {
+		t.Errorf("expected the flag to hold exactly %q, got %q", "inventory", flag)
+	}
+	if !strings.Contains(out, "== disks ==") || !strings.Contains(out, "Samsung|SSD|Healthy") {
+		t.Errorf("expected the inventory printed, got %q", out)
+	}
+}
+
+// An inventory left by an earlier request must not answer this one.
+func TestWSLFlagInventoryIgnoresAnOlderFile(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "windows-inventory.txt"), []byte("an old inventory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runMw(t, "host", "wsl-flag", "inventory", "--limit", "300ms")
+	if err == nil {
+		t.Fatalf("expected no answer to be found, got success:\n%s", out)
+	}
+	if strings.Contains(out, "an old inventory") {
+		t.Errorf("an older inventory was taken as the answer: %q", out)
+	}
+}
+
+func TestWSLFlagInventoryReachesAnotherHostOverItsSSHPrefix(t *testing.T) {
+	wslFlagHere(t, map[string]string{"desktop2": "ssh desktop2"})
+	real := hostWSLFlagRun
+	var calls []string
+	hostWSLFlagRun = func(_ context.Context, host, ssh, script string) (string, error) {
+		calls = append(calls, host+"|"+ssh+"|"+script)
+		if strings.HasPrefix(script, "cat ") && strings.Contains(script, "windows-inventory.txt") {
+			return "== state ==\ntime 2026-11-21T10:00:00Z", nil
+		}
+		return "", nil
+	}
+	t.Cleanup(func() { hostWSLFlagRun = real })
+	out, err := runMw(t, "host", "wsl-flag", "inventory", "--host", "desktop2", "--limit", "10s")
+	if err != nil {
+		t.Fatalf("mw host wsl-flag inventory --host failed: %v\n%s", err, out)
+	}
+	if len(calls) < 2 || !strings.Contains(calls[0], "printf %s inventory") || !strings.Contains(calls[0], "rm -f") || !strings.Contains(calls[0], "windows-inventory.txt") {
+		t.Errorf("expected the flag written after the last inventory is cleared, got %q", calls)
+	}
+	if !strings.Contains(out, "== state ==") {
+		t.Errorf("expected the inventory printed, got %q", out)
+	}
+}
+
+func TestWSLFlagStillAsksForOnlyTheFixedWords(t *testing.T) {
+	wslFlagHere(t, nil)
+	for _, bad := range []string{"inventory; reboot", "Inventory ", "inventories"} {
+		if out, err := runMw(t, "host", "wsl-flag", bad); err == nil {
+			t.Errorf("expected %q to be refused, got:\n%s", bad, out)
 		}
 	}
 }
