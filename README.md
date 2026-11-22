@@ -6400,6 +6400,30 @@ reporting. The alarm goes when a report says the install is there. Test: `go tes
 ./infrastructure/doctor -run TestAWSLHost` and `go test ./application -run
 TestDampersNamesAWSLHostMissingAnInstall`.
 
+**boost-fit** is the home's check that each Boost is fit (mw-6ww.185.9): the desktop was
+retired on 2026-11-11 and brought back by hand, and its doctor timer, its trim, its Windows task, its
+tidy timer and an up-to-date mw were lost on the way with no alarm that named them. On the home it
+asks every host of `[hands_hosts]` that is not this host, not in `retired_hosts` and not a cloud
+box, over ssh (`<prefix> -o BatchMode=yes -o ConnectTimeout=10 mw host fit --json`, the form
+**boost-reach** uses), at most once an hour; between asks it says again what it last found. It is
+faulty with one line for each host that is not fit, `<host> is not fit, N gaps: <gap> (cure: ...); ...`,
+and `mw status` names it under DAMPERS. A cure is a command the Mayor may run, or `his hands` and
+which paste. A host that does not answer ssh is **boost-reach**'s to say, and boost-fit is silent
+for it; one whose mw has no `host fit` (exit 1, not ssh's 255) is itself a gap, mw behind main,
+with `git pull --ff-only` and `make build` as the cure. The check adds no fix of its own: its
+cure is one note to the Mayor, and the fault stands after it. On a Boost it is ok, `asked by the
+home`, and where there is no Boost to ask it is ok. `mw host fit [--json]` is what each Boost
+answers, and it changes nothing: one line an item, `ok` or `GAP` with the cure, for mw's commit
+against `origin/main` of its own checkout (behind by N); each unit of the Boost set
+(`mw-dispatch`, `mw-doctor`, `mw-host-sweep`, `mw-host-tidy`: its timer enabled or not, and its
+last run); the age of the newest doctor verdict (a gap over 1 hour); tracked files of the rig
+checkout and the vault that are empty on disk though the commit holds content (a file committed
+empty is left alone); the beads env file there (its name only, never its contents); on WSL,
+windows-state's age and faults, fstrim's last run (a gap over 8 days) and, once D5 lands,
+wsl-disk-fits; on a host whose give-way marker stands, the Windows half's last renew (a gap over
+10 minutes); and the cap, `builder_jobs`, memory and swap totals. Tests: `go test ./application
+-run HostFit`, `go test ./infrastructure/doctor -run BoostFit`, `go test ./cmd/mw -run HostFit`.
+
 **mayor-gone** respawns the Mayor when the window its own vault-local
 `.mayor-acting` names is gone, or is open but its pane holds nothing but a
 bare shell — the same reading of `.mayor-acting`
