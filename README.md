@@ -4525,6 +4525,17 @@ hours), and faulty, not cannot-tell, when there is no report or it is over a day
 --install-line`, which installs the task again with the new script), inert off WSL.
 A task installed before this change writes no report until its line is run again. A WSL host that does see its drive (the Laptop's `/mnt/c`) needs no task: set `[doctor] windows_drive_mount = "/mnt/c"` (and `windows_drive_name`, default the mount's last name upper-cased, `C:`) in `~/.config/mw/config.toml` and the doctor and dispatch's reading write that report themselves from statfs of the mount before reading it (mw-gq6.1490); with the key unset or the mount absent (the desktop) the task's report is read as before. Test: `go test ./infrastructure/doctor -run WSLDriveFree`.
 
+**A WSL wall clock that steps back (mw-6ww.185.12).** The desktop's WSL2 wall clock
+stepped back about 1.3 s roughly twice a minute, which flaked tests that order by time
+(mw-5r3p30.280, mw-xhtcup.20). `mw doctor clock-steps` reads the wall clock against the
+monotonic clock every 100 ms for 90 s and is faulty when the wall clock went back by
+over 100 ms, saying how many steps and the largest; a forward jump is no fault. It
+samples at most once an hour (a run inside the hour says again what the last found),
+runs only on a WSL host, and the faulty verdict is the home's DAMPERS line
+`doctor: <host>: clock-steps faulty: ...`, with the likely cause (Hyper-V's implicit time sync
+and the distro's own NTP client both setting the clock) and the setting that ends it.
+It changes nothing on the host. Test: `go test ./infrastructure/doctor -run ClockSteps`.
+
 **Restart or compact WSL with no visit to the desk (mw-gq6.1039).** WSL on the
 desktop is sealed from Windows, so nothing inside it can start a Windows program;
 a Windows scheduled task (`contrib/windows/wsl-flag-watch.ps1`, run as the Windows
