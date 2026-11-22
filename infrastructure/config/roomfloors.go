@@ -13,10 +13,17 @@ import (
 // package needs not import it.
 const DefaultRoomMinRootFreeGB int64 = 15
 
-// roomFloorsIn reads the three disk keys of the [dispatch] table into settings:
+// DefaultStopFreeGB is the stop floor: under it the host freezes its Builders where
+// they stand and frees space (mw-6ww.185.7); `stop_free_gb = 0` in the [dispatch]
+// table turns it off. It is application's DefaultDiskStopFreeGB, said again so that
+// this package needs not import it.
+const DefaultStopFreeGB int64 = 5
+
+// roomFloorsIn reads the four disk keys of the [dispatch] table into settings:
 // `min_drive_free_gb` (the Windows drive of a WSL host, dispatch starts no
 // Builder under it), `min_root_free_gb` (the host's own root filesystem, the
-// same) and `drive_warn_gb` (mw doctor warns under it); each a whole number of
+// same), `stop_free_gb` (the disk guard freezes the Builders under it) and
+// `drive_warn_gb` (mw doctor warns under it); each a whole number of
 // gigabytes, 0 turning it off, and each left as it is when the table says
 // nothing.
 func roomFloorsIn(table map[string]string, path string, settings *RoomSettings) error {
@@ -27,6 +34,7 @@ func roomFloorsIn(table map[string]string, path string, settings *RoomSettings) 
 	}{
 		{"min_drive_free_gb", &settings.MinDriveFreeGB, "the guard off"},
 		{"min_root_free_gb", &settings.MinRootFreeGB, "the guard off"},
+		{"stop_free_gb", &settings.StopFreeGB, "the stop floor off"},
 		{"drive_warn_gb", &settings.DriveWarnGB, "the warning off"},
 	} {
 		said := strings.TrimSpace(table[floor.key])

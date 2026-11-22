@@ -1504,8 +1504,8 @@ type RoomSettings struct {
 	MinFreeMB int64
 	// MinDriveFreeGB is the free space, in gigabytes, the Windows drive of a WSL
 	// host must have; 0 is the guard off (mw-gq6.1381).
-	MinDriveFreeGB int64
-	MinRootFreeGB  int64 // the root filesystem's floor, min_root_free_gb; 0 is off (mw-6ww.185.6)
+	MinDriveFreeGB            int64
+	MinRootFreeGB, StopFreeGB int64 // the root filesystem's floor, min_root_free_gb, and the stop floor, stop_free_gb (mw-6ww.185.7); 0 is off
 	// DriveWarnGB is the free space, in gigabytes, under which mw doctor warns
 	// that the drive is low though dispatch is not yet refusing; 0 is off
 	// (mw-gq6.1428).
@@ -1553,7 +1553,7 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 			}
 		}
 	}
-	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB, MinDriveFreeGB: DefaultRoomMinDriveFreeGB, MinRootFreeGB: DefaultRoomMinRootFreeGB, DriveWarnGB: DefaultDriveWarnGB}
+	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB, MinDriveFreeGB: DefaultRoomMinDriveFreeGB, MinRootFreeGB: DefaultRoomMinRootFreeGB, StopFreeGB: DefaultStopFreeGB, DriveWarnGB: DefaultDriveWarnGB}
 	if said := strings.TrimSpace(table["room_load_per_core"]); said != "" {
 		n, err := strconv.ParseFloat(said, 64)
 		if err != nil || n <= 0 || math.IsInf(n, 0) || math.IsNaN(n) {
