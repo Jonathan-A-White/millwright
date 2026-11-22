@@ -9,8 +9,8 @@ import (
 )
 
 // MayorAnswers is the port a close-out run off a story's host asks that host to
-// run mw next there, with the Mayor's word (--met-by-mayor, --rescoped-by-mayor):
-// the far end of an ssh, as mw retry reaches the host a story was worked on
+// run mw next there, with the Mayor's word (--met-by-mayor, --rescoped-by-mayor)
+// or without one: the far end of an ssh, as mw retry reaches the host a story was worked on
 // (mw-gq6.1622). The adapter is infrastructure/peekremote, over the reach mw
 // retry reads (cmd/mw sshMayorAnswers); the fake is apptest.FakeMayorAnswers.
 type MayorAnswers interface {
@@ -21,8 +21,9 @@ type MayorAnswers interface {
 }
 
 // mayorsWord is the flags that carry the Mayor's word to the host that worked the
-// story, and false when the close-out was given none. The host is never told to
-// dispatch: the Mayor asked for a close-out alone.
+// story, and false when the close-out was given none: the flags are then
+// --no-dispatch alone. The host is never told to dispatch: a close-out run from
+// here asked for a close-out alone.
 func (n Next) mayorsWord() ([]string, bool) {
 	flags := []string{"--no-dispatch"}
 	word := false
@@ -35,12 +36,13 @@ func (n Next) mayorsWord() ([]string, bool) {
 	return flags, word
 }
 
-// answerHost is the host a close-out the Mayor gave his word to is run on instead
-// of here: the host the claim names, else the host key of the story's path, when
-// that is not this one. Empty when no word was given, no host can be asked, or
-// the story names this host (its branch is gone from here: nothing to run elsewhere).
+// answerHost is the host a close-out the home refused is run on instead of here,
+// with the Mayor's word when he gave one and without it when he did not
+// (mw-gq6.1624): the host the claim names, else the host key of the story's path,
+// when that is not this one. Empty when no host can be asked, or the story names
+// this host (its branch is gone from here: nothing to run elsewhere).
 func (n Next) answerHost(c *closeOut) string {
-	if _, word := n.mayorsWord(); !word || n.Answers == nil {
+	if n.Answers == nil {
 		return ""
 	}
 	host := n.claimHostOf(c.detail.Assignee)
@@ -62,7 +64,7 @@ func (n Next) answerThere(ctx context.Context, c *closeOut, report *NextReport, 
 	printed, err := n.Answers.NextThere(ctx, host, c.id, flags)
 	report.Delegated, report.DelegatedTo = printed, host
 	if err != nil {
-		return *report, fmt.Errorf("closing out %s: it was worked on %s, and `mw next` run there with the Mayor's word did not close it out (%s): nothing was written here; run it on %s by hand",
+		return *report, fmt.Errorf("closing out %s: it was worked on %s, and `mw next` run there did not close it out (%s): nothing was written here; run it on %s by hand",
 			c.id, host, oneLine(err.Error()), host)
 	}
 	return *report, nil
