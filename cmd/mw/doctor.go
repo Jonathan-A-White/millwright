@@ -481,6 +481,15 @@ func newDoctorCmd() *cobra.Command {
 			windowsState.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WindowsStateName), text)
 			}
+			// The wall clock stepping back on a WSL host, sampled for 90 s at most once
+			// an hour, last in the table so the run's budget is not spent before it
+			// (mw-6ww.185.12). A faulty verdict reaches the home's DAMPERS as a
+			// 'doctor: <host>: clock-steps faulty' line with the rest of the host's.
+			clockSteps := doctor.NewClockSteps()
+			clockSteps.State = store
+			clockSteps.Note = func(ctx context.Context, text string) error {
+				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.ClockStepsName), text)
+			}
 			dampers, err := doctorDamperSurveyOf(runTracker, vault, host)
 			if err != nil {
 				return err
@@ -655,6 +664,7 @@ func newDoctorCmd() *cobra.Command {
 				unitDrift,
 				harnessLevel,
 				cloudCapsRetired,
+				clockSteps,
 			}, churn...), checks...)
 			// Where Claude Code keeps its transcripts is the only place these
 			// two checks read; a host on codex has none, and says so once rather

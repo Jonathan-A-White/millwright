@@ -120,6 +120,14 @@ type DoctorCureEndsEpisode interface {
 	CureEndedEpisode() bool
 }
 
+// DoctorLongProbe is an optional addition to a DoctorCheck whose probe takes
+// longer than CheckBudget by its nature (a sample of the clock over 90 s): the
+// probe is held to ProbeBudget instead, still cut at what is left of RunBudget,
+// so the check is not cannot-tell on every run (mw-6ww.185.12).
+type DoctorLongProbe interface {
+	ProbeBudget() time.Duration
+}
+
 // DoctorChecks is the table mw doctor works down, in order.
 type DoctorChecks []DoctorCheck
 
@@ -585,12 +593,20 @@ func (d Doctor) limit() (limit time.Duration, byRun bool) {
 	return limit, false
 }
 
-// probe runs check's Probe within CheckBudget and what is left of RunBudget. A
-// probe still running at the limit is left behind (late), with the reason to
-// say; it is a read, and the run is a process that ends, so what it holds is
-// let go with it.
+// probe runs check's Probe within CheckBudget (or the longer one a
+// DoctorLongProbe asks for) and what is left of RunBudget. A probe still
+// running at the limit is left behind (late), with the reason to say; it is a
+// read, and the run is a process that ends, so what it holds is let go with it.
 func (d Doctor) probe(ctx context.Context, check DoctorCheck) (verdict Verdict, reason string, late bool) {
 	limit, byRun := d.limit()
+	if long, ok := check.(DoctorLongProbe); ok && d.CheckBudget > 0 && long.ProbeBudget() > limit && !byRun {
+		limit = long.ProbeBudget()
+		if d.RunBudget > 0 {
+			if left := d.RunBudget - d.now().Sub(d.began); left < limit {
+				limit, byRun = left, true
+			}
+		}
+	}
 	if limit <= 0 {
 		verdict, reason = check.Probe(ctx)
 		return verdict, reason, false
