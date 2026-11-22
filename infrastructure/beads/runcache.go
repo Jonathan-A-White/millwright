@@ -375,3 +375,31 @@ func (g *Gateway) showBeadsInRun(ctx context.Context, ids []string) (details []a
 	details, err := index.ShowBeads(ctx, ids)
 	return details, err == nil
 }
+
+// holdsList says whether the list of every bead, or its index, is already read.
+func (c *runCache) holdsList() bool {
+	return c.beads.held() || c.index.held()
+}
+
+// held says whether the read has been made, without making it.
+func (m *memo[T]) held() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.done
+}
+
+// ShowBeadsFew is ShowBeads for a few beads that a command wants the fields of
+// and nothing else: the list of every bead is not read for them. A Gateway
+// whose run cache already holds that list answers from it, as ShowBeads does;
+// otherwise the beads are read by id (keptshow.go), 51.8 MB and 14 to 60 s of
+// the server saved where ShowBeads on a run cache read every bead to answer for
+// the stories of a host's worktrees (mw-gq6.1625).
+func (g *Gateway) ShowBeadsFew(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
+	if g.cache == nil || g.cache.holdsList() {
+		return g.ShowBeads(ctx, ids)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return g.showWithoutList(ctx, ids)
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,13 +24,22 @@ func recordUpkeepRun(mark string) {
 	}
 }
 
+// fewBeads is the tracker that shows the few beads it is asked for by id, and
+// does not read every bead for them when the run holds no list of them
+// (mw-gq6.1625).
+type fewBeads struct{ *beads.Gateway }
+
+func (f fewBeads) ShowBeads(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
+	return f.Gateway.ShowBeadsFew(ctx, ids)
+}
+
 // hostUpkeepCheck is mw doctor's host-upkeep check for this host: its worktrees
 // are the .mw-worktrees beside each rig, its stories are read from the tracker,
 // the gateway tracker, which the damper survey reads too: both keep the one
 // list of every bead and the one read of the dependencies the run makes
 // (mw-gq6.1626).
 func hostUpkeepCheck(tracker *beads.Gateway, rigs map[string]string) *doctor.HostUpkeep {
-	check := &doctor.HostUpkeep{Stories: tracker}
+	check := &doctor.HostUpkeep{Stories: fewBeads{tracker}}
 	if home, err := os.UserHomeDir(); err == nil {
 		check.StateDir = filepath.Join(home, hostUpkeepStateDir)
 	}

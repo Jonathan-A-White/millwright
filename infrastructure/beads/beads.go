@@ -629,6 +629,12 @@ func (g *Gateway) ShowBeads(ctx context.Context, ids []string) ([]application.St
 	if details, ok := g.showBeadsInRun(ctx, ids); ok {
 		return details, nil
 	}
+	return g.showWithoutList(ctx, ids)
+}
+
+// showWithoutList is ShowBeads read by id, over the kept connection when there
+// is one and by bd otherwise, and never from the list of every bead.
+func (g *Gateway) showWithoutList(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
 	details, ok := g.showOverConnection(ctx, ids)
 	if !ok {
 		return g.showByBd(ctx, ids)
