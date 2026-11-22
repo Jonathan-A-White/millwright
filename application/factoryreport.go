@@ -74,6 +74,11 @@ type FactoryReport struct {
 	// Benchmarks, when set, names the rig and host of a ledger row whose story
 	// is gone, from the close-out that measured it, and is where speed is read.
 	Benchmarks BenchmarkBook
+	// Hands, when set, is where the hands steps are read from, to split the
+	// open-steps refusals into the steps a Builder left open and the stories
+	// that keep a hands step waiting on the Governor; left nil the line stays one
+	// count (mw-gq6.1642).
+	Hands ReportHands
 	// Seat is whose ledger is read.
 	Seat string
 	// Since is where the window starts; zero is DefaultReportDays before now.
@@ -138,6 +143,47 @@ type FactoryReport struct {
 	CommandNames []string
 	Now          func() time.Time
 	Out          io.Writer
+}
+
+// ReportHands is the part of the tracker's notes that keeps the hands steps:
+// PosternNotes' NotesWithPrefix, read once for every bead's hands.<bead> note.
+type ReportHands interface {
+	NotesWithPrefix(ctx context.Context, prefix string) (map[string]string, error)
+}
+
+// OpenStepsSplit is the open-steps refusals of one window told in two: those of
+// a story that keeps no hands step, where a Builder left a step of the formula
+// open, and those of a story that keeps one (Hands), where the open step may be
+// the one that waits on the Governor. Builder + Hands is the open-steps count.
+type OpenStepsSplit struct {
+	Builder int `json:"builder"`
+	Hands   int `json:"hands"`
+}
+
+// text is the split as the line of the open-steps refusals ends: "open-steps 5"
+// then this, the counts on one line.
+func (o OpenStepsSplit) text() string {
+	return fmt.Sprintf("left open %d · hands waiting on him %d", o.Builder, o.Hands)
+}
+
+// handsKeepers is the beads that keep a hands step, from the hands.<bead> notes
+// a ReportHands reads: a note that does not read as steps, or holds none, keeps
+// none. It is the set a refused story is looked up in; nil when none is read.
+func (r FactoryReport) handsKeepers(ctx context.Context) (map[string]bool, error) {
+	if r.Hands == nil {
+		return nil, nil
+	}
+	notes, err := r.Hands.NotesWithPrefix(ctx, HandsStepsKey(""))
+	if err != nil {
+		return nil, fmt.Errorf("reporting quality: the hands steps: %w", err)
+	}
+	keepers := map[string]bool{}
+	for key, raw := range notes {
+		if steps, err := parseHandsSteps(raw); err == nil && len(steps) > 0 {
+			keepers[strings.TrimPrefix(key, HandsStepsKey(""))] = true
+		}
+	}
+	return keepers, nil
 }
 
 // ReviewCounter counts what waits for him, as mw status DAMPERS does. The real
@@ -235,6 +281,9 @@ type Quality struct {
 	Attempts           int            `json:"attempts"`
 	AttemptsPerLanding float64        `json:"attempts_per_landing"`
 	Causes             map[string]int `json:"causes"`
+	// OpenSteps splits the open-steps refusals by whether the story keeps a hands
+	// step; nil when the report read no hands steps or none was refused so.
+	OpenSteps *OpenStepsSplit `json:"open_steps,omitempty"`
 	// Uncaused are the ids of the refused stories counted under CauseUnset, once
 	// each and sorted; cheap win R1 names them. They are not in the JSON.
 	Uncaused []string `json:"-"`
@@ -375,6 +424,9 @@ type reportEntry struct {
 	// SweepFinds and not by EscapedBugs.
 	sweep  bool
 	reason string
+	// handsRead says the report read the hands steps, and hands that this
+	// refusal's story keeps one (OpenStepsSplit).
+	handsRead, hands bool
 	// conflictFiles are the files a merge-conflict refusal's story last
 	// conflicted in.
 	conflictFiles []string
@@ -490,6 +542,10 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 	}
 
+	keepers, err := r.handsKeepers(ctx)
+	if err != nil {
+		return result, err
+	}
 	var all, testers []reportEntry
 	var landedIDs []string
 	landedSeen := map[string]bool{}
@@ -510,6 +566,9 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 		e := reportEntry{previous: previous, inWindow: inside, at: day, id: row.StoryID, rig: ReportUnknown, host: ReportUnknown, model: ReportUnknown,
 			landed: row.Landed() || tested, refused: refused, reason: reason, attempts: 1, own: 1, tester: tested}
+		if keepers != nil {
+			e.handsRead, e.hands = true, keepers[row.StoryID]
+		}
 		if row.Model != "" {
 			e.model = row.Model
 		}
@@ -893,6 +952,16 @@ func sumQuality(entries []reportEntry) Quality {
 		case e.refused:
 			q.Refused++
 			reasons[e.reason]++
+			if e.reason == string(ReasonOpenSteps) && e.handsRead {
+				if q.OpenSteps == nil {
+					q.OpenSteps = &OpenStepsSplit{}
+				}
+				if e.hands {
+					q.OpenSteps.Hands++
+				} else {
+					q.OpenSteps.Builder++
+				}
+			}
 			for _, file := range e.conflictFiles {
 				conflicts[file]++
 			}
@@ -1040,7 +1109,11 @@ func (k ReportBlock) writeQuality(b *strings.Builder) {
 	tail := fmt.Sprintf(": landed %d%s, refused %d (%.0f%%%s)", q.Landed, k.arrow("landed"), q.Refused, q.RefusalRate, k.arrow("refusal_rate"))
 	fmt.Fprintf(b, "%s%s\n", fitLine(k.Name, ReportWidth-utf8.RuneCountInString(tail)), tail)
 	for _, reason := range q.Reasons {
-		fmt.Fprintf(b, "  %s\n", fitLine(fmt.Sprintf("%s %d", reason.Reason, reason.Count), ReportWidth-2))
+		text := fmt.Sprintf("%s %d", reason.Reason, reason.Count)
+		if reason.Reason == string(ReasonOpenSteps) && q.OpenSteps != nil {
+			text += ": " + q.OpenSteps.text()
+		}
+		fmt.Fprintf(b, "  %s\n", fitLine(text, ReportWidth-2))
 	}
 	if q.Landed > 0 {
 		fmt.Fprintf(b, "  attempts per landing %.2f%s\n", q.AttemptsPerLanding, k.arrow("attempts_per_landing"))

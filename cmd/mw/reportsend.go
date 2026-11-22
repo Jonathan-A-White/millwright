@@ -134,6 +134,7 @@ func newReportSendCmd() *cobra.Command {
 					SeatSessions: seatSessions,
 					Seats:        seats,
 					Tracker:      gateway,
+					Hands:        gateway,
 					Files:        files,
 					Benchmarks:   vault.Benchmarks{Vault: files},
 					Rules:        files,

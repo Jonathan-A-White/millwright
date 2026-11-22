@@ -143,6 +143,7 @@ func newReportCmd() *cobra.Command {
 				Home:         files,
 				Here:         here,
 				Tracker:      gateway,
+				Hands:        gateway,
 				History:      files,
 				Review:       review,
 				Files:        files,
