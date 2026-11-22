@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -136,34 +137,45 @@ var _ application.GristBatches = (*Vault)(nil)
 // BatchOf implements application.GristBatches: the highest batch of the rig
 // whose outcome.txt says it landed the story ("landed <commit> on <target>, <n>
 // stories: <ids>"). A batch that was held, or that set the story aside, did not
-// carry it.
-func (v *Vault) BatchOf(_ context.Context, rig, story string) (int, bool, error) {
+// carry it. The batches are those of this checkout's folders and those of the
+// vault's origin, fetched first, so that a checkout behind another host's landing
+// does not answer for an older batch (mw-gq6.1664); a batch's outcome is the
+// checkout's file when it has one, the origin's when it has none.
+func (v *Vault) BatchOf(ctx context.Context, rig, story string) (int, bool, error) {
 	if err := safeName("rig", rig); err != nil {
 		return 0, false, err
 	}
 	dir := filepath.Join(v.dir, filepath.FromSlash(path.Join(application.BatchDir, rig)))
 	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return 0, false, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return 0, false, fmt.Errorf("listing %s: %w", dir, err)
 	}
-	found, highest := false, 0
+	origin := v.originBatchesOf(ctx)
+	numbers := map[int]bool{}
 	for _, entry := range entries {
-		number, err := strconv.Atoi(entry.Name())
-		if err != nil || !entry.IsDir() || number <= highest {
-			continue
-		}
-		outcome, err := os.ReadFile(filepath.Join(dir, entry.Name(), application.BatchOutcomeFile))
-		if err != nil {
-			continue
-		}
-		if landedStory(string(outcome), story) {
-			found, highest = true, number
+		if n, err := strconv.Atoi(entry.Name()); err == nil && entry.IsDir() && n > 0 {
+			numbers[n] = true
 		}
 	}
-	return highest, found, nil
+	for _, n := range origin.numbers(rig) {
+		numbers[n] = true
+	}
+	ordered := make([]int, 0, len(numbers))
+	for n := range numbers {
+		ordered = append(ordered, n)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(ordered)))
+	for _, number := range ordered {
+		outcome, err := os.ReadFile(filepath.Join(dir, strconv.Itoa(number), application.BatchOutcomeFile))
+		text, has := string(outcome), err == nil
+		if !has {
+			text, has = origin.outcome(rig, number)
+		}
+		if has && landedStory(text, story) {
+			return number, true, nil
+		}
+	}
+	return 0, false, nil
 }
 
 // landedStory reports whether the first line of a batch's outcome.txt is a
@@ -189,39 +201,60 @@ var _ application.BatchRefs = (*Vault)(nil)
 
 // WithoutOutcome implements application.BatchRefs: for each rig under
 // runs/batch, its highest-numbered batch directory when it holds no
-// outcome.txt, in rig order. A rig with no directory has none.
-func (v *Vault) WithoutOutcome(_ context.Context) ([]application.BatchRef, error) {
+// outcome.txt, in rig order. A rig with no directory has none. The directories
+// are those of this checkout and of the vault's origin, fetched first, so that
+// a checkout behind another host's landing does not name an older batch as the
+// newest, or one the other host has since given an outcome (mw-gq6.1664).
+func (v *Vault) WithoutOutcome(ctx context.Context) ([]application.BatchRef, error) {
 	root := filepath.Join(v.dir, filepath.FromSlash(application.BatchDir))
 	rigs, err := os.ReadDir(root)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("listing %s: %w", root, err)
 	}
-	var out []application.BatchRef
+	origin := v.originBatchesOf(ctx)
+	names := map[string]bool{}
 	for _, rig := range rigs {
-		if !rig.IsDir() {
-			continue
+		if rig.IsDir() {
+			names[rig.Name()] = true
 		}
-		entries, err := os.ReadDir(filepath.Join(root, rig.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("listing %s: %w", filepath.Join(root, rig.Name()), err)
-		}
+	}
+	for _, rig := range origin.rigs() {
+		names[rig] = true
+	}
+	ordered := make([]string, 0, len(names))
+	for name := range names {
+		ordered = append(ordered, name)
+	}
+	sort.Strings(ordered)
+	var out []application.BatchRef
+	for _, rig := range ordered {
 		highest := 0
+		entries, err := os.ReadDir(filepath.Join(root, rig))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("listing %s: %w", filepath.Join(root, rig), err)
+		}
 		for _, entry := range entries {
 			if n, err := strconv.Atoi(entry.Name()); err == nil && entry.IsDir() && n > highest {
+				highest = n
+			}
+		}
+		for _, n := range origin.numbers(rig) {
+			if n > highest {
 				highest = n
 			}
 		}
 		if highest == 0 {
 			continue
 		}
-		_, err = os.Stat(filepath.Join(root, rig.Name(), strconv.Itoa(highest), application.BatchOutcomeFile))
-		if errors.Is(err, fs.ErrNotExist) {
-			out = append(out, application.BatchRef{Rig: rig.Name(), Number: highest})
-		} else if err != nil {
-			return nil, fmt.Errorf("reading the outcome of batch %d of %s: %w", highest, rig.Name(), err)
+		_, err = os.Stat(filepath.Join(root, rig, strconv.Itoa(highest), application.BatchOutcomeFile))
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("reading the outcome of batch %d of %s: %w", highest, rig, err)
+		}
+		if _, has := origin.outcome(rig, highest); !has {
+			out = append(out, application.BatchRef{Rig: rig, Number: highest})
 		}
 	}
 	return out, nil
