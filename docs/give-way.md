@@ -17,6 +17,7 @@ Windows PowerShell 5.1, no module beyond what Windows ships. The distro is `Ubun
 - [Which event does what](#which-event-does-what)
 - [What the home shows](#what-the-home-shows)
 - [What is NOT covered](#what-is-not-covered)
+- [The disk guard: a freeze for the disk](#the-disk-guard-a-freeze-for-the-disk)
 - [Checking it](#checking-it)
 
 <!-- /toc -->
