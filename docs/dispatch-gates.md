@@ -51,6 +51,7 @@ A refused story's kept claim (`run=blocked`) holds its files at `shared-files` u
 - [The smoke-hold gate, and the gates that cannot hold their own fix](#the-smoke-hold-gate-and-the-gates-that-cannot-hold-their-own-fix)
 - [The starved-rig alarm](#the-starved-rig-alarm)
 - [Who runs the rig's tests, and under which lock](#who-runs-the-rigs-tests-and-under-which-lock)
+- [The stop floor, before any gate](#the-stop-floor-before-any-gate)
 
 <!-- /toc -->
 
@@ -571,3 +572,37 @@ Every place mw runs the rig's tests, and what it takes:
 | `mw suite` and the nightly suite it is started by | no (it runs on a throwaway worktree of the rig's origin) | yes, taken after the wait for a calm host, for one command line at a time (the tests, the changed specs, each re-run of a failing file) and given back between them; a lock it cannot take ends the suite with nothing kept (`Suite.GateLock`, mw-gq6.914, mw-gq6.917) | yes |
 | a landing's after-landing command (deploy, shots) | its own after-landing slot | no | no: it is not the rig's tests; the shots run after the landing's gate has ended |
 | `mw grist eval` and `mw grist smoke` | no | no | not the rig's tests: they run the mill, under its own grind slots (`hostlock.GrindSlots`) |
+
+## The stop floor, before any gate
+
+`no-room` only refuses stories that have not started, and the ones already running can fill a disk on their own: on
+2026-11-18 the Builders running on the desktop filled the last of D: with four sessions stalled (mw-6ww.183). So a
+tick that is about to dispatch asks the disk first (`application.DiskGuard`, `cmd/mw/diskguard.go`), before it
+syncs, claims or starts anything, and before the `give-way` look below it reads the marker the guard leaves.
+
+- **The floor.** `stop_free_gb` of the `[dispatch]` table, beside `min_root_free_gb`: 5 by default, `0` turns the
+  guard off. It is read of the same two spaces the room reads: the root filesystem on every host, and on a WSL host
+  the Windows drive of its vhdx. Either one under it is under the floor. A space the reading cannot learn is held to
+  nothing. A `--dry-run` runs no guard.
+- **Under it.** The host freezes every Builder process where it stands, through give way's own machinery
+  (`GiveWayProcesses`, `GiveWayMarkers`; the heartbeats go on, so no lease lapses), then runs `mw host sweep`,
+  `mw host tidy go-cache` and `mw host tidy tmp`, and the dispatch below finds the marker and starts nothing.
+  Nothing is killed and nothing is lost. A tick still under the floor renews the marker and stops nothing twice; it
+  runs the sweep and the tidy again after an hour, no sooner.
+- **Back.** Once every space it reads is over `stop_free_gb` plus 5 GB, the guard lets the Builders go on, as
+  `mw giveway off` does, and a session that died while frozen is retried. Between the floor and the floor plus 5 the
+  host stays frozen.
+- **One mail an episode.** The Mayor gets one mail, from the first tick that froze the host: the host, the free
+  space and the floor, what the sweep and the tidy freed and, when they could not get it back over the line, that it
+  stays frozen and the five largest directories under the home directory. A tick that lifts the freeze straight away
+  says so in that mail and names no directories.
+- **A person's give way is hers.** The guard's marker carries a `disk` mark. A marker without it is a person's
+  (`mw giveway on`, the Windows tasks): the guard neither lifts it nor adds its own over it, and a person's `on` over
+  the guard's takes the freeze from it, so the guard does not lift that. `mw giveway status` says `frozen for its disk
+  since <time>` for the guard's marker and `gives way since <time>` for hers.
+- **The home too.** Unlike `mw giveway on`, the guard also freezes the Builders of the home: a full disk there stops
+  the whole factory. It lowers, and never stops, the factory's own entries (`mw dispatch`, the Millhand's tick), as
+  give way always does.
+- **Not renewed.** The guard renews the marker on every tick it is under the line; a marker nobody renews for
+  `giveway_stale` is lifted by the next tick, as give way's is, so a host whose dispatch stops being run does not stay
+  frozen for good.

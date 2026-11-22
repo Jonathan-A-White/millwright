@@ -17,6 +17,7 @@ Windows PowerShell 5.1, no module beyond what Windows ships. The distro is `Ubun
 - [Which event does what](#which-event-does-what)
 - [What the home shows](#what-the-home-shows)
 - [What is NOT covered](#what-is-not-covered)
+- [The disk guard: a freeze for the disk](#the-disk-guard-a-freeze-for-the-disk)
 - [Checking it](#checking-it)
 
 <!-- /toc -->
@@ -197,6 +198,22 @@ is at the screen. So that the home does not take that silence for a fault, the h
 - Anything the person does in WSL itself.
 - The factory's own processes that `mw giveway on` does not stop (its Found-not-fixed list is on the first
   story, mw-2891blf.1).
+
+## The disk guard: a freeze for the disk
+
+Give way also has a second reason to freeze a host: its own disk (mw-6ww.185.7). When the root filesystem's free
+space, or on a WSL host the Windows drive's, is under `stop_free_gb` (`[dispatch]`, 5 GB by default, 0 off), the
+dispatch tick freezes the Builders through the same `GiveWayProcesses` and `GiveWayMarkers` ports as `mw giveway on`
+(heartbeats go on), runs `mw host sweep` and `mw host tidy go-cache` and `tmp`, mails the Mayor once, and starts
+nothing until the space is back over `stop_free_gb` plus 5 GB, when it lets the Builders go on and retries a session
+that died while frozen, as `mw giveway off` does. The rules are in `dispatch-gates.md` (The stop floor).
+
+- The marker is the guard's own: it carries a `disk` mark, and `mw giveway status` says `frozen for its disk since
+  <time>`, where a person's says `gives way since <time>`.
+- A host that gives way to a person is left to her: the guard neither lifts her freeze nor adds its own over it.
+  Her `mw giveway on` over the guard's freeze takes it over (the `disk` mark goes), and the guard leaves it to her.
+- `mw giveway off` lets a disk freeze go on at once; if the disk is still under the floor the next tick freezes the
+  host again.
 
 ## Checking it
 
