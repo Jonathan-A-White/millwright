@@ -23,6 +23,14 @@ const (
 	HarnessLevelDamperCap  = 1
 )
 
+// HarnessLevelMadeGrace is how long after a box was made its want of a first
+// sync is no fault (mw-gq6.1653). A host syncs on a five-minute clock (the
+// box's dispatch timer is OnCalendar=*:0/5, and mw-mail-notify syncs at most
+// every MW_MAIL_SYNC_EVERY seconds, 240 under its unit, 300 by default); the
+// grace is three of them, so a box that is slow to its first sync is still
+// pending and one that never syncs is cannot-tell soon after.
+const HarnessLevelMadeGrace = 15 * time.Minute
+
 // HarnessHost is a Builder host the check looks at: Box is a cloud box, whose
 // Claude Code is an npm package under ~/.local, not the native install.
 type HarnessHost struct {
@@ -60,6 +68,8 @@ type HarnessLevel struct {
 	// that cannot be read, judges nothing: every note is read as it is.
 	Book application.CloudBook
 	Plan application.CloudPlan
+	// Now is the clock. The zero value reads the real one.
+	Now func() time.Time
 
 	// faulty is what Probe last found, for Cure to carry.
 	faulty string
@@ -113,7 +123,7 @@ func (h *HarnessLevel) Probe(ctx context.Context) (application.Verdict, string) 
 		bookRead = berr == nil
 	}
 
-	var behind, unread []string
+	var behind, unread, pending []string
 	for _, host := range hosts {
 		if host.Name == h.Host {
 			continue
@@ -125,6 +135,10 @@ func (h *HarnessLevel) Probe(ctx context.Context) (application.Verdict, string) 
 				continue
 			}
 			if state.NoteOfAnOlderBox(h.Plan, host.Name, lastSync(synced)) {
+				if made, ok := h.justMade(state, host.Name); ok {
+					pending = append(pending, fmt.Sprintf("%s pending (made %s ago, no sync yet)", host.Name, made))
+					continue
+				}
 				unread = append(unread, fmt.Sprintf("%s unread (its notes are an older box's, left before this one was made)", host.Name))
 				continue
 			}
@@ -148,14 +162,38 @@ func (h *HarnessLevel) Probe(ctx context.Context) (application.Verdict, string) 
 		}
 	}
 	if len(behind) == 0 && len(unread) == 0 {
-		return application.DoctorOK, fmt.Sprintf("every Builder host has claude %s or later", want)
+		said := fmt.Sprintf("every Builder host has claude %s or later", want)
+		if len(pending) > 0 {
+			said = fmt.Sprintf("every Builder host that has synced has claude %s or later; %s", want, strings.Join(pending, "; "))
+		}
+		return application.DoctorOK, said
 	}
-	reason := strings.Join(append(behind, unread...), "; ")
+	reason := strings.Join(append(append(behind, unread...), pending...), "; ")
 	if len(behind) == 0 {
 		return application.DoctorCannotTell, reason
 	}
 	h.faulty = reason
 	return application.DoctorFaulty, reason
+}
+
+// justMade says host is a box the book holds, made less than
+// HarnessLevelMadeGrace ago, and how long ago in whole minutes.
+func (h *HarnessLevel) justMade(state application.CloudState, host string) (string, bool) {
+	now := time.Now
+	if h.Now != nil {
+		now = h.Now
+	}
+	for _, box := range state.Boxes {
+		if box.Name != host {
+			continue
+		}
+		age := now().Sub(box.Up)
+		if age < 0 || age >= HarnessLevelMadeGrace {
+			return "", false
+		}
+		return fmt.Sprintf("%dm", int(age.Minutes())), true
+	}
+	return "", false
 }
 
 // harnessCure is the line that brings a host level, for its kind of install.

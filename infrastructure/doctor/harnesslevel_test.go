@@ -157,3 +157,54 @@ func TestHarnessLevelLeavesOutTheNoteOfAnOlderBox(t *testing.T) {
 		})
 	}
 }
+
+// mw-gq6.1653: a box made a few minutes ago has had no first sync, so its notes
+// are an older box's by the book; that is pending, not a fault, until the grace
+// since it was made is up.
+func TestHarnessLevelCallsABoxJustMadeAndNotYetSyncedPendingNotUnread(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 22, 12, 16, 0, 0, time.UTC)
+	plan := application.CloudPlan{Prefix: "cloud"}
+	for _, c := range []struct {
+		name      string
+		madeAgo   time.Duration
+		versions  map[string]string
+		verdict   application.Verdict
+		wantWords []string
+		notWords  []string
+	}{
+		{"made 4m ago", 4 * time.Minute, map[string]string{"desktop": "2.1.322", "cloud3": "2.1.300"},
+			application.DoctorOK, []string{"cloud3 pending (made 4m ago, no sync yet)"}, []string{"unread"}},
+		{"made past the grace", doctor.HarnessLevelMadeGrace + time.Minute, map[string]string{"desktop": "2.1.322", "cloud3": "2.1.300"},
+			application.DoctorCannotTell, []string{"cloud3 unread (its notes are an older box's, left before this one was made)"}, []string{"pending"}},
+		{"pending beside a host behind", 4 * time.Minute, map[string]string{"desktop": "2.1.300", "cloud3": "2.1.300"},
+			application.DoctorFaulty, []string{"desktop has claude 2.1.300", "cloud3 pending"}, []string{"cloud3 unread"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			check := hlCheck(t, "2.1.322", c.versions)
+			check.Hosts = func(context.Context) ([]doctor.HarnessHost, error) {
+				return []doctor.HarnessHost{{Name: "desktop"}, {Name: "cloud3", Box: true}}, nil
+			}
+			notes := check.Notes.(*apptest.FakeDoctorNotes)
+			up := now.Add(-c.madeAgo)
+			_ = notes.SetNote(ctx, application.LastSyncKey("cloud3"), up.Add(-time.Hour).Format(application.LastSyncFormat))
+			check.Book = &apptest.FakeCloudBook{State: application.CloudState{Boxes: []application.CloudBox{{Name: "cloud3", Up: up}}}}
+			check.Plan = plan
+			check.Now = func() time.Time { return now }
+			verdict, reason := check.Probe(ctx)
+			if verdict != c.verdict {
+				t.Fatalf("expected %s, got %s (%s)", c.verdict, verdict, reason)
+			}
+			for _, w := range c.wantWords {
+				if !strings.Contains(reason, w) {
+					t.Errorf("expected the reason to hold %q, got %q", w, reason)
+				}
+			}
+			for _, w := range c.notWords {
+				if strings.Contains(reason, w) {
+					t.Errorf("expected the reason not to hold %q, got %q", w, reason)
+				}
+			}
+		})
+	}
+}
