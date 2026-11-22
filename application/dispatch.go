@@ -295,6 +295,7 @@ type Dispatch struct {
 	// DefaultRepathNoRoom) to host=auto, unless its pin says why it must stay
 	// (mw-gq6.1165). A nil CloudBook calls no box gone.
 	Retired      []string
+	IdleHostMail bool // [stuck] thawable: mail the Mayor of an idle host (idlehostmail.go)
 	CloudBook    CloudBook
 	CloudPlan    CloudPlan
 	RepathNoRoom time.Duration
@@ -1327,8 +1328,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				}
 			}
 			if !formulas[path.Formula] {
-				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "formula-not-installed", Why: fmt.Sprintf(
-					"its formula %s is not installed here, so it is not claimed", path.Formula)})
+				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "formula-not-installed", Why: fmt.Sprintf("its formula %s is not installed here, so it is not claimed", path.Formula)})
 				if !d.DryRun {
 					d.refuseUninstalledFormula(ctx, detail, path.Formula, reads, &report)
 				}
@@ -1385,8 +1385,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// not run again: the same Builder would hand it back the same way. Before
 		// the cap, so it takes none of the sessions (mw-gq6.418).
 		if at, handedBack, err := reads.handedBack(ctx, detail); err != nil {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "handed-back", Why: fmt.Sprintf(
-				"whether its Builder handed it back could not be read, so it is not claimed: %v", oneLine(err.Error()))})
+			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "handed-back", Why: fmt.Sprintf("whether its Builder handed it back could not be read, so it is not claimed: %v", oneLine(err.Error()))})
 			continue
 		} else if handedBack {
 			// The acceptance no longer reads as the claim recorded it: a Builder
@@ -1435,7 +1434,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// place (mw-gq6.349).
 		if sharing {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Gate: "shared-files", Why: share.String()})
-			held.hold(id)
+			held.hold(id, share)
 			continue
 		}
 		held.pass(id)
@@ -1548,6 +1547,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	d.keepFilesHeld(ctx, ready, held, &report)
 	d.keepHostPassed(ctx, ready, &report)
 	d.keepStarved(ctx, ready, shares.running, &report)
+	d.tellIdleHost(ctx, held, noRoom, free, &report)
 	report.Notes = append(report.Notes, shares.notes...)
 	d.print(report.String())
 	d.answerWaitingGrist(ctx, &report)

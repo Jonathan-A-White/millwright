@@ -68,13 +68,16 @@ func (h filesHeld) String() string {
 // ready stories it held there, and the ones it let past.
 type filesHeldPass struct {
 	held, past map[string]bool
+	// shares are the file and the holder of each story held, for the idle host's
+	// mail (mw-gq6.1645).
+	shares map[string]FileShare
 }
 
-func (p *filesHeldPass) hold(id string) {
+func (p *filesHeldPass) hold(id string, share FileShare) {
 	if p.held == nil {
-		p.held = map[string]bool{}
+		p.held, p.shares = map[string]bool{}, map[string]FileShare{}
 	}
-	p.held[id] = true
+	p.held[id], p.shares[id] = true, share
 }
 
 func (p *filesHeldPass) pass(id string) {
