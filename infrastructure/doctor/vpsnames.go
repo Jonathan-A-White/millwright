@@ -140,6 +140,11 @@ func (v *VPSNames) Cure(ctx context.Context) error {
 // Damper implements application.DoctorCheck.
 func (v *VPSNames) Damper() (time.Duration, int) { return VPSNamesDamperWait, VPSNamesDamperCap }
 
+// CureLeavesFault implements application.DoctorStandsAfterCure: the note changes
+// nothing on the VPS, so a name with no site is still faulty after it
+// (mw-6ww.185.28).
+func (v *VPSNames) CureLeavesFault() bool { return true }
+
 // WayBack implements application.DoctorCheck: the cure changes nothing.
 func (v *VPSNames) WayBack() string {
 	return "none needed: the cure only writes a note to the Mayor"

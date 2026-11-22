@@ -93,6 +93,11 @@ func (r *RootDiskBudget) Probe(context.Context) (application.Verdict, string) {
 	return application.DoctorOK, r.figures(used)
 }
 
+// CureLeavesFault implements application.DoctorStandsAfterCure: the note changes
+// nothing on the host, so the root still stands over its budget after it
+// (mw-6ww.185.28).
+func (r *RootDiskBudget) CureLeavesFault() bool { return true }
+
 // Cure implements application.DoctorCheck: one note to the Mayor, nothing on
 // the host changed. A note that cannot be written fails the cure, so the
 // damper tries again.

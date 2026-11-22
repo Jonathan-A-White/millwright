@@ -393,7 +393,7 @@ Feature: mw doctor
     Given the root-disk-budget check has a budget of 100000000000 bytes, a margin of 10000000000 bytes, and the WSL root uses 91000000000 bytes
     When mw doctor's root-disk-budget check runs for real
     Then mw doctor leaves with the status 0
-    And the doctor log holds "root-disk-budget cured"
+    And the doctor log holds "root-disk-budget faulty the WSL root uses 91.0 GB of a 100.0 GB budget"
     And the doctor notes were written 1 time
     And the note "doctor.laptop.root-disk-budget" holds "the WSL root uses 91.0 GB of a 100.0 GB budget"
     And the note "doctor.laptop.root-disk-budget" holds "Optimize-VHD"

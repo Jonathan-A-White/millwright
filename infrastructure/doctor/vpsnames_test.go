@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -106,5 +108,46 @@ func TestVPSNamesCureNotesTheMayor(t *testing.T) {
 	check.Note = func(_ context.Context, text string) error { note = text; return nil }
 	if err := check.Cure(context.Background()); err != nil || !strings.Contains(note, "kestrel.allmymind.org") {
 		t.Fatalf("err %v note %q", err, note)
+	}
+}
+
+// A name with no site is not put right by a note to the Mayor: run through the
+// doctor with its cure, the check is faulty (the note written) and then damped,
+// never cured, and the other hosts read it faulty on every tick (mw-6ww.185.28).
+func TestVPSNamesIsNeverReportedCuredByTheDoctor(t *testing.T) {
+	site := tlsServer(t, "Welcome to nginx!")
+	check := vpsNamesCheck(map[string]string{"allmymind.org": vpsAddr, "kestrel.allmymind.org": vpsAddr},
+		map[string]*httptest.Server{"kestrel.allmymind.org": site}, "kestrel.allmymind.org")
+	check.Client = site.Client()
+	notes := 0
+	check.Note = func(context.Context, string) error { notes++; return nil }
+	start := time.Date(2026, 11, 22, 9, 0, 0, 0, time.UTC)
+	now := start
+	verdicts := apptest.NewFakeTracker()
+	runner := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  apptest.NewFakeDoctorState(), Log: &apptest.FakeDoctorLog{}, Verdicts: verdicts,
+		Host: "vps", Now: func() time.Time { return now },
+	}
+	for _, at := range []time.Duration{0, 5 * time.Minute, 7 * time.Hour} {
+		now = start.Add(at)
+		report, _ := runner.Run(context.Background(), "", false)
+		if len(report.Results) != 1 {
+			t.Fatalf("at +%s: expected one result, got %+v", at, report.Results)
+		}
+		got := report.Results[0]
+		if got.Verdict != "faulty" && got.Verdict != "damped" {
+			t.Errorf("at +%s: expected faulty or damped, got %q (%s)", at, got.Verdict, got.String())
+		}
+		if strings.Contains(got.String(), "cured") {
+			t.Errorf("at +%s: the report says cured: %s", at, got.String())
+		}
+		said, _ := verdicts.Note(context.Background(), application.DoctorVerdictKey("vps"))
+		if verdict, ok := application.ParseDoctorVerdict(said); !ok || len(verdict.Faulty) != 1 || verdict.Faulty[0].Check != doctor.VPSNamesName {
+			t.Errorf("at +%s: expected the verdict to hold vps-names faulty, got %q", at, said)
+		}
+	}
+	if notes != 2 {
+		t.Errorf("expected one note at the start and one after the 6 hour damper, got %d", notes)
 	}
 }
