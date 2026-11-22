@@ -565,3 +565,35 @@ func TestWSLDriveFreeWritesNoReportOffWSL(t *testing.T) {
 		t.Errorf("a report was written on a host that is not WSL")
 	}
 }
+
+// systemd 255 prints `systemctl show` times in the host's zone whatever
+// --timestamp=unix says: the Laptop (America/New_York) printed 'EST' and every
+// timer read as never run (mw-6ww.185.22).
+func TestSystemdTimeReadsALocalZoneUTCAndUnixForms(t *testing.T) {
+	zone, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("no tz database: %v", err)
+	}
+	saved := time.Local
+	time.Local = zone
+	defer func() { time.Local = saved }()
+
+	for _, tc := range []struct {
+		in   string
+		want time.Time
+	}{
+		{"Sat 2026-11-21 20:47:28 EST", time.Date(2026, 11, 22, 1, 47, 28, 0, time.UTC)},
+		{"Tue 2026-11-17 14:12:19 UTC", time.Date(2026, 11, 17, 14, 12, 19, 0, time.UTC)},
+		{"@1763769000", time.Unix(1763769000, 0)},
+	} {
+		got, ok := doctor.SystemdTime(tc.in)
+		if !ok || !got.Equal(tc.want) {
+			t.Errorf("SystemdTime(%q) = %v, %v; want %v", tc.in, got, ok, tc.want)
+		}
+	}
+	for _, in := range []string{"", "n/a", "@0"} {
+		if _, ok := doctor.SystemdTime(in); ok {
+			t.Errorf("SystemdTime(%q) says it ran", in)
+		}
+	}
+}

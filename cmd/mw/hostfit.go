@@ -121,7 +121,11 @@ func (p hostFitProbes) Unit(ctx context.Context, unit string) (application.HostF
 	if err != nil && state == "" {
 		return application.HostFitUnitState{}, fmt.Errorf("systemctl --user is-enabled %s: %w", timer, err)
 	}
-	shown, _ := exec.CommandContext(ctx, "systemctl", "--user", "show", timer, "-p", "LastTriggerUSec", "--value", "--timestamp=unix").Output()
+	// systemd 255 ignores --timestamp=unix in `show` and prints $TZ's local
+	// time; UTC makes it one form on every host (mw-6ww.185.22).
+	show := exec.CommandContext(ctx, "systemctl", "--user", "show", timer, "-p", "LastTriggerUSec", "--value", "--timestamp=unix")
+	show.Env = append(os.Environ(), "TZ=UTC")
+	shown, _ := show.Output()
 	last, _ := doctor.SystemdTime(strings.TrimSpace(string(shown)))
 	return application.HostFitUnitState{Enabled: state == "enabled", LastRun: last}, nil
 }
@@ -275,22 +279,27 @@ func meminfoLimits(r io.Reader, limits application.HostFitLimits) (application.H
 	return limits, scanner.Err()
 }
 
-// cloudBoxNames are the hosts the cloud owns: those [cloud.caps] names and the
-// boxes the cloud's book holds. The boost-fit check asks none of them.
+// cloudBoxNames are the hosts the cloud owns: the boxes the cloud's book
+// holds. The boost-fit check asks none of them. [cloud.caps] is no list of
+// boxes: it caps the sessions of each host, the desktop and laptop among them
+// (mw-6ww.185.22).
 func cloudBoxNames(dir, host string) func(context.Context) ([]string, error) {
 	return func(ctx context.Context) ([]string, error) {
-		settings, ok, err := config.Cloud()
-		if err != nil || !ok {
+		if _, ok, err := config.Cloud(); err != nil || !ok {
 			return nil, err
 		}
-		var names []string
-		for name := range settings.HostCaps {
-			names = append(names, name)
-		}
-		state, err := vault.CloudBook{Vault: mwVault(dir, host)}.Read(ctx)
+		return cloudBoxNamesFrom(vault.CloudBook{Vault: mwVault(dir, host)}.Read)(ctx)
+	}
+}
+
+// cloudBoxNamesFrom names the boxes a cloud book holds.
+func cloudBoxNamesFrom(read func(context.Context) (application.CloudState, error)) func(context.Context) ([]string, error) {
+	return func(ctx context.Context) ([]string, error) {
+		state, err := read(ctx)
 		if err != nil {
-			return names, err
+			return nil, err
 		}
+		names := make([]string, 0, len(state.Boxes))
 		for _, box := range state.Boxes {
 			names = append(names, box.Name)
 		}

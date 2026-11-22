@@ -296,10 +296,17 @@ func showProperties(out string) map[string]string {
 // empty, n/a and @0 say it did not. It reads the form --timestamp=unix asks for
 // ('@1730000000') and the one systemd 255 prints all the same, run in UTC ('Tue
 // 2026-11-17 14:12:19 UTC'): reading only the first, the check said 'never run'
-// on the desktop for days after its trim ran (mw-gq6.1527).
+// on the desktop for days after its trim ran (mw-gq6.1527). A time in the
+// host's own zone (systemd 255 prints $TZ) is read in time.Local.
 func lastTrigger(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if at, err := time.Parse("Mon 2006-01-02 15:04:05 UTC", value); err == nil {
+		return at, true
+	}
+	// Any other zone abbreviation is read in the host's own zone, which is the
+	// one systemd printed it in: 'Sat 2026-11-21 20:47:28 EST' on the Laptop
+	// (mw-6ww.185.22).
+	if at, err := time.ParseInLocation("Mon 2006-01-02 15:04:05 MST", value, time.Local); err == nil {
 		return at, true
 	}
 	if !strings.HasPrefix(value, "@") {
