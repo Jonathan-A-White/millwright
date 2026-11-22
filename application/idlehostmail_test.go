@@ -8,12 +8,15 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // anIdleHost is a dispatch on a host with room: the first tick starts
 // mw-gq6.1 on src/Reader.tsx, and every tick after it starts nothing, for
 // mw-gq6.2 shares that file, mw-gq6.3 waits on the Governor and mw-gq6.4 is
-// parked behind an event. tick runs the dispatch at an offset from 09:00Z.
+// parked behind an event (which counts for nothing: a ready story is not a held
+// one). Three held stories sit apart: mw-gq6.10 and mw-gq6.11 name only the closed
+// mw-gq6.9, mw-gq6.12 names the open mw-gq6.1. tick runs the dispatch at an offset from 09:00Z.
 func anIdleHost(t *testing.T, mail bool) (dispatch *application.Dispatch, tracker *apptest.FakeTracker, mailbox *apptest.FakeMailbox, tick func(time.Duration)) {
 	t.Helper()
 	built, tracker, _, _, _ := aFactory(t)
@@ -30,6 +33,17 @@ func anIdleHost(t *testing.T, mail bool) (dispatch *application.Dispatch, tracke
 	storyChanging(t, tracker.AddStory, "mw-gq6.4", "src/Index.tsx")
 	mustDo(t, tracker.SetLabels("mw-gq6.3", application.LabelHitl))
 	mustDo(t, tracker.SetLabels("mw-gq6.4", "held-for-jonah"))
+	heldBehind := func(id, names string) {
+		t.Helper()
+		tracker.AddStory("mw-gq6", domain.Story{ID: id, Title: "A held story"})
+		mustDo(t, tracker.HoldStory(context.Background(), id))
+		mustDo(t, tracker.CommentOnStory(context.Background(), id, "HELD: waits on "+names))
+	}
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.9", Title: "Done"})
+	mustDo(t, tracker.CloseStory(context.Background(), "mw-gq6.9", "done"))
+	heldBehind("mw-gq6.10", "mw-gq6.9")
+	heldBehind("mw-gq6.11", "mw-gq6.9")
+	heldBehind("mw-gq6.12", "mw-gq6.1")
 
 	tick = func(after time.Duration) {
 		t.Helper()
@@ -59,7 +73,7 @@ func TestDispatchIdleHostMailSendsOneLineOfCountsOncePerSpell(t *testing.T) {
 	if strings.Contains(body, "\n") {
 		t.Errorf("the body is more than one line: %q", body)
 	}
-	for _, want := range []string{"vps", "1 held on files", "src/Reader.tsx", "mw-gq6.1", "1 waiting on him", "1 thawable"} {
+	for _, want := range []string{"vps", "1 held on files", "src/Reader.tsx", "mw-gq6.1", "1 waiting on him", "2 thawable"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the line %q lacks %q", body, want)
 		}
@@ -133,6 +147,8 @@ func TestDispatchIdleHostMailSaysNothingForAHostWithNothingToCount(t *testing.T)
 	_, tracker, mailbox, tick := anIdleHost(t, true)
 	mustDo(t, tracker.SetLabels("mw-gq6.3"))
 	mustDo(t, tracker.SetLabels("mw-gq6.4"))
+	mustDo(t, tracker.CloseStory(context.Background(), "mw-gq6.10", "done"))
+	mustDo(t, tracker.CloseStory(context.Background(), "mw-gq6.11", "done"))
 	if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.2", map[string]string{"files": "src/Preface.tsx"}); err != nil {
 		t.Fatalf("narrowing the files: %v", err)
 	}

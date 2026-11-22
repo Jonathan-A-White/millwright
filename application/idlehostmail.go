@@ -29,10 +29,6 @@ const idleSpellTold = " told"
 // Mayor or the Governor does something: no session of this host can start it.
 var waitingOnHimGates = []string{"hitl", "needs-files-key", "handed-back", "attempts-exhausted", "no-sweep", "tester-no-landed-story"}
 
-// thawableGate is the gate of a ready story parked behind an event
-// (held-for-<event>): it is released by removing the label, which nobody has.
-const thawableGate = "held-for"
-
 // idleCounts are what a host that has room and starts nothing is waiting for.
 type idleCounts struct {
 	// files are the ready stories held on a file a running story names, and
@@ -42,20 +38,20 @@ type idleCounts struct {
 	holders []string
 	// onHim are the ready stories that wait on the Mayor or the Governor.
 	onHim int
-	// thawable are the ready stories parked behind an event.
+	// thawable are the held stories past their reason: StuckReport.PastReasonCount,
+	// the number mw stuck prints as 'past their reason'.
 	thawable int
 }
 
 func (c idleCounts) none() bool { return c.files+c.onHim+c.thawable == 0 }
 
 // idleCountsOf reads the counts off the pass: its Passed list for the gates, and
-// the pass's shared-files holds for the file and holder.
+// the pass's shared-files holds for the file and holder. It leaves thawable to
+// pastReason, which reads the tracker.
 func idleCountsOf(passed []Passed, held filesHeldPass) idleCounts {
 	var c idleCounts
 	for _, p := range passed {
 		switch {
-		case p.Gate == thawableGate:
-			c.thawable++
 		case p.Gate == "shared-files":
 			c.files++
 			if share, ok := held.shares[p.StoryID]; ok {
@@ -73,6 +69,23 @@ func idleCountsOf(passed []Passed, held filesHeldPass) idleCounts {
 	}
 	slices.Sort(c.holders)
 	return c
+}
+
+// pastReason is how many held stories are past their reason, counted by the
+// survey mw stuck runs (StuckSurvey.Find, StuckReport.PastReasonCount): one
+// source for the mail and for mw stuck. A tracker that cannot read the graph, or
+// a read that fails, counts none and says so as a note.
+func (d Dispatch) pastReason(ctx context.Context, report *DispatchReport) int {
+	graph, ok := d.Tracker.(BeadGraph)
+	if !ok {
+		return 0
+	}
+	found, err := StuckSurvey{Graph: graph, Comments: d.Tracker}.Find(ctx)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the holds past their reason could not be counted for the idle-host mail: %v", err))
+		return 0
+	}
+	return found.PastReasonCount()
 }
 
 // idleHolderLines is how many files and holders the line names before it says
@@ -134,6 +147,7 @@ func (d Dispatch) tellIdleHost(ctx context.Context, held filesHeldPass, noRoom s
 		return
 	}
 	counts := idleCountsOf(report.Passed, held)
+	counts.thawable = d.pastReason(ctx, report)
 	if counts.none() {
 		return
 	}
