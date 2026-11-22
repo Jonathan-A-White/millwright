@@ -798,6 +798,8 @@ func (b BatchLand) noteSetAside(ctx context.Context, report *BatchReport) {
 		next := "This story stays queued."
 		if len(s.Conflicts) > 0 {
 			next = fmt.Sprintf("This story stays queued; if the next batch sets it aside for a conflict too, it is handed back to a Builder to rebase it on %s.", report.Target)
+		} else if s.ConflictSetAsides > 0 {
+			next = "This story stays queued; if the next batch sets it aside too, it is handed back to a Builder."
 		}
 		comment := fmt.Sprintf("Set aside by %s: %s\nThe other %s landed on %s at %s without waiting for it. %s",
 			report.Label(), s.Why, countStories(len(report.Merged)), report.Target, shortCommit(report.Commit), next)
@@ -848,14 +850,17 @@ func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *Batc
 }
 
 // mergeAll merges the queue into the batch in order. A story whose branch is
-// not at the origin, or does not merge, is set aside, and the merge of the next
-// is made on the batch as it stood: a merge that conflicts is undone by the
-// landing before it comes back.
+// not at the origin, whose commits are signed as a machine's, or that does not
+// merge, is set aside and counted on the story, whatever the reason, so that one
+// the batches set aside again and again is handed back and not queued for ever
+// (mw-gq6.1631, mw-gq6.1632); the merge of the next is made on the batch as it
+// stood: a merge that conflicts is undone by the landing before it comes back.
 func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []string, report *BatchReport) {
 	n := b.Next
 	for _, s := range report.Queue {
 		if _, err := n.Landing.RefHead(ctx, rigDir, s.Branch); err != nil {
 			s.Why = fmt.Sprintf("its branch %s is not at the rig's origin", s.Branch)
+			b.countSetAside(ctx, &s, report, nil)
 			report.SetAside = append(report.SetAside, s)
 			continue
 		}
@@ -866,6 +871,7 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 		// mw next refuses it: it is never merged, whatever else is in the batch.
 		if why := b.signedWhy(ctx, rigDir, s.Branch, report.Base, "its branch "+s.Branch); why != "" {
 			s.Why = why
+			b.countSetAside(ctx, &s, report, nil)
 			report.SetAside = append(report.SetAside, s)
 			continue
 		}
@@ -884,18 +890,14 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 				if len(s.ConflictFiles) > 0 {
 					s.Why += ". " + ConflictedFilesLine(s.ConflictFiles)
 				}
-				// Counted on the story, so that a story the batches set aside
-				// again and again is handed back, not queued for ever (mw-gq6.1631).
-				s.ConflictSetAsides = b.countConflictSetAside(ctx, s.ID, report)
-				fields := map[string]string{BatchConflictsField: strconv.Itoa(s.ConflictSetAsides)}
+				fields := map[string]string{}
 				if len(s.ConflictFiles) > 0 {
 					fields[ConflictFilesField] = strings.Join(s.ConflictFiles, ",")
 				}
-				if werr := writeRetrying(ctx, n, nil, "the conflicted files", func() error { return n.Tracker.SetStoryMetadata(ctx, s.ID, fields) }); werr != nil {
-					report.Notes = append(report.Notes, fmt.Sprintf("the files %s conflicted in, and how many batches set it aside, could not be recorded on it: %v", s.ID, werr))
-				}
+				b.countSetAside(ctx, &s, report, fields)
 			} else {
 				s.Why = "it could not be merged: " + firstLine(err.Error())
+				b.countSetAside(ctx, &s, report, nil)
 			}
 			report.SetAside = append(report.SetAside, s)
 			continue

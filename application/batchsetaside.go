@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -83,6 +84,22 @@ func (b BatchLand) countConflictSetAside(ctx context.Context, id string, report 
 	return before + 1
 }
 
+// countSetAside counts this batch's setting story s aside, for whatever reason,
+// on the story itself (BatchConflictsField), with the other metadata fields the
+// reason has to record. A story the batches set aside again and again is handed
+// back by handBackRepeaters, not queued for ever (mw-gq6.1631, mw-gq6.1632).
+func (b BatchLand) countSetAside(ctx context.Context, s *BatchStory, report *BatchReport, fields map[string]string) {
+	n := b.Next
+	s.ConflictSetAsides = b.countConflictSetAside(ctx, s.ID, report)
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	fields[BatchConflictsField] = strconv.Itoa(s.ConflictSetAsides)
+	if werr := writeRetrying(ctx, n, nil, "the count of set-asides", func() error { return n.Tracker.SetStoryMetadata(ctx, s.ID, fields) }); werr != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("how many batches set %s aside, and the files it conflicted in, could not be recorded on it: %v", s.ID, werr))
+	}
+}
+
 // setAsideSplit divides what the batch set aside into the stories that stay
 // queued for the next batch and the ones handed back to a Builder to rebase.
 func (r BatchReport) setAsideSplit() (queued, back []BatchStory) {
@@ -112,7 +129,7 @@ func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
 	n := b.Next
 	for i := range report.SetAside {
 		s := &report.SetAside[i]
-		if len(s.Conflicts) == 0 || s.ConflictSetAsides < MaxBatchConflicts || n.Tracker == nil {
+		if s.ConflictSetAsides < MaxBatchConflicts || n.Tracker == nil {
 			continue
 		}
 		if why := b.handBack(ctx, *s, report); why != "" {
@@ -148,14 +165,22 @@ func (b BatchLand) handBack(ctx context.Context, s BatchStory, report *BatchRepo
 		}
 		return fmt.Sprintf("its claim could not be given back: %v", err)
 	}
-	files := "the files were not named by the merge"
-	if line := ConflictedFilesLine(s.ConflictFiles); line != "" {
-		files = line
+	var comment string
+	if len(s.Conflicts) == 0 {
+		comment = fmt.Sprintf("Handed back by %s to a Builder: this story was set aside by %d batches, for a reason other than a merge conflict (%s)\n"+
+			"A batch takes a story's branch %s from the rig's origin and merges it as it stands, and could not. Mend what is said above (a branch not at the origin is pushed again, commits signed as a machine's are written again without it), run the suite and commit. "+
+			"Its run state %s is cleared and its claim given back, so the next dispatch tick takes it as a new attempt, and once its work is committed `mw next` queues it for the next batch again.",
+			report.Label(), s.ConflictSetAsides, firstLine(s.Why), StartPoint(n.remote(), StoryBranch(s.ID)), RunState+":"+RunQueued)
+	} else {
+		files := "the files were not named by the merge"
+		if line := ConflictedFilesLine(s.ConflictFiles); line != "" {
+			files = line
+		}
+		comment = fmt.Sprintf("Handed back by %s to a Builder to rebase on its target branch: this story was set aside for a merge conflict by %d batches (%s)\n%s\n"+
+			"Its branch %s does not merge into %s as it stands now, and a batch's fixer is given a batch only when every branch in it conflicts, so none was given this story beside branches that merged. "+
+			"Rebase %s onto %s, resolve the conflicts above, run the suite and commit. Its run state %s is cleared and its claim given back, so the next dispatch tick takes it as a new attempt, and once its work is committed `mw next` queues it for the next batch again.",
+			report.Label(), s.ConflictSetAsides, firstLine(s.Why), files, StoryBranch(s.ID), report.Target, StoryBranch(s.ID), StartPoint(n.remote(), report.Target), RunState+":"+RunQueued)
 	}
-	comment := fmt.Sprintf("Handed back by %s to a Builder to rebase on its target branch: this story was set aside for a merge conflict by %d batches (%s)\n%s\n"+
-		"Its branch %s does not merge into %s as it stands now, and a batch's fixer is given a batch only when every branch in it conflicts, so none was given this story beside branches that merged. "+
-		"Rebase %s onto %s, resolve the conflicts above, run the suite and commit. Its run state %s is cleared and its claim given back, so the next dispatch tick takes it as a new attempt, and once its work is committed `mw next` queues it for the next batch again.",
-		report.Label(), s.ConflictSetAsides, firstLine(s.Why), files, StoryBranch(s.ID), report.Target, StoryBranch(s.ID), StartPoint(n.remote(), report.Target), RunState+":"+RunQueued)
 	if err := writeRetrying(ctx, n, nil, "the hand-back note", func() error { return n.Tracker.CommentOnStory(ctx, s.ID, comment) }); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s was handed back, but the comment naming the conflicted files could not be written on it: %v", s.ID, err))
 	}
