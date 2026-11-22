@@ -142,13 +142,40 @@ func TestMayorAnswerOnABoxSaysWhyTheBoxDidNotAnswer(t *testing.T) {
 	}
 }
 
-// Without the Mayor's word, or on the host that worked the story, nothing is
-// run elsewhere: the refusal stands and names the command that works from here.
-func TestMayorAnswerOnABoxIsNotRunWithoutTheFlags(t *testing.T) {
-	run := aMayorAnswerOnTheHome(t, true, func(n *application.Next) {})
-	if len(run.remote.Calls()) != 0 {
-		t.Fatalf("expected no host asked without a flag, got %+v", run.remote.Calls())
+// A plain close-out (no word of the Mayor's) from the home is run on the host
+// that worked the story too, with only --no-dispatch: its refusal was the same
+// dead end the two flags were (mw-gq6.1624).
+func TestNextOnABoxPlainIsRunThere(t *testing.T) {
+	for name, noBranch := range map[string]bool{"no run record here": false, "branch not here": true} {
+		t.Run(name, func(t *testing.T) {
+			run := aMayorAnswerOnTheHome(t, noBranch, func(n *application.Next) {})
+			if run.err != nil {
+				t.Fatalf("expected the close-out run on cloud9, got: %v", run.err)
+			}
+			calls := run.remote.Calls()
+			if len(calls) != 1 || calls[0].Host != "cloud9" || calls[0].Story != "mw-gq6.9" {
+				t.Fatalf("expected one mw next of mw-gq6.9 on cloud9, got %+v", calls)
+			}
+			if got := strings.Join(calls[0].Flags, " "); got != "--no-dispatch" {
+				t.Errorf("expected only --no-dispatch, got %q", got)
+			}
+			if run.report.DelegatedTo != "cloud9" || !strings.Contains(run.report.String(), "landed  on main") {
+				t.Errorf("expected the report to say cloud9 ran it and what it printed, got: %s", run.report.String())
+			}
+			if strings.Contains(run.report.String(), "Mayor's word") {
+				t.Errorf("expected no Mayor's word in the report of a plain close-out, got: %s", run.report.String())
+			}
+			if len(run.ledger) != 0 || len(run.files.Commits()) != 0 || run.mail.Writes() != 0 || len(run.tracker.Comments("mw-gq6.9")) != 0 {
+				t.Errorf("expected nothing written on the home, got ledger %q, commits %v, %d mails", run.ledger, run.files.Commits(), run.mail.Writes())
+			}
+		})
 	}
+}
+
+// With no way to reach a host, or on the host that worked the story, nothing is
+// run elsewhere: the refusal stands and names the command that works from here.
+func TestMayorAnswerOnABoxIsNotRunWhereNoHostCanBeAsked(t *testing.T) {
+	run := aMayorAnswerOnTheHome(t, true, func(n *application.Next) { n.Answers = nil })
 	if run.err == nil {
 		t.Fatalf("expected a refusal")
 	}

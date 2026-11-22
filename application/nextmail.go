@@ -327,7 +327,7 @@ func (r NextReport) text(forMail bool) string {
 	fmt.Fprintf(&b, "next on %s: %s\n", r.Host, r.StoryID)
 	switch {
 	case r.DelegatedTo != "":
-		fmt.Fprintf(&b, "  there   the story was worked on %s: mw next ran there with the Mayor's word, and printed:\n", r.DelegatedTo)
+		fmt.Fprintf(&b, "  there   the story was worked on %s: mw next ran there, and printed:\n", r.DelegatedTo)
 		for _, line := range strings.Split(strings.TrimRight(r.Delegated, "\n"), "\n") {
 			fmt.Fprintf(&b, "            %s\n", line)
 		}

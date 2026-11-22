@@ -638,7 +638,7 @@ type NextReport struct {
 	// was merged, tested or pushed again.
 	Landed        bool
 	LandedEarlier bool
-	// Delegated is what mw next printed on DelegatedTo, which ran the Mayor's word there.
+	// Delegated is what mw next printed on DelegatedTo, which ran the close-out there (with the Mayor's word, if he gave one).
 	Delegated, DelegatedTo string
 	How                    Landed
 	Target                 string
