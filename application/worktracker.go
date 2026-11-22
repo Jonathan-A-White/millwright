@@ -195,6 +195,9 @@ type StoryDetail struct {
 	// ConflictFiles are the files the story's branch last conflicted in when a
 	// landing merged it (ConflictFilesField); empty when it never did.
 	ConflictFiles []string
+	// BatchConflicts is how many batches set this story aside for a conflict
+	// (BatchConflictsField); zero when none did.
+	BatchConflicts int
 	// SmokeExamples are the failing grist smoke examples the story names as its
 	// cause, as the SmokeExamplesField metadata says (<app>/<kind>/<example>);
 	// empty when it names none.

@@ -115,6 +115,7 @@ func (b BatchLand) HoldingTheSlot(holding Holding) BatchLand {
 func (b BatchLand) LandTheBatchIn(ctx context.Context, dir string, report *BatchReport) {
 	var nr NextReport
 	b.landIn(ctx, dir, dir, domain.EpicRequirements{}, report, &nr)
+	b.handBackRepeaters(ctx, report)
 	if report.Landed {
 		b.noteSetAside(ctx, report)
 	}

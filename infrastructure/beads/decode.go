@@ -361,6 +361,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		RebaseBase:        b.text(application.RebaseBaseField),
 		FilesChanged:      domain.FileList(b.text(application.FilesChangedField)),
 		ConflictFiles:     domain.FileList(b.text(application.ConflictFilesField)),
+		BatchConflicts:    b.count(application.BatchConflictsField),
 		SmokeExamples:     application.ParseSmokeExamples(b.text(application.SmokeExamplesField)),
 		Cause:             b.text(application.CauseField),
 		CauseWhy:          b.text(application.CauseWhyField),

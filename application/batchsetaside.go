@@ -62,3 +62,113 @@ func (s SetAside) Run(ctx context.Context, rig, id, why string) error {
 	}
 	return nil
 }
+
+// countConflictSetAside is how many batches have set story id aside for a
+// conflict, the one that is setting it aside now included (BatchConflictsField).
+// It is read off the story itself, not the listing the batch began with, which
+// an earlier batch of another host may have outdated; when it cannot be read the
+// listing's is used, and the report says so.
+func (b BatchLand) countConflictSetAside(ctx context.Context, id string, report *BatchReport) int {
+	before := 0
+	for _, s := range report.Queue {
+		if s.ID == id {
+			before = s.detail.BatchConflicts
+		}
+	}
+	if detail, err := b.Next.Tracker.ShowStory(ctx, id); err == nil {
+		before = detail.BatchConflicts
+	} else {
+		report.Notes = append(report.Notes, fmt.Sprintf("how many batches set %s aside before could not be read, so the listing's count of %d is used: %v", id, before, err))
+	}
+	return before + 1
+}
+
+// setAsideSplit divides what the batch set aside into the stories that stay
+// queued for the next batch and the ones handed back to a Builder to rebase.
+func (r BatchReport) setAsideSplit() (queued, back []BatchStory) {
+	for _, s := range r.SetAside {
+		if s.HandedBack {
+			back = append(back, s)
+		} else {
+			queued = append(queued, s)
+		}
+	}
+	return queued, back
+}
+
+// handBackRepeaters answers a story set aside for a conflict with the batch for
+// the MaxBatchConflicts'th time. Only a batch of which every branch conflicts is
+// given its fixer (landIn), so a story that conflicts beside branches that merge
+// is never given it: it stayed run=queued, the next batch took it, it conflicted
+// again and was set aside again, for as long as other stories kept the batch from
+// being all conflicts (mw-5r3p30.1231 and .1221, batches 622 and 623 of lampas,
+// mw-gq6.1631). Its branch conflicts with the target branch as it now is, and
+// what resolves that is a rebase on it, which is a Builder's: the run state is
+// cleared and the claim given back, so that the next dispatch tick takes the story
+// as a new attempt on its kept branch, and a comment names the files.
+//
+// A story that cannot be handed back is left queued, and the report says why.
+func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
+	n := b.Next
+	for i := range report.SetAside {
+		s := &report.SetAside[i]
+		if len(s.Conflicts) == 0 || s.ConflictSetAsides < MaxBatchConflicts || n.Tracker == nil {
+			continue
+		}
+		if why := b.handBack(ctx, *s, report); why != "" {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s was set aside for a conflict for the %s time, but it could not be handed back to a Builder to rebase, so it stays queued: %s",
+				s.ID, ordinal(s.ConflictSetAsides), why))
+			continue
+		}
+		s.HandedBack = true
+		s.Why += fmt.Sprintf("; set aside for a conflict for the %s time, so it was handed back to a Builder to rebase on %s", ordinal(s.ConflictSetAsides), report.Target)
+		report.Notes = append(report.Notes, fmt.Sprintf("%s was handed back to a Builder to rebase on %s: %s", s.ID, report.Target, ConflictedFilesLine(s.ConflictFiles)))
+	}
+}
+
+// handBack takes story s off the batch queue and gives its claim back; what it
+// returns is why it could not, empty when it did.
+func (b BatchLand) handBack(ctx context.Context, s BatchStory, report *BatchReport) string {
+	n := b.Next
+	// The run state first, as the harness-stop give-back does it (mw-gq6.1382):
+	// no open story is ever seen carrying run:queued.
+	if err := writeRetrying(ctx, n, nil, "the clearing of the run state", func() error { return n.Tracker.ClearRunState(ctx, s.ID) }); err != nil {
+		return fmt.Sprintf("its run state could not be cleared: %v", err)
+	}
+	holder := s.detail.Assignee
+	if detail, err := n.Tracker.ShowStory(ctx, s.ID); err == nil {
+		holder = detail.Assignee
+	}
+	if err := writeRetrying(ctx, n, nil, "the give-back of the claim on "+s.ID, func() error {
+		return givenBackAs(ctx, n.Tracker, s.ID, StatusOpen, n.Tracker.ReleaseClaimHeldBy(ctx, s.ID, holder))
+	}); err != nil {
+		// Queued again, so that it is not left claimed with no run state for the sweep to find.
+		if serr := n.Tracker.SetStoryState(ctx, s.ID, RunState, RunQueued, "handing it back failed: "+firstLine(err.Error())); serr != nil {
+			return fmt.Sprintf("its claim could not be given back: %v (and run=%s could not be written again: %v)", err, RunQueued, serr)
+		}
+		return fmt.Sprintf("its claim could not be given back: %v", err)
+	}
+	files := "the files were not named by the merge"
+	if line := ConflictedFilesLine(s.ConflictFiles); line != "" {
+		files = line
+	}
+	comment := fmt.Sprintf("Handed back by %s to a Builder to rebase on its target branch: this story was set aside for a merge conflict by %d batches (%s)\n%s\n"+
+		"Its branch %s does not merge into %s as it stands now, and a batch's fixer is given a batch only when every branch in it conflicts, so none was given this story beside branches that merged. "+
+		"Rebase %s onto %s, resolve the conflicts above, run the suite and commit. Its run state %s is cleared and its claim given back, so the next dispatch tick takes it as a new attempt, and once its work is committed `mw next` queues it for the next batch again.",
+		report.Label(), s.ConflictSetAsides, firstLine(s.Why), files, StoryBranch(s.ID), report.Target, StoryBranch(s.ID), StartPoint(n.remote(), report.Target), RunState+":"+RunQueued)
+	if err := writeRetrying(ctx, n, nil, "the hand-back note", func() error { return n.Tracker.CommentOnStory(ctx, s.ID, comment) }); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s was handed back, but the comment naming the conflicted files could not be written on it: %v", s.ID, err))
+	}
+	return ""
+}
+
+// ordinal says a count as a word: "second", "third", "4th".
+func ordinal(n int) string {
+	switch n {
+	case 2:
+		return "second"
+	case 3:
+		return "third"
+	}
+	return fmt.Sprintf("%dth", n)
+}
