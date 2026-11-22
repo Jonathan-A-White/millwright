@@ -36,6 +36,10 @@ const WgFaultAfter = 3 * time.Minute
 // reads on it.
 const WgRestartSettle = 15 * time.Second
 
+// WgCureTimeout is the one deadline Cure gives itself: the restart, the settle
+// and the re-probe, or the run's end if that is sooner.
+const WgCureTimeout = 2 * time.Minute
+
 // The wg check's damper: idle between two restarts, and how many it spends on
 // one fault episode before it gives up and waits for the escalation note to
 // wake the Millhand.
@@ -155,14 +159,21 @@ func (w *Wg) Probe(ctx context.Context) (application.Verdict, string) {
 // sudo -n refusing rather than running — is reported naming the sudoers
 // line this host lacks, rather than a bare exec error.
 func (w *Wg) Cure(ctx context.Context) error {
+	ctx, cancel := cureContext(ctx, WgCureTimeout)
+	defer cancel()
 	if _, err := w.runSudo(ctx, "systemctl", "restart", w.unit()); err != nil {
+		if cut := cutError(ctx, "sudo systemctl restarted the unit", "the next run probes the link again"); cut != nil {
+			return cut
+		}
 		if sudoNeedsPassword(err) {
 			return fmt.Errorf("sudo -n systemctl restart %s needs a password: add a sudoers line letting %s run it without one, e.g. via visudo: %q: %w",
 				w.unit(), w.sudoUser(), w.sudoUser()+" ALL=(root) NOPASSWD: /usr/bin/systemctl restart "+w.unit(), err)
 		}
 		return fmt.Errorf("sudo -n systemctl restart %s: %w", w.unit(), err)
 	}
-	w.sleep(WgRestartSettle)
+	if waitCtx(ctx, WgRestartSettle, w.Sleep) != nil {
+		return cutError(ctx, "it waited for the restarted unit to settle", "the unit was restarted, and the next run probes the link again")
+	}
 	w.Probe(ctx)
 	return nil
 }
@@ -200,14 +211,6 @@ func (w *Wg) now() time.Time {
 		return time.Now()
 	}
 	return w.Now()
-}
-
-func (w *Wg) sleep(d time.Duration) {
-	if w.Sleep == nil {
-		time.Sleep(d)
-		return
-	}
-	w.Sleep(d)
 }
 
 // dial reports whether address answers a TCP dial, over Dial when it is set,

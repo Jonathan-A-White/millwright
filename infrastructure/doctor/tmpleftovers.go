@@ -71,6 +71,10 @@ var tmpLeftoversGateVerbs = map[string]bool{
 const (
 	TmpLeftoversDamperWait = 5 * time.Minute
 	TmpLeftoversDamperCap  = 3
+
+	// TmpLeftoversCureTimeout is the one deadline Cure gives itself, the
+	// deletes and the go clean together, or the run's end if that is sooner.
+	TmpLeftoversCureTimeout = 2 * time.Minute
 )
 
 // tmpLeftoversItem is one leftover this check found dead: its path and the
@@ -116,6 +120,10 @@ type TmpLeftovers struct {
 	// GoClean runs when GoBuildDir is past its budget. Nil runs the real `go
 	// clean -cache`.
 	GoClean func(ctx context.Context) error
+
+	// CureTimeout is the one deadline Cure gives itself; zero reads
+	// TmpLeftoversCureTimeout.
+	CureTimeout time.Duration
 	// GateHolder says whose gate holds this host's gate lock now, "" for
 	// nobody (hostlock.Gate.Holder). A held gate lock is a gate under way,
 	// which has gaps between its go steps with no go process live: the cache
@@ -192,6 +200,8 @@ func (t *TmpLeftovers) Probe(context.Context) (application.Verdict, string) {
 // the gap between its go steps (mw-gq6.1332), and so is a
 // go clean that fails because one started meanwhile.
 func (t *TmpLeftovers) Cure(ctx context.Context) error {
+	ctx, cancel := cureContext(ctx, t.cureTimeout())
+	defer cancel()
 	dead, err := t.deadLeftovers()
 	if err != nil {
 		return err
@@ -202,6 +212,10 @@ func (t *TmpLeftovers) Cure(ctx context.Context) error {
 	var freed int64
 	if sumBytes(dead) > budget {
 		for _, item := range dead {
+			if cut := cutError(ctx, "it removed dead leftovers", "what it removed is gone and the rest is found again"); cut != nil {
+				t.cured, t.curedBytes = cured, freed
+				return cut
+			}
 			if err := os.RemoveAll(item.path); err != nil {
 				return fmt.Errorf("removing %s: %w", item.path, err)
 			}
@@ -226,6 +240,10 @@ func (t *TmpLeftovers) Cure(ctx context.Context) error {
 				// tidies after. That is a skip until a later tick, not a failed
 				// cure that wakes the Millhand (mw-gq6.318).
 			default:
+				if cut := cutError(ctx, "go clean -cache ran", "the cache is rebuildable and a half-cleaned one is cleaned again"); cut != nil {
+					t.cured, t.curedBytes = cured, freed
+					return cut
+				}
 				return fmt.Errorf("go clean -cache: %w", err)
 			}
 		}
@@ -415,6 +433,14 @@ func (t *TmpLeftovers) goClean(ctx context.Context) error {
 		return t.GoClean(ctx)
 	}
 	return exec.CommandContext(ctx, "go", "clean", "-cache").Run()
+}
+
+// cureTimeout is the one deadline Cure gives itself on top of the run's.
+func (t *TmpLeftovers) cureTimeout() time.Duration {
+	if t.CureTimeout > 0 {
+		return t.CureTimeout
+	}
+	return TmpLeftoversCureTimeout
 }
 
 func (t *TmpLeftovers) tmpDir() string {

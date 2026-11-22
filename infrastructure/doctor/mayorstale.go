@@ -374,13 +374,16 @@ func (m *MayorStale) mayorUp(ctx context.Context) (string, error) {
 	if settle == 0 {
 		settle = 2 * time.Second
 	}
+	// One deadline for all the attempts together, not one for each: three of
+	// them would outlast the run they are in (mw-gq6.1641).
+	ctx, cancel := cureContext(ctx, gone.timeout())
+	defer cancel()
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(settle):
+			if waitErr := waitCtx(ctx, settle, nil); waitErr != nil {
+				return "", cutError(ctx, "it waited to try bin/mayor-up again",
+					"the window it closed stays closed and the Mayor-gone check starts the Mayor again")
 			}
 		}
 		gone.window = ""

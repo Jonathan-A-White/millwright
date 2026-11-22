@@ -21,6 +21,10 @@ const TunnelName = "tunnel"
 // come back up before the next run reads on it.
 const TunnelRestartSettle = 15 * time.Second
 
+// TunnelCureTimeout is the one deadline Cure gives itself: the restart, the
+// settle and the re-probe, or the run's end if that is sooner.
+const TunnelCureTimeout = 2 * time.Minute
+
 // The tunnel check's damper: idle between two restarts, and how many it
 // spends on one fault episode before it gives up and waits for the
 // escalation note (a later story) to wake the Millhand.
@@ -102,10 +106,17 @@ func (t *Tunnel) Probe(ctx context.Context) (application.Verdict, string) {
 // stopped waiting is for the next probe to say — a wait, not a gate, the way
 // the wifi check's own Cure is.
 func (t *Tunnel) Cure(ctx context.Context) error {
+	ctx, cancel := cureContext(ctx, TunnelCureTimeout)
+	defer cancel()
 	if _, err := t.runSystemctl(ctx, "restart", t.unit()); err != nil {
+		if cut := cutError(ctx, "systemctl restarted the unit", "the next run probes the tunnel again"); cut != nil {
+			return cut
+		}
 		return fmt.Errorf("systemctl --user restart %s: %w", t.unit(), err)
 	}
-	t.sleep(TunnelRestartSettle)
+	if waitCtx(ctx, TunnelRestartSettle, t.Sleep) != nil {
+		return cutError(ctx, "it waited for the restarted unit to settle", "the unit was restarted, and the next run probes the tunnel again")
+	}
 	t.Probe(ctx)
 	return nil
 }
@@ -136,14 +147,6 @@ func (t *Tunnel) unit() string {
 		return t.Unit
 	}
 	return "reverse-tunnel.service"
-}
-
-func (t *Tunnel) sleep(d time.Duration) {
-	if t.Sleep == nil {
-		time.Sleep(d)
-		return
-	}
-	t.Sleep(d)
 }
 
 // runSSH runs one ssh call against the VPS, in BatchMode so that nothing is

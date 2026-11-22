@@ -35,6 +35,14 @@ const (
 	WifiDisconnectSettle = 3 * time.Second
 	WifiReconnectWait    = 20 * time.Second
 	WifiReconnectPoll    = 1 * time.Second
+
+	// WifiCureTimeout is the one deadline Cure gives itself, or the run's end
+	// if that is sooner.
+	WifiCureTimeout = 2 * time.Minute
+
+	// wifiRejoinGrace is how long the rejoin may take when the run's end came
+	// between the disconnect and it.
+	wifiRejoinGrace = 10 * time.Second
 )
 
 // The wifi check's damper: idle between two bounces, and how many it spends
@@ -134,6 +142,8 @@ func (w *Wifi) Probe(ctx context.Context) (application.Verdict, string) {
 // back by the time it stopped waiting. It refuses, joining nothing, when the
 // interface is not associated with any network to begin with.
 func (w *Wifi) Cure(ctx context.Context) error {
+	ctx, cancel := cureContext(ctx, WifiCureTimeout)
+	defer cancel()
 	out, err := w.runNetsh(ctx, "wlan", "show", "interfaces")
 	if err != nil {
 		return fmt.Errorf("reading the current Wi-Fi network (netsh wlan show interfaces): %v: %s", err, out)
@@ -146,15 +156,29 @@ func (w *Wifi) Cure(ctx context.Context) error {
 	if out, err := w.runNetsh(ctx, "wlan", "disconnect"); err != nil {
 		return fmt.Errorf("netsh wlan disconnect: %v: %s", err, out)
 	}
-	w.sleep(WifiDisconnectSettle)
+	waitErr := waitCtx(ctx, WifiDisconnectSettle, w.Sleep)
 
-	if out, err := w.runNetsh(ctx, "wlan", "connect", "name="+ssid); err != nil {
+	// The host is off its network now: the rejoin is the cure's way back, so it
+	// is made even when the run's end came during the settle, in a ctx of its
+	// own that the run's end does not reach.
+	connectCtx := ctx
+	if waitErr != nil {
+		var stop context.CancelFunc
+		connectCtx, stop = context.WithTimeout(context.WithoutCancel(ctx), wifiRejoinGrace)
+		defer stop()
+	}
+	if out, err := w.runNetsh(connectCtx, "wlan", "connect", "name="+ssid); err != nil {
 		return fmt.Errorf("netsh wlan connect name=%s: %v: %s", ssid, err, out)
+	}
+	if waitErr != nil {
+		return cutError(ctx, "it waited between leaving and rejoining the network", "the network was rejoined")
 	}
 
 	deadline := w.now().Add(WifiReconnectWait)
 	for !w.reachable(ctx) && w.now().Before(deadline) {
-		w.sleep(WifiReconnectPoll)
+		if waitCtx(ctx, WifiReconnectPoll, w.Sleep) != nil {
+			return cutError(ctx, "it waited for the network to come back", "the network was rejoined, and the next run probes it again")
+		}
 	}
 	return nil
 }
@@ -210,14 +234,6 @@ func (w *Wifi) now() time.Time {
 		return time.Now()
 	}
 	return w.Now()
-}
-
-func (w *Wifi) sleep(d time.Duration) {
-	if w.Sleep == nil {
-		time.Sleep(d)
-		return
-	}
-	w.Sleep(d)
 }
 
 // parseSSID reads the SSID line of `netsh wlan show interfaces` output — not
