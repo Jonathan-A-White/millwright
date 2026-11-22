@@ -1526,7 +1526,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				// Another host's dispatcher claimed it first: the story is theirs
 				// and nothing here is wrong. It takes none of the cap, and the
 				// stories after it are still worked (mw-gq6.569).
-				report.Passed = append(report.Passed, Passed{StoryID: id, Gate: ClaimLostGate, Why: lost.Error()})
+				report.Passed = append(report.Passed, lost.passed(id))
 			} else if errors.As(err, &refused) {
 				// An earlier attempt is in the way and is somebody's to settle:
 				// only this story waits, and the unit does not fail for it.
@@ -1894,11 +1894,8 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	// nothing here may undo it.
 	lying, running := d.namesake(ctx, started.Session)
 
-	if err := d.Tracker.ClaimStory(ctx, id); err != nil {
-		if holder, held := ClaimHeldBy(err); held {
-			return Started{}, false, &claimLost{holder: holder}
-		}
-		return Started{}, false, fmt.Errorf("claiming %s: %w", id, err)
+	if err := d.claimStory(ctx, id); err != nil {
+		return Started{}, false, err
 	}
 	d.print(fmt.Sprintf("  claimed %s\n", id))
 
@@ -2454,12 +2451,6 @@ type pourRefusal struct{ err error }
 
 func (e *pourRefusal) Error() string { return e.err.Error() }
 func (e *pourRefusal) Unwrap() error { return e.err }
-
-// claimLost is what start returns when another holder's claim got there first,
-// so that run passes the story over instead of failing the tick.
-type claimLost struct{ holder string }
-
-func (e *claimLost) Error() string { return "claimed by " + e.holder + " first" }
 
 // JobPourRefused is the actor of the job event a refused pour writes, kept
 // apart from "dispatch", which is the follower's job of springing dispatches

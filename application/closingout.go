@@ -85,6 +85,50 @@ func (d Dispatch) closingOutWhy(ctx context.Context, detail StoryDetail) string 
 		mark.By, int(d.now().Sub(mark.Since)/time.Minute), mark.Until.UTC().Format("15:04Z"))
 }
 
+// claimLost is what start returns when another holder's claim got there first,
+// so that run passes the story over instead of failing the tick.
+type claimLost struct {
+	holder     string
+	closingOut string // the closing-out gate's words, when a close-out's mark was seen at the claim (claimStory)
+}
+
+func (e *claimLost) Error() string {
+	if e.closingOut != "" {
+		return e.closingOut
+	}
+	return "claimed by " + e.holder + " first"
+}
+
+// passed is what run reports of the story: the closing-out gate's, when the
+// claim was not made for a close-out's mark, and the claim lost's otherwise.
+func (e *claimLost) passed(id string) Passed {
+	if e.closingOut != "" {
+		return Passed{StoryID: id, Gate: "closing-out", Why: e.closingOut, Waiting: true}
+	}
+	return Passed{StoryID: id, Gate: ClaimLostGate, Why: e.Error()}
+}
+
+// claimStory takes the claim on story id for start. Just before it, the story
+// is read again and the closing-out gate asked once more (mw-gq6.1656): the
+// ready list start was handed was read before the claim, and a close-out that
+// marked the story since (one forwarded to this host over ssh, say) was not in
+// it. The story is then passed over (a *claimLost that says so) and no attempt
+// is spent. A story that cannot be read is claimed as it was before this look.
+func (d Dispatch) claimStory(ctx context.Context, id string) error {
+	if fresh, err := d.Tracker.ShowStory(ctx, id); err == nil {
+		if why := d.closingOutWhy(ctx, fresh); why != "" {
+			return &claimLost{closingOut: why}
+		}
+	}
+	if err := d.Tracker.ClaimStory(ctx, id); err != nil {
+		if holder, held := ClaimHeldBy(err); held {
+			return &claimLost{holder: holder}
+		}
+		return fmt.Errorf("claiming %s: %w", id, err)
+	}
+	return nil
+}
+
 // reclaimDeadPane is reclaimDeadPaneNow, but for a story a close-out holds: it
 // is left alone, a refused one reported held as ever, and no attempt is spent.
 func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, reads *candidateReads, report *DispatchReport) (reclaimed, held bool, err error) {
@@ -171,4 +215,49 @@ func (s Status) closingOutWords(ready []StoryDetail) map[string]string {
 		}
 	}
 	return words
+}
+
+// ReasonAttemptMoved is a close-out that found its story started again, as a
+// later attempt, since it began (mw-gq6.1656): the formula and the session now
+// carrying the story's name are that attempt's, not the ones it is closing out.
+const ReasonAttemptMoved Reason = "attempt-moved"
+
+// attemptSeen is what a close-out read of its story's attempt when it began:
+// the count, and when the latest claim was made.
+type attemptSeen struct {
+	read     bool
+	attempts int
+	claimed  time.Time
+}
+
+func seenAttempt(detail StoryDetail) attemptSeen {
+	return attemptSeen{read: true, attempts: detail.Attempts, claimed: detail.ClaimedAt}
+}
+
+// attemptMoved is nil while the story is still at the attempt the close-out
+// began on, and otherwise the error that says a later one was started, which
+// is also written on report as the reason it stopped. A dispatch stamps the
+// time of its claim first and counts the attempt once its session is up, so
+// either one moving is a later attempt. The count is not looked at when
+// byCount is false: a send-back this close-out made counts an attempt of its
+// own. Nothing else is written: the formula, the session and the claim are the
+// later attempt's. A story that cannot be read is not taken to have moved.
+func (n Next) attemptMoved(ctx context.Context, report *NextReport, byCount bool) error {
+	if n.Tracker == nil || !report.seen.read {
+		return nil
+	}
+	fresh, err := n.Tracker.ShowStory(ctx, report.StoryID)
+	if err != nil || fresh.Closed() {
+		return nil
+	}
+	moved := fresh.ClaimedAt.After(report.seen.claimed) || byCount && fresh.Attempts > report.seen.attempts
+	if !moved {
+		return nil
+	}
+	was := max(report.seen.attempts, 1)
+	now := max(fresh.Attempts, was+1)
+	report.Reason = ReasonAttemptMoved
+	report.Why = fmt.Sprintf("attempt %d of %s was started while this close-out of attempt %d ran: its formula and its session are that attempt's, so nothing was judged, closed or changed",
+		now, report.StoryID, was)
+	return fmt.Errorf("closing out %s: %s (%s)", report.StoryID, report.Why, ReasonAttemptMoved)
 }
