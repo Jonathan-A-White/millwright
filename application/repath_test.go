@@ -540,3 +540,25 @@ func TestTheDispatcherNeverGivesAStoryWithAHostWhyAnotherHost(t *testing.T) {
 		}
 	})
 }
+
+// mw-gq6.1629: a story claimed since the ready listing is read again before the
+// re-path writes to it, and is left as the claim made it.
+func TestADispatchRePathsNoStoryAnotherHostClaimedSinceItWasListed(t *testing.T) {
+	dispatch, tracker := aRePathFactory(t)
+	pinnedTo(tracker, "mw-gq6.1", "desktop")
+	dispatch.Tracker = &claimedAtFirstShow{FakeTracker: tracker, id: "mw-gq6.1", holder: "mw@cloud17"}
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storyHost(t, tracker, "mw-gq6.1"); got != "desktop" {
+		t.Errorf("host = %q, want desktop untouched", got)
+	}
+	if c := tracker.Comments("mw-gq6.1"); len(c) != 0 {
+		t.Errorf("a story another host claimed was commented on: %q", c)
+	}
+	if len(report.Repathed) != 0 {
+		t.Errorf("the report names a re-path: %+v", report.Repathed)
+	}
+}

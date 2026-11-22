@@ -189,6 +189,12 @@ func (d Dispatch) repath(ctx context.Context, noRoom string, network *NetworkRea
 		if PinWhy(path, rules[path.Rig]) != "" {
 			continue
 		}
+		if who := d.heldElsewhere(ctx, detail.Story.ID); who != "" {
+			// Claimed (or held, or closed) since the listing: the story is not this
+			// pass's to write to (mw-gq6.1629).
+			report.Notes = append(report.Notes, fmt.Sprintf("%s: pinned to %s, which cannot take it, but it is held by %s now, so it was not re-pathed", detail.Story.ID, host, who))
+			continue
+		}
 		if err := d.Tracker.SetStoryMetadata(ctx, detail.Story.ID, map[string]string{"host": domain.HostAuto}); err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("%s: pinned to %s, which cannot take it, and not re-pathed: %v; run mw path set %s host=auto", detail.Story.ID, host, err, detail.Story.ID))
 			continue

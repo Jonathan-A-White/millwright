@@ -25,10 +25,16 @@ type stubRechecks struct {
 	// holds how many locks were out when each re-run began.
 	lock *aGateLock
 	held []int
+	// during, when it is set, runs inside each re-run: what happens elsewhere
+	// while the spec runs.
+	during func()
 }
 
 func (s *stubRechecks) Recheck(_ context.Context, rig, spec string) (application.SpecRecheck, error) {
 	s.asked = append(s.asked, rig+" "+spec)
+	if s.during != nil {
+		s.during()
+	}
 	if s.lock != nil {
 		s.held = append(s.held, s.lock.taken-s.lock.freed)
 	}
