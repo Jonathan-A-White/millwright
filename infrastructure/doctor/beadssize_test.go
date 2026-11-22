@@ -476,3 +476,28 @@ func TestACollectionSlowerThanTheStepBudgetCompletesAndRecordsLastGC(t *testing.
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// A user manager that does not answer (systemctl hung) does not hold the
+// beginning of the collection: ApartProcess asks it under a deadline of its own
+// and goes on without a scope (mw-gq6.1646).
+func TestApartProcessIsNotHeldByASystemctlThatHangs(t *testing.T) {
+	bin := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+			t.Fatalf("writing the fake %s: %v", name, err)
+		}
+	}
+	write("systemd-run", "exit 0")
+	write("systemctl", "exec sleep 30")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	began := time.Now()
+	err := doctor.ApartProcess{Self: "/bin/true"}.Start(context.Background())
+	if err != nil {
+		t.Fatalf("expected the process to begin without a scope, got %v", err)
+	}
+	if took := time.Since(began); took > 5*time.Second {
+		t.Fatalf("beginning waited %s for a systemctl that sleeps 30s", took)
+	}
+}

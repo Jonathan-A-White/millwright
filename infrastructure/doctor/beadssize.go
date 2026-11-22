@@ -242,6 +242,10 @@ func (b *BeadsSize) Cure(ctx context.Context) error {
 	return nil
 }
 
+// apartScopeAsk is how long ApartProcess waits for the user manager to say
+// whether it is running.
+const apartScopeAsk = 2 * time.Second
+
 // ApartProcess begins a command as a process of its own, in a session of its
 // own and, where there is a user manager, a systemd scope, so that neither the
 // end of the context it was begun in nor the stop of the unit that began it
@@ -261,12 +265,12 @@ type ApartProcess struct {
 }
 
 // Start begins the process and lets go of it, not waiting for it to end.
-func (a ApartProcess) Start(context.Context) error {
+func (a ApartProcess) Start(ctx context.Context) error {
 	if a.Self == "" {
 		return fmt.Errorf("no program to begin")
 	}
 	argv := append([]string{a.Self}, a.Args...)
-	if scope := a.scope(); scope != "" {
+	if scope := a.scope(ctx); scope != "" {
 		front := []string{scope, "--user", "--scope", "--collect", "--quiet"}
 		if a.Unit != "" {
 			front = append(front, "--unit="+a.Unit)
@@ -296,7 +300,7 @@ func (a ApartProcess) Start(context.Context) error {
 }
 
 // scope is the systemd-run to put the process in a scope with, or "".
-func (a ApartProcess) scope() string {
+func (a ApartProcess) scope(ctx context.Context) string {
 	if a.NoScope {
 		return ""
 	}
@@ -305,7 +309,14 @@ func (a ApartProcess) scope() string {
 		return ""
 	}
 	// A host without a user manager has systemd-run and nothing for it to ask.
-	if out, err := exec.Command("systemctl", "--user", "is-system-running").Output(); err != nil && len(out) == 0 {
+	// The question has a deadline of its own and the run's ctx: a user manager
+	// that does not answer is read as none, and the process goes on without a
+	// scope. This one is not the process that outlives the ctx.
+	ask, cancel := context.WithTimeout(ctx, apartScopeAsk)
+	defer cancel()
+	probe := exec.CommandContext(ask, "systemctl", "--user", "is-system-running")
+	probe.WaitDelay = time.Second
+	if out, err := probe.Output(); err != nil && len(out) == 0 {
 		return ""
 	}
 	return path
