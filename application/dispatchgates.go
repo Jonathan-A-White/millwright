@@ -28,7 +28,7 @@ var DispatchGates = []DispatchGate{
 	{"no-host", "the path names no host"},
 	{"other-host", "the path names another host"},
 	{"harness-hold", "the harness stopped a session here (usage limit, rate limit, overloaded or failing API) and the time it named has not come"},
-	{"no-room", "the host has no room: load, or a grist tutor in use"},
+	{"no-room", "the host has no room: load, memory, a disk under its floor, or a grist tutor in use"},
 	{"closing-out", "a close-out (mw next, by hand or by mw-closeout) is running on it, on any host, and its mark in the tracker has not lapsed: it is being landed by the Mayor, and a new attempt would spend one while he waits"},
 	{"queued", "its work is done and it is labelled run:queued for its rig's batch, yet it is open: mw land takes it, a new attempt would redo done work"},
 	{"landed", "its last run landed it and only the close was lost"},

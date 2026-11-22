@@ -1426,6 +1426,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			if alarm, found := reading.DriveFloorAlarm(s.Host, s.Room); found {
 				report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
 			}
+			if alarm, found := reading.RootFloorAlarm(s.Host, s.Room); found {
+				report.Dampers.Alarms = append(report.Dampers.Alarms, alarm)
+			}
 		}
 	}
 

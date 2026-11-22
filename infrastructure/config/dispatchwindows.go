@@ -27,7 +27,7 @@ import (
 //
 // While the clock of tz is from or later and before to, the window's keys
 // stand in for the root keys of the same name (and room_load_per_core,
-// room_min_free_mb and min_drive_free_gb for the [dispatch] table's). The first window in the file
+// room_min_free_mb, min_drive_free_gb and min_root_free_gb for the [dispatch] table's). The first window in the file
 // that holds the instant wins.
 const DispatchWindowsTable = "dispatch.windows"
 
@@ -61,6 +61,7 @@ var windowKnobs = []windowKnob{
 		return err == nil && n >= 1
 	}, "a whole number of megabytes, 1 or more"},
 	{"min_drive_free_gb", wholeAtLeast(0, 1<<30), "a whole number of gigabytes, 0 (the guard off) or more"},
+	{"min_root_free_gb", wholeAtLeast(0, 1<<30), "a whole number of gigabytes, 0 (the guard off) or more"},
 }
 
 var windowClock = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)

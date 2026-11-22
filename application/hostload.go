@@ -43,6 +43,11 @@ type LoadReading struct {
 	// its vhdx lives on a Windows drive the host must see to keep from filling
 	// it: a WSL host with no current drive report has no room (mw-gq6.1527).
 	WSL bool
+	// RootFreeBytes is the free space of the host's own root filesystem, when
+	// RootKnown. A reading that could not learn it leaves RootKnown false, and
+	// no floor applies (mw-6ww.185.6).
+	RootFreeBytes int64
+	RootKnown     bool
 	// PartWorkers is how many of the factory's own part workers were running
 	// their part when the load was read: the processes mw check --part N starts
 	// as mw check <story> --part N --part-worker --no-slot, outside the gate lock
@@ -133,6 +138,12 @@ const (
 	// take several GB (mw-gq6.1428, provisional). The config file's [dispatch]
 	// min_drive_free_gb changes it, and 0 turns the guard off.
 	DefaultRoomMinDriveFreeGB int64 = 15
+	// DefaultRoomMinRootFreeGB is the free space the host's own root filesystem
+	// must have to take a story, on every host: once a WSL disk is shrunk to fit
+	// its drive, and always on a cloud box, the root is the real limit
+	// (mw-6ww.185.6). The config file's [dispatch] min_root_free_gb changes it, and
+	// 0 turns the guard off.
+	DefaultRoomMinRootFreeGB int64 = 15
 )
 
 // RoomLimits is how much room a host must have before it starts a story. The
@@ -148,6 +159,18 @@ type RoomLimits struct {
 	// guard off.
 	MinDriveFreeGB int64
 	NoDriveGuard   bool
+	// MinRootFreeGB is the free space, in gigabytes, the host's root filesystem
+	// must have; zero reads DefaultRoomMinRootFreeGB, and NoRootGuard turns the
+	// guard off.
+	MinRootFreeGB int64
+	NoRootGuard   bool
+}
+
+func (l RoomLimits) minRootFreeGB() int64 {
+	if l.MinRootFreeGB <= 0 {
+		return DefaultRoomMinRootFreeGB
+	}
+	return l.MinRootFreeGB
 }
 
 func (l RoomLimits) minDriveFreeGB() int64 {
@@ -191,6 +214,9 @@ func (r LoadReading) NoRoom(limits RoomLimits) string {
 	}
 	if r.blindToItsDrive(limits) {
 		why = append(why, blindDriveSaid)
+	}
+	if r.rootUnderFloor(limits) {
+		why = append(why, r.rootSaid(limits))
 	}
 	return strings.Join(why, "; ")
 }

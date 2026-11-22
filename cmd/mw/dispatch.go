@@ -585,10 +585,12 @@ func withHostRoom(d application.Dispatch, room config.RoomSettings) application.
 }
 
 // roomLimits is the config file's room as dispatch and status judge a host by:
-// min_drive_free_gb = 0 turns the Windows drive's guard off (mw-gq6.1381).
+// min_drive_free_gb = 0 turns the Windows drive's guard off (mw-gq6.1381), and
+// min_root_free_gb = 0 the root filesystem's (mw-6ww.185.6).
 func roomLimits(room config.RoomSettings) application.RoomLimits {
 	return application.RoomLimits{
 		LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB,
 		MinDriveFreeGB: room.MinDriveFreeGB, NoDriveGuard: room.MinDriveFreeGB == 0,
+		MinRootFreeGB: room.MinRootFreeGB, NoRootGuard: room.MinRootFreeGB == 0,
 	}
 }
