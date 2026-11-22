@@ -175,6 +175,15 @@ func TestUnmetCriteriaTellsAPhraseSaidFromOneOnlyNamed(t *testing.T) {
 		"none before":                   {"AC1: none not met, all hold.", false},
 		"without":                       {"AC2 holds without any part not done.", false},
 		"apostrophe is not a quote":     {"AC2 doesn't hold, it's not met", true},
+		// A test list written 'case -> outcome (AC n)' names an expected outcome
+		// of a met criterion (mw-gq6.1598).
+		"test outcome not run":      {`4. fails far over and the host never calms -> not run (Err set, not a failed verdict), the error names "24.0 of 8" load (AC 4)`, false},
+		"test outcome not met":      {"2. the gate is refused -> not met (AC 2)", false},
+		"test outcome only in part": {"1. a half-done run -> only in part (AC 1)", false},
+		"test outcome not done":     {"3. the retry is spent => not done (AC 3)", false},
+		"test outcome not verified": {"5. the key is missing \u2192 not verified (AC 5)", false},
+		"criterion before arrow":    {"AC 4 -> not run", true},
+		"colon after the criterion": {"AC 4: not run: this host has no age key", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := application.UnmetCriteria(tc.comment)

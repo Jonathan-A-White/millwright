@@ -122,6 +122,8 @@ var (
 	negation     = regexp.MustCompile(`(?i)\b(no|none|without)\b`)
 	nothingAfter = regexp.MustCompile(`(?i)^\s*[:=-]?\s*(none|nothing)\b`)
 	clauseEnd    = regexp.MustCompile(`[,:()]| - `)
+	// outcomeArrow is the arrow of a test listed 'case -> outcome (AC n)'.
+	outcomeArrow = regexp.MustCompile(`->|=>|\x{2192}|\x{21d2}`)
 )
 
 func unmetPhraseAlternatives() string {
@@ -161,9 +163,25 @@ func saysUnmet(sentence string) bool {
 		if negation.MatchString(masked[clauseStart:at[0]]) || nothingAfter.MatchString(masked[at[1]:]) {
 			continue
 		}
+		if expectedOutcome(masked, at[0]) {
+			continue
+		}
 		return true
 	}
 	return false
+}
+
+// expectedOutcome reports whether the phrase at offset at is the outcome a
+// listed test expects, 'case -> not run (AC 4)': an arrow before it in its
+// sentence and no criterion named before that arrow. That names what a test
+// checks of a met criterion, not a criterion left unmet; 'AC 4 -> not run' names
+// the criterion first and is still said (mw-gq6.1598).
+func expectedOutcome(masked string, at int) bool {
+	arrows := outcomeArrow.FindAllStringIndex(masked[:at], -1)
+	if len(arrows) == 0 {
+		return false
+	}
+	return !criterionRef.MatchString(masked[:arrows[len(arrows)-1][0]])
 }
 
 // maskQuoted is text with every quoted span (double, curly or single quotes,
