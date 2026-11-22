@@ -28,8 +28,8 @@ func (n Next) offHostCloseOut(ctx context.Context, c *closeOut) string {
 	if _, err := n.Vault.ReadRunFile(ctx, c.id, ResultFileNameForAttempt(c.attempt())); !errors.Is(err, fs.ErrNotExist) {
 		return branchNotHereWhy(ctx, n.Landing, "next", c.id, c.rigDir, n.Host, host, c.path)
 	}
-	return fmt.Sprintf("its claim is %s, so its run record is on %s, not %s: run `mw next %s` on %s, where nothing was written here",
-		c.detail.Assignee, host, n.Host, c.id, host)
+	return fmt.Sprintf("its claim is %s, so its run record is on %s, not %s: run `mw next %s` on %s, or %s, where nothing was written here",
+		c.detail.Assignee, host, n.Host, c.id, host, answerFromHere(c.id))
 }
 
 // claimHostOf is the host an assignee names, whether the claim was made as mw
@@ -71,6 +71,9 @@ func branchNotHereWhy(ctx context.Context, landing Landing, command, storyID, ri
 	where, run := "another host", "on the host that worked it"
 	if host != "" {
 		where, run = host, "on "+host
+	}
+	if command == "next" {
+		run += ", or " + answerFromHere(storyID)
 	}
 	return fmt.Sprintf("its branch %s is not in %s's checkout of the rig, it was worked on %s: run `mw %s %s` %s, where nothing was written here",
 		StoryBranch(storyID), here, where, command, storyID, run)
