@@ -248,7 +248,7 @@ func newHostWSLFlagCmd() *cobra.Command {
 			"(--install-line --shrink-gb N) and the task keeps in its own folder on Windows: WSL can ask, never choose it.\n" +
 			"The task refuses, leaving WSL as it is, unless WSL is 2.5 or later, N GB is under 80% of the drive and the\n" +
 			"Linux root's used bytes are under 70% of N GB; then it shuts WSL down, resizes the disk, starts WSL and\n" +
-			"prints df's size of / before and after. It refuses here while H's cap is not 0 (drain it first: mw config\n" +
+			"prints df's size of / before and after. It refuses here while H's cap in force (a window's too) is not 0 (drain it first: mw config\n" +
 			"set cap 0), unless --running. The way back is the same command with a larger size.\n\n" +
 			"`mw host wsl-flag --install-line` prints the one line of admin PowerShell, run once at the desk, that\n" +
 			"installs the task (it runs at startup and every 2 minutes with nobody signed in, no password stored, and\n" +
@@ -396,9 +396,11 @@ func askWSLFlag(cmd *cobra.Command, host, ssh, action string, limit time.Duratio
 	}
 }
 
-// wslFlagCapScript prints the host's cap, or 'unset' when its config has none.
+// wslFlagCapScript prints the host's cap in force now, a [[dispatch.windows]]
+// window's included (config.CapInForce), or 'unset' when its mw cannot say: an
+// mw without --in-force fails here, and so is not taken for a cap of 0.
 func wslFlagCapScript() string {
-	return `"$HOME/.local/bin/mw" config get cap 2>/dev/null || echo unset`
+	return `"$HOME/.local/bin/mw" config get cap --in-force 2>/dev/null || echo unset`
 }
 
 // wslFlagCapIsZero is nil when host's cap on sessions is 0, as the shrink wants
@@ -412,7 +414,7 @@ func wslFlagCapIsZero(ctx context.Context, host, ssh string) error {
 		return fmt.Errorf("the cap of %s could not be read, so it is not known to be 0 (%v): drain it first: mw config set cap 0, or --running to go ahead", host, err)
 	}
 	if got != "0" {
-		return fmt.Errorf("the cap of %s is %s, not 0: drain it first: mw config set cap 0 (on %s), or --running to go ahead", host, got, host)
+		return fmt.Errorf("the cap in force on %s is %s, not 0: drain it first: mw config set cap 0 (on %s; a [[dispatch.windows]] cap in force answers ahead of it, so wait for its window to end), or --running to go ahead", host, got, host)
 	}
 	return nil
 }

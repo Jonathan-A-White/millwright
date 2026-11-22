@@ -4621,7 +4621,7 @@ the drive, once, so the vhdx can never outgrow it and a full disk is an ordinary
 shrink**: sweep the host so the root's used bytes are under 70% of the new size, drain it
 (`mw config set cap 0`), then `mw host wsl-flag shrink [--host <host>] [--limit 3h]` writes
 the flag, waits and prints the result, as `restart` and `compact` do; it refuses while the
-host's cap is not 0 (`drain it first: mw config set cap 0`) unless `--running` is given. The
+host's cap in force (a `[[dispatch.windows]]` window's included, read by `mw config get cap --in-force`) is not 0 (`drain it first: mw config set cap 0`) unless `--running` is given. The
 size is never chosen from inside WSL: it comes from the line the Governor reads,
 `mw host wsl-flag --install-line --shrink-gb 220` (220 GB on the desktop's 286 GB drive,
 provisional), and the task keeps it in `shrink-gb` beside its log in

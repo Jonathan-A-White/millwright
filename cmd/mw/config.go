@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -105,13 +106,27 @@ func newConfigSetCmd() *cobra.Command {
 }
 
 func newConfigGetCmd() *cobra.Command {
-	return &cobra.Command{
+	var inForce bool
+	cmd := &cobra.Command{
 		Use:   "get [<table>.]<key>",
 		Short: "Print one key of ~/.config/mw/config.toml",
 		Long: "get prints the value of one key of ~/.config/mw/config.toml, a string without its quotes.\n" +
-			"It fails, saying the key is unset, when the file has no such key.",
+			"It fails, saying the key is unset, when the file has no such key.\n" +
+			"With --in-force, `cap` prints the cap in force now: a [[dispatch.windows]] entry that holds this moment and carries cap\n" +
+			"answers ahead of the root-table key, and MW_CAP ahead of both (a host that says nothing prints the default).",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if inForce {
+				if args[0] != "cap" {
+					return fmt.Errorf("--in-force reads the cap in force and takes the key cap, not %q", args[0])
+				}
+				atOnce, err := config.Cap()
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), atOnce)
+				return nil
+			}
 			path, err := config.FilePath()
 			if err != nil {
 				return err
@@ -120,4 +135,6 @@ func newConfigGetCmd() *cobra.Command {
 				Run(cmd.Context(), args[0])
 		},
 	}
+	cmd.Flags().BoolVar(&inForce, "in-force", false, "cap only: print the cap in force now, a window's included, not the root-table key alone")
+	return cmd
 }

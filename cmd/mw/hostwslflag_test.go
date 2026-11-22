@@ -844,6 +844,34 @@ func TestWSLFlagShrinkRefusesWhileTheCapIsNotZero(t *testing.T) {
 	}
 }
 
+// A [[dispatch.windows]] entry that holds the present moment and carries cap
+// answers ahead of the root-table key (config.CapInForce): a host whose root
+// cap is 0 but whose window holds cap 2 starts sessions the shutdown would kill.
+func TestWSLFlagShrinkRefusesWhileACapWindowIsInForce(t *testing.T) {
+	dir := wslFlagHere(t, nil)
+	real := hostWSLFlagRun
+	hostWSLFlagRun = func(ctx context.Context, host, ssh, script string) (string, error) {
+		if strings.Contains(script, "config get cap") {
+			if strings.Contains(script, "--in-force") {
+				return "2", nil // the window's cap
+			}
+			return "0", nil // the root-table key alone
+		}
+		return real(ctx, host, ssh, script)
+	}
+	t.Cleanup(func() { hostWSLFlagRun = real })
+	out, err := runMw(t, "host", "wsl-flag", "shrink", "--limit", "300ms")
+	if err == nil {
+		t.Fatalf("a window holding cap 2 is a cap that is not 0, expected a refusal, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "is 2, not 0") {
+		t.Errorf("expected the refusal to say the cap in force is 2, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "wsl-flag")); statErr == nil {
+		t.Errorf("a refused shrink must write no flag")
+	}
+}
+
 func TestWSLFlagShrinkRunningSkipsTheCapCheck(t *testing.T) {
 	dir := wslFlagHere(t, nil)
 	wslFlagCapIs(t, "3")
