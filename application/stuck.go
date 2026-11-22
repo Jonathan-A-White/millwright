@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -63,6 +64,55 @@ type StuckRoot struct {
 // StuckReport is every held root that live beads wait behind.
 type StuckReport struct {
 	Roots []StuckRoot
+	// PastReason are the held stories whose written reason names only beads that
+	// have closed, grouped by epic: held with nothing left to wait for.
+	PastReason []StuckEpicHolds
+}
+
+// StuckPastReason is a held story whose written reason (the newest comment
+// IsHoldComment accepts) names beads that have all closed.
+type StuckPastReason struct {
+	ID string
+	// Closed are the beads its reason names, all closed, in id order.
+	Closed []string
+}
+
+// StuckEpicHolds are the StuckPastReason stories of one epic, in id order. Epic
+// is empty for stories with no parent.
+type StuckEpicHolds struct {
+	Epic  string
+	Holds []StuckPastReason
+}
+
+// PastReasonCount is how many held stories are past their reason.
+func (r StuckReport) PastReasonCount() int {
+	n := 0
+	for _, group := range r.PastReason {
+		n += len(group.Holds)
+	}
+	return n
+}
+
+// pastReasonText is the part of mw stuck's output about holds past their reason:
+// the count, then each epic with its stories and the closed beads they name.
+func (r StuckReport) pastReasonText() string {
+	n := r.PastReasonCount()
+	if n == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "past their reason: %d held %s name only beads that have closed; mw release puts one back\n", n, plural(n, "story", "stories"))
+	for _, group := range r.PastReason {
+		name := group.Epic
+		if name == "" {
+			name = "no epic"
+		}
+		fmt.Fprintf(&b, "%s (%d)\n", name, len(group.Holds))
+		for _, hold := range group.Holds {
+			fmt.Fprintf(&b, "  %s: closed %s\n", hold.ID, strings.Join(hold.Closed, " "))
+		}
+	}
+	return b.String()
 }
 
 // LiveBehind is how many distinct live beads wait behind some root.
@@ -85,14 +135,19 @@ func (r StuckReport) Summary() string {
 // String is what mw stuck prints: the count, then a line for each root with the
 // live beads behind it.
 func (r StuckReport) String() string {
-	if len(r.Roots) == 0 {
-		return "nothing is stuck: no live bead waits behind a held bead that cannot move.\n"
-	}
 	var b strings.Builder
-	b.WriteString("stuck: " + r.Summary() + "\n")
+	if len(r.Roots) == 0 {
+		if r.PastReasonCount() == 0 {
+			return "nothing is stuck: no live bead waits behind a held bead that cannot move.\n"
+		}
+		b.WriteString("no live bead waits behind a held bead that cannot move.\n")
+	} else {
+		b.WriteString("stuck: " + r.Summary() + "\n")
+	}
 	for _, root := range r.Roots {
 		fmt.Fprintf(&b, "%s (%s): %d behind: %s\n", root.ID, root.Why, len(root.Behind), strings.Join(root.Behind, " "))
 	}
+	b.WriteString(r.pastReasonText())
 	return b.String()
 }
 
@@ -125,6 +180,11 @@ type StuckFinder interface {
 //     not listed, as StaleClaims does not list it. One queued for its rig's
 //     batch landing (run:queued) is listed as that, not as a claim with no
 //     session.
+//
+// Apart from the roots, it lists the held stories past their reason
+// (StuckReport.PastReason): held, no blocker unfinished, no label that gives a
+// reason, whose newest hold comment names beads in the graph that have all
+// closed. A story whose reason names one still open, or names no bead, is not.
 //
 // A root is listed only when some live bead (open or in progress, not an epic)
 // waits behind it over 'blocks' links, through live beads only. It reads and
@@ -159,6 +219,7 @@ func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
 
 	var roots []StuckRoot
 	var maybe []StuckRoot // held with no label that gives a reason: comments decide
+	var unlabelled []string
 	for _, b := range beads {
 		if b.Type == "epic" || strings.Contains(b.ID, "-mol-") || !strings.EqualFold(b.Status, StatusHeld) {
 			continue
@@ -170,17 +231,15 @@ func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
 			}
 		case hasHoldLabel(b.Labels) || waitsOnUnfinished(byID, b):
 		default:
+			unlabelled = append(unlabelled, b.ID)
 			if live := behind(b.ID); len(live) > 0 {
 				maybe = append(maybe, StuckRoot{ID: b.ID, Why: stuckNoReason, Behind: live})
 			}
 		}
 	}
-	if len(maybe) > 0 {
-		ids := make([]string, len(maybe))
-		for n, root := range maybe {
-			ids[n] = root.ID
-		}
-		said, err := s.Comments.StoriesComments(ctx, ids)
+	var pastReason []StuckEpicHolds
+	if len(unlabelled) > 0 {
+		said, err := s.Comments.StoriesComments(ctx, unlabelled)
 		if err != nil {
 			return StuckReport{}, fmt.Errorf("reading the comments of the held beads: %w", err)
 		}
@@ -189,6 +248,7 @@ func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
 				roots = append(roots, root)
 			}
 		}
+		pastReason = pastReasonHolds(byID, unlabelled, said)
 	}
 	if s.Claims != nil {
 		stale, err := s.Claims.StaleClaims(ctx, now.Add(-StuckClaimAge))
@@ -205,7 +265,7 @@ func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
 		}
 	}
 	sort.Slice(roots, func(a, b int) bool { return roots[a].ID < roots[b].ID })
-	return StuckReport{Roots: roots}, nil
+	return StuckReport{Roots: roots, PastReason: pastReason}, nil
 }
 
 // staleClaimWhy is the reason a stale claim is a root. A story queued for its
@@ -244,6 +304,70 @@ func waitsOnUnfinished(byID map[string]domain.GraphBead, b domain.GraphBead) boo
 		}
 	}
 	return false
+}
+
+// beadRef is a bead id written in a comment.
+var beadRef = regexp.MustCompile(`\bmw-[a-z0-9]+(?:\.[0-9]+)*\b`)
+
+// pastReasonHolds are the held stories among ids whose newest hold comment
+// names beads of the graph that have all closed (and at least one), grouped by
+// epic: the epics in id order, those with no parent last.
+func pastReasonHolds(byID map[string]domain.GraphBead, ids []string, said map[string][]Comment) []StuckEpicHolds {
+	byEpic := map[string][]StuckPastReason{}
+	for _, id := range ids {
+		reason := newestHoldComment(said[id])
+		if reason == "" {
+			continue
+		}
+		var closed []string
+		allClosed := true
+		for _, ref := range beadRef.FindAllString(reason, -1) {
+			named, ok := byID[ref]
+			if !ok || ref == id || slices.Contains(closed, ref) {
+				continue
+			}
+			if !strings.EqualFold(named.Status, StatusClosed) {
+				allClosed = false
+				break
+			}
+			closed = append(closed, ref)
+		}
+		if !allClosed || len(closed) == 0 {
+			continue
+		}
+		sort.Strings(closed)
+		epic := ""
+		for _, e := range byID[id].Edges {
+			if e.Kind == domain.EdgeParentChild {
+				epic = e.To
+				break
+			}
+		}
+		byEpic[epic] = append(byEpic[epic], StuckPastReason{ID: id, Closed: closed})
+	}
+	var groups []StuckEpicHolds
+	for epic, holds := range byEpic {
+		sort.Slice(holds, func(a, b int) bool { return holds[a].ID < holds[b].ID })
+		groups = append(groups, StuckEpicHolds{Epic: epic, Holds: holds})
+	}
+	sort.Slice(groups, func(a, b int) bool {
+		if (groups[a].Epic == "") != (groups[b].Epic == "") {
+			return groups[b].Epic == ""
+		}
+		return groups[a].Epic < groups[b].Epic
+	})
+	return groups
+}
+
+// newestHoldComment is the text of the last comment IsHoldComment accepts, the
+// written reason in force; empty when there is none.
+func newestHoldComment(comments []Comment) string {
+	for n := len(comments) - 1; n >= 0; n-- {
+		if IsHoldComment(comments[n].Text) {
+			return comments[n].Text
+		}
+	}
+	return ""
 }
 
 func holdsAReason(comments []Comment) bool {
