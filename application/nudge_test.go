@@ -610,3 +610,38 @@ func TestNudgeNamesARigUnderItsFeatureFloor(t *testing.T) {
 		t.Fatalf("expected the clause to read %q, got %q", want, clauses[0].Text)
 	}
 }
+
+// 2026-11-22: mw-zbgo4ep.13 alarmed 'in progress 342 min, transcript quiet 214
+// min' minutes after the desktop's batch landed it, while the laptop that held
+// its claim had not yet closed it. A story whose run is recorded landed waits
+// for its holder's close-out tick and has no session to be quiet; one still
+// running is named.
+func TestNudgeSaysNothingOfAStoryWhoseRunLandedAndNamesOneStillRunning(t *testing.T) {
+	for _, tc := range []struct {
+		run   string
+		named bool
+	}{
+		{application.RunLanded, false},
+		{application.RunRunning, true},
+	} {
+		t.Run(tc.run, func(t *testing.T) {
+			tracker := aTrackerPathedToVPS(t)
+			storyOn(t, tracker, "mw-gq6.30", "A story whose batch landed it", "vps")
+			claim(t, tracker, "mw-gq6.30", 342*time.Minute)
+			if err := tracker.SetStoryState(context.Background(), "mw-gq6.30", application.RunState, tc.run, "recorded"); err != nil {
+				t.Fatalf("recording the run state: %v", err)
+			}
+			transcripts := apptest.NewFakeTranscriptTail()
+			transcriptWritten(transcripts, "mw-gq6.30", 214*time.Minute)
+
+			clauses := nudgeReport(t, tracker, application.Nudge{Transcripts: transcripts, Rigs: nudgeRigs})
+
+			if tc.named && (len(clauses) != 1 || clauses[0].Key != "mw-gq6.30") {
+				t.Fatalf("expected one clause for a story with run=%s, got %+v", tc.run, clauses)
+			}
+			if !tc.named && len(clauses) != 0 {
+				t.Fatalf("expected no clause for a story with run=%s, got %+v", tc.run, clauses)
+			}
+		})
+	}
+}
