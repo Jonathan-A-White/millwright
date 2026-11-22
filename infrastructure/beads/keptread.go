@@ -208,6 +208,9 @@ func commentCountsOf(ids []string) []string {
 type listingQueries struct {
 	beads, labels, edges string
 	edgesOf              func(ids []string) string
+	// wholeEdges, when set, gives every row of the dependencies, read once for
+	// several listings (Gateway.wholeEdges); a listing with it leaves edges empty.
+	wholeEdges func(context.Context, *sql.DB) ([]edgeRow, error)
 	// commentsOf, when set, gives the statements that count the comments of the
 	// beads found; a listing with none leaves every count 0.
 	commentsOf func(ids []string) []string
@@ -221,7 +224,7 @@ func (g *Gateway) listAllOverConnection(ctx context.Context) (all []bead, ok boo
 	if db == nil {
 		return nil, false
 	}
-	all, err := readListing(ctx, db, listingQueries{beads: beadsListQuery, labels: beadLabelsQuery, edges: beadEdgesQuery, commentsOf: commentCountsOf}, nil)
+	all, err := readListing(ctx, db, listingQueries{beads: beadsListQuery, labels: beadLabelsQuery, wholeEdges: g.wholeEdges, commentsOf: commentCountsOf}, nil)
 	if err != nil {
 		g.keptFailed(ctx, "every bead", err)
 		return nil, false
@@ -315,6 +318,21 @@ func readListing(ctx context.Context, db *sql.DB, q listingQueries, targets map[
 		}
 	}
 
+	if q.wholeEdges != nil {
+		rows, err := q.wholeEdges(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if i, held := at[r.issue]; held {
+				if err := keepEdge(all, i, edge{Issue: r.issue, DependsOn: r.to, Kind: r.kind}); err != nil {
+					return nil, err
+				}
+			}
+		}
+		return all, nil
+	}
+
 	edgesQuery := q.edges
 	if q.edgesOf != nil {
 		if len(all) == 0 {
@@ -353,16 +371,24 @@ func readListing(ctx context.Context, db *sql.DB, q listingQueries, targets map[
 		if !held {
 			continue
 		}
-		printed, err := json.Marshal(e)
-		if err != nil {
+		if err := keepEdge(all, i, e); err != nil {
 			return nil, err
-		}
-		all[i].Dependencies = append(all[i].Dependencies, printed)
-		if e.Kind == "parent-child" {
-			all[i].Parent = e.DependsOn
 		}
 	}
 	return all, edges.Err()
+}
+
+// keepEdge gives the bead at all[i] the edge e, printed as bd prints it.
+func keepEdge(all []bead, i int, e edge) error {
+	printed, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	all[i].Dependencies = append(all[i].Dependencies, printed)
+	if e.Kind == "parent-child" {
+		all[i].Parent = e.DependsOn
+	}
+	return nil
 }
 
 // readCommentCounts runs one commentCountsOf statement and gives each bead it

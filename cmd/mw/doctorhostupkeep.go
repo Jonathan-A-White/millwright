@@ -24,9 +24,12 @@ func recordUpkeepRun(mark string) {
 }
 
 // hostUpkeepCheck is mw doctor's host-upkeep check for this host: its worktrees
-// are the .mw-worktrees beside each rig, its stories are read from the tracker.
-func hostUpkeepCheck(vault, host string, rigs map[string]string) *doctor.HostUpkeep {
-	check := &doctor.HostUpkeep{Stories: mwGateway(vault, host, beads.WithRunCache())}
+// are the .mw-worktrees beside each rig, its stories are read from the tracker,
+// the gateway tracker, which the damper survey reads too: both keep the one
+// list of every bead and the one read of the dependencies the run makes
+// (mw-gq6.1626).
+func hostUpkeepCheck(tracker *beads.Gateway, rigs map[string]string) *doctor.HostUpkeep {
+	check := &doctor.HostUpkeep{Stories: tracker}
 	if home, err := os.UserHomeDir(); err == nil {
 		check.StateDir = filepath.Join(home, hostUpkeepStateDir)
 	}

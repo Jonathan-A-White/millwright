@@ -432,7 +432,11 @@ func newDoctorCmd() *cobra.Command {
 			tmpSize := &application.TmpSizeCheck{Host: host, Dir: os.TempDir(), Disk: tmpdisk.Disk{}}
 			// The sweep and the tidies have run here, and their timers are enabled
 			// (mw-6ww.185.8); the cure runs them.
-			hostUpkeep := hostUpkeepCheck(vault, host, rigsAt)
+			// Its stories and the damper survey are read through one gateway, which
+			// keeps for the run: each of two had read the dependencies whole
+			// (mw-gq6.1626).
+			runTracker := mwGateway(vault, host, beads.WithRunCache())
+			hostUpkeep := hostUpkeepCheck(runTracker, rigsAt)
 			rootDisk := doctor.NewRootDiskBudget()
 			rootDisk.Budget, rootDisk.Margin = rootDiskBudget, rootDiskMargin
 			rootDisk.Note = func(ctx context.Context, text string) error {
@@ -469,7 +473,7 @@ func newDoctorCmd() *cobra.Command {
 			windowsState.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WindowsStateName), text)
 			}
-			dampers, err := doctorDamperSurvey(vault, host)
+			dampers, err := doctorDamperSurveyOf(runTracker, vault, host)
 			if err != nil {
 				return err
 			}
@@ -692,7 +696,12 @@ func newDoctorCmd() *cobra.Command {
 // and verdicts go through gateways that ask bd afresh, so a note written in the
 // run is read as written.
 func doctorDamperSurvey(vault, host string) (application.DamperSurvey, error) {
-	gateway := mwGateway(vault, host, beads.WithRunCache())
+	return doctorDamperSurveyOf(mwGateway(vault, host, beads.WithRunCache()), vault, host)
+}
+
+// doctorDamperSurveyOf is doctorDamperSurvey read through gateway, which keeps
+// for the run.
+func doctorDamperSurveyOf(gateway *beads.Gateway, vault, host string) (application.DamperSurvey, error) {
 	survey, err := damperSurvey(gateway, vault, host)
 	if err != nil {
 		return survey, err
