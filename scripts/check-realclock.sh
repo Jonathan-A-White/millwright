@@ -25,6 +25,11 @@
 # baseline (scripts/check-realclock.sh --print writes the whole file anew) so
 # the room it left is not taken by a new use.
 #
+# This script holds the wall-clock reads of code that is not a test; it lists
+# no tests. --tests is that list: it prints each *_test.go in the tree that
+# reads time.Now() or time.Since(, as "<path> <count>", and exits 0 (it holds
+# nothing, so a test that reads the wall clock is never refused).
+#
 # Reads only the tree: the repository this script is in, or the directory named
 # by its last argument (the tests run it on throwaway directories). Writes
 # nothing; --print prints the baseline the tree holds now.
@@ -36,6 +41,11 @@ if [ "${1:-}" = "--print" ]; then
 	PRINT=1
 	shift
 fi
+TESTS=0
+if [ "${1:-}" = "--tests" ]; then
+	TESTS=1
+	shift
+fi
 
 if [ $# -ge 1 ]; then
 	ROOT=$1
@@ -45,6 +55,25 @@ fi
 cd "$ROOT"
 
 BASELINE=scripts/realclock-baseline.txt
+
+if [ "$TESTS" = 1 ]; then
+	find . \( -name .git -o -name node_modules -o -name vendor \) -prune -o \
+		-type f -name '*_test.go' -print | sed 's|^\./||' | LC_ALL=C sort |
+		xargs -r awk '
+			{
+				code = $0
+				sub(/^[ \t]+/, "", code)
+				if (code ~ /^\/\//) next
+				rest = $0
+				while (match(rest, /time\.Now\(\)|time\.Since\(/)) {
+					count[FILENAME]++
+					rest = substr(rest, RSTART + RLENGTH)
+				}
+			}
+			END { for (f in count) print f " " count[f] }
+		' | LC_ALL=C sort
+	exit 0
+fi
 
 uses=$(mktemp)
 trap 'rm -f "$uses"' EXIT
