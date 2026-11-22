@@ -462,6 +462,13 @@ func newDoctorCmd() *cobra.Command {
 			wslDriveFree.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLDriveFreeName), text)
 			}
+			// The Windows side of a WSL host, from the state the Windows task writes
+			// into WSL (mw-6ww.185.2).
+			windowsState := doctor.NewWindowsState()
+			windowsState.ScriptSHA256 = wslFlagScriptSHA256()
+			windowsState.Note = func(ctx context.Context, text string) error {
+				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WindowsStateName), text)
+			}
 			dampers, err := doctorDamperSurvey(vault, host)
 			if err != nil {
 				return err
@@ -599,6 +606,7 @@ func newDoctorCmd() *cobra.Command {
 				rootDisk,
 				wslTrim,
 				wslDriveFree,
+				windowsState,
 				mayorStuck,
 				mayorStale,
 				mayorGone,
