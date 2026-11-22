@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +31,7 @@ const (
 // task ignores any other content. inventory changes nothing: the task writes
 // windows-inventory.txt and the wait is for that file, not for wsl-flag.result.
 // down is written as 'down <seconds>' and is not waited for: WSL is down.
-var wslFlagActions = []string{"restart", "compact", "inventory", "down"}
+var wslFlagActions = []string{"restart", "compact", "inventory", "down", "shrink"}
 
 // The lengths `down --for` takes: the task ignores any other (mw-6ww.185.3).
 const (
@@ -41,6 +42,23 @@ const (
 // wslFlagInventoryLimit is how long mw host wsl-flag inventory waits when --limit
 // is not given: the task looks every 2 minutes and the read takes seconds.
 const wslFlagInventoryLimit = 10 * time.Minute
+
+// wslFlagShrinkLimit is how long mw host wsl-flag shrink waits when --limit is not
+// given: the task's own execution limit (3 hours) covers a shutdown, a resize of
+// the vhdx and a start (mw-6ww.185.5).
+const wslFlagShrinkLimit = 3 * time.Hour
+
+// The sizes, in GB, --shrink-gb takes: the task refuses a size that is not a whole
+// number in this range.
+const (
+	wslFlagShrinkMinGB = 20
+	wslFlagShrinkMaxGB = 16384
+)
+
+// wslFlagShrinkFile is the file, in the task's own folder on Windows, that keeps
+// the size of the shrink. The size comes from the line the Governor reads, never
+// from inside WSL: WSL can ask for the shrink, not choose its size.
+const wslFlagShrinkFile = "shrink-gb"
 
 // wslFlagTask is the name the install line registers the task under.
 const wslFlagTask = "millwright-wsl-flag-watch"
@@ -153,7 +171,7 @@ func wslFlagRegister() string {
 		`$mwwf_g="$mwwf_d\last-good-tick"; Remove-Item $mwwf_g -EA 0; Start-ScheduledTask ` + wslFlagTask + `; ` +
 		`for ($mwwf_i=0; $mwwf_i -lt 36 -and !(Test-Path $mwwf_g); $mwwf_i++) { sleep 5 }; ` +
 		`if (Test-Path $mwwf_g) { Unregister-ScheduledTask -TaskName millwright-wsl-keeper,millwright-wsl-watchdog -Confirm:$false -EA 0 } ` +
-		`else { Write-Warning 'no good tick in 3 min: keeper and watchdog left' }`
+		`else { Write-Warning 'no good tick in 3 min: old tasks left' }`
 }
 
 // wslFlagScriptSHA256 is the upper-case SHA-256 of the watcher script this
@@ -171,16 +189,25 @@ func wslFlagScriptSHA256() string {
 // runs it at startup and every 2 minutes with nobody signed in, as the Windows
 // user who ran the line, and, after the task's first good tick, removes the
 // keeper and watchdog tasks it replaces. It is short enough (well under 2000 bytes) to be sent to a phone.
-func WSLFlagInstallLine() (string, error) {
+func WSLFlagInstallLine() (string, error) { return WSLFlagInstallLineKeeping(0) }
+
+// WSLFlagInstallLineKeeping is WSLFlagInstallLine that, when shrinkGB is above 0,
+// also keeps that size in the task's own folder ($mwwf_d\shrink-gb) for the
+// flag word shrink to read (mw-6ww.185.5). With 0 it touches no kept size.
+func WSLFlagInstallLineKeeping(shrinkGB int) (string, error) {
 	commit := wslFlagCommit()
 	if len(commit) != 40 {
 		return "", fmt.Errorf("this mw was built with no commit to pin the download at (rebuild from the checkout with make build)")
 	}
+	keep := ""
+	if shrinkGB > 0 {
+		keep = `Set-Content "$mwwf_d\` + wslFlagShrinkFile + `" '` + strconv.Itoa(shrinkGB) + `'; `
+	}
 	return windowsElevationCheck + `; $mwwf_d="$env:ProgramData\millwright"; mkdir -Force $mwwf_d | Out-Null; ` +
 		`[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $mwwf_t="$mwwf_d\wsl-flag-watch.ps1.new"; ` +
 		`Invoke-WebRequest -UseBasicParsing -Uri '` + wslFlagRepoRaw + commit + "/" + wslFlagScriptPath + `' -OutFile $mwwf_t; ` +
-		`if ((Get-FileHash -Algorithm SHA256 $mwwf_t).Hash -ne '` + wslFlagScriptSHA256() + `') { Remove-Item $mwwf_t; throw 'wsl-flag-watch.ps1 does not match its expected SHA-256: nothing installed' }; ` +
-		`Move-Item -Force $mwwf_t "$mwwf_d\wsl-flag-watch.ps1"; ` + wslFlagRegister(), nil
+		`if ((Get-FileHash -Algorithm SHA256 $mwwf_t).Hash -ne '` + wslFlagScriptSHA256() + `') { Remove-Item $mwwf_t; throw 'SHA-256 mismatch: nothing installed' }; ` +
+		`Move-Item -Force $mwwf_t "$mwwf_d\wsl-flag-watch.ps1"; ` + keep + wslFlagRegister(), nil
 }
 
 // WSLFlagWayBack is the one line that takes the task and its script away, and
@@ -196,10 +223,11 @@ func WSLFlagWayBack() string {
 func newHostWSLFlagCmd() *cobra.Command {
 	var host string
 	var limit time.Duration
-	var installLine, dryRun bool
+	var installLine, dryRun, running bool
 	var downFor time.Duration
+	var shrinkGB int
 	cmd := &cobra.Command{
-		Use:   "wsl-flag restart|compact|inventory [--host <host>] [--limit <duration>] | down --for <5m..24h> [--host <host>] [--dry-run] | --install-line",
+		Use:   "wsl-flag restart|compact|inventory [--host <host>] [--limit <duration>] | shrink [--host <host>] [--limit <duration>] [--running] | down --for <5m..24h> [--host <host>] [--dry-run] | --install-line [--shrink-gb <N>]",
 		Short: "Ask a WSL host's Windows side to restart WSL, or to trim and compact its disk, with no visit to the desk",
 		Long: "WSL on the desktop is sealed from Windows (interop and /mnt/c off), so nothing inside it can start a\n" +
 			"Windows program. A Windows scheduled task (contrib/windows/wsl-flag-watch.ps1), run as the Windows user\n" +
@@ -215,6 +243,13 @@ func newHostWSLFlagCmd() *cobra.Command {
 			"`mw host wsl-flag restart|compact|inventory` writes the flag on the host (this host, or --host, reached over\n" +
 			"[hands_hosts]) and waits, up to --limit, for the task to write " + wslFlagResult + " beside it after WSL is\n" +
 			"back, and prints it (for inventory, it waits for " + wslFlagInventory + " and prints that, 10 minutes by default). The wait outlives the restart: a host that does not answer meanwhile is asked again.\n\n" +
+			"`mw host wsl-flag shrink [--host H] [--limit 3h]` makes the Linux disk smaller than its Windows drive, once,\n" +
+			"so that the vhdx can never outgrow the drive (mw-6ww.185.5). The size is the one the install line was given\n" +
+			"(--install-line --shrink-gb N) and the task keeps in its own folder on Windows: WSL can ask, never choose it.\n" +
+			"The task refuses, leaving WSL as it is, unless WSL is 2.5 or later, N GB is under 80% of the drive and the\n" +
+			"Linux root's used bytes are under 70% of N GB; then it shuts WSL down, resizes the disk, starts WSL and\n" +
+			"prints df's size of / before and after. It refuses here while H's cap is not 0 (drain it first: mw config\n" +
+			"set cap 0), unless --running. The way back is the same command with a larger size.\n\n" +
 			"`mw host wsl-flag --install-line` prints the one line of admin PowerShell, run once at the desk, that\n" +
 			"installs the task (it runs at startup and every 2 minutes with nobody signed in, no password stored, and\n" +
 			"after its first good tick removes the tasks millwright-wsl-keeper and millwright-wsl-watchdog), and the\n" +
@@ -225,11 +260,17 @@ func newHostWSLFlagCmd() *cobra.Command {
 			if installLine {
 				return cobra.NoArgs(cmd, args)
 			}
+			if cmd.Flags().Changed("shrink-gb") {
+				return fmt.Errorf("--shrink-gb belongs to --install-line: the size is kept by the line the Governor reads, never chosen from inside WSL")
+			}
 			if len(args) != 1 {
 				return fmt.Errorf("say what to ask for: one of %s (or --install-line)", strings.Join(wslFlagActions, ", "))
 			}
 			for _, a := range wslFlagActions {
 				if args[0] == a {
+					if running && a != "shrink" {
+						return fmt.Errorf("--running belongs to shrink only, not %s", a)
+					}
 					return wslFlagCheckFor(cmd, a, downFor)
 				}
 			}
@@ -238,7 +279,10 @@ func newHostWSLFlagCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 			if installLine {
-				line, err := WSLFlagInstallLine()
+				if cmd.Flags().Changed("shrink-gb") && (shrinkGB < wslFlagShrinkMinGB || shrinkGB > wslFlagShrinkMaxGB) {
+					return fmt.Errorf("--shrink-gb %d is not from %d to %d: the size of the Linux disk, in GB, that the task will shrink to", shrinkGB, wslFlagShrinkMinGB, wslFlagShrinkMaxGB)
+				}
+				line, err := WSLFlagInstallLineKeeping(shrinkGB)
 				if err != nil {
 					return err
 				}
@@ -274,12 +318,24 @@ func newHostWSLFlagCmd() *cobra.Command {
 			if args[0] == "inventory" && !cmd.Flags().Changed("limit") {
 				limit = wslFlagInventoryLimit
 			}
+			if args[0] == "shrink" {
+				if !cmd.Flags().Changed("limit") {
+					limit = wslFlagShrinkLimit
+				}
+				if !running {
+					if err := wslFlagCapIsZero(cmd.Context(), host, ssh); err != nil {
+						return err
+					}
+				}
+			}
 			return askWSLFlag(cmd, host, ssh, args[0], limit)
 		},
 	}
 	cmd.Flags().StringVar(&host, "host", "", "the host whose WSL to ask about (default: this host)")
 	cmd.Flags().DurationVar(&limit, "limit", wslFlagLimit, "how long to wait for the result")
 	cmd.Flags().DurationVar(&downFor, "for", 0, "down only: how long WSL stays down, from 5m to 24h in whole seconds")
+	cmd.Flags().IntVar(&shrinkGB, "shrink-gb", 0, "with --install-line: the size, in GB, the Linux disk is shrunk to by `shrink`; the task keeps it in its own folder")
+	cmd.Flags().BoolVar(&running, "running", false, "shrink only: go ahead although the host's cap is not 0 (sessions may be running)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be written and when, and write nothing")
 	cmd.Flags().BoolVar(&installLine, "install-line", false, "print the one admin-PowerShell line that installs the Windows task, and its way back")
 	return cmd
@@ -338,6 +394,27 @@ func askWSLFlag(cmd *cobra.Command, host, ssh, action string, limit time.Duratio
 		}
 		return nil
 	}
+}
+
+// wslFlagCapScript prints the host's cap, or 'unset' when its config has none.
+func wslFlagCapScript() string {
+	return `"$HOME/.local/bin/mw" config get cap 2>/dev/null || echo unset`
+}
+
+// wslFlagCapIsZero is nil when host's cap on sessions is 0, as the shrink wants
+// it: it shuts WSL down, which would take any running session with it. A cap that
+// cannot be read is not known to be 0.
+func wslFlagCapIsZero(ctx context.Context, host, ssh string) error {
+	cctx, cancel := context.WithTimeout(ctx, wslFlagWriteLimit)
+	defer cancel()
+	got, err := hostWSLFlagRun(cctx, host, ssh, wslFlagCapScript())
+	if err != nil {
+		return fmt.Errorf("the cap of %s could not be read, so it is not known to be 0 (%v): drain it first: mw config set cap 0, or --running to go ahead", host, err)
+	}
+	if got != "0" {
+		return fmt.Errorf("the cap of %s is %s, not 0: drain it first: mw config set cap 0 (on %s), or --running to go ahead", host, got, host)
+	}
+	return nil
 }
 
 // wslFlagUnanswered is the error for a wait that ended with no result, saying

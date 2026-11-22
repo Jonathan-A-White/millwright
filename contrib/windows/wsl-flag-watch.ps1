@@ -46,6 +46,15 @@
 #                      long has passed ('down until T' in the log), then start it
 #                      again and write the act; the end is kept in a file beside
 #                      the log, so a restart of Windows does not forget it
+#   shrink             once: make the Linux disk smaller than its Windows drive, so the
+#                      vhdx can never outgrow it (mw-6ww.185.5). The size N is the one the
+#                      install line kept in shrink-gb beside the log (mw host wsl-flag
+#                      --install-line --shrink-gb N): never from inside WSL. It refuses,
+#                      leaving WSL as it is, unless WSL is 2.5 or later, N GB is under 80% of
+#                      the drive's size and the Linux root's used bytes are under 70% of N GB;
+#                      then 'wsl --shutdown', 'wsl --manage <distro> --resize <N>GB', start;
+#                      the result holds the tool's last lines and df's size of / before and
+#                      after. A failure starts WSL again and says 'failed: ...'.
 #   anything else      ignored and logged
 #
 # The flag is deleted BEFORE acting. After WSL is back the outcome and the time
@@ -73,8 +82,11 @@
 # (the flag holds 'down' -DownFor seconds on the first tick) or full (WSL will not
 # start until the vhdx is compacted; -DriveFreeGB is the drive's free space, default
 # 100, -FreedHoursAgo that many hours since the drive was last freed, -AssumeAttached
-# a vhdx left attached). A drive it does not free prints 'not freeing: <why>'. The
-# tests run both under Windows PowerShell 5.1.
+# a vhdx left attached). A drive it does not free prints 'not freeing: <why>'. For the
+# shrink, -FlagWord shrink puts that word in the flag on the first tick, -ShrinkGB N is the
+# installed size (none by default), -WslVersion, -DriveSizeGB, -RootSizeGB and -RootUsedGB
+# are what the stand-ins say, and -ResizeFails makes the resize fail. The tests run both
+# under Windows PowerShell 5.1.
 
 param([switch]$StateDryRun,
       [switch]$DryRun,
@@ -83,7 +95,14 @@ param([switch]$StateDryRun,
       [int]$DownFor = 600,
       [double]$DriveFreeGB = 100,
       [double]$FreedHoursAgo = 0,
-      [switch]$AssumeAttached)
+      [switch]$AssumeAttached,
+      [string]$FlagWord = '',
+      [int]$ShrinkGB = 0,
+      [string]$WslVersion = '3.0.3.0',
+      [double]$DriveSizeGB = 286,
+      [double]$RootSizeGB = 1007,
+      [double]$RootUsedGB = 150,
+      [switch]$ResizeFails)
 $env:WSL_UTF8 = '1'
 $distro    = 'Ubuntu-24.04'
 $wslUser   = 'jwhite'
@@ -271,8 +290,10 @@ function Get-Inventory {
 if ($DryRun) {
     $script:dryUp = ($Assume -ne 'stopped' -and $Assume -ne 'full'); $script:dryCured = $false; $script:tick = 0
     $script:dryCompacted = $false; $script:dryVhdx = [int64](300GB); $script:dryFree = [int64]($DriveFreeGB * 1GB)
+    $script:dryRootSize = [int64]($RootSizeGB * 1GB)
 }
 $script:mem = @{}
+if ($DryRun -and $ShrinkGB -gt 0) { $script:mem['shrink-gb'] = "$ShrinkGB" }
 if ($DryRun -and $FreedHoursAgo -gt 0) { $script:mem['drive-freed-at'] = (Now-Utc).AddHours(-$FreedHoursAgo).ToString('yyyy-MM-dd''T''HH:mm:ss') + 'Z' }
 
 function Say([string]$m) { if ($DryRun) { Write-Host $m } }
@@ -292,6 +313,15 @@ function Wsl-StandIn([string]$cmd) {
     if ($cmd -match '--exec true') {
         $ok = $script:dryUp -and ($Assume -ne 'hung' -or $script:dryCured)
         return @{ Done = $true; Code = $(if ($ok) { 0 } else { 1 }); Out = '' }
+    }
+    if ($cmd -match '--version') { return @{ Done = $true; Code = 0; Out = "WSL version: $WslVersion`nKernel version: 6.6.87.2-1" } }
+    if ($cmd -match 'df -B1') {
+        return @{ Done = $true; Code = 0; Out = "1B-blocks         Used`n$([int64]$script:dryRootSize) $([int64]($RootUsedGB * 1GB))" }
+    }
+    if ($cmd -match '--manage .* --resize (\d+)GB') {
+        if ($ResizeFails) { return @{ Done = $true; Code = 1; Out = "Resizing the disk...`nError code: Wsl/Service/E_FAIL" } }
+        $script:dryRootSize = [int64]([int]$Matches[1] * 1GB)
+        return @{ Done = $true; Code = 0; Out = "Resizing the disk...`nThe operation completed successfully." }
     }
     return @{ Done = $true; Code = 0; Out = '' }
 }
@@ -334,6 +364,7 @@ function Wsl-Append([string]$path, [string]$text) {
 function Wsl-Read([string]$path) {
     if ($DryRun) {
         if ($path -eq $flag -and $Assume -eq 'down' -and $script:tick -eq 1) { return "down $DownFor" }
+        if ($path -eq $flag -and $FlagWord -and $script:tick -eq 1) { return $FlagWord }
         return $null
     }
     $r = Wsl-Sh "if [ -f '$path' ]; then cat '$path'; fi`n" 60
@@ -549,9 +580,88 @@ function Keep-WslUp {
 function Finish($action, $outcome) {
     $line = "$(Now) $action $outcome"
     Act $action $outcome
+    if ($DryRun) { Write-Host "result $line" }
     if (-not (Wait-WslAnswers 300)) { Log "$line (WSL did not come back in 5 minutes; result not written)"; return }
     Flush-Acts
     if (Wsl-Write $result "$line`n") { Log $line } else { Log "$line (the result could not be written)" }
+}
+
+# One decimal, always: '1007.0'.
+function Gb1([double]$bytes) { return ([math]::Round($bytes / 1GB, 1)).ToString('0.0', [Globalization.CultureInfo]::InvariantCulture) }
+
+# The drive's size, in bytes, that holds the vhdx; 0 when it could not be read.
+function Drive-Size {
+    if ($DryRun) { return [int64]($DriveSizeGB * 1GB) }
+    try { $d = Get-PSDrive (Split-Path -Qualifier $vhdx).TrimEnd(':') -ErrorAction Stop; return [int64]($d.Used + $d.Free) } catch { return [int64]0 }
+}
+
+# df's size and used bytes of the Linux root, as @{ Size; Used }, or $null when WSL did not say.
+function Root-Df {
+    $r = Run-Native "wsl.exe -d $distro -u root --exec df -B1 --output=size,used /" 60 $null
+    if (-not $r.Done -or $r.Code -ne 0) { return $null }
+    $last = ("$($r.Out)" -split "[\r\n]+" | Where-Object { $_.Trim() } | Select-Object -Last 1)
+    if ("$last".Trim() -match '^(\d+)\s+(\d+)$') { return @{ Size = [int64]$Matches[1]; Used = [int64]$Matches[2] } }
+    return $null
+}
+
+# WSL's version as text ('3.0.3.0'), or $null when it did not say.
+function Wsl-Version {
+    $r = Run-Native 'wsl.exe --version' 20 $null
+    $first = ("$($r.Out)" -split "[\r\n]+" | Where-Object { $_.Trim() } | Select-Object -First 1)
+    if ($r.Done -and "$first" -match '(\d+(\.\d+)+)') { return $Matches[1] }
+    return $null
+}
+
+# The flag word shrink (mw-6ww.185.5): refuse, leaving WSL as it is, unless the size was installed
+# and WSL, the drive and the root allow it; then shut down, resize, start, and say df's size of /
+# before and after. Every outcome goes through Finish, so that the result file answers the flag.
+function Invoke-Shrink {
+    $nText = "$(Store-Get 'shrink-gb')".Trim()
+    if (-not $nText) { Log 'shrink: no size was installed'; Finish 'shrink' 'failed: no size was installed'; return }
+    if ($nText -notmatch '^[0-9]{1,5}$' -or [int]$nText -lt 20 -or [int]$nText -gt 16384) {
+        Log "shrink: the installed size '$nText' is not a whole number of GB from 20 to 16384"
+        Finish 'shrink' "failed: the installed size '$nText' is not a whole number of GB from 20 to 16384"
+        return
+    }
+    $n = [int]$nText
+    $why = New-Object System.Collections.Generic.List[string]
+    $v = Wsl-Version
+    $parsed = $null
+    if ($v) { try { $parsed = [version]$v } catch { } }
+    if (-not $parsed) { $why.Add("WSL's version could not be read") }
+    elseif ($parsed -lt [version]'2.5') { $why.Add("WSL $v is older than 2.5") }
+    $driveBytes = Drive-Size
+    if ($driveBytes -le 0) { $why.Add("the drive's size could not be read") }
+    elseif ($n * 1GB -ge 0.8 * $driveBytes) { $why.Add("$n GB is not under 80% of the drive's $(Gb $driveBytes) GB") }
+    $df = Root-Df
+    if (-not $df) { $why.Add("df of / could not be read") }
+    elseif ($df.Used -ge 0.7 * $n * 1GB) { $why.Add("the Linux root uses $(Gb1 $df.Used) GB, which is not under 70% of $n GB") }
+    if ($why.Count -gt 0) {
+        $said = $why -join '; '
+        Log "shrink: refused: $said"
+        Finish 'shrink' "failed: $said; WSL left as it is"
+        return
+    }
+    $before = $df.Size
+    Log "shrink: to $n GB (df / $(Gb1 $before) GB, the drive $(Gb $driveBytes) GB)"
+    [void](Run-Native 'wsl.exe --shutdown' 60 $null)
+    Pause 15
+    $r = Run-Native "wsl.exe --manage $distro --resize ${n}GB" 3600 $null
+    $tail = if ($r.Done) { ("$($r.Out)" -split "[\r\n]+" | Where-Object { $_.Trim() } | Select-Object -Last 3) -join ' ' } else { 'did not finish in 60 minutes' }
+    Log "shrink: resize exit $($r.Code) : $tail"
+    $failure = $null
+    if (-not $r.Done) { $failure = 'the resize did not finish in 60 minutes' } elseif ($r.Code -ne 0) { $failure = "the resize exit $($r.Code)" }
+    $up = Bring-Up
+    $after = $null
+    if ($up) { $after = Root-Df }
+    if ($failure) {
+        $started = if ($up) { 'WSL started again' } else { 'WSL did not start again' }
+        Finish 'shrink' "failed: ${failure}: $tail; $started"
+    } elseif (-not $after) {
+        Finish 'shrink' "failed: the resize ended well ($tail) but df of / could not be read after it; WSL did not answer"
+    } else {
+        Finish 'shrink' "ok: df / $(Gb1 $before) GB -> $(Gb1 $after.Size) GB: $tail"
+    }
 }
 
 function Invoke-Tick {
@@ -586,7 +696,7 @@ function Invoke-Tick {
     $downSeconds = 0
     if ($want -match '^down ([0-9]{1,6})$') { $downSeconds = [int]$Matches[1] }
     $isDown = ($downSeconds -ge 300 -and $downSeconds -le 86400)
-    if (-not $isDown -and $want -ne 'restart' -and $want -ne 'compact' -and $want -ne 'inventory') {
+    if (-not $isDown -and $want -ne 'restart' -and $want -ne 'compact' -and $want -ne 'inventory' -and $want -ne 'shrink') {
         $shown = if ($want.Length -gt 40) { $want.Substring(0, 40) } else { $want }
         Log "ignored flag content: '$shown'"
         [void](Wsl-Write $result "$(Now) ignored: the flag held '$shown'`n")
@@ -614,6 +724,12 @@ function Invoke-Tick {
         Store-Set 'down-until' $untilText
         Log "down: taken, down until $untilText"
         [void](Run-Native 'wsl.exe --shutdown' 60 $null)
+        return 0
+    }
+
+    if ($want -eq 'shrink') {
+        Log 'shrink: begin'
+        Invoke-Shrink
         return 0
     }
 

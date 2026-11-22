@@ -481,6 +481,15 @@ func newDoctorCmd() *cobra.Command {
 			windowsState.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WindowsStateName), text)
 			}
+			// The Linux disk against its Windows drive (mw-6ww.185.5): never faulty
+			// on the home, whose disk is not shrunk without the Governor's word.
+			wslDiskFits := doctor.NewWSLDiskFits()
+			wslDiskFits.Home = func(ctx context.Context) (bool, error) {
+				return application.IsHome(ctx, mwVault(vault, host), host)
+			}
+			wslDiskFits.Note = func(ctx context.Context, text string) error {
+				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.WSLDiskFitsName), text)
+			}
 			// The wall clock stepping back on a WSL host, sampled for 90 s at most once
 			// an hour, last in the table so the run's budget is not spent before it
 			// (mw-6ww.185.12). A faulty verdict reaches the home's DAMPERS as a
@@ -628,6 +637,7 @@ func newDoctorCmd() *cobra.Command {
 				wslTrim,
 				wslDriveFree,
 				windowsState,
+				wslDiskFits,
 				mayorStuck,
 				mayorStale,
 				mayorGone,
