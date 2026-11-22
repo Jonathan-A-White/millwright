@@ -1256,8 +1256,12 @@ func TestAStaleHostsHoldIsNotNamedBesideAnotherHostsFreshOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	alarms := starvedAlarms(t, tracker)
-	if len(alarms) != 1 || strings.Contains(alarms[0].Text, "cloud1") || !strings.Contains(alarms[0].Text, "no room") {
+	if len(alarms) != 1 || strings.Contains(alarms[0].Text, "not checked out") || !strings.Contains(alarms[0].Text, "held by no room") {
 		t.Errorf("expected only the laptop's hold, got %+v", alarms)
+	}
+	// The stale host is named once, as left out, with why (mw-gq6.1660).
+	if !strings.Contains(alarms[0].Text, "left out as not current: cloud1: no good dispatch run for 5h00m") {
+		t.Errorf("expected cloud1 named as left out, got %q", alarms[0].Text)
 	}
 }
 
