@@ -47,8 +47,9 @@ type HarnessHost struct {
 //
 // Behind is faulty, one line per host naming it, both versions and the cure for
 // its kind of install. A host that left no version, or one that is no version,
-// is said unread and never guessed; with none behind, that is cannot-tell. It
-// runs only on the home. It changes nothing: the cure is a person's, or
+// is said unread and never guessed; with none behind, that is cannot-tell. A
+// box made less than HarnessLevelMadeGrace ago whose notes are still an older
+// box's is pending, no fault (mw-gq6.1653). It runs only on the home. It changes nothing: the cure is a person's, or
 // contrib/vultr-boost set-harness for a box.
 type HarnessLevel struct {
 	// Home and Host are the vault's home file and this host's name.
