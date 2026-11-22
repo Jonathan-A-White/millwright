@@ -50,3 +50,14 @@ func cutError(ctx context.Context, doing, left string) error {
 	}
 	return fmt.Errorf("the cure was cut while %s (%w); %s; it will be retried by the next run", doing, ctx.Err(), left)
 }
+
+// alarmTimeout is how long the alarm of a Mayor cure is given to be sent.
+const alarmTimeout = 30 * time.Second
+
+// alarmContext is the ctx an alarm is sent under: ctx's values with a deadline
+// of its own, and not its end. A cure cut by the run's end still owes the
+// Governor the word of what it did and could not do, which an ended ctx would
+// refuse to send (mw-gq6.1647).
+func alarmContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), alarmTimeout)
+}

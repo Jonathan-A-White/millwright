@@ -349,6 +349,9 @@ func (m *MayorStale) alarm(ctx context.Context, text string, cause error) error 
 	if m.Alarm == nil {
 		return cause
 	}
+	// Sent whether or not the run has ended (mw-gq6.1647).
+	ctx, cancel := alarmContext(ctx)
+	defer cancel()
 	seq, err := m.Alarm(ctx, text)
 	if err != nil {
 		if cause != nil {
