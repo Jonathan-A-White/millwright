@@ -895,7 +895,7 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 			return
 		}
 	}
-	path := c.path.WithoutSourceKeys()
+	path := FiledPath(c.path, "", TesterKindBug)
 	path.Files = ""
 	story := NewStory{
 		EpicID:     c.detail.EpicID,

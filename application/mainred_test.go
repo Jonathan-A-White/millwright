@@ -148,3 +148,36 @@ func TestMainRedWaitHonoursTheDriveGuardOff(t *testing.T) {
 		})
 	}
 }
+
+// A bug that carries main's red runs on the factory's default route, not on
+// the finder's (mw-gq6.1550, folded into mw-gq6.1640).
+func TestAMainRedBugGetsItsOwnModelAndEffortNotTheFinders(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelFable, Effort: domain.EffortXHigh, Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", theSourceStory())
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	landing := &aMainLanding{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}}
+	named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.01s)\nFAIL\n")}
+	before := tracker.Stories()
+	report, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: landing, Landing: landing,
+		Checks: twoFailingTests{}, Slot: aSlot{}, Mailbox: apptest.NewFakeMailbox(),
+		NamedChecks: named, MainAloneBound: 0,
+		LoadWait: func(context.Context, time.Duration) error { return nil },
+		Seat:     "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	if report.Reason != application.ReasonMainRed {
+		t.Fatalf("expected the story held on main's red, got %q (%v)", report.Reason, err)
+	}
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 || !strings.Contains(filed[0].Story.Title, "main is red") {
+		t.Fatalf("expected 1 main-red bug filed, got %d: %+v", len(filed), filed)
+	}
+	if got := filed[0].Merged(); got.Model != domain.ModelSonnet || got.Effort != domain.EffortHigh {
+		t.Errorf("expected the main-red bug on sonnet at high, got %s at %s", got.Model, got.Effort)
+	}
+}

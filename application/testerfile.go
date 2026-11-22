@@ -190,8 +190,8 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		return TesterFiled{}, fmt.Errorf("reading the landed story %s: %w", landedID, err)
 	}
 	// The landed story's size, bump and callers_ok are its own, not a finding's
-	// (mw-gq6.1227).
-	path := landed.Merged().WithoutSourceKeys()
+	// (mw-gq6.1227), and so are its model and effort (mw-gq6.1551).
+	path := FiledPath(landed.Merged(), "", finding.Kind)
 	if path.Rig == "" {
 		return TesterFiled{}, fmt.Errorf("the landed story %s has no rig, so there is no path to copy from it: nothing was filed", landedID)
 	}

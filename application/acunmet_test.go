@@ -94,3 +94,39 @@ func TestAnUnmetACJoinedToAFiledBugIsWrittenInTheCloseOutsLog(t *testing.T) {
 		}
 	}
 }
+
+// A bug filed for an unmet criterion runs on the factory's default route, not
+// on the finder's: a finder pathed fable at xhigh does not give its model and
+// effort to a small bug (mw-gq6.1549, folded into mw-gq6.1640).
+func TestAnUnmetACBugGetsItsOwnModelAndEffortNotTheFinders(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelFable, Effort: domain.EffortXHigh, Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", theSourceStory())
+	mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+	mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", "Done, but AC 2 NOT met: the test does not run yet.\nFor the rig memory: nothing"))
+	before := tracker.Stories()
+	lands := &fakeRetryLanding{}
+	_, err := application.Next{
+		Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+		Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	mustDo(t, err)
+
+	var bug []application.StoryDetail
+	for _, d := range theTestersFiled(t, tracker, before) {
+		if strings.Contains(d.Story.Title, "AC") {
+			bug = append(bug, d)
+		}
+	}
+	if len(bug) != 1 {
+		t.Fatalf("expected 1 unmet-AC bug filed, got %d: %+v", len(bug), bug)
+	}
+	if got := bug[0].Merged(); got.Model != domain.ModelSonnet || got.Effort != domain.EffortHigh {
+		t.Errorf("expected the unmet-AC bug on sonnet at high, got %s at %s", got.Model, got.Effort)
+	}
+}
