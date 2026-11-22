@@ -268,7 +268,8 @@ func (i FoundItem) Acceptance() string {
 // foundBug is one bug to file for lines of the section: its title, and the
 // lines it quotes (one, or the ones past the cap). A bug of one line has that
 // line read as item; the bug that lists the lines past the cap has none, and
-// quotes each line whole.
+// quotes each line whole; its acceptance is read from those lines all the same
+// (acceptance, mw-gq6.1627).
 type foundBug struct {
 	title string
 	lines []string
@@ -282,6 +283,30 @@ func (b foundBug) said() []string {
 		return []string{b.item.What}
 	}
 	return b.lines
+}
+
+// acceptance is the acceptance the bug is filed with: the item's AC and Sweep,
+// or, for the bug that lists the lines past the cap, the AC and Sweep of each
+// line that gave an AC, numbered and labelled with its finding, the Sweep on a
+// line of its own. Empty when no line gave an AC (mw-gq6.1627).
+func (b foundBug) acceptance() string {
+	if b.item != nil {
+		return b.item.Acceptance()
+	}
+	var parts []string
+	for _, line := range b.lines {
+		item := ParseFoundItem(line)
+		if item.AC == "" {
+			continue
+		}
+		ac := foundNumberedPattern.ReplaceAllString(item.AC, "")
+		part := fmt.Sprintf("%d. %s: %s", len(parts)+1, item.What, ac)
+		if item.Sweep != "" {
+			part += "\nSweep: " + item.Sweep
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "\n")
 }
 
 // foundBugs is the bugs a section files: one for each of the first
@@ -1227,12 +1252,9 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			overrides = place.path
 			epicID, standalone = "", true
 		}
-		acceptance := ""
-		if bug.item != nil {
-			acceptance = bug.item.Acceptance()
-			if bug.item.Size != "" {
-				overrides.Size = bug.item.Size
-			}
+		acceptance := bug.acceptance()
+		if bug.item != nil && bug.item.Size != "" {
+			overrides.Size = bug.item.Size
 		}
 		story := NewStory{
 			EpicID:      epicID,

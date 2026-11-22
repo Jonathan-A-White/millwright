@@ -1010,3 +1010,53 @@ func TestAFoundStoryOfAnotherRigWithNoKnownStoryRunsOnSonnetHigh(t *testing.T) {
 		t.Errorf("expected the finder's route named, got:\n%s", filed[0].Description)
 	}
 }
+
+// The bead that lists the findings past the cap carries the Builder's AC and
+// Sweep of the one past it, the Sweep on a line of its own, so dispatch does not
+// refuse it for want of a sweep (mw-gq6.1627).
+func TestFoundAtCloseOverflowBeadHoldsTheACAndSweepOfTheThirdFinding(t *testing.T) {
+	filed, _ := aSingleLandingSaying(t, "Done.\nFound, not fixed:\nA is wrong (a.go:1)\nB is wrong (b.go:2)\nC is wrong (c.go:3). AC: go test ./x -run TestC passes. Sweep: grep the other readers. Size: S. By design? no\nFor the rig memory: nothing")
+	if len(filed) != 3 {
+		t.Fatalf("expected 3 bugs, got %d: %+v", len(filed), filed)
+	}
+	over := filed[2]
+	if !strings.Contains(over.Story.Title, "1 more findings not fixed") {
+		t.Fatalf("expected the overflow bead last, got %q", over.Story.Title)
+	}
+	if !strings.Contains(over.Acceptance, "go test ./x -run TestC passes") {
+		t.Errorf("expected the AC of the third finding in the acceptance, got %q", over.Acceptance)
+	}
+	if !slices.Contains(strings.Split(over.Acceptance, "\n"), "Sweep: grep the other readers") {
+		t.Errorf("expected the Sweep on a line of its own, got %q", over.Acceptance)
+	}
+	if domain.SweepOf(over.Acceptance) != domain.SweepGiven {
+		t.Errorf("expected the acceptance to pass the sweep rule, got %q", over.Acceptance)
+	}
+}
+
+// With two findings past the cap, each one's AC is in the acceptance, labelled
+// with its finding; one with no AC leaves nothing of its own.
+func TestFoundAtCloseOverflowBeadHoldsEachFindingsACLabelled(t *testing.T) {
+	filed, _ := aSingleLandingSaying(t, "Done.\nFound, not fixed:\nA is wrong (a.go:1)\nB is wrong (b.go:2)\nC is wrong (c.go:3). AC: go test ./c passes. Sweep: look at c\nD is wrong (d.go:4). AC: go test ./d passes. Sweep: look at d\nFor the rig memory: nothing")
+	if len(filed) != 3 {
+		t.Fatalf("expected 3 bugs, got %d: %+v", len(filed), filed)
+	}
+	acc := filed[2].Acceptance
+	for _, want := range []string{"C is wrong (c.go:3)", "go test ./c passes", "Sweep: look at c", "D is wrong (d.go:4)", "go test ./d passes", "Sweep: look at d"} {
+		if !strings.Contains(acc, want) {
+			t.Errorf("expected the acceptance to hold %q, got %q", want, acc)
+		}
+	}
+	cIdx, dIdx := strings.Index(acc, "go test ./c"), strings.Index(acc, "go test ./d")
+	if strings.Index(acc, "D is wrong") < cIdx || dIdx < strings.Index(acc, "Sweep: look at c") {
+		t.Errorf("expected each AC beside its own finding, got %q", acc)
+	}
+}
+
+// Findings past the cap that give no AC leave the overflow bead held, as before.
+func TestFoundAtCloseOverflowBeadWithNoACIsHeldForIt(t *testing.T) {
+	filed, _ := aSingleLandingSaying(t, "Done.\nFound, not fixed:\nA is wrong (a.go:1)\nB is wrong (b.go:2)\nC is wrong (c.go:3)\nFor the rig memory: nothing")
+	if len(filed) != 3 || filed[2].Acceptance != "" || filed[2].Status != apptest.StatusDeferred {
+		t.Fatalf("expected a held overflow bead with no acceptance, got %+v", filed)
+	}
+}
