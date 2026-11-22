@@ -24,7 +24,7 @@ func registerAcNotMetSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the filed bug is titled "([^"]*)"$`, c.theFiledBugIsTitled)
 	ctx.Then(`^the filed bug is held and labelled "([^"]*)" and "([^"]*)"$`, c.theFiledBugIsHeldAndLabelled)
 	ctx.Then(`^the filed bug's description quotes: (.+)$`, c.theFiledBugsDescriptionQuotes)
-	ctx.Then(`^the filed bug has the path of "([^"]*)"$`, c.theFiledBugHasThePathOf)
+	ctx.Then(`^the filed bug has the path of "([^"]*)" but the default model and effort$`, c.theFiledBugHasThePathOf)
 	ctx.Then(`^the filed bug's acceptance has a line beginning "([^"]*)"$`, c.theFiledBugsAcceptanceHasALine)
 }
 
@@ -124,7 +124,11 @@ func (c *nextContext) theFiledBugHasThePathOf(id string) error {
 	if err != nil {
 		return err
 	}
-	if got, want := bug.Merged(), landed.Merged(); got != want {
+	// A filed bug's model and effort are its own, not its finder's
+	// (mw-gq6.1640): sonnet at high, the default route.
+	want := landed.Merged()
+	want.Model, want.Effort = domain.ModelSonnet, domain.EffortHigh
+	if got := bug.Merged(); got != want {
 		return fmt.Errorf("the filed bug's path is %+v, expected %+v", got, want)
 	}
 	return nil

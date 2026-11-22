@@ -30,7 +30,7 @@ Feature: A landing whose closing comment says an acceptance criterion is not met
     And the filed bug is held and labelled "bug" and "friction"
     And the filed bug's description quotes: AC 3 NOT met: the harness refused the step.
     And the filed bug's description quotes: 3. The third thing works, and its long explanation
-    And the filed bug has the path of "mw-gq6.1"
+    And the filed bug has the path of "mw-gq6.1" but the default model and effort
     And the filed bug's acceptance has a line beginning "Sweep:"
 
   Scenario: Only the criterion that is not met gets a bug
