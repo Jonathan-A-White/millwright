@@ -1132,8 +1132,9 @@ minutes and has started nothing, dispatch mails the Mayor one line of counts
 (`Idle: <host> has had room for <time> with nothing to start`): how many ready
 stories are held on a files key, with each file and its holder, how many wait on
 him (`hitl`, `needs-files-key`, `handed-back`, `attempts-exhausted`, `no-sweep`,
-`tester-no-landed-story`), and how many are thawable (parked behind a
-`held-for-<event>` label). It is sent once for an idle spell, kept in the note
+`tester-no-landed-story`), and how many are thawable (held stories past their
+reason: the number `mw stuck` prints as "past their reason", whose newest
+`HELD:` comment names only closed beads). It is sent once for an idle spell, kept in the note
 `host.<host>.idle_spell`; the spell ends when a story starts or the host has no
 room. `thawable = false` in a `[stuck]` table of the config file turns the mail off
 (it is on when the key is missing). See `application/idlehostmail.go`.
