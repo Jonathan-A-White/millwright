@@ -160,7 +160,9 @@ func (c *ClockSteps) Probe(ctx context.Context) (application.Verdict, string) {
 	if len(steps) > 0 {
 		found = []string{c.said(steps)}
 	}
-	if c.State != nil {
+	// A dry run changes nothing, the hour's clock included: the next real run
+	// samples again.
+	if c.State != nil && !application.DoctorDryRun(ctx) {
 		if err := c.State.Save(ctx, ClockStepsSampledStateName, application.DoctorEpisode{FirstFaulty: c.now(), SeenPaths: found}); err != nil {
 			return application.DoctorCannotTell, fmt.Sprintf("saving this check's own state: %v", err)
 		}

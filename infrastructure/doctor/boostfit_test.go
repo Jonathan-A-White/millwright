@@ -248,3 +248,45 @@ func TestBoostFitCureIsOneNoteNamingTheGapsAndLeavesTheFault(t *testing.T) {
 		t.Fatal("the note changes nothing on the Boost")
 	}
 }
+
+func TestBoostFitADryRunAsksAndSavesNothingSoItsHourIsLeftAlone(t *testing.T) {
+	r := newBoostFitRig(t)
+	r.answers["desktop"] = fitAnswer{gaps: []application.HostFitItem{{Name: "fstrim", Detail: "never run", Cure: "c"}}}
+	doc := application.Doctor{Checks: application.DoctorChecks{r.check("laptop")}, State: r.store, Log: r.store,
+		Host: "laptop", Now: func() time.Time { return r.now }}
+	for i := 0; i < 2; i++ {
+		if _, err := doc.Run(context.Background(), doctor.BoostFitName, true); err != nil {
+			t.Fatal(err)
+		}
+		kept, err := r.store.Load(context.Background(), doctor.BoostFitSeenStateName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !kept.FirstFaulty.IsZero() || len(kept.SeenPaths) != 0 {
+			t.Fatalf("dry run %d saved the hourly state: %+v", i+1, kept)
+		}
+	}
+	if len(r.asked) != 2 {
+		t.Errorf("with nothing kept, each dry run asks afresh: asked %v", r.asked)
+	}
+}
+
+func TestBoostFitADryRunInsideTheHourLeavesTheKeptClockAlone(t *testing.T) {
+	r := newBoostFitRig(t)
+	r.answers["desktop"] = fitAnswer{gaps: []application.HostFitItem{{Name: "fstrim", Detail: "never run", Cure: "c"}}}
+	r.probe("laptop")
+	before, err := r.store.Load(context.Background(), doctor.BoostFitSeenStateName)
+	if err != nil || before.FirstFaulty.IsZero() {
+		t.Fatalf("a real run keeps its clock: %+v %v", before, err)
+	}
+	r.now = r.now.Add(61 * time.Minute)
+	doc := application.Doctor{Checks: application.DoctorChecks{r.check("laptop")}, State: r.store, Log: r.store,
+		Host: "laptop", Now: func() time.Time { return r.now }}
+	if _, err := doc.Run(context.Background(), doctor.BoostFitName, true); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := r.store.Load(context.Background(), doctor.BoostFitSeenStateName)
+	if !after.FirstFaulty.Equal(before.FirstFaulty) {
+		t.Errorf("a dry run moved the kept clock from %v to %v", before.FirstFaulty, after.FirstFaulty)
+	}
+}

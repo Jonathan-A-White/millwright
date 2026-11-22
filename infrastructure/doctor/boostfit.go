@@ -130,10 +130,18 @@ func (b *BoostFit) Probe(ctx context.Context) (application.Verdict, string) {
 		lines = kept.SeenPaths
 	} else {
 		lines = b.askAll(ctx, hosts)
-		if err := b.State.Save(ctx, BoostFitSeenStateName, application.DoctorEpisode{FirstFaulty: b.now(), SeenPaths: lines}); err != nil {
-			return application.DoctorCannotTell, fmt.Sprintf("saving this check's own state: %v", err)
+		// A dry run changes nothing, the hour's clock included: the next real run
+		// asks again.
+		if !application.DoctorDryRun(ctx) {
+			if err := b.State.Save(ctx, BoostFitSeenStateName, application.DoctorEpisode{FirstFaulty: b.now(), SeenPaths: lines}); err != nil {
+				return application.DoctorCannotTell, fmt.Sprintf("saving this check's own state: %v", err)
+			}
 		}
 	}
+	return b.verdict(lines)
+}
+
+func (b *BoostFit) verdict(lines []string) (application.Verdict, string) {
 	if len(lines) == 0 {
 		return application.DoctorOK, ""
 	}
