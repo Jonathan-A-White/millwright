@@ -542,6 +542,12 @@ func newDispatchCmd() *cobra.Command {
 				dispatch.Log = logs.Dispatch
 				dispatch.RecheckSkips = logs.RecheckSkips
 			}
+			// The stop floor comes before anything is started (mw-6ww.185.7): a host
+			// under it freezes its Builders and frees space, and the dispatch below
+			// finds its marker and starts nothing. A rehearsal changes nothing.
+			if !dryRun {
+				runDiskGuard(cmd, host, room, gateway)
+			}
 			report, err := dispatch.Run(cmd.Context())
 			// The tick has synced, so what this host holds is level with the home's
 			// give-back: a session of a story another host holds now is ended
