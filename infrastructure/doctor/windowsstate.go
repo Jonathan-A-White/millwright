@@ -52,8 +52,8 @@ const windowsStateTime = "2006-01-02T15:04:05Z"
 // task has stopped, or the PC is off or asleep); when the AC standby timeout is
 // not 0; when a 'millwright' scheduled task is disabled or its last result is a
 // failure; when a physical disk's health is not Healthy; and when the installed
-// script is not the one this mw carries. A restart pending for over 3 days is
-// said in its ok line. Ok, 'not WSL', on a host that is not WSL. Its cure is one
+// script is not the one this mw carries. A restart pending for over 3 days, and the newest
+// act of the last 24 hours in windows-acts beside the file, are said in its ok line. Ok, 'not WSL', on a host that is not WSL. Its cure is one
 // note to the Mayor: nothing on Windows can be changed from WSL.
 type WindowsState struct {
 	// ScriptSHA256 is the SHA-256 of the watcher script this mw carries; empty
@@ -181,7 +181,51 @@ func (w *WindowsState) okLine(st windowsStateLines, age time.Duration) string {
 			}
 		}
 	}
+	if act := w.newestAct(); act != "" {
+		parts = append(parts, "newest act "+act)
+	}
 	return strings.Join(parts, "; ")
+}
+
+// WindowsActsFile is the file beside windows-state in which the Windows task
+// writes one line per act it took to keep WSL up: '<UTC time> <what>: <outcome>',
+// such as '2026-11-21T12:00:00Z hung: restarted' (mw-6ww.185.3).
+const WindowsActsFile = "windows-acts"
+
+// WindowsStateActsWindow is how far back the ok line looks for an act.
+const WindowsStateActsWindow = 24 * time.Hour
+
+// newestAct is the newest act of the last 24 hours as 'what: outcome at time',
+// or "" when the file is absent, unreadable or holds none. A line that is not
+// '<UTC time> <text>' is skipped.
+func (w *WindowsState) newestAct() string {
+	path, err := w.path()
+	if err != nil {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), WindowsActsFile))
+	if err != nil {
+		return ""
+	}
+	var best time.Time
+	var text string
+	for _, l := range strings.Split(string(raw), "\n") {
+		stamp, what, ok := strings.Cut(strings.TrimSpace(l), " ")
+		if !ok || strings.TrimSpace(what) == "" {
+			continue
+		}
+		at, err := time.Parse(windowsStateTime, stamp)
+		if err != nil || w.now().Sub(at) > WindowsStateActsWindow {
+			continue
+		}
+		if at.After(best) {
+			best, text = at, strings.TrimSpace(what)
+		}
+	}
+	if text == "" {
+		return ""
+	}
+	return text + " at " + best.Format(windowsStateTime)
 }
 
 // Cure implements application.DoctorCheck: one note to the Mayor, nothing on

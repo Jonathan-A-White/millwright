@@ -4530,8 +4530,8 @@ desktop is sealed from Windows, so nothing inside it can start a Windows program
 a Windows scheduled task (`contrib/windows/wsl-flag-watch.ps1`, run as the Windows
 user that owns the distro) reads the flag file `~/.local/state/mw/wsl-flag` inside
 WSL every 2 minutes and does one of a fixed set of things: `restart` is `wsl
---shutdown` then the `Start WSL (millwright)` task; `compact` is `fstrim -av`, a
-shutdown, a diskpart compact of the vhdx and the start task. WSL can ask, never
+--shutdown` then a start of the distro by the task itself; `compact` is `fstrim -av`, a
+shutdown, a diskpart compact of the vhdx and the same start. WSL can ask, never
 command: any other content is ignored and logged. `mw host wsl-flag
 restart|compact [--host <host>] [--limit <duration>]` writes the flag on the host
 and waits for `wsl-flag.result` beside it (the task writes it after WSL is back),
@@ -4546,6 +4546,33 @@ the line (it would have to be base64, which an antivirus took for a threat,
 mw-gq6.1431); a binary built with no commit refuses and says to rebuild from the
 checkout. Test: `go test ./cmd/mw -run
 WSLFlag`.
+
+**The task keeps WSL up by itself (mw-6ww.185.3).** The one task runs at startup and
+every 2 minutes with nobody signed in (logon type S4U, no password stored), so a
+Windows restart for an update no longer leaves WSL down until someone signs in. It
+replaces the `millwright-wsl-keeper` and `millwright-wsl-watchdog` tasks and the
+`Start WSL (millwright)` logon task: restart and compact no longer need it. Each
+tick, before it looks at the flag, it does at most one act: a distro that
+`wsl.exe -l --running` does not list is started (`not running: started`); one that
+fails, or does not answer `wsl.exe -d <distro> --exec true` in 40 seconds, on two
+ticks in a row is shut down and started again (`hung: restarted`). Starting is a
+`wsl.exe -d <distro> --exec sleep infinity` process the task leaves running to hold
+the distro up. Everything of WSL's it reads or writes goes through `wsl.exe`, not
+`\\wsl.localhost`. Every act is one line, `<UTC time> <what>: <outcome>`, in
+`windows-acts` beside the flag (it waits in a file beside the task's log until WSL
+answers), and `mw doctor windows-state` names the newest act of the last 24 hours in
+its ok line. The install line, after the task's first good tick (the task writes
+`last-good-tick`), removes the keeper and watchdog tasks if they are there; the way
+back removes only the task and its script. The fourth flag word is `down`:
+`mw host wsl-flag down --for D [--host H] [--dry-run]` (D from 5 minutes to 24
+hours in whole seconds, any other length refused before the flag is written and
+ignored by the task) has the task shut WSL down, start nothing until D has passed
+(`down until T` in its log), start WSL again and write the act `down: started
+again`; it writes the flag and returns, WSL being down. The script's `-DryRun
+-Assume running|stopped|hung|down [-Ticks N] [-DownFor S]` runs ticks against a
+stand-in for `wsl.exe` and prints what each would do. A start after a Windows
+restart with nobody signed in is proven only at the desk. Tests: `go test ./cmd/mw
+-run WSLFlag`, `go test ./infrastructure/doctor -run WindowsState`.
 
 **The Windows side reports itself (mw-6ww.185.2).** When the desktop's WSL is down
 nothing can see Windows, so the same task writes three files into
