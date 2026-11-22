@@ -12,9 +12,11 @@ import (
 )
 
 // handedOffEnv marks an --apply pass that a hand-off started in a unit of its
-// own, and names the file that pass creates once it has begun: the parent
+// own, and names the file that pass writes to once it has begun: the parent
 // tells a unit that never started (run in place instead) from a pass that
-// started and failed (leave with its status).
+// started and failed (leave with its status). The file has no name on disk:
+// the parent holds it open, already unlinked, and the name is its /proc path,
+// so no death of the parent leaves a file behind in the temp directory.
 const handedOffEnv = "MW_APPLY_DETACHED"
 
 // handOff runs the --apply pass a service started in a transient systemd unit
@@ -45,9 +47,9 @@ func handOff(selfPath string, stdout, stderr io.Writer) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
-	started.Close()
-	defer os.Remove(started.Name())
+	defer started.Close()
 	os.Remove(started.Name())
+	startedPath := fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), started.Fd())
 
 	// A unit starts with the manager's environment, not ours: carry ours in.
 	args := []string{"--collect", "--quiet", "--wait", "--pipe", "--same-dir",
@@ -60,12 +62,12 @@ func handOff(selfPath string, stdout, stderr io.Writer) (bool, error) {
 			args = append(args, "--setenv="+kv)
 		}
 	}
-	args = append(args, "--setenv="+handedOffEnv+"="+started.Name(), "--", selfPath, "postern", "inbox", "--apply")
+	args = append(args, "--setenv="+handedOffEnv+"="+startedPath, "--", selfPath, "postern", "inbox", "--apply")
 
 	cmd := exec.Command(systemdRun, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
 	runErr := cmd.Run()
-	if _, statErr := os.Stat(started.Name()); statErr != nil {
+	if info, statErr := started.Stat(); statErr != nil || info.Size() == 0 {
 		return false, nil
 	}
 	var exited *exec.ExitError
@@ -101,8 +103,9 @@ func (e *handedOffExit) Error() string {
 	return fmt.Sprintf("the apply pass, run in a unit of its own, left with status %d", e.code)
 }
 
-// markHandedOff is what the pass a hand-off started does first: create the
-// file the parent looks for, and stop a write to a parent that has died from
+// markHandedOff is what the pass a hand-off started does first: write to the
+// file the parent holds open (the parent may already be dead, and the file
+// then goes with the last descriptor, leaving nothing in /tmp), and stop a write to a parent that has died from
 // killing the pass on SIGPIPE — the parent's death is what the unit is for.
 func markHandedOff() {
 	name := os.Getenv(handedOffEnv)
@@ -110,5 +113,8 @@ func markHandedOff() {
 		return
 	}
 	signal.Ignore(syscall.SIGPIPE)
-	os.WriteFile(name, nil, 0o600)
+	if f, err := os.OpenFile(name, os.O_WRONLY, 0); err == nil {
+		f.WriteString("started\n")
+		f.Close()
+	}
 }
