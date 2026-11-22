@@ -432,15 +432,15 @@ func (g *Gateway) moleculesOverConnection(ctx context.Context, rootIDs []string)
 
 // graphWhere is the beads BeadGraph reads, as its bd list leaves out mail,
 // events and molecules. Its edges are read from the dependencies alone and
-// readGraph keeps those of the beads it holds (mw-gq6.1445).
+// readGraph keeps those of the beads it holds (mw-gq6.1445); the rows are the
+// whole table, read once for the graph and the listing of every bead
+// (wholeEdges, mw-gq6.1626).
 const graphWhere = "i.issue_type not in ('mail', 'event', 'molecule')"
 
 const (
 	graphBeadsQuery  = "select i.id, i.title, i.status, i.issue_type, i.priority, i.created_at from issues i where " + graphWhere + " order by i.created_at, i.id"
 	graphLabelsQuery = "select l.issue_id, l.label from labels l join issues i on i.id = l.issue_id where " + graphWhere +
 		" order by l.issue_id, l.label"
-	graphEdgesQuery = "select d.issue_id, coalesce(d.depends_on_issue_id, d.depends_on_wisp_id, d.depends_on_external) as depends_on_id, d.type" +
-		" from dependencies d"
 )
 
 // graphOverConnection is BeadGraph over the kept connection, in three narrow
@@ -450,7 +450,7 @@ func (g *Gateway) graphOverConnection(ctx context.Context) ([]domain.GraphBead, 
 	if db == nil {
 		return nil, false
 	}
-	graph, err := readGraph(ctx, db)
+	graph, err := readGraph(ctx, db, g.wholeEdges)
 	if err != nil {
 		g.keptFailed(ctx, "the bead graph", err)
 		return nil, false
@@ -458,7 +458,7 @@ func (g *Gateway) graphOverConnection(ctx context.Context) ([]domain.GraphBead, 
 	return graph, true
 }
 
-func readGraph(ctx context.Context, db *sql.DB) ([]domain.GraphBead, error) {
+func readGraph(ctx context.Context, db *sql.DB, edgeRows func(context.Context, *sql.DB) ([]edgeRow, error)) ([]domain.GraphBead, error) {
 	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
 	defer cancel()
 	rows, err := db.QueryContext(bounded, graphBeadsQuery)
@@ -507,20 +507,14 @@ func readGraph(ctx context.Context, db *sql.DB) ([]domain.GraphBead, error) {
 	}
 	labels.Close()
 
-	edges, err := db.QueryContext(bounded, graphEdgesQuery)
+	edges, err := edgeRows(ctx, db)
 	if err != nil {
 		return nil, err
 	}
-	defer edges.Close()
-	for edges.Next() {
-		var id, kind string
-		var to sql.NullString
-		if err := edges.Scan(&id, &to, &kind); err != nil {
-			return nil, err
-		}
-		if i, held := at[id]; held && to.String != "" {
-			graph[i].Edges = append(graph[i].Edges, domain.BeadEdge{To: to.String, Kind: kind})
+	for _, e := range edges {
+		if i, held := at[e.issue]; held && e.to != "" {
+			graph[i].Edges = append(graph[i].Edges, domain.BeadEdge{To: e.to, Kind: e.kind})
 		}
 	}
-	return graph, edges.Err()
+	return graph, nil
 }

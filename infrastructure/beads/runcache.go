@@ -51,6 +51,9 @@ type runCache struct {
 	// the grillings and again for the stuck check, 2.5 s each at load
 	// (mw-gq6.1323).
 	graph memo[[]domain.GraphBead]
+	// edges is every row of the dependencies, which the listing of every bead and
+	// the bead graph each keep the edges of their beads from (mw-gq6.1626).
+	edges memo[[]edgeRow]
 	// closed is the closed stories read of a rig, or of every rig, each kept
 	// under the kind of read it was (see closedMemo).
 	closed closedMemo
@@ -64,6 +67,7 @@ func (c *runCache) reset() {
 	c.notes.reset()
 	c.keptNotes.reset()
 	c.graph.reset()
+	c.edges.reset()
 	c.closed.reset()
 }
 
