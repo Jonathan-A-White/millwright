@@ -19,8 +19,21 @@ import (
 // (mw-gq6.1286). The edges are read from the dependencies alone and readClosed
 // keeps those of the closed stories it holds: a join with the closed condition
 // took 0.9 to 1.0 s of the server at load 12 and over (mw-gq6.1445).
+//
+// The only index on a closed bead is (status, updated_at), so a bound on
+// closed_at alone read all 80,000 closed beads, metadata and all, for the 15,000
+// of the fortnight: 1 to 2 s of the server at load (mw-gq6.1619). A bead is
+// closed at its last update, so closedWhere also bounds updated_at, from
+// closedUpdatedSlack before the closed_at bound, and the server reads the
+// fortnight's range of the index; the closed_at condition still gives the exact
+// answer. closedBounds is the two arguments of closedWhere.
 const (
-	closedWhere = "i.status = 'closed' and i.issue_type not in ('epic', 'mail', 'event') and i.closed_at >= ?"
+	closedWhere = "i.status = 'closed' and i.issue_type not in ('epic', 'mail', 'event') and i.closed_at >= ?" +
+		" and i.updated_at >= ?"
+
+	// closedUpdatedSlack is how far before a bead's closed_at its updated_at may
+	// lie: 0 to 1 s on the beads held (10,390 of them, none more than a second).
+	closedUpdatedSlack = time.Hour
 
 	closedStoriesQuery = "select i.id as id, i.title as title, i.issue_type as issue_type, i.closed_at as closed_at," +
 		" i.close_reason as close_reason, i.metadata as metadata from issues i where " + closedWhere
@@ -44,12 +57,16 @@ func (g *Gateway) closedOverConnection(ctx context.Context, since time.Time) (cl
 	return closed, true
 }
 
+// closedBounds is the arguments of closedWhere for the stories closed since.
+func closedBounds(since time.Time) []any {
+	return []any{since.UTC().Format(time.DateTime), since.Add(-closedUpdatedSlack).UTC().Format(time.DateTime)}
+}
+
 func readClosed(ctx context.Context, db *sql.DB, since time.Time) ([]application.ClosedStory, error) {
 	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
 	defer cancel()
-	from := since.UTC().Format(time.DateTime)
 
-	rows, err := db.QueryContext(bounded, closedStoriesQuery, from)
+	rows, err := db.QueryContext(bounded, closedStoriesQuery, closedBounds(since)...)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +150,7 @@ func (g *Gateway) closedOfRigOverConnection(ctx context.Context, rig string, sin
 func readClosedOfRig(ctx context.Context, db *sql.DB, query string, since time.Time, rig string) ([]application.ClosedStory, error) {
 	bounded, cancel := context.WithTimeout(ctx, keptQueryBound)
 	defer cancel()
-	rows, err := db.QueryContext(bounded, query, since.UTC().Format(time.DateTime), rig)
+	rows, err := db.QueryContext(bounded, query, append(closedBounds(since), rig)...)
 	if err != nil {
 		return nil, err
 	}
