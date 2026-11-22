@@ -99,7 +99,7 @@ if (-not (Get-ScheduledTask -TaskName $startTask -ErrorAction SilentlyContinue))
     exit 1
 }
 
-Log "$want: begin"
+Log "${want}: begin"
 if ($want -eq 'restart') {
     wsl.exe --shutdown
     Start-Sleep 15
