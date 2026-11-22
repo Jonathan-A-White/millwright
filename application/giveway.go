@@ -101,6 +101,9 @@ type GiveWayMarker struct {
 	// before the first write or after one that failed: a renew writes it again at
 	// once then, and otherwise no oftener than GiveWayNoteRenewEvery.
 	NoteAt time.Time `json:"note_at,omitempty"`
+	// Disk is set when the disk guard froze the host (DiskGuard), not a person: the
+	// marker is the guard's to renew and lift.
+	Disk *GiveWayDisk `json:"disk,omitempty"`
 }
 
 // GiveWayMarkers keeps the marker in the host's own state directory. Nothing
@@ -190,6 +193,9 @@ type GiveWayRequest struct {
 	Sessions []string
 	// Notes are the --note k=v given, put in the log line.
 	Notes map[string]string
+	// Disk is the disk guard's own on: the marker it leaves is its, and a
+	// person's on over it takes it over.
+	Disk bool
 }
 
 func (g GiveWay) now() time.Time {
@@ -574,6 +580,7 @@ func (g GiveWay) On(ctx context.Context, req GiveWayRequest) error {
 			marker, renewing = old, true
 			marker.Seen = start
 		}
+		marker = marker.forRequest(req, g.by())
 		if err := g.Marker.Write(ctx, marker); err != nil {
 			return fmt.Errorf("writing the give-way marker: %w", err)
 		}
@@ -1014,7 +1021,11 @@ func (g GiveWay) Status(ctx context.Context) error {
 	if !there {
 		g.say("not giving way")
 	} else {
-		g.say("gives way since %s (by %s, last seen %s ago): %d sessions, %d processes stopped",
+		said := "gives way"
+		if marker.Disk != nil {
+			said = "frozen for its disk"
+		}
+		g.say("%s since %s (by %s, last seen %s ago): %d sessions, %d processes stopped", said,
 			marker.Since.UTC().Format(time.RFC3339), marker.By, now.Sub(marker.Seen).Round(time.Second), len(marker.Sessions), len(marker.Stopped))
 		if now.Sub(marker.Seen) > g.stale() {
 			g.say("the marker is stale (not renewed for over %s): the next dispatch tick lifts it", g.stale())
