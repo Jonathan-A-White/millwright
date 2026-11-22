@@ -66,6 +66,9 @@ type BatchMetric struct {
 	// tests: the next landing leaves it out and lands the others together
 	// (mw-6ww.119.11.1.2). A guess, never a verdict: empty when none is named.
 	Suspect string `json:"suspect,omitempty"`
+	// HandedBack are the stories a batch of one handed back to a Builder for
+	// being red alone again: their count of holds starts again (mw-gq6.1637).
+	HandedBack []string `json:"handed_back,omitempty"`
 }
 
 // Metric is the line the batch leaves, as of at.
@@ -81,6 +84,7 @@ func (r BatchReport) Metric(at time.Time) BatchMetric {
 	if r.Landed {
 		m.IDs = storyIDs(r.Merged)
 	}
+	m.HandedBack = storyIDs(r.RedAloneBack)
 	if m.heldRed() && len(m.IDs) > 1 {
 		m.Suspect = r.suspect()
 	}
@@ -214,4 +218,28 @@ func HeldRedAlone(lines []BatchMetric) map[string]int {
 		}
 	}
 	return alone
+}
+
+// HeldRedAloneBefore is the number of the latest batch that held the story red
+// when landed alone, if one did and nothing since mended it, however many
+// batches of other stories landed between: a story is handed back when a batch
+// of it alone is red again (mw-gq6.1637). Unlike HeldRedAlone, whose window ends
+// at the rig's last landing so that a story is taken again once the rig lands,
+// the count here ends only at a batch that landed the story or handed it back.
+func HeldRedAloneBefore(lines []BatchMetric, id string) (int, bool) {
+	var batch int
+	var held bool
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if slices.Contains(line.HandedBack, id) {
+			break
+		}
+		if line.Outcome != BatchHeld && slices.Contains(line.IDs, id) {
+			break
+		}
+		if line.heldRed() && len(line.IDs) == 1 && line.IDs[0] == id && !held {
+			batch, held = line.Batch, true
+		}
+	}
+	return batch, held
 }
