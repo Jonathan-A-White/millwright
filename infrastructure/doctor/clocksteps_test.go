@@ -151,3 +151,48 @@ func TestClockStepsCureIsOneNote(t *testing.T) {
 		t.Fatalf("expected one note naming the check, got %v %v", notes, err)
 	}
 }
+
+func TestClockStepsADryRunSamplesAndSavesNothingSoItsHourIsLeftAlone(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	store := doctor.New(t.TempDir())
+	clock := newStepClock(map[int]time.Duration{40: -1300 * time.Millisecond})
+	check := clock.check("wsl")
+	check.State, check.Now = store, func() time.Time { return now }
+	doc := application.Doctor{Checks: application.DoctorChecks{check}, State: store, Log: store,
+		Host: "desktop", Now: func() time.Time { return now }}
+	for i := 0; i < 2; i++ {
+		if _, err := doc.Run(context.Background(), doctor.ClockStepsName, true); err != nil {
+			t.Fatal(err)
+		}
+		kept, err := store.Load(context.Background(), doctor.ClockStepsSampledStateName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !kept.FirstFaulty.IsZero() || len(kept.SeenPaths) != 0 {
+			t.Fatalf("dry run %d saved the hourly state: %+v", i+1, kept)
+		}
+	}
+}
+
+func TestClockStepsADryRunInsideTheHourLeavesTheKeptClockAlone(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	store := doctor.New(t.TempDir())
+	clock := newStepClock(nil)
+	check := clock.check("wsl")
+	check.State, check.Now = store, func() time.Time { return now }
+	check.Probe(context.Background())
+	before, _ := store.Load(context.Background(), doctor.ClockStepsSampledStateName)
+	if before.FirstFaulty.IsZero() {
+		t.Fatal("a real run keeps its clock")
+	}
+	now = now.Add(61 * time.Minute)
+	doc := application.Doctor{Checks: application.DoctorChecks{check}, State: store, Log: store,
+		Host: "desktop", Now: func() time.Time { return now }}
+	if _, err := doc.Run(context.Background(), doctor.ClockStepsName, true); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := store.Load(context.Background(), doctor.ClockStepsSampledStateName)
+	if !after.FirstFaulty.Equal(before.FirstFaulty) {
+		t.Errorf("a dry run moved the kept clock from %v to %v", before.FirstFaulty, after.FirstFaulty)
+	}
+}
