@@ -330,7 +330,15 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		if running || len(ready) == 0 {
 			continue
 		}
-		text := fmt.Sprintf("%s: %d ready, none running for %s, held by %s", rig, len(ready), elapsed(now.Sub(r.Since)), holdsWords(holding[rig]))
+		// A rig only some hosts step aside from (no grist key here, pinned elsewhere)
+		// while the hosts that could take it wait for room is held by that room, and
+		// the alarm says so (mw-gq6.1659).
+		heldBy := "held by " + holdsWords(holding[rig])
+		waiting, standsAside := hostsStandingAside(holding[rig])
+		if standsAside {
+			heldBy = waitsForWords(waiting)
+		}
+		text := fmt.Sprintf("%s: %d ready, none running for %s, %s", rig, len(ready), elapsed(now.Sub(r.Since)), heldBy)
 		// The oldest host's own holds decide whether it is a wait and whether a
 		// harness stop is among them (mw-gq6.1439).
 		own := hostsHolds(holding[rig], r.Host)
@@ -352,6 +360,7 @@ func StarvedAlarms(rigs []StarvedRig, work WorkInHand, now time.Time) []DamperAl
 		for _, h := range own {
 			wait = wait && holdIsAWait(h)
 		}
+		wait = wait || standsAside
 		identity := strings.Join(append([]string{rig}, slices.Sorted(slices.Values(ready))...), "\t")
 		alarms = append(alarms, DamperAlarm{Principle: StarvedPrinciple, Text: text, Beads: ready, Identity: identity, Wait: wait})
 	}
