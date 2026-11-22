@@ -26,21 +26,26 @@ func hostPasteBlocks(out string) []string {
 	return blocks
 }
 
+// hostPasteCommands is every `mw host` command that prints a Windows paste (the
+// wsl-flag install line prints its way back beside it). A new paste generator
+// goes here: the one-line, no-base64, paste-rules and parse tests all read it.
+var hostPasteCommands = [][]string{
+	{"host", "trim-setup"},
+	{"host", "wsl-flag", "--install-line"},
+	{"host", "giveway", "--install-line"},
+	{"host", "giveway", "--uninstall-line"},
+	{"host", "giveway", "--mode-line", "freeze"},
+	{"host", "giveway", "--mode-line", "shutdown"},
+	{"host", "hidden"},
+}
+
 // mw-gq6.1437: a 25-line paste typed into the Governor's PowerShell came out
 // garbled ('Triggggggggggggggggger') and left a $c from an earlier line in use.
 // Every paste mw host prints is one physical line, with no base64.
 func TestEveryHostPasteIsOneLineAndHoldsNoBase64(t *testing.T) {
 	hostTrimStates(t, "laptop", map[string]string{"laptop": "lacks-dropin"})
 	giveWayPinned(t)
-	for _, args := range [][]string{
-		{"host", "trim-setup"},
-		{"host", "wsl-flag", "--install-line"},
-		{"host", "giveway", "--install-line"},
-		{"host", "giveway", "--uninstall-line"},
-		{"host", "giveway", "--mode-line", "freeze"},
-		{"host", "giveway", "--mode-line", "shutdown"},
-		{"host", "hidden"},
-	} {
+	for _, args := range hostPasteCommands {
 		name := "mw " + strings.Join(args, " ")
 		out, err := runMw(t, args...)
 		if err != nil {
@@ -134,15 +139,7 @@ func TestHostHiddenPasteVariablesCarryThePrefix(t *testing.T) {
 func TestHostPastesPassThePasteRules(t *testing.T) {
 	hostTrimStates(t, "laptop", map[string]string{"laptop": "lacks-dropin"})
 	giveWayPinned(t)
-	for _, args := range [][]string{
-		{"host", "trim-setup"},
-		{"host", "wsl-flag", "--install-line"},
-		{"host", "giveway", "--install-line"},
-		{"host", "giveway", "--uninstall-line"},
-		{"host", "giveway", "--mode-line", "freeze"},
-		{"host", "giveway", "--mode-line", "shutdown"},
-		{"host", "hidden"},
-	} {
+	for _, args := range hostPasteCommands {
 		name := "mw " + strings.Join(args, " ")
 		out, err := runMw(t, args...)
 		if err != nil {
