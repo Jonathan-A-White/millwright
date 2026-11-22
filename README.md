@@ -4612,6 +4612,37 @@ installed before this change writes no state until its line is run again. Tests:
 `go test ./cmd/mw -run WSLFlag`, `go test ./infrastructure/doctor -run
 WindowsState`.
 
+**Shrink the Linux disk to fit its drive, once (mw-6ww.185.5).** Linux on the desktop saw a
+1,007 GB disk held in a file on a 286 GB drive, so nothing inside WSL ever felt the drive
+fill, and the file only grows: trims, compacts and floors are all guards around a disk that
+is too big for its drive. The fourth fixed flag word, `shrink`, makes the disk smaller than
+the drive, once, so the vhdx can never outgrow it and a full disk is an ordinary Linux
+`no space left` that mw's floors see and a sweep cures. The order is **sweep, drain,
+shrink**: sweep the host so the root's used bytes are under 70% of the new size, drain it
+(`mw config set cap 0`), then `mw host wsl-flag shrink [--host <host>] [--limit 3h]` writes
+the flag, waits and prints the result, as `restart` and `compact` do; it refuses while the
+host's cap is not 0 (`drain it first: mw config set cap 0`) unless `--running` is given. The
+size is never chosen from inside WSL: it comes from the line the Governor reads,
+`mw host wsl-flag --install-line --shrink-gb 220` (220 GB on the desktop's 286 GB drive,
+provisional), and the task keeps it in `shrink-gb` beside its log in
+`%ProgramData%\millwright`; a task installed with no size answers a shrink flag `failed: no
+size was installed` and changes nothing. The task refuses, leaving WSL as it is, unless WSL
+is 2.5 or later (`wsl --manage --resize` needs it), N GB is under 80% of the drive's size and
+the Linux root's used bytes are under 70% of N GB; then it runs `wsl --shutdown`, `wsl
+--manage <distro> --resize <N>GB` and starts WSL, and the result line holds the tool's last
+lines and `df`'s size of `/` before and after. A failure starts WSL again and says `failed:
+...`. **The way back** is the same command with a larger size: install the line again with a
+larger `--shrink-gb` and `mw host wsl-flag shrink` again. The script's `-DryRun -FlagWord
+shrink -ShrinkGB N [-WslVersion V] [-DriveSizeGB G] [-RootSizeGB R] [-RootUsedGB U]
+[-ResizeFails]` prints each refusal and the order of the good case against stand-ins.
+`mw doctor wsl-disk-fits` on a WSL host that is not the home is faulty when the root
+filesystem's size is larger than its Windows drive's size (the `vhdx_drive` line of
+`windows-state`) less 20 GB, saying both numbers and naming `mw host wsl-flag shrink`;
+cannot-tell with no `windows-state`; ok on a host that is not WSL. On the home it is never
+faulty (its disk is not shrunk without the Governor's word): its ok line says the two numbers
+and `watched by wsl-drive-free`. Tests: `go test ./cmd/mw -run WSLFlag`, `go test
+./infrastructure/doctor -run WSLDiskFits`.
+
 **Compact, monthly.** Trimming only marks the freed blocks; the vhdx file shrinks
 when Windows compacts it. About monthly, and whenever the drive runs low, in an
 admin Windows PowerShell with nothing running in WSL (it stops WSL; the last
