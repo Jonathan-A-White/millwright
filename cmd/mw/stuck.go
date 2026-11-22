@@ -43,7 +43,10 @@ func newStuckCmd() *cobra.Command {
 			"one a line (mw status cuts a list at 5 and ends it '+N (all: mw stuck --dampers)'): the review queue's\n" +
 			"cards, demos and hands steps, the untouched P1s, the waiting demos, the grillings with no card, the\n" +
 			"needs-you line when his badge's count is over needs_you. With\n" +
-			"no alarm tripped it prints a single line saying so. It reads and writes nothing.",
+			"no alarm tripped it prints a single line saying so. After the alarms it always prints two lines: his\n" +
+			"review queue against its limit (the limit of review_queue is judged on that alone) and, beside it,\n" +
+			"the number Postern's Needs you badge shows, split by kind (cards, demos, hands steps, landings\n" +
+			"waiting for his look, other), with his To do items beside it. It reads and writes nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if dampers {
@@ -68,7 +71,7 @@ func newStuckCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprint(cmd.OutOrStdout(), report.FullList())
+				fmt.Fprint(cmd.OutOrStdout(), report.FullList(), report.QueueLines())
 				return nil
 			}
 			gateway, err := beads.FromConfig()

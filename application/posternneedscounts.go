@@ -38,6 +38,10 @@ type PosternNeedsCounts struct {
 	WrittenAt string             `json:"written_at"`
 	You       PosternNeedsWaiter `json:"you"`
 	Mayor     PosternNeedsWaiter `json:"mayor"`
+	// Todo is how many open items wait on his own To do lists. They make no need,
+	// so they are not in You.Total, and the needs_you alarm does not judge them;
+	// the report prints them beside his badge's number (mw-gq6.1643).
+	Todo int `json:"todo,omitempty"`
 }
 
 // CountPosternNeeds counts doc's needs that wait on him and on the Mayor, not
@@ -46,6 +50,11 @@ func CountPosternNeeds(doc PosternViewDoc, now time.Time) PosternNeedsCounts {
 	counts := PosternNeedsCounts{
 		V: 1, WrittenAt: now.UTC().Format(time.RFC3339),
 		You: PosternNeedsWaiter{Kinds: map[string]int{}}, Mayor: PosternNeedsWaiter{Kinds: map[string]int{}},
+	}
+	for _, bead := range doc.Beads {
+		if bead.Type != "epic" && bead.Status != "closed" && hasLabel(bead.Labels, LabelHitlTodo) {
+			counts.Todo++
+		}
 	}
 	for _, need := range doc.Needs {
 		if need.Folded {
