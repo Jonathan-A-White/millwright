@@ -1557,53 +1557,6 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	return report, nil
 }
 
-// recheckBug re-runs the check a bug names on its rig's main, before the story is
-// claimed (mw-gq6.414, mw-gq6.775). A check that passes closes the story (no
-// session, no claim, no worktree) and fixed is true. Otherwise the story is
-// dispatched as it always was, and said is what the re-run came to for its line:
-// that the check still fails, why it could not be run, or that the bug names none.
-// Nothing is re-run in a dry run, and nothing for a story that is not a bug, or is
-// a flaky file's bug.
-func (d Dispatch) recheckBug(ctx context.Context, detail StoryDetail, path domain.Path, report *DispatchReport) (said string, fixed bool) {
-	check, named, asked := bugCheck(detail, path.Files)
-	if (d.Rechecks == nil && d.ExampleRechecks == nil) || d.DryRun || !asked {
-		return "", false
-	}
-	id := detail.Story.ID
-	if !named {
-		return noCheckNamed, false
-	}
-	var found SpecRecheck
-	var err error
-	if check.IsExample() {
-		if d.ExampleRechecks == nil {
-			return "", false
-		}
-		found, err = d.ExampleRechecks.RecheckExamples(ctx, check.App, check.Kind, check.Examples)
-		if errors.Is(err, ErrNoGristKey) {
-			return noGristKeyHere, false
-		}
-	} else {
-		if d.Rechecks == nil {
-			return "", false
-		}
-		found, err = d.recheckUnderGate(ctx, id, path.Rig, check.Spec, report)
-	}
-	var busy gateBusy
-	if errors.As(err, &busy) {
-		d.noteRecheckSkip(ctx, report, id, busy.Error())
-		return busy.Error(), false
-	}
-	switch {
-	case err != nil:
-		d.noteRecheckSkip(ctx, report, id, "not re-run on main first: "+firstLine(err.Error()))
-		return fmt.Sprintf("not re-run on main first: %v", oneLine(err.Error())), false
-	case !found.Passed:
-		return fmt.Sprintf("re-run on main first: %s (%s) still fails at %s", check, check.Source, short(found.Sha)), false
-	}
-	return d.settlePassedBug(ctx, detail, path.Rig, check, found, report)
-}
-
 // closeStory closes the story id the way mw next closes one (CloseRetry,
 // mw-gq6.1133): a passing fault is waited out and tried again, a close bd was
 // unsure of is read first, and a close lost every try is mailed to the Mayor
