@@ -143,13 +143,22 @@ func (v *VaultDirty) remember(ctx context.Context, outside []string) ([]string, 
 	if err != nil {
 		return nil, fmt.Errorf("reading this check's own state: %w", err)
 	}
+	// A dry run changes nothing, this check's own record included: it reads what
+	// the last real run saw and keeps it.
+	dry := application.DoctorDryRun(ctx)
 	if len(outside) == 0 {
 		if len(episode.SeenPaths) == 0 {
 			return nil, nil
 		}
+		if dry {
+			return episode.SeenPaths, nil
+		}
 		if err := v.State.Reset(ctx, vaultDirtySeenStateName); err != nil {
 			return nil, fmt.Errorf("forgetting this check's own state: %w", err)
 		}
+		return episode.SeenPaths, nil
+	}
+	if dry {
 		return episode.SeenPaths, nil
 	}
 	if err := v.State.Save(ctx, vaultDirtySeenStateName, application.DoctorEpisode{SeenPaths: outside}); err != nil {

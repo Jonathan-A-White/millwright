@@ -80,8 +80,11 @@ func (f *Formulas) Probe(ctx context.Context) (application.Verdict, string) {
 		return application.DoctorCannotTell, "comparing the formulas: " + err.Error()
 	}
 	if len(stale) == 0 {
-		if err := f.State.Reset(ctx, formulasSeenStateName); err != nil {
-			return application.DoctorCannotTell, "forgetting this check's own state: " + err.Error()
+		// A dry run changes nothing, this check's own record included.
+		if !application.DoctorDryRun(ctx) {
+			if err := f.State.Reset(ctx, formulasSeenStateName); err != nil {
+				return application.DoctorCannotTell, "forgetting this check's own state: " + err.Error()
+			}
 		}
 		return application.DoctorOK, ""
 	}
@@ -94,8 +97,10 @@ func (f *Formulas) Probe(ctx context.Context) (application.Verdict, string) {
 		return application.DoctorCannotTell, "reading this check's own state: " + err.Error()
 	}
 	if len(seen.SeenPaths) == 0 {
-		if err := f.State.Save(ctx, formulasSeenStateName, application.DoctorEpisode{SeenPaths: []string{head}}); err != nil {
-			return application.DoctorCannotTell, "saving this check's own state: " + err.Error()
+		if !application.DoctorDryRun(ctx) {
+			if err := f.State.Save(ctx, formulasSeenStateName, application.DoctorEpisode{SeenPaths: []string{head}}); err != nil {
+				return application.DoctorCannotTell, "saving this check's own state: " + err.Error()
+			}
 		}
 		return application.DoctorOK, ""
 	}

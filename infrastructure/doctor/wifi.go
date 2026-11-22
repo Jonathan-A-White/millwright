@@ -97,8 +97,11 @@ func (w *Wifi) Probe(ctx context.Context) (application.Verdict, string) {
 	}
 
 	if w.reachable(ctx) {
-		if err := w.State.Reset(ctx, wifiReachStateName); err != nil {
-			return application.DoctorCannotTell, fmt.Sprintf("forgetting this check's own state: %v", err)
+		// A dry run changes nothing, this check's own record included.
+		if !application.DoctorDryRun(ctx) {
+			if err := w.State.Reset(ctx, wifiReachStateName); err != nil {
+				return application.DoctorCannotTell, fmt.Sprintf("forgetting this check's own state: %v", err)
+			}
 		}
 		return application.DoctorOK, ""
 	}
@@ -110,8 +113,10 @@ func (w *Wifi) Probe(ctx context.Context) (application.Verdict, string) {
 	first := episode.FirstFaulty
 	if first.IsZero() {
 		first = w.now()
-		if err := w.State.Save(ctx, wifiReachStateName, application.DoctorEpisode{FirstFaulty: first}); err != nil {
-			return application.DoctorCannotTell, fmt.Sprintf("saving this check's own state: %v", err)
+		if !application.DoctorDryRun(ctx) {
+			if err := w.State.Save(ctx, wifiReachStateName, application.DoctorEpisode{FirstFaulty: first}); err != nil {
+				return application.DoctorCannotTell, fmt.Sprintf("saving this check's own state: %v", err)
+			}
 		}
 	}
 
