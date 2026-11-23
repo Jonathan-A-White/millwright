@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright"
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/domain/events"
@@ -627,6 +628,7 @@ func newDoctorCmd() *cobra.Command {
 				doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
 				wg,
 				doctor.NewVaultDirty(vault, host, store),
+				doctor.NewVaultGitignore(vault, host, millwright.Template()),
 				formulasCheck,
 				doctor.NewTimers(units),
 				beadsSizeCheck(vault, host, beadsBudget, beadsSquash, cmd.ErrOrStderr()),

@@ -598,6 +598,19 @@ Feature: mw doctor
     Then mw doctor leaves with the status 0
     And the doctor log holds "age-key ok n/a: the vault keeps no secrets"
 
+  Scenario: The real vault-gitignore check on a vault whose .gitignore lacks a line of the template's names it and cures it by adding it (mw-gq6.1689)
+    Given a vault whose .gitignore is the template's without the line "runs/*/heartbeat-*.log"
+    When mw doctor's vault-gitignore check runs
+    Then mw doctor printed "runs/*/heartbeat-*.log"
+    And the doctor log holds "vault-gitignore cured"
+    And the vault's .gitignore holds the line "runs/*/heartbeat-*.log"
+
+  Scenario: The real vault-gitignore check on a vault whose .gitignore holds every line of the template's is ok
+    Given a vault whose .gitignore is the template's
+    When mw doctor's vault-gitignore check runs
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "vault-gitignore ok"
+
   Scenario: The real boost-config check on the home whose [tests] has a line the vault's hosts/boost-config.toml lacks cures it by exporting and committing that file
     Given the home host's config.toml for boost-config holding:
       """
