@@ -68,6 +68,6 @@ Files: [codemap-detail.md](codemap-detail.md).
 
 cmd/mw/root.go, cmd/mw/version.go
 
-changelog_files: infra/rig/version.go > domain/changelog.go; union_merge_files: rig/landing.go; regenerated_files: rig/regenerate.go
+changelog_files: infra/rig/version.go > domain/changelog.go; union_merge_files: rig/landing.go
 
 scripts/check-codemap.sh
