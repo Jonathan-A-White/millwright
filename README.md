@@ -116,6 +116,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
   - [Outside services and networks](#outside-services-and-networks)
   - [The version a landing raises](#the-version-a-landing-raises)
   - [Merging append-mostly docs by union](#merging-append-mostly-docs-by-union)
+  - [Regenerating generated files after a conflict](#regenerating-generated-files-after-a-conflict)
   - [The changelog a landing writes](#the-changelog-a-landing-writes)
 - [Licence](#licence)
 
