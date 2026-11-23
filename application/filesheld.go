@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // FilesHeldTooLong is how long a ready story may wait on a files overlap before
@@ -134,4 +136,43 @@ func heldByFiles(since time.Time, now time.Time) string {
 		return ""
 	}
 	return fmt.Sprintf("held by files for %s, since %s", elapsed(now.Sub(since)), since.UTC().Format("01-02 15:04Z"))
+}
+
+// readyDemand counts the ready stories of host auto that wait for any host,
+// those held on a file a running story names, and those folded into another
+// ready story that shares a file with them.
+//
+// A ready story whose files a running story names is held by the dispatch of
+// any host until that story lands, so no new box can start it either: it is
+// counted apart and makes no box (mw-gq6.1669). The test is the dispatch's own
+// (fileShares) on what the tracker says, the files key and the files the story
+// recorded as changed; a branch's own diff is on its host and is not read here,
+// so a story held only by that is still counted as waiting.
+//
+// Of the ready stories left, dispatch starts one of a set that share a file and
+// holds the rest until it lands (Dispatch.keepFilesHeld, which counts each story
+// it starts as running), so such a set is one unit of demand, not one each
+// (mw-gq6.1673). They are taken in the tracker's order, and each counted as
+// waiting joins the stories the next is tested against, by the same test.
+func readyDemand(ctx context.Context, running, ready []StoryDetail) (waiting, held, folded int) {
+	var shares, counted fileShares
+	for _, d := range running {
+		shares.add(d)
+	}
+	for _, d := range ready {
+		if d.Merged().Host != domain.HostAuto || d.Hitl() {
+			continue
+		}
+		if share, shared := shares.shared(ctx, d); shared && share.Unkeyed == KeyedBoth {
+			held++
+			continue
+		}
+		if share, shared := counted.shared(ctx, d); shared && share.Unkeyed == KeyedBoth {
+			folded++
+			continue
+		}
+		counted.add(d)
+		waiting++
+	}
+	return waiting, held, folded
 }
