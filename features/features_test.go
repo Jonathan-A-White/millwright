@@ -1,12 +1,14 @@
 package features
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/features/steps"
@@ -121,13 +123,23 @@ func runFeatures(t *testing.T, paths []string) {
 		TestingT: t,
 	}
 
+	var started atomic.Int64
 	suite := godog.TestSuite{
-		ScenarioInitializer: initializeScenarios,
-		Options:             &opts,
+		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
+			ctx.Before(func(c context.Context, _ *godog.Scenario) (context.Context, error) {
+				started.Add(1)
+				return c, nil
+			})
+			initializeScenarios(ctx)
+		},
+		Options: &opts,
 	}
 
 	if suite.Run() != 0 {
 		t.Fatal("non-zero status returned, failed to run feature tests")
+	}
+	if started.Load() == 0 {
+		t.Fatalf("MW_FEATURE=%s ran no scenario: it names no feature file, or a line that starts no scenario", strings.Join(paths, " "))
 	}
 }
 
