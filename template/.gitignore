@@ -26,8 +26,10 @@ runs/*/next-*.log
 runs/*/stderr-*.log
 # The heartbeat's words, kept beside the harness's by the same line (mw-gq6.1683)
 runs/*/heartbeat-*.log
-# mw check's whole output
-runs/*/check-*.log
+# mw check's whole output and its scratch files: each part's .run, .out, .took
+# and .prog, the specs' and the gate's .run, .out and .result, the tests' .rec,
+# and the .slot files (mw-gq6.1688)
+runs/*/check-*
 # mw todo rank's pass logs
 runs/todo-rank/
 

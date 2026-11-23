@@ -2,7 +2,7 @@ Feature: A run leaves nothing stray in the vault
   mw writes some files into the vault that it never commits: a session's boot
   file, the temp file its result is redirected into, the close-out's own log,
   the heartbeat's log, the harness's stderr,
-  mw check's log, the seats' reaper and talk logs and acting files, the key
+  mw check's log and scratch files, the seats' reaper and talk logs and acting files, the key
   metrics. The .gitignore mw init lays in a fresh vault names each of them, so
   that after a run git status of the vault is quiet and a seat booted into the
   vault is not shown hundreds of leftovers (mw-gq6.461). What mw does commit is
@@ -23,6 +23,19 @@ Feature: A run leaves nothing stray in the vault
     And mw closes out "mw-gq6.1"
     Then the story "mw-gq6.1" is closed
     And git status of the vault is quiet
+
+  Scenario: A story checked part by part, with its changed specs, leaves git status of the vault quiet (mw-gq6.1688)
+    Given the rig's gate is split into these parts:
+      | name     | command                      |
+      | lint     | printf 'lint\n' >> {log}     |
+      | unit 1/1 | printf 'unit-1\n' >> {log}   |
+    And the rig has a changed-specs command that logs the specs it is given
+    And the story "mw-gq6.1" has been worked in its own worktree
+    And the story "mw-gq6.1" also added the spec "tests/e2e/talk-fit.spec.ts"
+    When a session checks "mw-gq6.1" part 1
+    And a session checks "mw-gq6.1" part 2
+    And a session checks "mw-gq6.1"
+    Then git status of the vault is quiet
 
   Scenario: A session killed before its result is moved into place leaves git status of the vault quiet
     Given the story "mw-gq6.1" has been worked in its own worktree
