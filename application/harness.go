@@ -24,6 +24,12 @@ type Launch struct {
 	Kickoff    string
 	ResultFile string
 
+	// StderrFile is the file the harness's own stderr is kept in as well as shown
+	// in the pane (mw-gq6.1677), beside ResultFile: the pane is closed when the
+	// story is reclaimed, and dies with a host that shuts down. Empty keeps
+	// nothing.
+	StderrFile string
+
 	// After is the command run when the harness exits, however it exits: mw
 	// closing the story out. It is chained onto the harness's own command line
 	// rather than hung off a hook, because a session that dies fires no hooks

@@ -1641,3 +1641,35 @@ func TestNoClaudeEnvFileLeavesTheLaunchAsItWas(t *testing.T) {
 		}
 	}
 }
+
+// mw-gq6.1677: the harness's own stderr is kept beside the result (Launch.StderrFile)
+// as well as shown in the pane, and the result file still holds stdout alone.
+func TestTheHarnessStderrIsKeptBesideTheResultAsWellAsThePane(t *testing.T) {
+	dir := t.TempDir()
+	harness := filepath.Join(dir, "harness")
+	if err := os.WriteFile(harness, []byte("#!/bin/sh\necho boom >&2\nprintf '{\"ok\":true}'\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := New(WithProgram(harness)).Session(launch(func(l *application.Launch) {
+		l.ResultFile = filepath.Join(dir, "result-2.json")
+		l.StderrFile = filepath.Join(dir, "stderr-2.log")
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	cmd := exec.Command(spec.Command[0], spec.Command[1:]...)
+	var shown strings.Builder
+	cmd.Stderr = &shown
+	_ = cmd.Run()
+	kept, err := os.ReadFile(filepath.Join(dir, "stderr-2.log"))
+	if err != nil || string(kept) != "boom\n" {
+		t.Errorf("expected stderr-2.log to hold boom, got %q (%v)", kept, err)
+	}
+	result, err := os.ReadFile(filepath.Join(dir, "result-2.json"))
+	if err != nil || string(result) != `{"ok":true}` {
+		t.Errorf("expected the result to hold stdout alone, got %q (%v)", result, err)
+	}
+	if shown.String() != "boom\n" {
+		t.Errorf("expected the pane to show boom too, got %q", shown.String())
+	}
+}

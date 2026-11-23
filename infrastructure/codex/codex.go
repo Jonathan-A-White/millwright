@@ -154,9 +154,7 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 
 	// The boot text is stdin of the harness's command, between its argv and the
 	// result redirect; the rest is the same for every harness.
-	line := sessionshell.ResultRedirect(argv, l.ResultFile)
-	at := len(sessionshell.ShellLine(argv))
-	line = line[:at] + " < " + sessionshell.ShellQuote(l.BootFile) + line[at:]
+	line := sessionshell.ResultRedirectFrom(argv, l.BootFile, l.ResultFile, l.StderrFile)
 	line = sessionshell.WithBdShim(line, l.BdRetry)
 	line = sessionshell.WithHeartbeat(line, l)
 	line = sessionshell.WithAfter(line, l)

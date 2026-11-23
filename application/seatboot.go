@@ -206,6 +206,12 @@ func HeartbeatLogNameForAttempt(attempt int) string {
 	return fmt.Sprintf("heartbeat-%d.log", max(1, attempt))
 }
 
+// StderrLogNameForAttempt is the run file the harness's own stderr is kept in for
+// attempt (Launch.StderrFile), beside the result and numbered as NextLogNameForAttempt is.
+func StderrLogNameForAttempt(attempt int) string {
+	return fmt.Sprintf("stderr-%d.log", max(1, attempt))
+}
+
 // attemptRunFileName is the run file name base is written under for attempt.
 // The first attempt of a story is not numbered at all, so that nothing about
 // the common case — a story worked once — changes, and so that a run record or
@@ -660,6 +666,7 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		ResultFile:   b.Vault.RunFile(id, ResultFileNameForAttempt(attempt)),
 		Kickoff:      kickoff(b.Vault.Dir(), seat.MemoryAccess()) + advice,
 		After:        b.after(id),
+		StderrFile:   b.Vault.RunFile(id, StderrLogNameForAttempt(attempt)),
 		AfterLog:     b.afterLog(id, attempt),
 		Heartbeat:    b.heartbeat(id),
 		HeartbeatLog: b.heartbeatLog(id, attempt),

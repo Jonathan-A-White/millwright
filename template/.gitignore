@@ -22,6 +22,8 @@ runs/*/result.json.tmp
 runs/*/result-*.json.tmp
 # The close-out's own log, kept by the session's launch line
 runs/*/next-*.log
+# The harness's own stderr, kept beside its result by the same line (mw-gq6.1677)
+runs/*/stderr-*.log
 # mw check's whole output
 runs/*/check-*.log
 # mw todo rank's pass logs

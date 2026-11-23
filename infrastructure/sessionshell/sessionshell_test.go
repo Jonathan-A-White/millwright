@@ -37,7 +37,7 @@ func TestShellLineJoinsTheWordsItQuoted(t *testing.T) {
 }
 
 func TestResultIsWrittenBesideThenMovedIntoPlace(t *testing.T) {
-	got := ResultRedirect([]string{"agent", "go"}, "/v/runs/mw-1/result.json")
+	got := ResultRedirect([]string{"agent", "go"}, "/v/runs/mw-1/result.json", "")
 	want := "agent go > /v/runs/mw-1/result.json.tmp; mv /v/runs/mw-1/result.json.tmp /v/runs/mw-1/result.json"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
@@ -162,5 +162,52 @@ func TestACloseOutKilledWithItsShellLeavesOnlyItsStartLine(t *testing.T) {
 	kept := runAfter(t, "kill -KILL $PPID")
 	if !strings.HasPrefix(kept, application.CloseOutStarted+" 20") || strings.Contains(kept, application.CloseOutEnded) {
 		t.Errorf("expected only the start line, got %q", kept)
+	}
+}
+
+// runResult runs the session's line for a stand-in harness, the way a pane's
+// shell would, and returns what the line itself printed on stderr.
+func runResult(t *testing.T, dir, harness string) string {
+	t.Helper()
+	script := filepath.Join(dir, "harness")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+harness+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := ResultRedirect([]string{script}, filepath.Join(dir, "result-1.json"), filepath.Join(dir, "stderr-1.log"))
+	cmd := exec.Command("sh", "-c", line)
+	var shown strings.Builder
+	cmd.Stderr = &shown
+	_ = cmd.Run()
+	return shown.String()
+}
+
+// mw-gq6.1677: the harness's stderr is kept beside its result, and still shown
+// in the pane; the result holds stdout alone.
+func TestTheHarnessStderrIsKeptBesideTheResultAndStillShown(t *testing.T) {
+	dir := t.TempDir()
+	shown := runResult(t, dir, "echo '{\"ok\":true}'; echo boom >&2; exit 2")
+	kept, err := os.ReadFile(filepath.Join(dir, "stderr-1.log"))
+	if err != nil {
+		t.Fatalf("expected stderr-1.log to exist: %v", err)
+	}
+	if string(kept) != "boom\n" {
+		t.Errorf("expected stderr-1.log to hold boom, got %q", kept)
+	}
+	result, err := os.ReadFile(filepath.Join(dir, "result-1.json"))
+	if err != nil {
+		t.Fatalf("expected the result to be moved into place: %v", err)
+	}
+	if string(result) != "{\"ok\":true}\n" {
+		t.Errorf("expected the result to hold stdout only, got %q", result)
+	}
+	if shown != "boom\n" {
+		t.Errorf("expected the line's own stderr to carry boom, got %q", shown)
+	}
+}
+
+// With no stderr file the line is as it was: stderr goes to the pane alone.
+func TestNoStderrFileLeavesTheLineAsItWas(t *testing.T) {
+	if got, want := ResultRedirect([]string{"agent", "go"}, "/v/r.json", ""), "agent go > /v/r.json.tmp; mv /v/r.json.tmp /v/r.json"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
 	}
 }

@@ -534,7 +534,7 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// Only the result goes to the file, written beside and moved into place once
 	// the session has exited; the bd shim, the heartbeat and the close-out are
 	// the same for every harness (sessionshell).
-	line := sessionshell.ResultRedirect(argv, l.ResultFile)
+	line := sessionshell.ResultRedirect(argv, l.ResultFile, l.StderrFile)
 	line = sessionshell.WithBdShim(line, l.BdRetry)
 	line = sessionshell.WithHeartbeat(line, l)
 	line = sessionshell.WithAfter(line, l)

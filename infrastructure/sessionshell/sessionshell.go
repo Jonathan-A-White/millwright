@@ -56,7 +56,15 @@ func shellSafe(word string) bool {
 
 // ResultRedirect is argv run with only its stdout kept, in resultFile. What the
 // harness says on stderr stays in the session, where a person who attaches to
-// it can read it.
+// it can read it; given a stderrFile it is kept there as well (mw-gq6.1677).
+//
+// The pane is the one place stderr would otherwise be, and it dies with a host
+// that shuts down and is closed by dispatch when it reclaims the story, taking
+// the words with it. The shell is POSIX, so the stderr is not split by a process
+// substitution: the harness's stderr goes into a pipe to tee, which appends it
+// to stderrFile and writes it on to the pane's own stderr, and its stdout is
+// moved to fd 3, which the group opens onto the temp path. tee appends, so a
+// later attempt of the same name adds to it.
 //
 // The redirect writes to a temp path beside the real one and is renamed into
 // place only once the session has fully exited, rather than opening the real
@@ -68,10 +76,25 @@ func shellSafe(word string) bool {
 // descriptor, and the session's own completed write lands nowhere anyone can
 // read it. The rename is atomic on the same filesystem, so whatever the real
 // path held meanwhile is replaced whole, never partially, by this session's own
-// result.
-func ResultRedirect(argv []string, resultFile string) string {
+// result. A session killed between its end and the rename leaves the temp file
+// alone, and application.closeOutDied reads a whole one as a session that ended.
+func ResultRedirect(argv []string, resultFile, stderrFile string) string {
+	return ResultRedirectFrom(argv, "", resultFile, stderrFile)
+}
+
+// ResultRedirectFrom is ResultRedirect for a harness that reads its stdin from
+// stdinFile, when that is not empty.
+func ResultRedirectFrom(argv []string, stdinFile, resultFile, stderrFile string) string {
 	tmp := resultFile + ".tmp"
-	return ShellLine(argv) + " > " + ShellQuote(tmp) + "; mv " + ShellQuote(tmp) + " " + ShellQuote(resultFile)
+	command := ShellLine(argv)
+	if stdinFile != "" {
+		command += " < " + ShellQuote(stdinFile)
+	}
+	move := "; mv " + ShellQuote(tmp) + " " + ShellQuote(resultFile)
+	if stderrFile == "" {
+		return command + " > " + ShellQuote(tmp) + move
+	}
+	return "{ " + command + " 2>&1 1>&3 | tee -a " + ShellQuote(stderrFile) + " >&2; } 3> " + ShellQuote(tmp) + move
 }
 
 // WithBdShim runs line with the session's bd retrying a write that meets a
