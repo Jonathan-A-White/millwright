@@ -143,6 +143,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the heartbeat log of "([^"]*)" for attempt (\d+) holds (\d+) earlier lines and ends with:$`, c.theHeartbeatLogEndsWith)
 	ctx.Given(`^the close-out log of "([^"]*)" for attempt (\d+) holds (\d+) earlier lines and ends with:$`, c.theCloseOutLogEndsWith)
 	ctx.Given(`^the close-out log of "([^"]*)" for attempt (\d+) is empty$`, c.theCloseOutLogIsEmpty)
+	ctx.Given(`^the stderr log of "([^"]*)" for attempt (\d+) holds:$`, c.theStderrLogHolds)
+	ctx.Given(`^the stderr log of "([^"]*)" for attempt (\d+) is empty$`, c.theStderrLogIsEmpty)
 	ctx.Given(`^the close-out log of "([^"]*)" for attempt (\d+) holds only its start line$`, c.theCloseOutLogHoldsOnlyItsStartLine)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane but its lease has not expired$`, c.theSessionHasADeadPaneButLeaseNotExpired)
 	ctx.When(`^the session of "([^"]*)" dies again with its lease expired$`, c.theSessionDiesAgainWithLeaseExpired)
@@ -270,6 +272,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
 	ctx.Then(`^the reclaim comment on "([^"]*)" says the attempt was refunded$`, c.theReclaimCommentSaysRefunded)
 	ctx.Then(`^the latest reclaim comment on "([^"]*)" says it was not refunded: (.+)$`, c.theLatestReclaimCommentSaysNotRefunded)
+	ctx.Then(`^the latest reclaim comment on "([^"]*)" says "([^"]*)"$`, c.theLatestReclaimCommentSays)
 	ctx.Then(`^the latest reclaim comment on "([^"]*)" says its close-out died$`, c.theLatestReclaimCommentSaysCloseOutDied)
 	ctx.Then(`^the story "([^"]*)" names the cause of attempt (\d+) as (\w+)$`, c.theStoryNamesTheCauseOfAttempt)
 	ctx.Then(`^the story "([^"]*)" records (\d+) dead-pane refunds?$`, c.theStoryRecordsRefunds)
@@ -542,6 +545,17 @@ func (c *dispatchContext) theCloseOutLogEndsWith(id string, attempt, earlier int
 // and before the line that now opens its log was written (mw-gq6.1038).
 func (c *dispatchContext) theCloseOutLogIsEmpty(id string, attempt int) error {
 	return c.putRunFile(id, application.NextLogNameForAttempt(attempt), "")
+}
+
+// theStderrLogHolds writes what the harness said on stderr, as the session's
+// line keeps it beside the result (mw-gq6.1677).
+func (c *dispatchContext) theStderrLogHolds(id string, attempt int, words *godog.DocString) error {
+	return c.putRunFile(id, application.StderrLogNameForAttempt(attempt), strings.TrimRight(words.Content, "\n")+"\n")
+}
+
+// theStderrLogIsEmpty is a session that said nothing on stderr (mw-gq6.1677).
+func (c *dispatchContext) theStderrLogIsEmpty(id string, attempt int) error {
+	return c.putRunFile(id, application.StderrLogNameForAttempt(attempt), "")
 }
 
 // theCloseOutLogHoldsOnlyItsStartLine is a close-out that began, wrote its
@@ -1810,6 +1824,21 @@ func (c *dispatchContext) theLatestReclaimCommentSaysCloseOutDied(id string) err
 	}
 	if !strings.Contains(latest, "its close-out died") {
 		return fmt.Errorf("expected the latest reclaim comment on %s to say its close-out died, got %q", id, latest)
+	}
+	return nil
+}
+
+// theLatestReclaimCommentSays checks the newest dead-pane reclaim comment on the
+// story holds words (mw-gq6.1677).
+func (c *dispatchContext) theLatestReclaimCommentSays(id, words string) error {
+	latest := ""
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, "dead pane") {
+			latest = comment
+		}
+	}
+	if !strings.Contains(latest, words) {
+		return fmt.Errorf("expected the latest reclaim comment on %s to say %q, got %q", id, words, latest)
 	}
 	return nil
 }

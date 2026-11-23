@@ -465,6 +465,50 @@ Feature: Dispatching the stories this host is ready to work
     And the mail to the Mayor says "close-out started 2026-11-07T04:45:03Z"
     And the mail to the Mayor says "next-2.log has no end line: the close-out never ended"
 
+  # mw-gq6.1677: the harness's own stderr was in the pane alone and died with it.
+  # It is kept beside the result (stderr-<n>.log) and its last lines go in the
+  # mail and the comment when it holds any; with none, the mail is as it was.
+
+  Scenario: A close-out that died after a session that wrote on stderr is mailed with that stderr's last lines
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 2 times
+    And the session of "mw-gq6.9" finished, leaving its result for attempt 2 and no ledger line
+    And the close-out log of "mw-gq6.9" for attempt 2 holds only its start line
+    And the stderr log of "mw-gq6.9" for attempt 2 holds:
+      """
+      API Error: 529 overloaded_error
+      the harness gave up after 3 retries
+      """
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then the subject of the mail to the Mayor is "Close-out died: mw-gq6.9"
+    And the mail to the Mayor says "The session's last words on stderr (runs/mw-gq6.9/stderr-2.log)"
+    And the mail to the Mayor says "the harness gave up after 3 retries"
+    And the latest reclaim comment on "mw-gq6.9" says "the harness gave up after 3 retries"
+
+  Scenario: A close-out that died after a session whose stderr log is empty or absent is mailed as before
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 2 times
+    And the session of "mw-gq6.9" finished, leaving its result for attempt 2 and no ledger line
+    And the close-out log of "mw-gq6.9" for attempt 2 holds only its start line
+    And the stderr log of "mw-gq6.9" for attempt 2 is empty
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then the subject of the mail to the Mayor is "Close-out died: mw-gq6.9"
+    And the mail to the Mayor says "next-2.log has no end line"
+    And the mail to the Mayor does not say "on stderr"
+
+  Scenario: A session that died, not its close-out, has its stderr's last lines in the reclaim comment
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 2 times
+    And the stderr log of "mw-gq6.9" for attempt 2 holds:
+      """
+      node: out of memory
+      """
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then the latest reclaim comment on "mw-gq6.9" says "node: out of memory"
+
   # mw-gq6.182: a story its close-out refused is evidence, not a dead session.
   # The claim, the worktree and the branch stay as the session left them until
   # a person acts (mw retry, a hold, a give-back by hand).

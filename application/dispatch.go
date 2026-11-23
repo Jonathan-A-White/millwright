@@ -2702,7 +2702,7 @@ func (d Dispatch) reclaimDeadPaneNow(ctx context.Context, detail StoryDetail, re
 				id, name, err))
 		}
 	}
-	if err := d.Tracker.CommentOnStory(ctx, id, why+d.givenBackClosingComment(ctx, detail)); err != nil {
+	if err := d.Tracker.CommentOnStory(ctx, id, why+d.stderrLogTail(ctx, id, max(1, detail.Attempts))+d.givenBackClosingComment(ctx, detail)); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: the dead-pane reclaim could not be commented on: %v", id, err))
 	}
 	report.Reclaimed = append(report.Reclaimed, Reclaimed{StoryID: id, Session: name, LeaseExpired: detail.LeaseExpires})

@@ -48,7 +48,7 @@ func (d Dispatch) closeOutDied(ctx context.Context, detail StoryDetail) (session
 		return "", false
 	}
 	id := detail.Story.ID
-	printed, err := d.Boot.Vault.ReadRunFile(ctx, id, ResultFileNameForAttempt(max(1, detail.Attempts)))
+	printed, err := d.readFinishedResult(ctx, id, max(1, detail.Attempts))
 	if err != nil {
 		return "", false
 	}
@@ -100,6 +100,7 @@ func (d Dispatch) reclaimDiedCloseOut(ctx context.Context, detail StoryDetail, s
 	}
 
 	lastWords := fmt.Sprintf("The close-out's last words (runs/%s/%s):\n%s", id, logName, tail)
+	lastWords += d.stderrLogTail(ctx, id, attempt)
 	lastWords += d.heartbeatLogTail(ctx, id, HeartbeatLogNameForAttempt(attempt))
 	comment := fmt.Sprintf("mw dispatch on %s found %s claimed here with a dead pane (%s is %s) and its lease had run out, and its close-out died: %s. "+
 		"The window was closed and the claim given back so it is dispatched again, its worktree and branch left for the next attempt; %s.\n\n%s",
@@ -186,6 +187,47 @@ func (d Dispatch) heartbeatLogTail(ctx context.Context, id, logName string) stri
 		lines = lines[len(lines)-HeartbeatLogTail:]
 	}
 	return fmt.Sprintf("\n\nThe heartbeat's last words (runs/%s/%s):\n%s", id, logName, strings.Join(lines, "\n"))
+}
+
+// readFinishedResult is the text of the result the session of attempt left: the
+// renamed result file, or, when there is none, the temp file the session's line
+// writes it to (ResultRedirect) when that holds a whole result. A pane killed
+// between the harness ending and the rename leaves only the temp file, and a
+// session that finished is not a session that died (mw-gq6.1677). A temp file
+// that does not parse is a session cut off mid-run, as it was before: the error
+// is the renamed file's own.
+func (d Dispatch) readFinishedResult(ctx context.Context, id string, attempt int) (string, error) {
+	name := ResultFileNameForAttempt(attempt)
+	printed, err := d.Boot.Vault.ReadRunFile(ctx, id, name)
+	if !errors.Is(err, fs.ErrNotExist) {
+		return printed, err
+	}
+	tmp, tmpErr := d.Boot.Vault.ReadRunFile(ctx, id, name+".tmp")
+	if tmpErr != nil {
+		return "", err
+	}
+	if result, parseErr := ReadSessionResult(tmp); parseErr != nil || result.SessionID == "" {
+		return "", err
+	}
+	return tmp, nil
+}
+
+// stderrLogTail is the last CloseOutLogTail lines of the harness's own stderr
+// kept for attempt (Launch.StderrFile), set under a heading of their own, or
+// nothing when no log was kept or it holds nothing (mw-gq6.1677): the pane that
+// showed them is gone by the time anyone reads, and a session that said nothing
+// on stderr has no words to quote.
+func (d Dispatch) stderrLogTail(ctx context.Context, id string, attempt int) string {
+	logName := StderrLogNameForAttempt(attempt)
+	kept, err := d.Boot.Vault.ReadRunFile(ctx, id, logName)
+	if err != nil || strings.TrimSpace(kept) == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(kept, "\n"), "\n")
+	if len(lines) > CloseOutLogTail {
+		lines = lines[len(lines)-CloseOutLogTail:]
+	}
+	return fmt.Sprintf("\n\nThe session's last words on stderr (runs/%s/%s):\n%s", id, logName, strings.Join(lines, "\n"))
 }
 
 // closeOutLogKept says the close-out's words for the story's current attempt are
