@@ -347,7 +347,7 @@ func TestInboxShowsAnAppliedMessageAsOneLineAndNeverAppliesItTwice(t *testing.T)
 	if _, err := f.inbox().Run(context.Background()); err != nil {
 		t.Fatalf("reading: %v", err)
 	}
-	if got := strings.TrimSpace(f.out.String()); got != "already applied earlier: applied release mw-e.1 txid tx-rel" {
+	if got := strings.TrimSpace(f.out.String()); got != "nothing new: every message here was already applied earlier\nalready applied earlier: applied release mw-e.1 txid tx-rel" {
 		t.Fatalf("expected one line for the applied message, got %q", got)
 	}
 	if got := f.tracker.Comments("mw-e.1"); len(got) != 1 {
@@ -372,7 +372,7 @@ func TestInboxShowsAnAppliedGovernorCommentWithItsWholeText(t *testing.T) {
 	if _, err := f.inbox().Run(context.Background()); err != nil {
 		t.Fatalf("reading: %v", err)
 	}
-	want := "already applied earlier: applied comment mw-e.2 txid tx-words\n" + text + "\n"
+	want := "nothing new: every message here was already applied earlier\nalready applied earlier: applied comment mw-e.2 txid tx-words\n" + text + "\n"
 	if got := f.out.String(); got != want {
 		t.Fatalf("expected the line and his three lines whole, got %q", got)
 	}
@@ -391,7 +391,7 @@ func TestInboxPrintsAnAppliedAnswerOnceMarkedAsOld(t *testing.T) {
 	if _, err := f.inbox().Run(context.Background()); err != nil {
 		t.Fatalf("first read: %v", err)
 	}
-	if got := strings.TrimSpace(f.out.String()); got != "already applied earlier: applied answer mw-e.3 txid tx-answer" {
+	if got := strings.TrimSpace(f.out.String()); got != "nothing new: every message here was already applied earlier\nalready applied earlier: applied answer mw-e.3 txid tx-answer" {
 		t.Fatalf("expected the applied answer marked as old, once, got %q", got)
 	}
 	f.out.Reset()
@@ -837,7 +837,7 @@ func TestATapSeenByTheFollowerAndThenTheInboxIsAppliedOnce(t *testing.T) {
 	f.followTaps(t, log)
 	f.apply(t)
 
-	if got := strings.TrimSpace(f.out.String()); got != "already applied earlier: applied release mw-e.1 txid tx-rel" {
+	if got := strings.TrimSpace(f.out.String()); got != "nothing new: every message here was already applied earlier\nalready applied earlier: applied release mw-e.1 txid tx-rel" {
 		t.Fatalf("expected the read to say it was applied earlier, got %q", got)
 	}
 	if got := f.tracker.Comments("mw-e.1"); len(got) != 1 {

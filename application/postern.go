@@ -865,6 +865,9 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 	}
 	newestFirst := reversePosternInbox(mine)
+	if everyOneApplied(applied, mine) {
+		i.printf("%s\n", nothingNewLine)
+	}
 	// A message waiting for a part holds the cursor below its first record.
 	held, isHeld := heldBelow(mine)
 	// The oldest messages a pass already applied are shown first, marked as
@@ -1593,8 +1596,8 @@ func (i PosternInbox) fromLabel(m PosternInboxMessage) string {
 // UnreadCount reports how many messages addressed to this key are unread,
 // without reading them: it moves the cursor nowhere, so a notifier can call
 // it as often as it likes. A talk record is not counted: mw talk wait's. Nor is
-// a message kept for Ideas only, or one a pass already applied: the read prints
-// neither as a message (mw-gq6.1500).
+// a message kept for Ideas only, or one a pass already applied (a comment on
+// its bead too): the read prints neither as a message (mw-gq6.1500, mw-gq6.1685).
 func (i PosternInbox) UnreadCount(ctx context.Context) (int, error) {
 	if err := i.wired(); err != nil {
 		return 0, err

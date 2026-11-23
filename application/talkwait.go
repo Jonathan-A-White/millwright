@@ -575,7 +575,7 @@ func (r *talkWaitRun) noteJoinedPost(key string, message PosternInboxMessage) {
 		r.postTimer, r.postDue = nil, false
 		r.partsMu.Unlock()
 	}
-	if r.keepsMessage(message) {
+	if r.keepsMessage(message) || r.appliedNotUnread(message) {
 		return
 	}
 	r.posts = append(r.posts, message)
@@ -740,7 +740,7 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 			if record.Seq > inboxCursor {
 				if message, ok := r.unreadMessage(record, privKey); ok && message.Split != "" {
 					r.holdPost(message)
-				} else if ok && !r.keepsMessage(message) {
+				} else if ok && !r.keepsMessage(message) && !r.appliedNotUnread(message) {
 					r.posts = append(r.posts, message)
 					if err := rememberChannelOf(r.Threads, message); err != nil {
 						r.printf(r.Err, "mw talk wait: %v\n", err)

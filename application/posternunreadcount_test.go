@@ -55,17 +55,18 @@ func TestUnreadCountLeavesOutWhatAPassAlreadyApplied(t *testing.T) {
 	}
 }
 
-// An applied comment's words are printed by the read, the Mayor's only sight
-// of them, so the count keeps it.
-func TestUnreadCountKeepsAnAppliedCommentWhoseWordsTheReadPrints(t *testing.T) {
+// An applied comment is not counted either (mw-gq6.1685): its words are already
+// a comment on its bead. The read still prints them after its applied line, so
+// nothing is lost to the count.
+func TestUnreadCountLeavesOutAnAppliedCommentButTheReadStillPrintsItsWords(t *testing.T) {
 	f := newPartsFixture(t)
 	f.addPlain("direct:words", "words for the bead")
 	if err := f.tracker.SetNote(context.Background(), application.PosternAppliedKey("direct:words"), "applied comment mw-e.2 txid direct:words"); err != nil {
 		t.Fatal(err)
 	}
 	count, err := f.reader(&bytes.Buffer{}).UnreadCount(context.Background())
-	if err != nil || count != 1 {
-		t.Fatalf("expected the comment counted, got %d, %v", count, err)
+	if err != nil || count != 0 {
+		t.Fatalf("expected the applied comment not counted, got %d, %v", count, err)
 	}
 	out := &bytes.Buffer{}
 	if _, err := f.reader(out).Run(context.Background()); err != nil {

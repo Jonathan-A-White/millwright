@@ -213,8 +213,9 @@ func newPosternInboxCmd() *cobra.Command {
 			"message, and a bead comment naming it ends with \" [image: <path>]\".\n\n" +
 			"--unread-count prints only how many are unread, without reading them, so a notifier can\n" +
 			"poll it without consuming anything. A message a pass already applied is one \"already applied\n" +
-			"earlier\" line in a read, not a message, and is not counted (an applied comment, whose words the\n" +
-			"read prints, is).\n\n" +
+			"earlier\" line in a read, not a message, and is not counted, an applied comment included: its\n" +
+			"words are already a comment on its bead. A read in which every message is already applied\n" +
+			"says \"nothing new\" first. mw talk wait leaves such a message out of its unread number too.\n\n" +
 			"A talk record (class talk, postern's docs/protocol.md section 20) is neither read nor counted\n" +
 			"here: mw talk wait hears it, so that one turn never wakes the Mayor twice.\n\n" +
 			"--apply is the zero-token pass the postern backend's on-message hook runs: every message\n" +
