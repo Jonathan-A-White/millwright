@@ -99,6 +99,9 @@ type FiledPlan struct {
 	// stories: nothing here releases them, and the tree names them as epics.
 	Epics    []FiledEpic
 	Released bool
+	// Kept are the ids of the stories an approved release left held because their
+	// acceptance holds a criterion that needs its own landing (mw-gq6.1694).
+	Kept []string
 }
 
 // FiledEpic is an epic found under a filed epic: its id, what it is called, and
@@ -387,12 +390,23 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 		return filed, nil
 	}
 
+	acceptances := make(map[string]string, len(plan.Stories))
+	for _, story := range plan.Stories {
+		acceptances[story.Key] = story.Acceptance
+	}
 	for _, story := range filed.Stories {
+		// The criterion a Builder cannot meet before landing is what mw release and
+		// mw release-paced refuse too: the story stays held and is named.
+		if line := notRunnableRefusal(ctx, f.Rules, story.ID, story.Path.Rig, acceptances[story.Key]); line != "" {
+			f.print(fmt.Sprintf("%s, skipped (mw release --force \"<why>\" %s to release it anyway)\n", line, story.ID))
+			filed.Kept = append(filed.Kept, story.ID)
+			continue
+		}
 		if err := f.Tracker.ReleaseStory(ctx, story.ID); err != nil {
 			return filed, fmt.Errorf("releasing story %s of %s: %w", story.ID, epicID, err)
 		}
 	}
-	filed.Released = true
+	filed.Released = len(filed.Kept) < len(filed.Stories)
 	f.print(filed.releases())
 	f.print(sizeWarnings(filed.Stories, false, true))
 	return filed, nil
@@ -952,7 +966,7 @@ func (s FiledStory) tree() string {
 func (p FiledPlan) Unblocked() []string {
 	var free []string
 	for _, story := range p.Stories {
-		if len(story.Needs) == 0 {
+		if len(story.Needs) == 0 && !slices.Contains(p.Kept, story.ID) {
 			free = append(free, story.ID)
 		}
 	}
@@ -971,12 +985,18 @@ func (p FiledPlan) holdings() string {
 // released, and what a dispatcher can take right now.
 func (p FiledPlan) releases() string {
 	ready := p.Unblocked()
-	if len(ready) == 0 {
-		return fmt.Sprintf("\nReleased all %d stories of %s. None of them is ready: they all wait on another.\n",
-			len(p.Stories), p.EpicID)
+	which := fmt.Sprintf("all %d stories", len(p.Stories))
+	kept := ""
+	if len(p.Kept) > 0 {
+		which = fmt.Sprintf("%d of %d stories", len(p.Stories)-len(p.Kept), len(p.Stories))
+		kept = fmt.Sprintf(" Left held: %s.", strings.Join(p.Kept, ", "))
 	}
-	return fmt.Sprintf("\nReleased all %d stories of %s. Ready now: %s.\n",
-		len(p.Stories), p.EpicID, strings.Join(ready, ", "))
+	if len(ready) == 0 {
+		return fmt.Sprintf("\nReleased %s of %s. None of them is ready: they all wait on another.%s\n",
+			which, p.EpicID, kept)
+	}
+	return fmt.Sprintf("\nReleased %s of %s. Ready now: %s.%s\n",
+		which, p.EpicID, strings.Join(ready, ", "), kept)
 }
 
 // withUsableHosts is the plan with host=auto in place of a host that cannot take
