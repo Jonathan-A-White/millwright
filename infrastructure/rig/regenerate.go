@@ -78,6 +78,13 @@ func (w *Worktrees) regenerate(ctx context.Context, dir string, entries []domain
 	if run == nil {
 		run = runShell
 	}
+	// The landing is cut bare: the generator is given the rig's node_modules and
+	// ignored inputs for its run only (mw-gq6.1672).
+	undo, err := w.provide(ctx, dir)
+	defer undo()
+	if err != nil {
+		return nil, refused(stopped, "CONFLICT (regenerated): %s could not be generated: %v", strings.Join(generated, ", "), err)
+	}
 	var done []application.Regeneration
 	ran := map[string]bool{}
 	for _, entry := range entries {
