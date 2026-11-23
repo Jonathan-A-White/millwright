@@ -99,3 +99,65 @@ func TestElevenStoriesFreeToStartStillMakeABox(t *testing.T) {
 		t.Errorf("expected one box made, got %v", report.Making)
 	}
 }
+
+// mw-gq6.1673: ready stories that name one file can start only one at a time,
+// so a set of them is one unit of demand, not one each; cloud11 and cloud12
+// were made for sets like that and sat idle.
+
+// foldedFactory files `sharing` ready stories that all name eslint-suppressions.json
+// and `free` that name a file of their own; nothing runs. desktop may run `cap`.
+func foldedFactory(t *testing.T, sharing, free, cap int) (*apptest.FakeTracker, application.CloudPlan, time.Time) {
+	t.Helper()
+	now := time.Date(2026, 11, 23, 6, 52, 0, 0, time.UTC)
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-f", domain.Path{Rig: "millwright", Branch: "main", Host: domain.HostAuto})
+	add := func(id, files string) {
+		tracker.AddStory("mw-f", domain.Story{ID: id, Title: "story " + id})
+		if err := tracker.SetStoryMetadata(context.Background(), id, map[string]string{"files": files}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range sharing {
+		add(fmt.Sprintf("mw-f.share%d", i), fmt.Sprintf("eslint-suppressions.json,src/share%d.ts", i))
+	}
+	for i := range free {
+		add(fmt.Sprintf("mw-f.free%d", i), fmt.Sprintf("src/free%d.ts", i))
+	}
+	plan := cloudPlan
+	plan.HostCaps = map[string]int{"desktop": cap}
+	return tracker, plan, now
+}
+
+func TestReadyStoriesThatShareAFileAreOneUnitOfDemand(t *testing.T) {
+	tracker, plan, now := foldedFactory(t, 10, 2, 5)
+	report, cloud := runFileHeldCheck(t, tracker, plan, now)
+	if report.Waiting != 3 || report.FileFolded != 9 || report.FileHeld != 0 || report.Free != 5 {
+		t.Errorf("expected 3 waiting, 9 folded, 0 held, 5 free, got %d, %d, %d, %d", report.Waiting, report.FileFolded, report.FileHeld, report.Free)
+	}
+	if len(report.Making) != 0 || len(cloud.TakeBegun()) != 0 {
+		t.Errorf("expected no box made for a set only one of which can start, made %v", report.Making)
+	}
+	want := "cloud: 3 stories wait for any host (9 more share a file with another waiting story), 5 sessions free"
+	if got := report.String(); len(got) < len(want) || got[:len(want)] != want {
+		t.Errorf("expected the line to start %q, got %q", want, got)
+	}
+}
+
+func TestTwelveStoriesThatShareNothingStillMakeABoxWhenElevenAreFree(t *testing.T) {
+	tracker, plan, now := foldedFactory(t, 0, 12, 11)
+	report, cloud := runFileHeldCheck(t, tracker, plan, now)
+	if report.Waiting != 12 || report.FileFolded != 0 {
+		t.Errorf("expected 12 waiting and none folded, got %d and %d", report.Waiting, report.FileFolded)
+	}
+	if len(report.Making) != 1 || len(cloud.TakeBegun()) != 1 {
+		t.Errorf("expected one box made, got %v", report.Making)
+	}
+}
+
+func TestTheLineSaysBothTheHeldAndTheFoldedStories(t *testing.T) {
+	r := application.CloudReport{Waiting: 3, FileHeld: 2, FileFolded: 9}
+	want := "3 stories wait for any host (2 more held on files, 9 more share a file with another waiting story)"
+	if got := r.String(); len(got) < len(want) || got[len("cloud: "):len("cloud: ")+len(want)] != want {
+		t.Errorf("expected %q in the line, got %q", want, got)
+	}
+}

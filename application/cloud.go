@@ -625,6 +625,11 @@ type CloudReport struct {
 	// each names a file a running story names: no host, new box or old, may
 	// start one until that story lands (mw-gq6.1669).
 	FileHeld int
+	// FileFolded are the ready stories of host auto left out of Waiting because
+	// each shares a file with another ready story already counted in it: only
+	// one of such a set can start at once, so the set is one unit of demand
+	// (mw-gq6.1673).
+	FileFolded int
 	// Coming are the sessions the boxes still being made, or restoring, will
 	// run once they are up: not free, and counted only so that a second box is
 	// not made for the stories a box on its way already serves.
@@ -640,11 +645,19 @@ type CloudReport struct {
 }
 
 // waitingText says how many stories wait for any host, and how many more are
-// left out because each is held on a file a running story names.
+// left out because each is held on a file a running story names, or shares a
+// file with another story counted as waiting.
 func (r CloudReport) waitingText() string {
 	text := fmt.Sprintf("%d stories wait for any host", r.Waiting)
+	var more []string
 	if r.FileHeld > 0 {
-		text += fmt.Sprintf(" (%d more held on files)", r.FileHeld)
+		more = append(more, fmt.Sprintf("%d more held on files", r.FileHeld))
+	}
+	if r.FileFolded > 0 {
+		more = append(more, fmt.Sprintf("%d more share a file with another waiting story", r.FileFolded))
+	}
+	if len(more) > 0 {
+		text += " (" + strings.Join(more, ", ") + ")"
 	}
 	return text
 }
@@ -716,7 +729,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 		}
 	}
 	p.repathGone(ctx, work)
-	p.report.Waiting, p.report.FileHeld, p.report.Free, p.report.Coming = p.demand(ctx, work)
+	p.report.Waiting, p.report.FileHeld, p.report.FileFolded, p.report.Free, p.report.Coming = p.demand(ctx, work)
 	if p.report.Waiting > p.report.Free+p.report.Coming && len(p.state.Boxes) < c.Plan.MaxBoxes {
 		p.make(ctx)
 	}
@@ -1618,14 +1631,21 @@ func (p *cloudPass) setSessionDenies(ctx context.Context) {
 // second box for a story the first already serves. So are those of a box the
 // home has not cleared yet (CloudBox.MayWork); a box that failed its own check
 // counts neither.
-func (p *cloudPass) demand(ctx context.Context, work WorkInHand) (waiting, fileHeld, free, coming int) {
+func (p *cloudPass) demand(ctx context.Context, work WorkInHand) (waiting, fileHeld, folded, free, coming int) {
 	// A ready story whose files a running story names is held by the dispatch of
 	// any host until that story lands, so no new box can start it either: it is
 	// counted apart and makes no box (mw-gq6.1669). The test is the dispatch's
 	// own (fileShares) on what the tracker says, the files key and the files the
 	// story recorded as changed; a branch's own diff is on its host and is not
 	// read here, so a story held only by that is still counted as waiting.
-	var shares fileShares
+	//
+	// Of the ready stories left, dispatch starts one of a set that share a file
+	// and holds the rest until it lands (Dispatch.keepFilesHeld, which counts
+	// each story it starts as running), so such a set is one unit of demand, not
+	// one each (mw-gq6.1673). They are taken in the tracker's order, and each
+	// counted as waiting joins the stories the next is tested against, by the
+	// same test: the files key and the files recorded as changed.
+	var shares, counted fileShares
 	for _, d := range work.RunningLive(p.now) {
 		if !d.Hitl() {
 			shares.add(d)
@@ -1639,6 +1659,11 @@ func (p *cloudPass) demand(ctx context.Context, work WorkInHand) (waiting, fileH
 			fileHeld++
 			continue
 		}
+		if share, held := counted.shared(ctx, d); held && share.Unkeyed == KeyedBoth {
+			folded++
+			continue
+		}
+		counted.add(d)
 		waiting++
 	}
 	for host, limit := range p.check.Plan.HostCaps {
@@ -1663,7 +1688,7 @@ func (p *cloudPass) demand(ctx context.Context, work WorkInHand) (waiting, fileH
 		}
 		free += max(0, box.boxCap(p.check.Plan)-sessions(work, box.Name, p.now))
 	}
-	return waiting, fileHeld, free, coming
+	return waiting, fileHeld, folded, free, coming
 }
 
 // sessions counts the stories claimed on host that a session works. A story
