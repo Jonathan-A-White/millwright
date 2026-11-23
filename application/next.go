@@ -2500,7 +2500,7 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 			why += " (" + openStepsFlagsSaid + ")"
 			wayOut = "\n\nIf the story's closing comment is on the bead, written after the branch's newest commit, " + OpenStepsWayOut(c.id) + "."
 		}
-		return Refusal{ReasonOpenSteps, why, "Still open:\n" + stepList(open) + wayOut + n.unrunPartsSaid(ctx, c)}, true
+		return Refusal{ReasonOpenSteps, why + n.governorsSaid(ctx, c.id, open), "Still open:\n" + stepList(open) + wayOut + n.unrunPartsSaid(ctx, c)}, true
 	}
 	return Refusal{}, false
 }

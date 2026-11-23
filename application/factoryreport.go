@@ -183,6 +183,17 @@ func (r FactoryReport) handsKeepers(ctx context.Context) (map[string]bool, error
 			keepers[strings.TrimPrefix(key, HandsStepsKey(""))] = true
 		}
 	}
+	// A story whose Builder marked a step the Governor's waits on him as much as
+	// one that keeps a hands step does (mw-gq6.1676).
+	marks, err := r.Hands.NotesWithPrefix(ctx, GovernorsStepPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("reporting quality: the steps marked the Governor's: %w", err)
+	}
+	for _, raw := range marks {
+		if step, ok := parseGovernorsStep(raw); ok {
+			keepers[step.Story] = true
+		}
+	}
 	return keepers, nil
 }
 
