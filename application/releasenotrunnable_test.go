@@ -161,3 +161,31 @@ func TestReleaseLeavesAVerifyAfterLandingParagraphAlone(t *testing.T) {
 		t.Fatalf("expected the release, the live URL is under a Verify after landing line: %v", err)
 	}
 }
+
+// A paced release has no --force: a held story of the list whose acceptance holds
+// a criterion that needs its own landing is skipped and named, and the next story
+// of the list takes its place (mw-gq6.1691).
+func TestReleasePacedRefusesANotRunnableCriterion(t *testing.T) {
+	held := application.StatusHeld
+	tracker, ids := pacedList(t, 30, held, held)
+	if err := tracker.SetAcceptance("p-1", lampasAC4); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetAcceptance("p-2", runnableAC); err != nil {
+		t.Fatal(err)
+	}
+
+	released, out := pacedRelease(t, tracker, ids, false)
+
+	if strings.Join(released, ",") != "p-2" {
+		t.Errorf("expected only p-2 released, got %v", released)
+	}
+	if got := statusOf(t, tracker, "p-1"); got != application.StatusHeld {
+		t.Errorf("expected p-1 left held, got %s", got)
+	}
+	for _, said := range []string{"p-1", "criterion 4", "Verify strings:", "skipped"} {
+		if !strings.Contains(out, said) {
+			t.Errorf("expected the output to say %q, got:\n%s", said, out)
+		}
+	}
+}

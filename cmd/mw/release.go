@@ -97,7 +97,8 @@ func newReleasePacedCmd() *cobra.Command {
 			"none while mw usage show reads over 60% of the week (mw config set pace.usage_line 85 moves\n" +
 			"the 60). A story of the list that is open or\n" +
 			"running counts against the 3 and is left as it is; one that is closed, not in the tracker,\n" +
-			"iced, or held on the Governor's word is skipped and named. When it releases none it says why:\n" +
+			"iced, held on the Governor's word, or whose acceptance holds a criterion that needs its own landing\n" +
+			"(a live URL of a served rig, or judged after the fix lands) is skipped and named. When it releases none it says why:\n" +
 			"the usage reading, the count, or that the reading is missing or stale (mw usage read).\n\n" +
 			"Each story released gets a comment quoting the usage reading and the count it acted on.\n" +
 			"--dry-run releases nothing, writes nothing, and prints what it would.",
@@ -137,6 +138,7 @@ func newReleasePacedCmd() *cobra.Command {
 				Tracker:   gateway,
 				Readings:  application.UsageReadings{Notes: mwGateway(dir, host)},
 				UsageLine: line,
+				Rules:     rigRulesIfKnown(),
 				DryRun:    dryRun,
 				Out:       cmd.OutOrStdout(),
 			}.Run(cmd.Context(), ids)

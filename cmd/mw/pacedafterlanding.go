@@ -26,6 +26,7 @@ func pacedAfterLanding(dir string, gateway interface {
 			Tracker:   gateway,
 			Readings:  application.UsageReadings{Notes: gateway},
 			UsageLine: line,
+			Rules:     rigRulesIfKnown(),
 		},
 	}
 }

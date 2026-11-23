@@ -497,6 +497,10 @@ type ReleasePaced struct {
 	// UsageLine is the percent of the week's usage over which nothing is released
 	// (the config's [pace] usage_line); zero is ReleasePacedUsageLine.
 	UsageLine float64
+	// Rules is where a rig's site_url is read from, to know a live URL of a served
+	// rig in a story's acceptance (mw-gq6.1691). A nil Rules knows the other live
+	// URLs and the words 'after the fix lands' only.
+	Rules EpicRules
 }
 
 // Run releases the next stories of ids the pace allows and reports their ids.
@@ -562,7 +566,7 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 		return nil, nil
 	}
 
-	chosen, err := r.choose(ctx, held, room)
+	chosen, err := r.choose(ctx, held, byID, room)
 	if err != nil {
 		return nil, err
 	}
@@ -653,9 +657,11 @@ func checkPace(ctx context.Context, readings UsageReadings, line float64, now ti
 }
 
 // choose is the first room of the held stories, in order, that no comment holds
-// on the Governor's word; one that does is skipped and named. It reads comments
-// only for as many stories as it needs.
-func (r ReleasePaced) choose(ctx context.Context, held []string, room int) ([]string, error) {
+// on the Governor's word and whose acceptance holds no criterion that needs its
+// own landing (a live URL of a served rig, or judged after the fix lands, which
+// no Builder can meet: mw-gq6.1691); one that does is skipped and named. It reads
+// comments only for as many stories as it needs.
+func (r ReleasePaced) choose(ctx context.Context, held []string, details map[string]StoryDetail, room int) ([]string, error) {
 	var chosen []string
 	for from := 0; from < len(held) && len(chosen) < room; {
 		to := min(from+room-len(chosen), len(held))
@@ -667,6 +673,11 @@ func (r ReleasePaced) choose(ctx context.Context, held []string, room int) ([]st
 				strings.Join(batch, ", "), err)
 		}
 		for _, id := range batch {
+			story := details[id]
+			if line := notRunnableRefusal(ctx, r.Rules, id, story.Merged().Rig, story.Acceptance); line != "" {
+				r.print(fmt.Sprintf("%s, skipped (mw release --force \"<why>\" %s to release it anyway)\n", line, id))
+				continue
+			}
 			if _, _, word := wordHold(id, comments[id], nil, ""); word {
 				r.print(fmt.Sprintf("%s is held on the Governor's word, skipped (mw release --over-hold \"<why>\" %s to release it)\n", id, id))
 				continue
