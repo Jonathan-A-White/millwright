@@ -77,7 +77,8 @@ func (c *nextContext) theLaunchLineIsKilled(id string) error {
 // and an mw of the scenario's own first on PATH: the claude prints a finished
 // session's result (or, killed, kills the shell running the line before the
 // result is moved into place); the mw only says it ran, the close-out itself
-// being the scenario's own next step.
+// being the scenario's own next step. The line runs a heartbeat beside the
+// harness, whose words the line keeps in heartbeat-<attempt>.log (mw-gq6.1683).
 func (c *nextContext) runLaunchLine(id string, killed bool) error {
 	ctx := context.Background()
 	detail, err := c.tracker.ShowStory(ctx, id)
@@ -86,7 +87,7 @@ func (c *nextContext) runLaunchLine(id string, killed bool) error {
 	}
 	boot := application.SeatBoot{
 		Vault: vault.New(c.vault), Harness: claude.New(), Seat: nextSeat, Host: nextHost,
-		After: []string{"mw", "next"},
+		After: []string{"mw", "next"}, Heartbeat: []string{"mw", "next", "--heartbeat"},
 	}
 	spec, err := boot.Boot(ctx, detail, application.WorktreeDir(c.rig, id))
 	if err != nil {

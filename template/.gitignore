@@ -24,6 +24,8 @@ runs/*/result-*.json.tmp
 runs/*/next-*.log
 # The harness's own stderr, kept beside its result by the same line (mw-gq6.1677)
 runs/*/stderr-*.log
+# The heartbeat's words, kept beside the harness's by the same line (mw-gq6.1683)
+runs/*/heartbeat-*.log
 # mw check's whole output
 runs/*/check-*.log
 # mw todo rank's pass logs

@@ -1,6 +1,7 @@
 Feature: A run leaves nothing stray in the vault
   mw writes some files into the vault that it never commits: a session's boot
   file, the temp file its result is redirected into, the close-out's own log,
+  the heartbeat's log, the harness's stderr,
   mw check's log, the seats' reaper and talk logs and acting files, the key
   metrics. The .gitignore mw init lays in a fresh vault names each of them, so
   that after a run git status of the vault is quiet and a seat booted into the
