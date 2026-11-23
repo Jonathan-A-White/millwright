@@ -696,6 +696,18 @@ func firstLine(text string) string {
 	return strings.TrimSpace(text)
 }
 
+// mergeWhy is the one line a merge that conflicted says of itself in a story's
+// state and ledger: git's lines naming the conflicts and what mw added after
+// them (what a generator said when it failed), as a batch says them, and not
+// the first line of the error, which is git's command (mw-gq6.1668). The first
+// line of an error that is no conflict.
+func mergeWhy(err error) string {
+	if !Conflicted(err) {
+		return firstLine(err.Error())
+	}
+	return strings.Join(ConflictLines(err.Error()), "; ")
+}
+
 // mergeBy merges branch into the landing worktree dir by the rig's rules: by
 // MergeRuled when the rig lists generated files, by MergeUnion when it lists
 // union files, and by Merge otherwise.

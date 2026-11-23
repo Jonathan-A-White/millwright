@@ -1810,7 +1810,7 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	if err := writeRetrying(ctx, n, report, "the send-back's record", func() error { return n.Tracker.SetStoryMetadata(ctx, c.id, sendFields) }); err != nil {
 		return fmt.Sprintf("it could not be recorded as sent back to rebase against %s, which is what bounds the send-backs: %v", shortSHA(head), err)
 	}
-	rebaseWhy := fmt.Sprintf("sent back to rebase onto %s (%s, send-back %d of %d): %s", onto, shortSHA(head), sends+1, MaxRebaseSends, firstLine(landErr.Error()))
+	rebaseWhy := fmt.Sprintf("sent back to rebase onto %s (%s, send-back %d of %d): %s", onto, shortSHA(head), sends+1, MaxRebaseSends, mergeWhy(landErr))
 	if err := writeRetrying(ctx, n, report, "the rebase state", func() error {
 		return n.Tracker.SetStoryState(ctx, c.id, RebaseState, RebaseSentBack, rebaseWhy)
 	}); err != nil {
@@ -1842,7 +1842,7 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	if err := recordAttempt(ctx, n.Tracker, c.detail); err != nil {
 		report.Notes = append(report.Notes, err.Error())
 	}
-	report.SentBack, report.Reason, report.Why = spec.Name, ReasonMergeConflict, firstLine(landErr.Error())
+	report.SentBack, report.Reason, report.Why = spec.Name, ReasonMergeConflict, mergeWhy(landErr)
 	where := fmt.Sprintf("sent back to rebase by mw on %s: session %s in %s on %s, onto %s", n.Host, spec.Name, c.worktree, c.branch, onto)
 	note := fmt.Sprintf("mw next on %s did not land this story (%s): %s does not merge into %s without conflicts, "+
 		"because %s moved on while the story was worked.\n\n"+

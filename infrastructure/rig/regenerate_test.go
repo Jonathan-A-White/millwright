@@ -240,3 +240,100 @@ func TestARealShellRunsTheGeneratorInTheLandingWorktree(t *testing.T) {
 		t.Errorf("the merge holds %q", got)
 	}
 }
+
+// mw-gq6.1668: batch 642 of lampas set a story aside on a conflict only in the two
+// files of one regenerated_files entry, and its note held git's CONFLICT lines
+// and nothing of the generator.
+func TestAnEntryOfTwoPathsInTwoFoldersIsRegeneratedForBothAndEachIsNamed(t *testing.T) {
+	here := twoStoriesRegenerating(t, "docs/lxx-align/gen.txt", "data/lxx/align/gen.expect.json")
+	rules := domain.MergeRules{Regenerated: []domain.RegeneratedFiles{{
+		Paths: []string{"docs/lxx-align/gen.txt", "data/lxx/align/gen.expect.json"},
+		Run:   "printf 'made\\n' > docs/lxx-align/gen.txt && printf '{}\\n' > data/lxx/align/gen.expect.json",
+	}}}
+
+	landed, left, err := mergeRuled(t, here, "mw/two", rig.New(), rules)
+	if err != nil {
+		t.Fatalf("expected both files settled, got %v", err)
+	}
+	said := strings.Join(application.RegenerationLines(landed.Regenerated), "\n")
+	for _, file := range []string{"docs/lxx-align/gen.txt", "data/lxx/align/gen.expect.json"} {
+		if !strings.Contains(said, "regenerated "+file+" by printf") {
+			t.Errorf("expected a line for %s, got %q", file, said)
+		}
+	}
+	if got := run(t, here, "git", "show", landed.Commit+":data/lxx/align/gen.expect.json"); got != "{}" {
+		t.Errorf("the merge holds %q", got)
+	}
+	if strings.TrimSpace(left) != "" {
+		t.Errorf("expected nothing left uncommitted, got %q", left)
+	}
+}
+
+// whatABatchSays is what a batch writes as the Why of a story set aside: git's
+// CONFLICT lines and whatever mw added to them.
+func whatABatchSays(err error) string { return strings.Join(application.ConflictLines(err.Error()), "\n") }
+
+func TestWhatABatchSaysOfAGeneratorThatFailedCarriesItsLastLines(t *testing.T) {
+	here := twoStoriesRegenerating(t, "docs/lxx-align/gen.txt", "data/lxx/align/gen.expect.json")
+	generator := aGenerator{said: "line1\nTypeError: not shipped on this host\n", err: errors.New("exit status 2")}
+	rules := domain.MergeRules{Regenerated: []domain.RegeneratedFiles{{
+		Paths: []string{"docs/lxx-align/gen.txt", "data/lxx/align/gen.expect.json"}, Run: "npm run gen"}}}
+
+	_, _, err := mergeRuled(t, here, "mw/two", rig.New(rig.WithRegenerator(generator.run)), rules)
+	if !application.Conflicted(err) {
+		t.Fatalf("expected a conflict, got %v", err)
+	}
+	said := whatABatchSays(err)
+	for _, want := range []string{"Merge conflict in docs/lxx-align/gen.txt", "npm run gen", "failed", "TypeError: not shipped on this host"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("expected the batch to say %q, got:\n%s", want, said)
+		}
+	}
+}
+
+// A merge that the generator settled and git then refused to commit, and a conflict in
+// a file no entry lists, are said by mw's own words after git's: the batch's Why kept
+// only the lines that name a CONFLICT, so they were lost.
+func TestWhatABatchSaysOfARefusalAfterTheGeneratorIsNotLeftOut(t *testing.T) {
+	for name, tc := range map[string]struct {
+		files []string
+		hook  bool
+		want  []string
+	}{
+		"git refuses the commit": {
+			files: []string{"docs/gen.txt"}, hook: true,
+			want: []string{"Merge conflict in docs/gen.txt", "no commits on a Monday"},
+		},
+		"a file no entry lists": {
+			files: []string{"docs/gen.txt", "src/code.txt"},
+			want:  []string{"Merge conflict in src/code.txt", "src/code.txt is in conflict and the rig does not list it"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			here := twoStoriesRegenerating(t, tc.files...)
+			if tc.hook {
+				hook := filepath.Join(here, ".git", "hooks", "pre-commit")
+				write(t, here, ".git/hooks/pre-commit", "#!/bin/sh\necho 'no commits on a Monday' >&2\nexit 1\n")
+				if err := os.Chmod(hook, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			generator := &aGenerator{write: map[string]string{"docs/gen.txt": generatedTable}}
+			rules := domain.MergeRules{Regenerated: []domain.RegeneratedFiles{{Paths: []string{"docs/gen.txt"}, Run: "npm run gen"}}}
+
+			_, left, err := mergeRuled(t, here, "mw/two", rig.New(rig.WithRegenerator(generator.run)), rules)
+			if !application.Conflicted(err) {
+				t.Fatalf("expected a conflict, got %v", err)
+			}
+			said := whatABatchSays(err)
+			for _, want := range tc.want {
+				if !strings.Contains(said, want) {
+					t.Errorf("expected the batch to say %q, got:\n%s", want, said)
+				}
+			}
+			if strings.TrimSpace(left) != "" {
+				t.Errorf("expected the merge undone, got %q", left)
+			}
+		})
+	}
+}

@@ -397,8 +397,8 @@ func (w *Worktrees) MergeRuled(ctx context.Context, landingDir, branch string, r
 		if err != nil {
 			said := fmt.Sprintf("%v: %v", application.ErrMergeConflict, err)
 			if _, abort := w.git(ctx, landingDir, "merge", "--abort"); abort != nil {
-				said = fmt.Sprintf("%v: %v (and the half-made merge in %s could not be undone: %v)",
-					application.ErrMergeConflict, err, landingDir, abort)
+				said = fmt.Sprintf("%v\nCONFLICT (not undone): the half-made merge in %s could not be undone: %v",
+					said, landingDir, oneLine(abort.Error()))
 			}
 			return application.Landed{}, &application.MergeConflict{Files: conflicted, Said: said}
 		}
@@ -458,35 +458,35 @@ func (w *Worktrees) unionConflicts(ctx context.Context, dir string, driver *gitc
 		// driver could not settle it: running it again would say the same.
 		if attr, err := w.git(ctx, dir, "check-attr", "merge", "--", file); err == nil {
 			if _, value, _ := strings.Cut(strings.TrimSpace(attr), ": merge: "); gitcmd.IsTrimMerge(value) {
-				return nil, nil, fmt.Errorf("%w (%s is merged by mw's trim-safe driver, merge=%s, which could not settle it; union would bring back every line a trim took out)",
-					stopped, file, value)
+				return nil, nil, refused(stopped, "%s is merged by mw's trim-safe driver, merge=%s, which could not settle it; union would bring back every line a trim took out",
+					file, value)
 			}
 		}
 		if !listed(rules.Union, file) {
-			return nil, nil, fmt.Errorf("%w (%s is in conflict and the rig does not list it to be merged by union or regenerated)", stopped, file)
+			return nil, nil, refused(stopped, "%s is in conflict and the rig does not list it to be merged by union or regenerated", file)
 		}
 		unionFiles = append(unionFiles, file)
 	}
 	if len(unionFiles) > 0 {
 		scratch, err := os.MkdirTemp("", "mw-union-")
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w (and a place to merge %s could not be made: %v)", stopped, strings.Join(unionFiles, ", "), err)
+			return nil, nil, refused(stopped, "and a place to merge %s could not be made: %v", strings.Join(unionFiles, ", "), err)
 		}
 		defer os.RemoveAll(scratch)
 		merged := make(map[string]string, len(unionFiles))
 		for _, file := range unionFiles {
 			text, err := w.trimMergeOf(ctx, dir, scratch, driver, file)
 			if err != nil {
-				return nil, nil, fmt.Errorf("%w (%s is listed in union_merge_files, but could not be merged: %v)", stopped, file, err)
+				return nil, nil, refused(stopped, "%s is listed in union_merge_files, but could not be merged: %v", file, err)
 			}
 			merged[file] = text
 		}
 		for _, file := range unionFiles {
 			if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(file)), []byte(merged[file]), 0o644); err != nil {
-				return nil, nil, fmt.Errorf("%w (writing %s: %v)", stopped, file, err)
+				return nil, nil, refused(stopped, "writing %s: %v", file, err)
 			}
 			if _, err := w.git(ctx, dir, "add", "--", file); err != nil {
-				return nil, nil, fmt.Errorf("%w (%v)", stopped, err)
+				return nil, nil, refused(stopped, "%v", err)
 			}
 		}
 	}
@@ -495,7 +495,7 @@ func (w *Worktrees) unionConflicts(ctx context.Context, dir string, driver *gitc
 		return nil, nil, err
 	}
 	if _, err := w.git(ctx, dir, "commit", "--no-edit"); err != nil {
-		return nil, nil, fmt.Errorf("%w (%v)", stopped, err)
+		return nil, nil, refused(stopped, "%v", err)
 	}
 	return unionFiles, regenerations, nil
 }

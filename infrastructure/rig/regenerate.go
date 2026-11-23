@@ -68,10 +68,10 @@ func (w *Worktrees) regenerate(ctx context.Context, dir string, entries []domain
 	}
 	for _, file := range generated {
 		if _, err := w.git(ctx, dir, "checkout", "--ours", "--", file); err != nil {
-			return nil, fmt.Errorf("%w (CONFLICT (regenerated): %s could not take the target's side: %s)", stopped, file, oneLine(err.Error()))
+			return nil, refused(stopped, "CONFLICT (regenerated): %s could not take the target's side: %s", file, oneLine(err.Error()))
 		}
 		if _, err := w.git(ctx, dir, "add", "--", file); err != nil {
-			return nil, fmt.Errorf("%w (%v)", stopped, err)
+			return nil, refused(stopped, "%v", err)
 		}
 	}
 	run := w.regenerator
@@ -96,8 +96,8 @@ func (w *Worktrees) regenerate(ctx context.Context, dir string, entries []domain
 			said, err := run(limited, dir, entry.Run)
 			cancel()
 			if err != nil {
-				return nil, fmt.Errorf("%w (CONFLICT (regenerated): %s by `%s` failed: %v; its last lines: %s)",
-					stopped, strings.Join(mine, ", "), entry.Run, err, lastLines(said))
+				return nil, refused(stopped, "CONFLICT (regenerated): %s by `%s` failed: %v; its last lines: %s",
+					strings.Join(mine, ", "), entry.Run, err, lastLines(said))
 			}
 		}
 		for _, file := range mine {
@@ -107,19 +107,32 @@ func (w *Worktrees) regenerate(ctx context.Context, dir string, entries []domain
 	// What the commands rewrote: the tracked files they changed and the files
 	// that were in conflict, never what else they left lying about.
 	if _, err := w.git(ctx, dir, "add", "-u"); err != nil {
-		return nil, fmt.Errorf("%w (%v)", stopped, err)
+		return nil, refused(stopped, "%v", err)
 	}
 	for _, file := range generated {
 		if marked, err := hasConflictMarker(filepath.Join(dir, filepath.FromSlash(file))); err != nil {
-			return nil, fmt.Errorf("%w (CONFLICT (regenerated): %s could not be read after its generator ran: %v)", stopped, file, err)
+			return nil, refused(stopped, "CONFLICT (regenerated): %s could not be read after its generator ran: %v", file, err)
 		} else if marked {
-			return nil, fmt.Errorf("%w (CONFLICT (regenerated): %s still holds a conflict marker after its generator ran)", stopped, file)
+			return nil, refused(stopped, "CONFLICT (regenerated): %s still holds a conflict marker after its generator ran", file)
 		}
 		if _, err := w.git(ctx, dir, "add", "--", file); err != nil {
-			return nil, fmt.Errorf("%w (CONFLICT (regenerated): %s was not left by its generator: %s)", stopped, file, oneLine(err.Error()))
+			return nil, refused(stopped, "CONFLICT (regenerated): %s was not left by its generator: %s", file, oneLine(err.Error()))
 		}
 	}
 	return done, nil
+}
+
+// refused is stopped, git's own refusal of a merge, with why on a line of its
+// own after it, as a line that names a CONFLICT as git's do: a batch says of a
+// story it set aside the lines of the refusal that name a CONFLICT and no
+// other, so words kept in the tail of git's last line were lost with the
+// generator's output (mw-gq6.1668). why is one line, whatever it was given.
+func refused(stopped error, why string, args ...any) error {
+	why = oneLine(fmt.Sprintf(why, args...))
+	if !strings.HasPrefix(why, "CONFLICT") {
+		why = "CONFLICT (not settled): " + why
+	}
+	return fmt.Errorf("%w\n%s", stopped, why)
 }
 
 // hasConflictMarker reports whether the file at path holds a line git writes
