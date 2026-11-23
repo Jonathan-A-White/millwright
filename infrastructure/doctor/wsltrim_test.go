@@ -339,6 +339,35 @@ func TestWSLTrimIsOkWhenFstrimTimerIsDaily(t *testing.T) {
 	}
 }
 
+// mw-gq6.1681: systemctl show lists a daily timer as '*-*-* 00:00:00', never the
+// word daily, so a host with the daily drop-in set was called weekly.
+func TestWSLTrimCountsSystemdsNormalizedDailyAsDaily(t *testing.T) {
+	cases := []struct {
+		calendar string
+		daily    bool
+	}{
+		{"*-*-* 00:00:00", true},
+		{"Mon *-*-* 00:00:00", false},
+		{"Mon..Fri *-*-* 00:00:00", false},
+		{"*-*-01 00:00:00", false},
+	}
+	for _, c := range cases {
+		program := fakeTrimSystemctlCalendar(t, trimNow.Add(-time.Hour), c.calendar)
+		check := &doctor.WSLTrim{Program: program, DetectVirt: detectVirt("wsl"), DropIns: []string{}, Now: func() time.Time { return trimNow }}
+		verdict, reason := check.Probe(context.Background())
+		if c.daily && verdict != application.DoctorOK {
+			t.Errorf("calendar %q: expected ok, got %v %q", c.calendar, verdict, reason)
+		}
+		if !c.daily {
+			if verdict != application.DoctorFaulty {
+				t.Errorf("calendar %q: expected faulty, got %v %q", c.calendar, verdict, reason)
+			} else if !strings.Contains(reason, "mw host trim-setup") {
+				t.Errorf("calendar %q: expected the reason to name the cure, got %q", c.calendar, reason)
+			}
+		}
+	}
+}
+
 // driveFreeCheck is the check over a report file in a temp dir holding text
 // (nothing when text is empty and missing is true).
 func driveFreeCheck(t *testing.T, virt string, text string, missing bool) *doctor.WSLDriveFree {

@@ -181,11 +181,38 @@ func (w *WSLTrim) Probe(ctx context.Context) (application.Verdict, string) {
 	if age > WSLTrimMaxAge {
 		return application.DoctorFaulty, fmt.Sprintf("fstrim.timer last ran %d days ago on this WSL host%s; cure: %s", int(age/(24*time.Hour)), w.installSaid(), WSLTrimCureCommand)
 	}
-	if cal := props["TimersCalendar"]; cal != "" && !strings.Contains(cal, wslTrimDailyLine) {
+	if cal := props["TimersCalendar"]; cal != "" && !calendarIsDaily(cal) {
 		return application.DoctorFaulty, fmt.Sprintf("fstrim.timer last ran %d days ago but is not daily (systemd lists %s), so a weekly trim is slower than the vhdx grows%s; cure: %s, or as root on this host: %s",
 			int(age/(24*time.Hour)), cal, w.installSaid(), WSLTrimCureCommand, WSLTrimRootScript())
 	}
 	return application.DoctorOK, fmt.Sprintf("fstrim.timer last ran %d days ago", int(age/(24*time.Hour)))
+}
+
+// calendarIsDaily says whether a TimersCalendar value of systemctl show holds an
+// OnCalendar= that fires every day. systemd prints a timer set to daily as
+// '{ OnCalendar=*-*-* 00:00:00 ; next_elapse=... }', never the word daily, so a
+// spec is daily when it is the word daily or its date is *-*-* with no
+// day-of-week field ('Mon *-*-* 00:00:00' is the weekly default). Any one of
+// the timer's OnCalendar= entries being daily counts.
+func calendarIsDaily(cal string) bool {
+	const key = "OnCalendar="
+	for _, part := range strings.Split(cal, key)[1:] {
+		spec := part
+		if i := strings.IndexAny(spec, ";}"); i >= 0 {
+			spec = spec[:i]
+		}
+		fields := strings.Fields(spec)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) == 1 && fields[0] == "daily" {
+			return true
+		}
+		if fields[0] == "*-*-*" {
+			return true
+		}
+	}
+	return false
 }
 
 // installSaid says, for a faulty line, that the drop-ins this check's cure
