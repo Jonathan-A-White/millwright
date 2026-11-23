@@ -271,7 +271,9 @@ func TestAnEntryOfTwoPathsInTwoFoldersIsRegeneratedForBothAndEachIsNamed(t *test
 
 // whatABatchSays is what a batch writes as the Why of a story set aside: git's
 // CONFLICT lines and whatever mw added to them.
-func whatABatchSays(err error) string { return strings.Join(application.ConflictLines(err.Error()), "\n") }
+func whatABatchSays(err error) string {
+	return strings.Join(application.ConflictLines(err.Error()), "\n")
+}
 
 func TestWhatABatchSaysOfAGeneratorThatFailedCarriesItsLastLines(t *testing.T) {
 	here := twoStoriesRegenerating(t, "docs/lxx-align/gen.txt", "data/lxx/align/gen.expect.json")
