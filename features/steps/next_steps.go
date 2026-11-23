@@ -273,6 +273,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextGristExampleSteps(ctx, c)
 	registerNextGiveBackSteps(ctx, c)
 	registerNextStampSteps(ctx, c)
+	registerOpenStepsGuardSteps(ctx, c)
 	registerNextVersionSteps(ctx, c)
 	registerNextChangelogSteps(ctx, c)
 	registerNextCommonErrorsSteps(ctx, c)

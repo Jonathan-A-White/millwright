@@ -31,6 +31,7 @@ Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md
 - [The factory's investments](#the-factorys-investments)
 - [Changing one key of the config file](#changing-one-key-of-the-config-file)
   - [The `[session]` table: deny rules for story sessions](#the-session-table-deny-rules-for-story-sessions)
+  - [The `[closeout]` table: the open-steps guard](#the-closeout-table-the-open-steps-guard)
 - [Setting a story's path](#setting-a-storys-path)
 - [Booting a session into a seat](#booting-a-session-into-a-seat)
 - [Dispatching a story](#dispatching-a-story)
@@ -1050,6 +1051,41 @@ the home's (`contrib/vultr-boost set-session-deny`), once, as a move in the clou
 report; a box already level gets no ssh. An unset or empty `deny` on the home
 sets no box and empties none. `mw doctor boost-config` names a home whose list
 differs from the file's, and cures it with the same export.
+
+### The `[closeout]` table: the open-steps guard
+
+```toml
+[closeout]
+open_steps_guard = true   # the default: false installs no guard
+```
+
+A Builder that ended its session with a formula step open cost a whole second
+attempt: the close-out refuses `open-steps`. So a Builder's Claude session is
+launched with a Stop hook in its `--settings`, `mw step guard <story>`. When the
+session is about to end, the guard lists the story's open formula steps, each by
+id and title, and exits 2, which keeps the session going with that list as its
+next instruction. For each step the Builder either runs what it asks and closes it
+(`bd close <step>`), or marks it the Governor's, with the reason only he can do it:
+
+```sh
+mw step governor <story> <step> --why "only the Governor can sign in to the bank"
+```
+
+A marked step lets the guard pass. It is not closed: `mw next` still refuses the
+story's open steps, and treats the story as one with a hands step waiting on him.
+`mw report` counts the refusal under "hands waiting on him", not "left open", and
+the Mayor's mail names the step and its reason. The step must be an open step of
+the story's formula and the reason must say something.
+
+The guard holds one session back at most 3 times (counted in
+`runs/<story>/open-steps-guard.<session>` of the vault), then lets it end, and the
+close-out refuses as it always did. A step list it cannot read is said on standard
+error and does not hold the session. `closeout.open_steps_guard = false` (`mw
+config set closeout.open_steps_guard false`) installs no hook: the settings are
+byte for byte what they were. It is for Claude sessions only: Codex runs `codex
+exec` with no Stop hook, and the Tester, a batch's fixer and the seats' windows
+are not given it. The measure is the open-steps "left open" count in `mw report`.
+See `features/open_steps_guard.feature`.
 
 ## Setting a story's path
 

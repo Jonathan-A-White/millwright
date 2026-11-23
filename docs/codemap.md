@@ -47,7 +47,7 @@ Files: [codemap-detail.md](codemap-detail.md).
 |-|-|-|
 | File, Release, Ice, Thaw, Stuck (--inversions: DAMPERS), Retry, Cause, Note, Path*, Toc (nextfiles.go: toc-stale) | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/ice.go, cmd/mw/stuck.go, application/dampers.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go, cmd/mw/toc.go | {file*,release,retry*,cause,note,path_set,toc} |
 | Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send], Invest[Book], Loop | cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go, cmd/mw/invest.go, cmd/mw/loop.go | {show,peek,prove,stamp,tester,report*,invest} |
-| Dispatch, Next, BatchLand, AfterLandingRun, BdRetry | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*} |
+| Dispatch, Next, BatchLand, AfterLandingRun, BdRetry, StepGuard | cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/land.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | {dispatch,next,batch_land,after_*,bd_*} |
 | Check*, Status, CloudCheck, CloudMake, Brief | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | {check,status,cloud,brief} |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |
 | Suite, SuiteFiler, NightlySuite, NightlyTiming, ContributeBack | cmd/mw/suite.go, cmd/mw/suitenightly.go, cmd/mw/timingnightly.go | {suite*,timing_nightly,contribute_back} |
@@ -58,7 +58,7 @@ Files: [codemap-detail.md](codemap-detail.md).
 | Seat* | cmd/mw/seat.go | seat_* |
 | Talk*, TalkShow | cmd/mw/talk.go | talk_* |
 | Millhand, Deputy, MillhandTick | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
-| Secrets*, Google*, Contacts, Gdrive (`mw gdrive doc read`, `mw gdrive doc append`), Hands*, Ask, Watch, Doctor | cmd/mw/secrets.go, cmd/mw/google.go, cmd/mw/contacts.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | {secrets,hands,ask,watch,doctor} |
+| Secrets*, Google*, Contacts, Gdrive (`mw gdrive doc read|append`), Hands*, Ask, Watch, Doctor | cmd/mw/secrets.go, cmd/mw/google.go, cmd/mw/contacts.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | {secrets,hands,ask,watch,doctor} |
 | SeatBoot{,Set}, SeatRead, Memory[Log], Errors, Init | cmd/mw/init.go, cmd/mw/memory.go, cmd/mw/errors.go, infra/memoryqueries | {seat_boot,init,memory,errors} |
 | Postern* (+clear), Digest + Factory loop (LoopSource) | cmd/mw/postern.go, cmd/mw/posternview.go, cmd/mw/posternbead.go, cmd/mw/posternmirror.go, cmd/mw/digest.go | postern_* |
 | Event* | cmd/mw/events.go | event_follow |
