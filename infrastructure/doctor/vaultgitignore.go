@@ -178,7 +178,10 @@ func (v *VaultGitignore) cureLines(ctx context.Context) error {
 	if have != "" {
 		text.WriteString("\n")
 	}
-	text.WriteString("# Lines template/.gitignore gained after this vault was made (mw doctor, " + v.Host + ")\n")
+	// The header names no host: every host cures its own vault, and blocks that
+	// differ only by a host name conflict when the second rebases onto the first
+	// (mw-gq6.1693). The commit message names the host.
+	text.WriteString("# Lines template/.gitignore gained after this vault was made (mw doctor)\n")
 	for _, line := range lacking {
 		text.WriteString(line + "\n")
 	}

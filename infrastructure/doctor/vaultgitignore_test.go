@@ -188,3 +188,51 @@ func TestVaultGitignoreCureUntracksAFileAFreshLineIgnores(t *testing.T) {
 		t.Fatalf("after the cure the verdict = %v (%s), want ok", verdict, reason)
 	}
 }
+
+// mw-gq6.1693: every host cures its own vault and commits locally, so the block
+// a cure appends must be the same on every host: a header naming the host made
+// each later host's commit conflict in .gitignore when it rebased onto the first
+// host's pushed cure.
+
+func TestVaultGitignoreTwoHostsCuresRebaseWithoutConflict(t *testing.T) {
+	first := aVaultGitignoreVault(t, strings.Replace(vgTemplate, "runs/*/heartbeat-*.log\n", "", 1))
+	vdRun(t, first, "git", "push", "-q", "origin", "main")
+	remote := strings.TrimSpace(vdRun(t, first, "git", "remote", "get-url", "origin"))
+	second := filepath.Join(t.TempDir(), "vault2")
+	vdRun(t, filepath.Dir(second), "git", "clone", "-q", remote, second)
+	vdRun(t, second, "git", "config", "user.name", "millwright test")
+	vdRun(t, second, "git", "config", "user.email", "test@millwright.invalid")
+
+	template := fstest.MapFS{".gitignore": {Data: []byte(vgTemplate)}}
+	for host, dir := range map[string]string{"desktop": first, "cloud9": second} {
+		if err := doctor.NewVaultGitignore(dir, host, template).Cure(context.Background()); err != nil {
+			t.Fatalf("Cure on %s: %v", host, err)
+		}
+	}
+	vdRun(t, first, "git", "push", "-q", "origin", "main")
+
+	// no .gitattributes union here: the two cures must merge on their own
+	vdRun(t, second, "git", "pull", "--rebase", "-q", "origin", "main")
+	got, err := os.ReadFile(filepath.Join(second, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(got), "runs/*/heartbeat-*.log"); n != 1 {
+		t.Errorf(".gitignore holds the cured line %d times, want once: %q", n, got)
+	}
+}
+
+func TestVaultGitignoreCureWritesNoHostIntoTheFile(t *testing.T) {
+	clone := aVaultGitignoreVault(t, strings.Replace(vgTemplate, "runs/*/heartbeat-*.log\n", "", 1))
+	check := doctor.NewVaultGitignore(clone, "cloud9-host", fstest.MapFS{".gitignore": {Data: []byte(vgTemplate)}})
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("Cure: %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(clone, ".gitignore"))
+	if strings.Contains(string(got), "cloud9-host") {
+		t.Errorf(".gitignore names the host: %q", got)
+	}
+	if msg := vdRun(t, clone, "git", "log", "-1", "--format=%s"); !strings.Contains(msg, "cloud9-host") {
+		t.Errorf("commit message %q does not name the host", msg)
+	}
+}
