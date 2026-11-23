@@ -196,6 +196,9 @@ type BatchStory struct {
 	Merge       string
 	FastForward bool
 	Unioned     []string
+	// Regenerated are the generated files the merge settled by running the rig's
+	// generator (regenerated_files).
+	Regenerated []Regeneration
 
 	// Why says why it was set aside, and Conflicts are git's conflict lines
 	// when it was because the branch conflicts with the batch.
@@ -663,7 +666,7 @@ func (b BatchLand) dryRun(ctx context.Context, rigDir string, report *BatchRepor
 // one gate run and the push. It says Landed, or Held and why.
 func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.EpicRequirements, report *BatchReport, nr *NextReport) {
 	n := b.Next
-	b.mergeAll(ctx, dir, rigDir, rules.UnionMergeFiles, report)
+	b.mergeAll(ctx, dir, rigDir, rules.MergeRules(), report)
 	// A branch set aside for its conflicts is the fixer's to merge, before the
 	// version is raised and the tests are run: what it merges then gets its
 	// changelog entry, and the batch is tested once, after it. But only a batch
@@ -878,7 +881,7 @@ func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *Batc
 // the batches set aside again and again is handed back and not queued for ever
 // (mw-gq6.1631, mw-gq6.1632); the merge of the next is made on the batch as it
 // stood: a merge that conflicts is undone by the landing before it comes back.
-func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []string, report *BatchReport) {
+func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union domain.MergeRules, report *BatchReport) {
 	n := b.Next
 	for _, s := range report.Queue {
 		if _, err := n.Landing.RefHead(ctx, rigDir, s.Branch); err != nil {
@@ -898,13 +901,7 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 			report.SetAside = append(report.SetAside, s)
 			continue
 		}
-		var landed Landed
-		var err error
-		if len(union) > 0 {
-			landed, err = n.Landing.MergeUnion(ctx, dir, s.Branch, union)
-		} else {
-			landed, err = n.Landing.Merge(ctx, dir, s.Branch)
-		}
+		landed, err := n.mergeBy(ctx, dir, s.Branch, union)
 		if err != nil {
 			if Conflicted(err) {
 				s.Conflicts = ConflictLines(err.Error())
@@ -925,7 +922,10 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 			report.SetAside = append(report.SetAside, s)
 			continue
 		}
-		s.Merge, s.FastForward, s.Unioned = landed.Commit, landed.FastForward, landed.Unioned
+		s.Merge, s.FastForward, s.Unioned, s.Regenerated = landed.Commit, landed.FastForward, landed.Unioned, landed.Regenerated
+		for _, line := range RegenerationLines(s.Regenerated) {
+			report.Notes = append(report.Notes, s.ID+": "+line)
+		}
 		report.Merged = append(report.Merged, s)
 	}
 }
@@ -1308,6 +1308,9 @@ func (r BatchReport) mergeOrder() string {
 			fmt.Fprintf(&b, " %s %s", how, merged.Merge)
 			if len(merged.Unioned) > 0 {
 				fmt.Fprintf(&b, " (trim-merged %s)", strings.Join(merged.Unioned, ", "))
+			}
+			for _, line := range RegenerationLines(merged.Regenerated) {
+				fmt.Fprintf(&b, " (%s)", line)
 			}
 			b.WriteString("\n")
 			continue

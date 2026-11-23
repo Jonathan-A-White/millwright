@@ -348,6 +348,9 @@ func (r NextReport) text(forMail bool) string {
 		if len(r.How.Unioned) > 0 {
 			fmt.Fprintf(&b, "  trim-merged: %s (conflicts in files the rig lists, settled by mw's trim-safe driver: both sides' added lines kept, removed ones left out, tested together)\n", strings.Join(r.How.Unioned, ", "))
 		}
+		for _, line := range RegenerationLines(r.How.Regenerated) {
+			fmt.Fprintf(&b, "  %s (conflict in a generated file the rig lists, settled by its generator on the merged tree, tested together)\n", line)
+		}
 	case r.Tested != "" && r.Findings.Text == "":
 		fmt.Fprintf(&b, "  tested  %s by an earlier run of mw next: nothing was read or written again\n", r.Tested)
 	case r.Tested != "":

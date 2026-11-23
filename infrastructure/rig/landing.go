@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
 )
 
@@ -360,6 +361,12 @@ func (w *Worktrees) Merge(ctx context.Context, landingDir, branch string) (appli
 // undone, as in Merge. Never by git merge-file --union: it kept both sides of
 // every hunk, so a trim got back what it took out (mw-gq6.499).
 func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, union []string) (application.Landed, error) {
+	return w.MergeRuled(ctx, landingDir, branch, domain.MergeRules{Union: union})
+}
+
+// MergeRuled implements application.Landing: MergeUnion, and the files the rig
+// lists as regenerated settled by their generator (mw-gq6.1666).
+func (w *Worktrees) MergeRuled(ctx context.Context, landingDir, branch string, rules domain.MergeRules) (application.Landed, error) {
 	if branch == "" {
 		return application.Landed{}, fmt.Errorf("merging into %s: which branch?", landingDir)
 	}
@@ -379,13 +386,14 @@ func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, u
 	defer driver.Remove()
 
 	var unioned []string
+	var regenerated []application.Regeneration
 	// --no-edit so that no editor is ever opened: nobody is at the keyboard.
 	merge := append(driver.Config(), "merge", "--no-edit", branch)
 	if _, err := w.git(ctx, landingDir, merge...); err != nil {
 		// Read before the union rules touch the index and before the merge is
 		// undone: afterwards the paths are gone (mw-gq6.559).
 		conflicted := w.unmergedPaths(ctx, landingDir)
-		unioned, err = w.unionConflicts(ctx, landingDir, driver, union, err)
+		unioned, regenerated, err = w.unionConflicts(ctx, landingDir, driver, rules, err)
 		if err != nil {
 			said := fmt.Sprintf("%v: %v", application.ErrMergeConflict, err)
 			if _, abort := w.git(ctx, landingDir, "merge", "--abort"); abort != nil {
@@ -408,6 +416,7 @@ func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, u
 		// pushed is exactly the commit the story's tests ran on.
 		FastForward: commit == strings.TrimSpace(tip) && commit != strings.TrimSpace(before),
 		Unioned:     unioned,
+		Regenerated: regenerated,
 	}, nil
 }
 
@@ -428,63 +437,67 @@ func (w *Worktrees) unmergedPaths(ctx context.Context, dir string) []string {
 }
 
 // unionConflicts settles a merge that has stopped on conflicts, if all of them
-// are in files union lists, by driver, and commits it; it reports the files it
-// settled. When it cannot, it returns an error saying why, with the merge left
-// as it stopped for the caller to undo; stopped is git's own refusal, which it
-// returns when no file is conflicted at all (a merge that failed for another
-// reason).
-func (w *Worktrees) unionConflicts(ctx context.Context, dir string, driver *gitcmd.MergeDriver, union []string, stopped error) ([]string, error) {
-	said, err := w.git(ctx, dir, "diff", "--name-only", "--diff-filter=U", "-z")
-	if err != nil || len(union) == 0 {
-		return nil, stopped
+// are in files rules lists, and commits it: the union files by driver, the
+// regenerated ones by taking the target's side and running their generator
+// (regenerate). It reports the files it settled each way. When it cannot, it
+// returns an error saying why, with the merge left as it stopped for the caller
+// to undo; stopped is git's own refusal, which it returns when no file is
+// conflicted at all (a merge that failed for another reason).
+func (w *Worktrees) unionConflicts(ctx context.Context, dir string, driver *gitcmd.MergeDriver, rules domain.MergeRules, stopped error) ([]string, []application.Regeneration, error) {
+	files := w.unmergedPaths(ctx, dir)
+	if rules.None() || len(files) == 0 {
+		return nil, nil, stopped
 	}
-	var files []string
-	for _, file := range strings.Split(said, "\x00") {
-		if file != "" {
-			files = append(files, file)
-		}
-	}
-	if len(files) == 0 {
-		return nil, stopped
-	}
+	var unionFiles, generated []string
 	for _, file := range files {
+		if len(regeneratedBy(rules.Regenerated, file)) > 0 {
+			generated = append(generated, file)
+			continue
+		}
 		// git's merge already ran the driver on a file named with it, and the
 		// driver could not settle it: running it again would say the same.
 		if attr, err := w.git(ctx, dir, "check-attr", "merge", "--", file); err == nil {
 			if _, value, _ := strings.Cut(strings.TrimSpace(attr), ": merge: "); gitcmd.IsTrimMerge(value) {
-				return nil, fmt.Errorf("%w (%s is merged by mw's trim-safe driver, merge=%s, which could not settle it; union would bring back every line a trim took out)",
+				return nil, nil, fmt.Errorf("%w (%s is merged by mw's trim-safe driver, merge=%s, which could not settle it; union would bring back every line a trim took out)",
 					stopped, file, value)
 			}
 		}
-		if !listed(union, file) {
-			return nil, fmt.Errorf("%w (%s is in conflict and the rig does not list it to be merged by union)", stopped, file)
+		if !listed(rules.Union, file) {
+			return nil, nil, fmt.Errorf("%w (%s is in conflict and the rig does not list it to be merged by union or regenerated)", stopped, file)
 		}
+		unionFiles = append(unionFiles, file)
 	}
-	scratch, err := os.MkdirTemp("", "mw-union-")
-	if err != nil {
-		return nil, fmt.Errorf("%w (and a place to merge %s could not be made: %v)", stopped, strings.Join(files, ", "), err)
-	}
-	defer os.RemoveAll(scratch)
-	merged := make(map[string]string, len(files))
-	for _, file := range files {
-		text, err := w.trimMergeOf(ctx, dir, scratch, driver, file)
+	if len(unionFiles) > 0 {
+		scratch, err := os.MkdirTemp("", "mw-union-")
 		if err != nil {
-			return nil, fmt.Errorf("%w (%s is listed in union_merge_files, but could not be merged: %v)", stopped, file, err)
+			return nil, nil, fmt.Errorf("%w (and a place to merge %s could not be made: %v)", stopped, strings.Join(unionFiles, ", "), err)
 		}
-		merged[file] = text
+		defer os.RemoveAll(scratch)
+		merged := make(map[string]string, len(unionFiles))
+		for _, file := range unionFiles {
+			text, err := w.trimMergeOf(ctx, dir, scratch, driver, file)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w (%s is listed in union_merge_files, but could not be merged: %v)", stopped, file, err)
+			}
+			merged[file] = text
+		}
+		for _, file := range unionFiles {
+			if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(file)), []byte(merged[file]), 0o644); err != nil {
+				return nil, nil, fmt.Errorf("%w (writing %s: %v)", stopped, file, err)
+			}
+			if _, err := w.git(ctx, dir, "add", "--", file); err != nil {
+				return nil, nil, fmt.Errorf("%w (%v)", stopped, err)
+			}
+		}
 	}
-	for _, file := range files {
-		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(file)), []byte(merged[file]), 0o644); err != nil {
-			return nil, fmt.Errorf("%w (writing %s: %v)", stopped, file, err)
-		}
-		if _, err := w.git(ctx, dir, "add", "--", file); err != nil {
-			return nil, fmt.Errorf("%w (%v)", stopped, err)
-		}
+	regenerations, err := w.regenerate(ctx, dir, rules.Regenerated, generated, stopped)
+	if err != nil {
+		return nil, nil, err
 	}
 	if _, err := w.git(ctx, dir, "commit", "--no-edit"); err != nil {
-		return nil, fmt.Errorf("%w (%v)", stopped, err)
+		return nil, nil, fmt.Errorf("%w (%v)", stopped, err)
 	}
-	return files, nil
+	return unionFiles, regenerations, nil
 }
 
 // trimMergeOf is the file as driver merges it of the two sides of a conflict

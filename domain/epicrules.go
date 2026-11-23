@@ -39,6 +39,12 @@ type EpicRequirements struct {
 	// of each (mw-gq6.424). It is no requirement of an epic either, so Any does
 	// not count it.
 	UnionMergeFiles []string
+	// RegeneratedFiles, when it is not empty, are the generated files of the rig
+	// (regenerated_files): a landing whose merge conflicts only in them, and in
+	// union_merge_files, takes the target's side of each, runs the entry's
+	// command and commits the merge. It is no requirement of an epic either, so
+	// Any does not count it.
+	RegeneratedFiles []RegeneratedFiles
 	// TimingTests, when it is not empty, are the globs, relative to the rig's
 	// root, of its test files that need a real clock to mean anything: the gate
 	// and the suite runs of its tests are handed MW_TIMING=skip and the globs, so

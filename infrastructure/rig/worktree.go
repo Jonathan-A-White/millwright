@@ -48,6 +48,9 @@ type Worktrees struct {
 	buildLimits  map[string]time.Duration
 	buildStretch int
 	mergeScript  string
+	// regenerator runs a rig's regenerated_files commands (mw-gq6.1666); nil is
+	// the host's shell.
+	regenerator Regenerator
 	// endProcess ends one process found holding a worktree (mw-gq6.876).
 	endProcess func(pid int) error
 	// writersWait is how long endWriters tries (mw-gq6.876).

@@ -19,6 +19,7 @@ import (
 // registerNextUnionSteps registers the union-merge steps of features/next.feature.
 func registerNextUnionSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's file in the vault lists "([^"]*)" to be merged by union$`, c.theRigListsAUnionFile)
+	ctx.Given(`^the rig's file in the vault regenerates "([^"]*)" by "([^"]*)"$`, c.theRigRegeneratesAFile)
 	ctx.Given(`^the other host landed the file "([^"]*)" holding "([^"]*)" on "([^"]*)"$`, c.theOtherHostLandedAFile)
 	ctx.Given(`^"([^"]*)" wrote the file "([^"]*)" holding "([^"]*)"$`, c.theStoryWroteAFile)
 	ctx.Then(`^the file "([^"]*)" on "([^"]*)" at the rig's origin holds the lines "([^"]*)" and "([^"]*)"$`, c.theOriginFileHoldsBothLines)
@@ -26,6 +27,12 @@ func registerNextUnionSteps(ctx *godog.ScenarioContext, c *nextContext) {
 
 func (c *nextContext) theRigListsAUnionFile(file string) error {
 	return c.theRigFileHoldsTheLine(fmt.Sprintf("%s = [%q]", vault.UnionMergeFilesKey, file))
+}
+
+// theRigRegeneratesAFile writes the rig's file with one regenerated_files table:
+// the generator is a real shell command, run in the landing worktree.
+func (c *nextContext) theRigRegeneratesAFile(file, command string) error {
+	return c.theRigFileHoldsTheLine(fmt.Sprintf("[[%s]]\npaths = [%q]\nrun = '%s'", vault.RegeneratedFilesKey, file, command))
 }
 
 func (c *nextContext) theOtherHostLandedAFile(file, line, branch string) error {

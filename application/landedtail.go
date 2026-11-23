@@ -340,7 +340,7 @@ var landedTail = []tailStep{
 			mailed := NextReport{
 				StoryID: s.story.ID, Host: t.n.Host, Title: s.story.Title, Target: report.Target, Commits: s.story.Commits, Pushes: 1,
 				Tags:   report.tags.ForStory(s.story.detail.Acceptance),
-				Landed: true, How: Landed{Commit: s.story.Merge, FastForward: s.story.FastForward, Version: report.Version, Unioned: s.story.Unioned},
+				Landed: true, How: Landed{Commit: s.story.Merge, FastForward: s.story.FastForward, Version: report.Version, Unioned: s.story.Unioned, Regenerated: s.story.Regenerated},
 				TesterFiled: s.testerFiled,
 				Ledger:      s.line, Closed: s.closed, DemoHeld: s.heldDemo, NotClosed: "see the batch's report",
 				Notes: append([]string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(b.together, ", "),

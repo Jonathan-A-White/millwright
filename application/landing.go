@@ -82,6 +82,31 @@ type Landed struct {
 	// lines kept, and each side's removed ones left out (mw-gq6.499). Empty for
 	// a merge that had no conflict.
 	Unioned []string
+	// Regenerated are the generated files the merge conflicted in that the rig
+	// lists (regenerated_files) and whose generator was run on the merged tree,
+	// each with the command that wrote it again. Empty for a merge that had no
+	// such conflict.
+	Regenerated []Regeneration
+}
+
+// Regeneration is one generated file a merge settled by running its generator:
+// the file, and the rig's command that wrote it again.
+type Regeneration struct {
+	Path string
+	Run  string
+}
+
+// String is 'regenerated <path> by <run>', as the batch's notes and the
+// landing's report say it.
+func (r Regeneration) String() string { return "regenerated " + r.Path + " by " + r.Run }
+
+// RegenerationLines are the lines of regenerations, one each, in their order.
+func RegenerationLines(regenerated []Regeneration) []string {
+	lines := make([]string, 0, len(regenerated))
+	for _, r := range regenerated {
+		lines = append(lines, r.String())
+	}
+	return lines
 }
 
 // VersionBump asks a landing worktree to raise the rig's version after a merge:
@@ -214,6 +239,17 @@ type Landing interface {
 	// other file as well is undone exactly as Merge undoes it, none of the
 	// listed files merged. Nothing is written to the rig's attributes.
 	MergeUnion(ctx context.Context, landingDir, branch string, union []string) (Landed, error)
+
+	// MergeRuled is MergeUnion for a rig that also lists generated files
+	// (regenerated_files): when the merge conflicts only in files that rules
+	// list, as union or as regenerated, each union file is settled as MergeUnion
+	// settles it and each regenerated one takes the target's side; then each
+	// regenerated entry that matched a conflicted file runs its command once in
+	// the landing worktree, what it rewrote is staged, and the merge is
+	// committed, Regenerated naming each file and command. A command that exits
+	// non-zero or leaves a conflict marker in a file is a conflict as well, its
+	// last lines in the error. A file both rules list is regenerated.
+	MergeRuled(ctx context.Context, landingDir, branch string, rules domain.MergeRules) (Landed, error)
 
 	// BumpVersion raises the patch of the version in the first of bump.Files,
 	// writes it into all of them and commits that as "Version X.Y.Z (<story>)"
@@ -658,4 +694,17 @@ func firstLine(text string) string {
 		return strings.TrimSpace(text[:cut])
 	}
 	return strings.TrimSpace(text)
+}
+
+// mergeBy merges branch into the landing worktree dir by the rig's rules: by
+// MergeRuled when the rig lists generated files, by MergeUnion when it lists
+// union files, and by Merge otherwise.
+func (n Next) mergeBy(ctx context.Context, dir, branch string, rules domain.MergeRules) (Landed, error) {
+	switch {
+	case len(rules.Regenerated) > 0:
+		return n.Landing.MergeRuled(ctx, dir, branch, rules)
+	case len(rules.Union) > 0:
+		return n.Landing.MergeUnion(ctx, dir, branch, rules.Union)
+	}
+	return n.Landing.Merge(ctx, dir, branch)
 }

@@ -161,6 +161,9 @@ func (f *fakeRetryLanding) Merge(context.Context, string, string) (application.L
 func (f *fakeRetryLanding) MergeUnion(context.Context, string, string, []string) (application.Landed, error) {
 	return application.Landed{}, nil
 }
+func (f *fakeRetryLanding) MergeRuled(context.Context, string, string, domain.MergeRules) (application.Landed, error) {
+	return application.Landed{}, nil
+}
 func (f *fakeRetryLanding) BumpVersion(context.Context, string, application.VersionBump) (application.Bumped, error) {
 	return application.Bumped{}, nil
 }

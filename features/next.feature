@@ -855,6 +855,20 @@ Feature: Closing out a finished story and carrying on
     And that mail's body holds:
       | trim-merged: ATTRIBUTION.md |
 
+  Scenario: A branch that conflicts only in a generated file the rig lists has the file's generator run on the merge, tested together, and lands
+    Given the rig's file in the vault regenerates "docs/gen.txt" by "echo regenerated > docs/gen.txt"
+    And the other host landed the file "docs/gen.txt" holding "the other host's row" on "main"
+    And "mw-gq6.1" wrote the file "docs/gen.txt" holding "the story's row"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the file "docs/gen.txt" on "main" at the rig's origin holds the lines "regenerated" and "regenerated"
+    And it landed as a merge commit
+    And the rig's tests were run 2 times
+    And the story "mw-gq6.1" is closed
+    And that mail's body holds:
+      | regenerated docs/gen.txt by echo regenerated > docs/gen.txt |
+
   Scenario: A branch that conflicts in a file the rig does not list is sent back as before
     Given the rig's file in the vault lists "CLAUDE.md" to be merged by union
     And the other host landed the file "ATTRIBUTION.md" holding "the other host credits this" on "main"

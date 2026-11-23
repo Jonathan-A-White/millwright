@@ -86,6 +86,9 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	version_files          = ["package.json", "package-lock.json"]
 //	changelog_files        = ["public/changelog.json", "CHANGELOG.md"]
 //	union_merge_files      = ["ATTRIBUTION.md", "docs/*.md"]
+//	[[regenerated_files]]  # last in the file: its tables hold paths and run only
+//	paths = ["docs/lxx-align/gen.txt"]
+//	run   = "npm run lxx:align-expect -- --book gen"
 //	timing_tests           = ["tests/timing/**", "**/*.timing.test.ts"]
 //	public_url             = "https://github.com/Jonathan-A-White/lampas"
 //	site_url               = "https://lampas.allmymind.org/"
@@ -151,7 +154,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
-	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, TimingTestsKey: true,
+	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, RegeneratedFilesKey: true, TimingTestsKey: true,
 	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, NeedsLaptopKey: true, NightlySuiteKey: true, SuiteEpicKey: true, SuiteEveryKey: true, SuiteHostKey: true, BuilderCallKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
@@ -173,9 +176,22 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 	var requirements domain.EpicRequirements
 	var unknown []string
 	lines := strings.Split(written, "\n")
+	inRegenTable := false
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(stripComment(lines[i]))
 		if line == "" {
+			continue
+		}
+		if line == regenTableHeader {
+			requirements.RegeneratedFiles = append(requirements.RegeneratedFiles, domain.RegeneratedFiles{})
+			inRegenTable = true
+			continue
+		}
+		if inRegenTable {
+			var err error
+			if i, err = readRegenTableLine(&requirements.RegeneratedFiles[len(requirements.RegeneratedFiles)-1], lines, i); err != nil {
+				return requirements, nil, err
+			}
 			continue
 		}
 		key, value, found := strings.Cut(line, "=")
@@ -232,6 +248,14 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			default:
 				requirements.Capacity.MemoryFreeMB = n
 			}
+			continue
+		}
+		if found && key == RegeneratedFilesKey {
+			entries, last, err := readRegenInline(value, lines, i)
+			if err != nil {
+				return requirements, nil, fmt.Errorf("line %d: %w", i+1, err)
+			}
+			requirements.RegeneratedFiles, i = append(requirements.RegeneratedFiles, entries...), last
 			continue
 		}
 		if found && key == GuestKey {
@@ -383,12 +407,15 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, the feature keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, the %s tables, the feature keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
 				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, NeedsLaptopKey, NightlySuiteKey, SuiteEpicKey, SuiteEveryKey, SuiteHostKey, BuilderCallKey,
-				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey,
+				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey, RegeneratedFilesKey,
 				FeatureShareKey, FeatureShareMinKey, FeatureShareMaxKey, FeatureFloorKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
+	}
+	if err := checkRegenerated(requirements.RegeneratedFiles); err != nil {
+		return requirements, nil, err
 	}
 	if (requirements.SuiteEvery > 0) != (requirements.SuiteHost != "") {
 		return requirements, nil, fmt.Errorf("%s and %s go together: a rig's file names both or neither (got %s only)", SuiteEveryKey, SuiteHostKey,

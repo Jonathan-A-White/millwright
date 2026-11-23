@@ -6880,6 +6880,31 @@ own `docs/codemap.md`, `merge=codemap`. A merge made by hand, with no such confi
 git's text merge, which stops on a conflict; a landing never settles a file named with
 the driver by union, even when the rig lists it.
 
+### Regenerating generated files after a conflict
+
+A file a program writes whole (a table with one row a chapter, an index, a lock file) conflicts
+whenever two stories regenerate it, and neither side is the right one; `union_merge_files`
+would keep both sides' rows. A rig's file may name such files and the command that writes them
+again, as a list of tables placed after every other key of the file:
+
+```toml
+[[regenerated_files]]
+paths = ["docs/lxx-align/gen.txt"]            # paths inside the rig, or path.Match globs
+run   = "npm run lxx:align-expect -- --book gen"   # a shell command, run in the landing worktree
+```
+
+(or on one line, `regenerated_files = [{ paths = ["a.txt"], run = "make a" }]`). When the
+merge of `mw next` or of `mw land` conflicts *only* in files that some entry's `paths` match,
+alone or together with `union_merge_files`, `mw` takes the target branch's side of each such
+file, runs each matching entry's `run` once in the landing worktree (the merged tree), stages
+what it rewrote, and commits the merge. A file both keys list is regenerated. The gate then
+runs on the merged result as for any merge commit; the batch's notes and the Landed mail say
+`regenerated <path> by <run>`. A `run` that exits non-zero, runs over ten minutes, or leaves a
+conflict marker in a listed file undoes the whole merge and sets the story aside as any
+conflict does, with the command's last lines in the note; a conflict in a file not listed is
+set aside as before. A rig without the key lands as it always did. Set the key only once no older `mw`
+runs on any host: an older one stops a landing on a line it does not know.
+
 ### The changelog a landing writes
 
 A rig's file that names `version_files` may also say

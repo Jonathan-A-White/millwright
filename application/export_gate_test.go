@@ -123,6 +123,13 @@ func (b BatchLand) LandTheBatchIn(ctx context.Context, dir string, report *Batch
 	report.Notes = append(report.Notes, nr.Notes...)
 }
 
+// LandTheBatchUnder is LandTheBatchIn for a rig whose file says rules.
+func (b BatchLand) LandTheBatchUnder(ctx context.Context, dir string, rules domain.EpicRequirements, report *BatchReport) {
+	var nr NextReport
+	b.landIn(ctx, dir, dir, rules, report, &nr)
+	report.Notes = append(report.Notes, nr.Notes...)
+}
+
 // MailTheBatch lets the tests of package application_test send the one mail a
 // batch that did not land whole sends the Mayor (BatchLand.mailTheMayor).
 func (b BatchLand) MailTheBatch(ctx context.Context, report *BatchReport) {

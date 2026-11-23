@@ -3000,7 +3000,7 @@ func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
 func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Landed, error) {
 	base := StartPoint(n.remote(), c.target)
 	var version VersionBump
-	var union []string
+	var union domain.MergeRules
 	if n.Rules != nil {
 		rules, unknown, err := n.landingRequirements(ctx, c.path.Rig)
 		if err != nil {
@@ -3024,7 +3024,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 		}
 		version.Files = rules.VersionFiles
 		version.Minor = c.path.Bump == domain.BumpMinor
-		union = rules.UnionMergeFiles
+		union = rules.MergeRules()
 		if len(rules.VersionFiles) > 0 && len(rules.ChangelogFiles) > 0 {
 			if version.Entry, err = n.changelogEntry(ctx, c, report); err != nil {
 				return Landed{}, failedFor(ReasonLandingFailed, err)
@@ -3103,14 +3103,8 @@ func landingRequirementsFrom(ctx context.Context, rules EpicRules, rig string) (
 // made if it made anything new, and push. Each attempt starts from a fresh
 // landing worktree at the newest base, so a push that was refused and tried
 // again raises the version once, from the new base, never on top of its own.
-func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir string, version VersionBump, union []string) (Landed, error) {
-	var landed Landed
-	var err error
-	if len(union) > 0 {
-		landed, err = n.Landing.MergeUnion(ctx, dir, c.branch, union)
-	} else {
-		landed, err = n.Landing.Merge(ctx, dir, c.branch)
-	}
+func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir string, version VersionBump, union domain.MergeRules) (Landed, error) {
+	landed, err := n.mergeBy(ctx, dir, c.branch, union)
 	if err != nil {
 		if Conflicted(err) {
 			return Landed{}, failedFor(ReasonMergeConflict, fmt.Errorf("%s does not merge into %s without conflicts, which mw will not resolve for anybody: %w",
