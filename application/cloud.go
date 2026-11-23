@@ -554,7 +554,8 @@ func (p CloudPlan) boxCap() int {
 //     salvage is tried once, and what it could not save is a move and an
 //     alert to the Governor;
 //   - destroys each box idle for Plan.Idle;
-//   - makes one box when more stories wait for any host than there are
+//   - makes one box when more stories wait for any host (not counting those
+//     held on a file a running story names, which no box can start) than there are
 //     sessions free across the hosts and the boxes, while there are fewer
 //     than Plan.MaxBoxes, and the month can pay a first hour of it and one
 //     more hour of every box with it.
@@ -620,6 +621,10 @@ type CloudReport struct {
 	// Waiting are the stories that wait for any host, Free the sessions free
 	// across the hosts and the boxes.
 	Waiting, Free int
+	// FileHeld are the ready stories of host auto left out of Waiting because
+	// each names a file a running story names: no host, new box or old, may
+	// start one until that story lands (mw-gq6.1669).
+	FileHeld int
 	// Coming are the sessions the boxes still being made, or restoring, will
 	// run once they are up: not free, and counted only so that a second box is
 	// not made for the stories a box on its way already serves.
@@ -634,11 +639,22 @@ type CloudReport struct {
 	Paces []string
 }
 
+// waitingText says how many stories wait for any host, and how many more are
+// left out because each is held on a file a running story names.
+func (r CloudReport) waitingText() string {
+	text := fmt.Sprintf("%d stories wait for any host", r.Waiting)
+	if r.FileHeld > 0 {
+		text += fmt.Sprintf(" (%d more held on files)", r.FileHeld)
+	}
+	return text
+}
+
 // String is the report in one line.
 func (r CloudReport) String() string {
-	line := fmt.Sprintf("cloud: %d stories wait for any host, %d sessions free, %d boxes up, $%.2f spent this month", r.Waiting, r.Free, r.Boxes, r.SpentUSD)
+	waiting := r.waitingText()
+	line := fmt.Sprintf("cloud: %s, %d sessions free, %d boxes up, $%.2f spent this month", waiting, r.Free, r.Boxes, r.SpentUSD)
 	if r.Coming > 0 {
-		line = fmt.Sprintf("cloud: %d stories wait for any host, %d sessions free (%d more once the boxes being made are up), %d boxes up, $%.2f spent this month", r.Waiting, r.Free, r.Coming, r.Boxes, r.SpentUSD)
+		line = fmt.Sprintf("cloud: %s, %d sessions free (%d more once the boxes being made are up), %d boxes up, $%.2f spent this month", waiting, r.Free, r.Coming, r.Boxes, r.SpentUSD)
 	}
 	for _, m := range r.Moves {
 		line += "\n  " + m
@@ -700,7 +716,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 		}
 	}
 	p.repathGone(ctx, work)
-	p.report.Waiting, p.report.Free, p.report.Coming = p.demand(work)
+	p.report.Waiting, p.report.FileHeld, p.report.Free, p.report.Coming = p.demand(ctx, work)
 	if p.report.Waiting > p.report.Free+p.report.Coming && len(p.state.Boxes) < c.Plan.MaxBoxes {
 		p.make(ctx)
 	}
@@ -1602,11 +1618,28 @@ func (p *cloudPass) setSessionDenies(ctx context.Context) {
 // second box for a story the first already serves. So are those of a box the
 // home has not cleared yet (CloudBox.MayWork); a box that failed its own check
 // counts neither.
-func (p *cloudPass) demand(work WorkInHand) (waiting, free, coming int) {
-	for _, d := range work.Ready {
-		if d.Merged().Host == domain.HostAuto && !d.Hitl() {
-			waiting++
+func (p *cloudPass) demand(ctx context.Context, work WorkInHand) (waiting, fileHeld, free, coming int) {
+	// A ready story whose files a running story names is held by the dispatch of
+	// any host until that story lands, so no new box can start it either: it is
+	// counted apart and makes no box (mw-gq6.1669). The test is the dispatch's
+	// own (fileShares) on what the tracker says, the files key and the files the
+	// story recorded as changed; a branch's own diff is on its host and is not
+	// read here, so a story held only by that is still counted as waiting.
+	var shares fileShares
+	for _, d := range work.RunningLive(p.now) {
+		if !d.Hitl() {
+			shares.add(d)
 		}
+	}
+	for _, d := range work.Ready {
+		if d.Merged().Host != domain.HostAuto || d.Hitl() {
+			continue
+		}
+		if share, held := shares.shared(ctx, d); held && share.Unkeyed == KeyedBoth {
+			fileHeld++
+			continue
+		}
+		waiting++
 	}
 	for host, limit := range p.check.Plan.HostCaps {
 		if IsRetired(p.check.Plan.Retired, host) {
@@ -1630,7 +1663,7 @@ func (p *cloudPass) demand(work WorkInHand) (waiting, free, coming int) {
 		}
 		free += max(0, box.boxCap(p.check.Plan)-sessions(work, box.Name, p.now))
 	}
-	return waiting, free, coming
+	return waiting, fileHeld, free, coming
 }
 
 // sessions counts the stories claimed on host that a session works. A story
@@ -1684,7 +1717,7 @@ func (p *cloudPass) make(ctx context.Context) {
 		p.fail(fmt.Errorf("not making %s: its gate note could not be shut, so a box of that name might take stories unchecked: %w", name, err))
 		return
 	}
-	p.move(ctx, fmt.Sprintf("making %s: %d stories wait for any host, %d sessions free", name, p.report.Waiting, p.report.Free))
+	p.move(ctx, fmt.Sprintf("making %s: %s, %d sessions free", name, p.report.waitingText(), p.report.Free))
 	p.standingHolds(ctx, name)
 	p.dirty = "making " + name
 	if err := p.check.Provider.Begin(ctx, name); err != nil {

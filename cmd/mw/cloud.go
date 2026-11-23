@@ -37,7 +37,8 @@ func newCloudCmd() *cobra.Command {
 		Short: "Make a cloud box if stories wait and every host is full, destroy an idle one",
 		Long: "check is one look at the cloud, which the home's follower makes every minute: when more\n" +
 			"stories wait for any host than there are sessions free across the hosts of [cloud.caps]\n" +
-			"and the boxes, it makes one box with contrib/vultr-boost; a box with no story for\n" +
+			"and the boxes (a story held on a file a running story names is left out: no box can start\n" +
+			"it), it makes one box with contrib/vultr-boost; a box with no story for\n" +
 			"idle_minutes is destroyed (a story queued for its rig's batch has no session, so it does\n" +
 			"not keep a box busy); and no box is made, or kept, past monthly_cap_usd. Each move\n" +
 			"is a cloud event and a line of mw status. It runs on the home only.\n\n" +
