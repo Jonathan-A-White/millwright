@@ -10,8 +10,11 @@ import (
 )
 
 // homeSecretWords are what a criterion names when only a home host can run it:
-// the budget commands, the age key, the gdrive sign-in, the YNAB token.
-var homeSecretWords = regexp.MustCompile(`(?i)\bmw budget\b|\bage[ .]key\b|\bgdrive\b|\bYNAB\b`)
+// the budget commands, the age key, the gdrive sign-in, the YNAB token. The
+// secret is matched, not the product's name: a criterion whose YNAB is a fake,
+// a fixture or a stub runs on any host (mw-gq6.1690), so YNAB counts only as its
+// token (YNAB token, YNAB's token, YNAB_TOKEN) or as the real or live one.
+var homeSecretWords = regexp.MustCompile(`(?i)\bmw budget\b|\bage[ .]key\b|\bgdrive\b|\bYNAB_TOKEN\b|\bYNAB(?:'s)? (?:api |access |personal )?token\b|\b(?:real|live) YNAB\b`)
 
 // homeSecretWarning is the one warning, empty for none, of a story whose
 // acceptance has a criterion that needs the age key, a gdrive sign-in, a YNAB
