@@ -340,6 +340,12 @@ type SeatBoot struct {
 	// real bd.
 	BdRetry []string
 
+	// StepGuard is the command the Builder's Stop hook runs, the program and the
+	// arguments before the story's id: `mw step guard` (mw-gq6.1676). Empty when
+	// the host's closeout.open_steps_guard is false. A Tester story is never
+	// given it.
+	StepGuard []string
+
 	// Queries is the host's log of memory queries, read at boot for the subjects
 	// of a rig's facts that Builders query most; nil counts none.
 	Queries MemoryQueryLog
@@ -658,6 +664,7 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		Heartbeat:    b.heartbeat(id),
 		HeartbeatLog: b.heartbeatLog(id, attempt),
 		BdRetry:      b.BdRetry,
+		StepGuard:    b.stepGuardFor(detail),
 		MaxTurns:     turns,
 	})
 	if err != nil {
@@ -1088,6 +1095,29 @@ func formulaSteps(b *strings.Builder, detail StoryDetail) {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
+	b.WriteString(stepGuardSaid + "\n\n")
+}
+
+// stepGuardSaid is what the boot tells a Builder of the guard on its session's
+// end (mw-gq6.1676): a Stop hook, `mw step guard`, lists the formula's open steps
+// and keeps the session going, at most OpenStepsGuardMaxBlocks times, so that
+// each step is closed or marked the Governor's, with the reason, before the
+// session ends. A host turns it off with closeout.open_steps_guard = false in its
+// config; the Codex harness has none.
+var stepGuardSaid = fmt.Sprintf("You cannot end this session with a formula step open: when you try, `mw step guard` "+
+	"names each open step and keeps you going, up to %d times (a host's `closeout.open_steps_guard = false` turns it off; "+
+	"Codex has no such guard, so there the close-out refuses the open steps). For each, run what it asks and close it "+
+	"(`bd close <step>`); or, if only the Governor's own hands can do it, mark it his with the reason only he can do it: "+
+	"`mw step governor <story> <step> --why \"<reason>\"`. mw next then counts the story as waiting on him, not as steps "+
+	"you left open, and names the step and the reason to the Mayor.", OpenStepsGuardMaxBlocks)
+
+// stepGuardFor is the Stop hook's command for a story's session: StepGuard, but
+// not for a Tester's.
+func (b SeatBoot) stepGuardFor(detail StoryDetail) []string {
+	if IsTesterStory(detail) {
+		return nil
+	}
+	return b.StepGuard
 }
 
 // section writes one block of the boot file, ending it with a blank line

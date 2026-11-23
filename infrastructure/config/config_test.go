@@ -3401,3 +3401,24 @@ func TestSkipRigsKeys(t *testing.T) {
 		}
 	}
 }
+
+// mw-gq6.1676: closeout.open_steps_guard is on unless the config says false.
+func TestOpenStepsGuardIsOnUntilTheConfigSaysFalse(t *testing.T) {
+	for _, body := range []string{"", "host = \"laptop\"\n", "[closeout]\n", "[closeout]\nopen_steps_guard = true\n"} {
+		writeConfig(t, body)
+		if on, err := config.OpenStepsGuard(); err != nil || !on {
+			t.Errorf("config %q: expected the guard on, got %v, %v", body, on, err)
+		}
+	}
+	writeConfig(t, "[closeout]\nopen_steps_guard = false # off while I look\n")
+	if on, err := config.OpenStepsGuard(); err != nil || on {
+		t.Errorf("expected the guard off, got %v, %v", on, err)
+	}
+}
+
+func TestOpenStepsGuardThatIsNotABooleanIsAnErrorNamingTheKey(t *testing.T) {
+	writeConfig(t, "[closeout]\nopen_steps_guard = \"maybe\"\n")
+	if _, err := config.OpenStepsGuard(); err == nil || !strings.Contains(err.Error(), "closeout.open_steps_guard") {
+		t.Errorf("expected an error naming closeout.open_steps_guard, got %v", err)
+	}
+}

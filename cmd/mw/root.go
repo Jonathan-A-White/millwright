@@ -84,6 +84,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newShowCmd())
 	root.AddCommand(newSleepCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newStepCmd())
 	root.AddCommand(newSuiteCmd())
 	root.AddCommand(newTimingCmd())
 	root.AddCommand(newSweepCmd())

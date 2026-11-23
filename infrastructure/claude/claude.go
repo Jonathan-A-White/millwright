@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -153,8 +154,8 @@ var UnattendedSeatSettings = withDenyHook(SessionSettings)
 // The document is read and written back rather than spliced, for the same
 // reason withDenyHook is: so that the rule's own quotes and parentheses are
 // escaped by the JSON encoder and not by hand.
-func sessionSettings(tests string, deny []string) (string, error) {
-	if tests == "" && len(deny) == 0 {
+func sessionSettings(tests string, deny []string, stopGuard string) (string, error) {
+	if tests == "" && len(deny) == 0 && stopGuard == "" {
 		return SessionSettings, nil
 	}
 	var rules []string
@@ -182,12 +183,29 @@ func sessionSettings(tests string, deny []string) (string, error) {
 		}
 		permissions["deny"] = denied
 	}
+	if stopGuard != "" {
+		doc["hooks"] = map[string]any{"Stop": []any{
+			map[string]any{"hooks": []any{map[string]any{"type": "command", "command": stopGuard}}},
+		}}
+	}
 
 	out, err := json.Marshal(doc)
 	if err != nil {
 		return "", fmt.Errorf("the session settings for %q do not encode: %w", tests, err)
 	}
 	return string(out), nil
+}
+
+// stopGuardCommand is the shell line of the Stop hook of a Builder's session
+// (mw-gq6.1676): the words of l.StepGuard, quoted, and the story's id. Empty
+// when the launch names no guard. Claude Code runs it when the session is about
+// to end; `mw step guard` exits 2 with the open steps named on standard error,
+// which keeps the session going, and 0 to let it end.
+func stopGuardCommand(l application.Launch) string {
+	if len(l.StepGuard) == 0 {
+		return ""
+	}
+	return sessionshell.ShellLine(append(slices.Clone(l.StepGuard), l.StoryID))
 }
 
 // denyRules checks the deny rules the config lists (mw-t5shinh.22, `[session]
@@ -475,7 +493,7 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 			return application.SessionSpec{}, fmt.Errorf("launching %s: %w", l.StoryID, err)
 		}
 	}
-	settings, err := sessionSettings(h.tests[l.Path.Rig], deny)
+	settings, err := sessionSettings(h.tests[l.Path.Rig], deny, stopGuardCommand(l))
 	if err != nil {
 		return application.SessionSpec{}, fmt.Errorf("launching %s: %w", l.StoryID, err)
 	}

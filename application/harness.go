@@ -58,6 +58,13 @@ type Launch struct {
 	// chained beside it. An empty BdRetry leaves the session the real bd.
 	BdRetry []string
 
+	// StepGuard is the command a Builder's session runs, with the story's id
+	// after it, when it is about to end: this same mw, `mw step guard`
+	// (mw-gq6.1676). The Claude harness installs it as a Stop hook; the Codex
+	// harness has no such hook and ignores it. Empty installs none: the knob
+	// closeout.open_steps_guard is false, or the session is not a Builder's.
+	StepGuard []string
+
 	// MaxTurns is the most turns the session may take; 0 sets no limit. A
 	// batch's fixer is bounded by its rig's batch_fixer_turns (Land Rush 5).
 	MaxTurns int
