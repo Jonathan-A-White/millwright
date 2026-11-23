@@ -232,6 +232,7 @@ func newLandCmd() *cobra.Command {
 				Units:        hostUnits(),
 				Stamps:       stamps,
 			}, room)
+			files.NumberBatchesBy(batchNumbersFor(next))
 			landing := batchLandFor(next, files, dryRun, application.LandScope{One: one, Only: only, Without: without}, cmd.ErrOrStderr())
 			if self, err := os.Executable(); err == nil {
 				if home, err := os.UserHomeDir(); err == nil {
@@ -303,4 +304,17 @@ func batchClaimFor(next application.Next) application.BatchClaim {
 		return application.BatchClaim{}
 	}
 	return application.BatchClaim{Notes: notes, Host: next.Host}
+}
+
+// batchNumbersFor is how this landing numbers its batch across hosts: the
+// number is claimed in the tracker's key-value store as it is taken, so that two
+// hosts landing one rig at once do not both call their batch the same
+// (mw-gq6.1665). A tracker with no such store makes the zero value, which
+// numbers from the folders alone.
+func batchNumbersFor(next application.Next) application.BatchNumbers {
+	notes, ok := next.Tracker.(application.SlotNotes)
+	if !ok {
+		return application.BatchNumbers{}
+	}
+	return application.BatchNumbers{Notes: notes, Host: next.Host}
 }

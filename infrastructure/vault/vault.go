@@ -55,6 +55,7 @@ type Vault struct {
 	mergeScript string
 	lockBound   time.Duration
 	lockPoll    time.Duration
+	numbers     application.BatchNumbers
 }
 
 // Option shapes a Vault.
@@ -88,6 +89,16 @@ func WithLockWait(bound, poll time.Duration) Option {
 func WithMergeScript(script string) Option {
 	return func(v *Vault) { v.mergeScript = script }
 }
+
+// WithBatchNumbers makes NewBatch take each batch's number from the shared
+// store the claims are kept in, so that two hosts landing one rig at once do
+// not number their batches alike (mw-gq6.1665).
+func WithBatchNumbers(numbers application.BatchNumbers) Option {
+	return func(v *Vault) { v.numbers = numbers }
+}
+
+// NumberBatchesBy is WithBatchNumbers for a Vault already made.
+func (v *Vault) NumberBatchesBy(numbers application.BatchNumbers) { v.numbers = numbers }
 
 // New returns the vault held in a directory.
 func New(dir string, opts ...Option) *Vault {

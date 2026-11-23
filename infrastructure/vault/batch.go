@@ -19,7 +19,8 @@ import (
 var _ application.BatchRecords = (*Vault)(nil)
 
 // BatchNumberingNoteFile is the file NewBatch writes in a batch's directory when
-// it could not fetch the vault's origin to number the batch above every host's.
+// it could not fetch the vault's origin, or reach the beads server its numbers are
+// claimed on, to number the batch above every host's.
 const BatchNumberingNoteFile = "numbering-note.txt"
 
 // NewBatch implements application.BatchRecords: the directory
@@ -30,7 +31,11 @@ const BatchNumberingNoteFile = "numbering-note.txt"
 // written in the batch's directory as BatchNumberingNoteFile and the local
 // folders number the batch, as they did before. Mkdir rather than MkdirAll for
 // the last step, so that two landings that pick the same number do not share
-// it: the second takes the next.
+// it: the second takes the next. The number is claimed on the beads server every
+// host shares (application.BatchNumbers) as it is taken, not when the landing
+// commits its folder an hour later, so that two hosts landing the rig at once
+// do not number their batches alike (mw-gq6.1665); a server that cannot be
+// reached is written in the batch's directory too.
 func (v *Vault) NewBatch(ctx context.Context, rig string) (int, error) {
 	if err := safeName("rig", rig); err != nil {
 		return 0, err
@@ -49,22 +54,29 @@ func (v *Vault) NewBatch(ctx context.Context, rig string) (int, error) {
 			highest = n
 		}
 	}
-	elsewhere, said := v.batchesInOrigin(ctx, rig)
+	elsewhere, originSaid := v.batchesInOrigin(ctx, rig)
 	if elsewhere > highest {
 		highest = elsewhere
 	}
-	for n := highest + 1; ; n++ {
+	numbered, claimSaid := "", ""
+	for floor := highest; ; {
+		n, said := v.numbers.Claim(ctx, rig, floor)
+		if said != "" {
+			claimSaid = said
+		}
 		err := os.Mkdir(filepath.Join(dir, strconv.Itoa(n)), 0o755)
 		if err == nil {
-			if said != "" {
+			numbered = strings.TrimSpace(strings.Join([]string{originSaid, claimSaid}, "\n"))
+			if numbered != "" {
 				note := filepath.Join(dir, strconv.Itoa(n), BatchNumberingNoteFile)
-				_ = os.WriteFile(note, []byte(said+"\n"), 0o644)
+				_ = os.WriteFile(note, []byte(numbered+"\n"), 0o644)
 			}
 			return n, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
 			return 0, fmt.Errorf("making batch %d of %s: %w", n, rig, err)
 		}
+		floor = n
 	}
 }
 
@@ -98,6 +110,58 @@ func (v *Vault) batchesInOrigin(ctx context.Context, rig string) (int, string) {
 		}
 	}
 	return highest, ""
+}
+
+var _ application.BatchFolders = (*Vault)(nil)
+
+// BatchTakenInOrigin implements application.BatchFolders: whether the vault's
+// origin, fetched, holds runs/batch/<rig>/<number>.
+func (v *Vault) BatchTakenInOrigin(ctx context.Context, rig string, number int) (bool, error) {
+	if err := safeName("rig", rig); err != nil {
+		return false, err
+	}
+	for _, n := range v.originBatchesOf(ctx).numbers(rig) {
+		if n == number {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// KeepBatchApart implements application.BatchFolders: the checkout's folder of
+// the batch is renamed <number>.apart (.apart-2 and on when that is taken), a
+// name no reader of the batches takes for a number, and why is added to the end
+// of its outcome.txt.
+func (v *Vault) KeepBatchApart(_ context.Context, rig string, number int, why string) (string, error) {
+	if err := safeName("rig", rig); err != nil {
+		return "", err
+	}
+	if number < 1 {
+		return "", fmt.Errorf("keeping a batch of %s apart: which batch?", rig)
+	}
+	rigDir := path.Join(application.BatchDir, rig)
+	from := filepath.Join(v.dir, filepath.FromSlash(rigDir), strconv.Itoa(number))
+	name := strconv.Itoa(number) + ".apart"
+	for i := 2; ; i++ {
+		if _, err := os.Stat(filepath.Join(v.dir, filepath.FromSlash(rigDir), name)); errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		name = fmt.Sprintf("%d.apart-%d", number, i)
+	}
+	if err := os.Rename(from, filepath.Join(v.dir, filepath.FromSlash(rigDir), name)); err != nil {
+		return "", fmt.Errorf("moving batch %d of %s aside: %w", number, rig, err)
+	}
+	moved := path.Join(rigDir, name)
+	outcome := filepath.Join(v.dir, filepath.FromSlash(moved), application.BatchOutcomeFile)
+	kept, _ := os.ReadFile(outcome)
+	text := string(kept)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	if err := os.WriteFile(outcome, []byte(text+why+"\n"), 0o644); err != nil {
+		return moved, fmt.Errorf("writing %s: %w", outcome, err)
+	}
+	return moved, nil
 }
 
 // PutBatchFile implements application.BatchRecords: runs/batch/<rig>/<n>/<name>,
