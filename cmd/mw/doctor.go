@@ -182,6 +182,9 @@ func newDoctorCmd() *cobra.Command {
 
 			dispatchWindows := doctor.NewDispatchWindows(config.DispatchWindowProblems())
 
+			paceDifferences, paceErr := config.PaceDifferences(vault)
+			paceSource := doctor.NewPaceSource(host, paceDifferences, paceErr)
+
 			// Read here, judged by the check: a config this host cannot read is
 			// rig-tests's to say.
 			rigsAt, rigsErr := config.Rigs()
@@ -647,6 +650,7 @@ func newDoctorCmd() *cobra.Command {
 				seatContext,
 				posternTranscribe,
 				dispatchWindows,
+				paceSource,
 				rigTests,
 				boostConfig,
 				beadsServerCheck,

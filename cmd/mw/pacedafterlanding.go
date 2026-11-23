@@ -11,16 +11,18 @@ import (
 // pacedAfterLanding is what a landing runs, once it has closed its stories, to
 // release the next stories of the paced lists they were on: the lists of the
 // vault (vaultPacedLists), at the pace mw release-paced keeps (mw-gq6.1682). A
+// pace is the vault's pace.toml, so every landing host keeps the same one
+// (mw-gq6.1698), and the host's own [pace] answers only for a key it leaves out. A
 // [pace] table that cannot be read releases none and says so in a note.
 func pacedAfterLanding(dir string, gateway interface {
 	application.WorkTracker
 	application.SweepNotes
 }) application.PacedReleaser {
-	line, err := config.PaceUsageLine()
+	line, err := config.PaceUsageLineIn(dir)
 	if err != nil {
 		return pacedUnreadable{err: err}
 	}
-	maxAtOnce, err := config.PaceMaxAtOnce()
+	maxAtOnce, err := config.PaceMaxAtOnceIn(dir)
 	if err != nil {
 		return pacedUnreadable{err: err}
 	}
