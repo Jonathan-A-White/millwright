@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -70,13 +71,22 @@ func (r groomRules) EpicRequirements(ctx context.Context, rig string) (domain.Ep
 }
 
 // vaultPacedLists finds the paced lists the vault keeps: the files
-// plans/<plan>/release-order*.txt, one story id a line.
+// plans/<plan>/release-order*.txt and plans/<plan>/*-order.txt, one story id a
+// line. A landing runs the lists a landed story is on (mw-gq6.1682).
 type vaultPacedLists struct{ dir string }
 
 func (v vaultPacedLists) PacedLists(context.Context) ([]application.PacedList, error) {
-	names, err := filepath.Glob(filepath.Join(v.dir, "plans", "*", "release-order*.txt"))
-	if err != nil {
-		return nil, err
+	var names []string
+	for _, pattern := range []string{"release-order*.txt", "*-order.txt"} {
+		found, err := filepath.Glob(filepath.Join(v.dir, "plans", "*", pattern))
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range found {
+			if !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
 	}
 	var lists []application.PacedList
 	for _, name := range names {

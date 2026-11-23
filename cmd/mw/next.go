@@ -346,6 +346,7 @@ func newNextCmd() *cobra.Command {
 				HeartbeatGrace: application.DefaultHeartbeatGrace,
 
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterCommandsFrom(config.AfterLanding, time.Now), rig.WithAfterLimits(afterLimits), deploySteps, rig.WithAfterNice(nice), rig.WithAfterJobs(jobs), rig.WithAfterTestRuns(testRuns)),
+				Paced:        pacedAfterLanding(dir, gateway),
 				DeploySlot:   hostSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Deployed:     hostDeployedMarks(),
 				Integrity:    hostDeployedMarks(),

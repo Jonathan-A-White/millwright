@@ -306,6 +306,9 @@ type Next struct {
 	// from the rig by itself. A nil AfterLanding runs nothing.
 	AfterLanding AfterLanding
 
+	// Paced runs again the paced lists a landed story is on (pacedafterlanding.go).
+	Paced PacedReleaser
+
 	// LiveSite reads the rig's live page and healthz after a passing after-landing
 	// command, so that each story landed gets a DEPLOYED-CHECKED comment
 	// (deploychecked.go). A nil LiveSite checks nothing. LiveCheckBound is how long

@@ -661,6 +661,14 @@ nothing and prints what it would release. The 3 and the 60 are constants
 (`ReleasePacedMax`, `ReleasePacedUsageLine`), not config keys. See
 `application/release_test.go`.
 
+Nobody has to run it again by hand: `mw next` and `mw land` run the same release
+for each list of the vault (`plans/<plan>/release-order*.txt` and
+`plans/<plan>/*-order.txt`) that names a story they have just landed and closed
+(the landed tail's step "release the paced lists"). The story no longer counts
+against the 3, so the next held one of its list is released if the usage allows.
+What each list did, or why it released none, is a `release-paced <list>:` note of
+the landing. See `application/pacedafterlanding_test.go`.
+
 ## The icebox
 
 ```sh

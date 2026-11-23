@@ -71,6 +71,7 @@ const (
 	stepLandedMail     = "mail the Mayor"
 	stepAbandoned      = "look for abandoned stories"
 	stepCarryOn        = "carry on"
+	stepPacedLists     = "release the paced lists"
 )
 
 // landedTail names every step, in the order a single landing takes them.
@@ -353,6 +354,10 @@ var landedTail = []tailStep{
 			report.Mailed = append(report.Mailed, MailLanded+": "+s.c.id)
 			b.land.say("mailed %s: %s", MailLanded, s.c.id)
 		}},
+	{name: stepPacedLists, scope: onceForBatch,
+		why: "Once a landing has closed its stories, the lists of mw release-paced that name one are run again, so the next held story " +
+			"of each is released when the pace allows with no Mayor to remember the command (mw-gq6.1682); a batch names all it closed.",
+		run: func(t *tail, s *tailStory) { t.n.releasePaced(t, s) }},
 	{name: stepAbandoned, scope: perStory, only: singleLanding,
 		why: "Per landing: mw next looks at what else runs on the host once its story is closed; mw land lands no session's work.",
 		run: func(t *tail, s *tailStory) {
@@ -385,7 +390,7 @@ var landedTail = []tailStep{
 var (
 	singleReads     = []string{stepReadBackend, stepReadGrist, stepReadFiles}
 	singleAfterPush = []string{stepAdvanceRig, stepRunState, stepChainStamp, stepSayFiles, stepAfterLanding, stepCheckLive, stepGristSmoke, stepStageBackend, stepSpringTester}
-	singleFinish    = []string{stepRemoveWorktree, stepBenchmark, stepLedger, stepCommit, stepClose, stepCloseFormula, stepLandedMail, stepAbandoned, stepCarryOn}
+	singleFinish    = []string{stepRemoveWorktree, stepBenchmark, stepLedger, stepCommit, stepClose, stepCloseFormula, stepLandedMail, stepPacedLists, stepAbandoned, stepCarryOn}
 )
 
 // fixedOnMainFinish is the order a bug closed as fixed on the target branch
@@ -413,6 +418,7 @@ var batchOrder = [][]string{
 	{stepAdvanceRig, stepAfterLanding},
 	{stepStageBackend},
 	{stepLandedMail},
+	{stepPacedLists},
 	{stepLetTheSlotGo, stepCheckLive, stepGristSmoke},
 }
 
