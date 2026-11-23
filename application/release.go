@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -50,6 +51,12 @@ type Release struct {
 	// the comment. It is written on each story it lets through.
 	OverHold string
 
+	// Force is why a story whose acceptance holds a criterion no Builder can meet
+	// before landing (a live URL of a served rig, or judged after the fix lands) is
+	// released anyway (mw-gq6.1686). Empty releases none of them: the release is
+	// refused, naming the criterion. It is written on each story it lets through.
+	Force string
+
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -84,6 +91,15 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 
 	held := found.held()
 	iced := found.iced()
+	var heldDetails []StoryDetail
+	for _, story := range epic.Stories {
+		if slices.ContainsFunc(held, func(h FiledStory) bool { return h.ID == story.Story.ID }) {
+			heldDetails = append(heldDetails, story)
+		}
+	}
+	if err := r.checkRunnable(ctx, heldDetails); err != nil {
+		return found, err
+	}
 	refs := make([]heldRef, 0, len(held))
 	for _, story := range held {
 		refs = append(refs, heldRef{ID: story.ID, Parent: epic.ID})
@@ -152,6 +168,9 @@ func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
 	warnNoFilesKey(ctx, r.Out, r.Rules, detail)
 	warnWrongRig(r.Out, r.Rigs, r.RigFiles, detail)
 	warnHomeSecret(r.Out, detail)
+	if err := r.checkRunnable(ctx, []StoryDetail{detail}); err != nil {
+		return found, err
+	}
 	if err := r.checkWordHolds(ctx, []heldRef{{ID: id, Parent: detail.EpicID}}); err != nil {
 		return found, err
 	}

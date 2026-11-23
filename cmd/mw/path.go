@@ -24,7 +24,7 @@ func newPathCmd() *cobra.Command {
 }
 
 func newPathSetCmd() *cobra.Command {
-	var from, after, hold, overClaim string
+	var from, after, hold, overClaim, force string
 	cmd := &cobra.Command{
 		Use:   "set <story-id> [--from <sibling-id>] [--after <ids|none>] [--hold \"<why>\"] [key=value ...]",
 		Short: "Set a story's path keys in one write",
@@ -63,6 +63,11 @@ func newPathSetCmd() *cobra.Command {
 			"An acceptance criterion that says it is the landing check 'from his use' or 'not the Builder's' gets a WARN on\n" +
 			"stderr: a Builder is held to every line of the acceptance and cannot run it; put it on a VERIFY AFTER\n" +
 			"LANDING line of the description (mw-gq6.1567). Nothing is refused.\n\n" +
+			"An acceptance criterion that names a live URL of a served rig, or says it is judged after the fix lands, gets a\n" +
+			"WARN on stderr, and on --after a release (on a release_on_path rig) is refused for it: the story stays held with one\n" +
+			"'held:' line naming the criterion, since no Builder can meet it before landing. Move it to a 'Verify strings:' line\n" +
+			"or to mw verify, or give --force \"<why>\" to release the story anyway: the why is written on the story as a\n" +
+			"RELEASED WITH --force: comment (mw-gq6.1686).\n\n" +
 			"An acceptance criterion that names mw budget, the age key, gdrive or YNAB, on a story whose host is not a home\n" +
 			"host (laptop or desktop), gets a WARN on stderr, as mw release prints it: those secrets live on a home host alone,\n" +
 			"so pin the story there (mw-gq6.1578). Nothing is refused.\n\n" +
@@ -133,7 +138,7 @@ func newPathSetCmd() *cobra.Command {
 				}
 			}
 			_, err = application.PathSet{Tracker: gateway, Retired: retired, CloudBook: cloudBook, CloudPlan: cloudPlan, Readings: readings, UsageLine: usageLine, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
-				After: afterIDs, Hold: hold, OverClaim: overClaim}.
+				After: afterIDs, Hold: hold, OverClaim: overClaim, Force: force}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err
 		},
@@ -141,6 +146,7 @@ func newPathSetCmd() *cobra.Command {
 	cmd.Flags().StringVar(&from, "from", "", "the sibling story to copy the seven path keys from")
 	cmd.Flags().StringVar(&after, "after", "", "the stories this one waits on, comma-separated, or none; on a rig with release_on_path = true it also releases the held story")
 	cmd.Flags().StringVar(&overClaim, "over-claim", "", "why the path of a story a Builder has claimed (in progress, or a live claim) is adjusted all the same; written as an OVER-CLAIM: comment")
+	cmd.Flags().StringVar(&force, "force", "", "why a story with a criterion no Builder can meet before landing (a live URL, or judged after the fix lands) is released on --after all the same; written as a RELEASED WITH --force: comment")
 	cmd.Flags().StringVar(&hold, "hold", "", "why the story stays held: written as a HELD: comment; nothing is released")
 	return cmd
 }

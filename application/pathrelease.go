@@ -90,7 +90,7 @@ func (s PathSet) releaseOnPathSet(ctx context.Context, id string, story StoryDet
 	}
 	// The release of `mw release <id>`, which reads the story as the write left
 	// it and looks once more for a hold on the Governor's word.
-	if _, err := (Release{Tracker: s.Tracker, Rules: s.Rules, Rigs: s.Rigs, RigFiles: s.RigFiles}).story(ctx, id); err != nil {
+	if _, err := (Release{Tracker: s.Tracker, Rules: s.Rules, Rigs: s.Rigs, RigFiles: s.RigFiles, Force: s.Force}).story(ctx, id); err != nil {
 		return fmt.Errorf("releasing %s after its path was set: %w", id, err)
 	}
 	if err := s.Tracker.CommentOnStory(ctx, id, ReleasedOnPathSet); err != nil {
@@ -194,6 +194,13 @@ func (s PathSet) whyStayHeld(ctx context.Context, id string, story, written Stor
 	}
 	if lines := dispatchRefusals(written); len(lines) > 0 {
 		return lines[0] + "; put that right in the story, then run mw path set " + id + " again", nil
+	}
+	// A criterion no Builder can meet before landing: not released unless --force
+	// says why (mw-gq6.1686); Release writes the why when it lets the story through.
+	if strings.TrimSpace(s.Force) == "" {
+		if line := notRunnableRefusal(ctx, s.Rules, id, merged.Rig, story.Acceptance); line != "" {
+			return line + "; or run mw path set " + id + " again with --force \"<why>\" to release it anyway", nil
+		}
 	}
 	return s.whyOverThePace(ctx, id, story)
 }

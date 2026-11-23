@@ -19,7 +19,7 @@ import (
 // holds everything it files, so this is the other half of filing — and the only
 // way to approve a plan without filing a second copy of it.
 func newReleaseCmd() *cobra.Command {
-	var overHold string
+	var overHold, force string
 	cmd := &cobra.Command{
 		Use:   "release <epic-id|story-id>",
 		Short: "Release the held stories of a plan filed earlier, or one held story",
@@ -42,7 +42,12 @@ func newReleaseCmd() *cobra.Command {
 			"word (a comment opening 'HELD:' that names the 'Governor' or 'his word'; the same words in\n" +
 			"other prose are no hold; not older than the story's last release over a hold) is not released: the release is refused, printing that comment, and\n" +
 			"nothing in the epic is released. --over-hold \"<why>\" releases it anyway and writes the why\n" +
-			"on the story.",
+			"on the story.\n\n" +
+			"A held story whose acceptance holds a criterion that names a live URL of a served rig (an allmymind.org\n" +
+			"address or the rig's site_url) or says it is judged after the fix lands, after landing or once it is live, is\n" +
+			"not released either: no Builder can meet it before landing. The release is refused, naming the criterion, and\n" +
+			"nothing in the epic is released; move it to a 'Verify strings:' line or to mw verify. --force \"<why>\" releases\n" +
+			"it anyway and writes the why on the story (mw-gq6.1686).",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
@@ -57,12 +62,14 @@ func newReleaseCmd() *cobra.Command {
 				Rigs:     rigs,
 				RigFiles: rig.Files{},
 				OverHold: overHold,
+				Force:    force,
 				Out:      cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&overHold, "over-hold", "", "release a story held on the Governor's word anyway, for this reason (written on the story)")
+	cmd.Flags().StringVar(&force, "force", "", "release a story with a criterion no Builder can meet before landing anyway, for this reason (written on the story)")
 	return cmd
 }
 

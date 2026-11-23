@@ -73,6 +73,11 @@ type PathSet struct {
 	// after the path. A closed story is refused whatever it says.
 	OverClaim string
 
+	// Force is --force: why a story whose acceptance holds a criterion no Builder
+	// can meet before landing is released on path set all the same (mw-gq6.1686).
+	// It is written on the story by the release.
+	Force string
+
 	// HeavyNet names the rigs that install dependencies ([heavy_net]): a path
 	// that pins one to a home host draws a warning on Err naming host=auto
 	// (mw-gq6.702). A nil HeavyNet warns of none.
@@ -605,21 +610,9 @@ func (s PathSet) notRunnableWarning(ctx context.Context, id, rig, acceptance str
 
 // liveURLWarning is the live-URL half of notRunnableWarning.
 func (s PathSet) liveURLWarning(ctx context.Context, id, rig, acceptance string) string {
-	site := ""
-	if s.Rules != nil && strings.TrimSpace(rig) != "" {
-		if requirements, err := s.Rules.EpicRequirements(ctx, rig); err == nil {
-			site = strings.ToLower(strings.TrimRight(strings.TrimSpace(requirements.SiteURL), "/"))
-		}
-	}
 	var numbers []string
-	for _, criterion := range domain.AcceptanceCriteria(acceptance) {
-		if aTestOrFixture.MatchString(criterion.Text) {
-			continue
-		}
-		if liveServedURL.MatchString(criterion.Text) || afterLandingWords.MatchString(criterion.Text) ||
-			(site != "" && strings.Contains(strings.ToLower(criterion.Text), site)) {
-			numbers = append(numbers, fmt.Sprint(criterion.Number))
-		}
+	for _, criterion := range liveURLCriteria(ctx, s.Rules, rig, acceptance) {
+		numbers = append(numbers, fmt.Sprint(criterion.Number))
 	}
 	if len(numbers) == 0 {
 		return ""
