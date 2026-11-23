@@ -94,3 +94,52 @@ func TestReportOpenStepsSplitWithNoHandsReaderKeepsTheOldLine(t *testing.T) {
 		t.Errorf("a split was made with no hands reader: %+v", result.Whole.Quality.OpenSteps)
 	}
 }
+
+// pourTwice pours a formula for the story twice, as a retry does, points the
+// story at the second pouring, and returns both.
+func pourTwice(t *testing.T, tracker *apptest.FakeTracker, story string) (earlier, current application.Molecule) {
+	t.Helper()
+	ctx := context.Background()
+	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "Understand"}, application.FormulaStep{Title: "Commit"})
+	var err error
+	if earlier, err = tracker.PourFormula(ctx, "tdd-feature", story, "The story", false); err != nil {
+		t.Fatal(err)
+	}
+	if current, err = tracker.PourFormula(ctx, "tdd-feature", story, "The story", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStoryMetadata(ctx, story, map[string]string{application.MoleculeField: current.RootID}); err != nil {
+		t.Fatal(err)
+	}
+	return earlier, current
+}
+
+func markGovernors(t *testing.T, tracker *apptest.FakeTracker, story, step string) {
+	t.Helper()
+	raw, err := json.Marshal(application.GovernorsStep{Story: story, Step: step, Reason: "only he can", At: "2026-10-17T09:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetNote(context.Background(), application.GovernorsStepKey(story, step), string(raw)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAMarkOfAnEarlierAttemptsStepIsNotAHandsWait(t *testing.T) {
+	tracker, files := apptest.NewFakeTracker(), vault.New(t.TempDir())
+	openStepsRows(t, tracker, files)
+	// os-2's earlier attempt marked a step the Governor's; its retry poured a
+	// fresh formula whose steps the Builder left open. os-4 marked a step of its
+	// current formula.
+	earlier, _ := pourTwice(t, tracker, "os-2")
+	markGovernors(t, tracker, "os-2", earlier.Steps[0].ID)
+	_, current := pourTwice(t, tracker, "os-4")
+	markGovernors(t, tracker, "os-4", current.Steps[0].ID)
+
+	result, printed := runOpenStepsReport(t, tracker, files, tracker)
+
+	split := result.Whole.Quality.OpenSteps
+	if split == nil || split.Hands != 1 || split.Builder != 4 {
+		t.Errorf("split %+v, want left open 4 and hands waiting 1 (a stale mark is no wait):\n%s", split, printed)
+	}
+}

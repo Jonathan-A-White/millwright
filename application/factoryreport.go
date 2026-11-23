@@ -169,7 +169,7 @@ func (o OpenStepsSplit) text() string {
 // handsKeepers is the beads that keep a hands step, from the hands.<bead> notes
 // a ReportHands reads: a note that does not read as steps, or holds none, keeps
 // none. It is the set a refused story is looked up in; nil when none is read.
-func (r FactoryReport) handsKeepers(ctx context.Context) (map[string]bool, error) {
+func (r FactoryReport) handsKeepers(ctx context.Context, byID map[string]StoryDetail) (map[string]bool, error) {
 	if r.Hands == nil {
 		return nil, nil
 	}
@@ -189,8 +189,19 @@ func (r FactoryReport) handsKeepers(ctx context.Context) (map[string]bool, error
 	if err != nil {
 		return nil, fmt.Errorf("reporting quality: the steps marked the Governor's: %w", err)
 	}
+	// A mark of a step the story's current formula does not have open is an
+	// earlier attempt's, and waits on no one (mw-gq6.1680).
+	open := currentOpenSteps{tracker: r.Hands, root: func(story string) string { return byID[story].Molecule.RootID }}
 	for _, raw := range marks {
-		if step, ok := parseGovernorsStep(raw); ok {
+		step, ok := parseGovernorsStep(raw)
+		if !ok {
+			continue
+		}
+		current, err := open.has(ctx, step)
+		if err != nil {
+			return nil, fmt.Errorf("reporting quality: %w", err)
+		}
+		if current {
 			keepers[step.Story] = true
 		}
 	}
@@ -560,7 +571,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 	}
 
-	keepers, err := r.handsKeepers(ctx)
+	keepers, err := r.handsKeepers(ctx, byID)
 	if err != nil {
 		return result, err
 	}

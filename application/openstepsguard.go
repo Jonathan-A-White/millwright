@@ -285,3 +285,45 @@ func (n Next) governorsSaid(ctx context.Context, story string, open []FormulaSte
 	}
 	return fmt.Sprintf("; waiting on the Governor, marked his by the session: %s", strings.Join(said, "; "))
 }
+
+// currentOpenSteps tells whether a mark of a step is of the story's current
+// formula, as the report counts the stories that wait on the Governor. A retry
+// pours a fresh formula, and a mark of the earlier attempt's step is none of
+// its steps (mw-gq6.1680). A mark counts when it cannot be told otherwise: the
+// tracker reads no steps, the story has no formula or is not known, or the
+// formula has no step open (a story that went on to land closed them all).
+type currentOpenSteps struct {
+	tracker any
+	root    func(story string) string
+	read    map[string][]FormulaStep
+}
+
+func (c *currentOpenSteps) has(ctx context.Context, mark GovernorsStep) (bool, error) {
+	steps, ok := c.tracker.(interface {
+		OpenSteps(ctx context.Context, moleculeID string) ([]FormulaStep, error)
+	})
+	root := c.root(mark.Story)
+	if !ok || root == "" {
+		return true, nil
+	}
+	open, seen := c.read[root]
+	if !seen {
+		var err error
+		if open, err = steps.OpenSteps(ctx, root); err != nil {
+			return false, fmt.Errorf("reading the steps of %s: %w", root, err)
+		}
+		if c.read == nil {
+			c.read = map[string][]FormulaStep{}
+		}
+		c.read[root] = open
+	}
+	if len(open) == 0 {
+		return true, nil
+	}
+	for _, s := range open {
+		if s.ID == mark.Step {
+			return true, nil
+		}
+	}
+	return false, nil
+}
