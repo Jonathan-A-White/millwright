@@ -71,6 +71,24 @@ type BatchRecords interface {
 	BatchFilePath(rig string, number int, name string) string
 }
 
+// BatchFolders is the part of a batch's records that guards its folder against
+// another host's: the records of this landing are kept only in its own
+// runs/batch/<rig>/<n> (mw-gq6.1665). A BatchRecords that is also BatchFolders
+// is asked before the batch's records are committed.
+type BatchFolders interface {
+	// BatchTakenInOrigin reports whether the vault's origin, fetched, already
+	// holds the folder of batch number of rig: another host's batch with this
+	// landing's number, which this landing's files would overwrite. A vault
+	// with no origin, or one that cannot be fetched, reports false.
+	BatchTakenInOrigin(ctx context.Context, rig string, number int) (bool, error)
+
+	// KeepBatchApart moves this checkout's folder of the batch out of the
+	// numbered place, so that it is overwritten by nothing and overwrites
+	// nothing, and writes why at the end of its outcome.txt. It reports the
+	// folder's new path from the vault's root.
+	KeepBatchApart(ctx context.Context, rig string, number int, why string) (string, error)
+}
+
 // BatchHistory reads the batch lines back, oldest first; none and no error when
 // there are none.
 type BatchHistory interface {
@@ -1425,6 +1443,7 @@ func (b BatchLand) commitLedger(ctx context.Context, report *BatchReport, also .
 // has not changed is left out.
 func (b BatchLand) commit(ctx context.Context, report *BatchReport) {
 	paths := append([]string(nil), report.Records...)
+	paths = b.keepApartIfTaken(ctx, report, paths)
 	if report.Landed {
 		paths = append(paths, path.Join(SeatsDir, b.Next.Seat, LedgerFileName))
 	}
@@ -2362,4 +2381,42 @@ func (b BatchLand) holdQueue(ctx context.Context, queue []BatchStory) (release f
 		}
 		return nil
 	}
+}
+
+// keepApartIfTaken stops this landing's records going into a folder another
+// host's batch has in the vault's origin. Its files are kept in a folder beside
+// the numbered ones, which no reader of the batches takes for a batch, the
+// outcome there says so, and the report's notes say so: the other host's records
+// are never written over (mw-gq6.1665). It returns the paths to commit, the
+// batch's own where they were moved.
+func (b BatchLand) keepApartIfTaken(ctx context.Context, report *BatchReport, paths []string) []string {
+	folders, ok := b.Records.(BatchFolders)
+	if !ok || report.Number < 1 {
+		return paths
+	}
+	taken, err := folders.BatchTakenInOrigin(ctx, report.Rig, report.Number)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("whether the vault's origin already holds %s could not be read: %v", report.Label(), err))
+		return paths
+	}
+	if !taken {
+		return paths
+	}
+	why := fmt.Sprintf("NOT KEPT AS BATCH %d: another host's batch %d of %s is already in the vault's origin, so this landing's records were not written over it", report.Number, report.Number, report.Rig)
+	apart, err := folders.KeepBatchApart(ctx, report.Rig, report.Number, why)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: %s, and its folder could not be moved aside, so its records are not committed: %v", report.Label(), why, err))
+		return nil
+	}
+	report.Notes = append(report.Notes, fmt.Sprintf("%s: %s; its records are kept in %s", report.Label(), why, apart))
+	numbered := path.Join(BatchDir, report.Rig, strconv.Itoa(report.Number)) + "/"
+	moved := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if rest, found := strings.CutPrefix(p, numbered); found {
+			p = path.Join(apart, rest)
+		}
+		moved = append(moved, p)
+	}
+	report.Records = moved
+	return moved
 }

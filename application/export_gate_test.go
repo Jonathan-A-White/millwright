@@ -134,3 +134,7 @@ func (b BatchLand) MailTheBatch(ctx context.Context, report *BatchReport) {
 func (b BatchLand) ClaimTheRig(ctx context.Context, rig string, report *BatchReport) (said []string, unclaim func(), claimed bool) {
 	return b.claimTheRig(ctx, rig, report)
 }
+
+// CommitTheRecords lets the tests of package application_test run the last
+// step of a landing, which commits the batch's records in the vault.
+func (b BatchLand) CommitTheRecords(ctx context.Context, report *BatchReport) { b.commit(ctx, report) }
