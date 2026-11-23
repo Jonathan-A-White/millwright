@@ -3381,6 +3381,28 @@ func TestPaceUsageLineIsSixtyUntilTheTableSaysOtherwise(t *testing.T) {
 	}
 }
 
+// [pace] max_at_once (mw-gq6.1695) is how many stories of a list a paced release
+// lets run or be open at once: 3 until the config says otherwise.
+func TestPaceMaxAtOnceIsThreeUntilTheTableSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nmax_at_once = 5\n")
+	if n, err := config.PaceMaxAtOnce(); err != nil || n != 3 {
+		t.Fatalf("expected the default 3, not a root-table key, got %v: %v", n, err)
+	}
+	writeConfig(t, "[pace]\nmax_at_once = 5\n")
+	if n, err := config.PaceMaxAtOnce(); err != nil || n != 5 {
+		t.Fatalf("expected 5, got %v: %v", n, err)
+	}
+	for _, bad := range []string{"0", "-2", "2.5", "\"many\""} {
+		writeConfig(t, "[pace]\nmax_at_once = "+bad+"\n")
+		_, err := config.PaceMaxAtOnce()
+		if err == nil {
+			t.Errorf("expected pace.max_at_once = %s to be refused", bad)
+		} else if !strings.Contains(err.Error(), "max_at_once") {
+			t.Errorf("expected the refusal to name max_at_once, got %v", err)
+		}
+	}
+}
+
 // mw-6ww.119.11.1.3: the [dispatch] table's skip_rigs names the rigs a host
 // declines, skip_rigs_wait_min the way out (default 20).
 func TestSkipRigsKeys(t *testing.T) {

@@ -460,8 +460,9 @@ func (p FiledPlan) released(count int) string {
 // The pace of a paced release (mw-u2w5klk, "The model stories and the pace"): at
 // most ReleasePacedMax stories of a list running or open at once, and none
 // released while the week's usage reads over ReleasePacedUsageLine percent. They
-// are the epic's numbers; the line is the default of the config's [pace]
-// usage_line key (ReleasePaced.UsageLine, PathSet.UsageLine), the count is no key.
+// are the epic's numbers, and the defaults of the config's [pace] keys: the line
+// of usage_line (ReleasePaced.UsageLine, PathSet.UsageLine), the count of
+// max_at_once (ReleasePaced.MaxAtOnce, PathSet.MaxAtOnce).
 const (
 	ReleasePacedMax       = 3
 	ReleasePacedUsageLine = 60.0
@@ -474,6 +475,15 @@ func usageLineOf(line float64) float64 {
 		return line
 	}
 	return ReleasePacedUsageLine
+}
+
+// maxAtOnceOf is the count a paced release holds to: n when it is set, else the
+// default ReleasePacedMax.
+func maxAtOnceOf(n int) int {
+	if n > 0 {
+		return n
+	}
+	return ReleasePacedMax
 }
 
 // LabelModelStory marks a story that is a model's judgement (a pass over a batch
@@ -497,6 +507,9 @@ type ReleasePaced struct {
 	// UsageLine is the percent of the week's usage over which nothing is released
 	// (the config's [pace] usage_line); zero is ReleasePacedUsageLine.
 	UsageLine float64
+	// MaxAtOnce is how many stories of the list may run or be open at once (the
+	// config's [pace] max_at_once); zero is ReleasePacedMax.
+	MaxAtOnce int
 	// Rules is where a rig's site_url is read from, to know a live URL of a served
 	// rig in a story's acceptance (mw-gq6.1691). A nil Rules knows the other live
 	// URLs and the words 'after the fix lands' only.
@@ -543,7 +556,7 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 	}
 
 	// The usage speaks first, before the skipped are named; the count after.
-	pace, err := checkPace(ctx, r.Readings, r.UsageLine, now, active, "the list")
+	pace, err := checkPace(ctx, r.Readings, r.UsageLine, r.MaxAtOnce, now, active, "the list")
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +595,7 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 	note := fmt.Sprintf("RELEASED by mw release-paced: usage %.1f%% of the week (read %s, the week resets %s), not over %.0f%%; "+
 		"%d of the list running or open, so room for %d (at most %d at once)",
 		reading.Percent, reading.At.UTC().Format(time.RFC3339), reading.Resets.UTC().Format(time.RFC3339),
-		usageLineOf(r.UsageLine), active, room, ReleasePacedMax)
+		usageLineOf(r.UsageLine), active, room, maxAtOnceOf(r.MaxAtOnce))
 	var released []string
 	for _, id := range chosen {
 		if err := r.Tracker.ReleaseStory(ctx, id); err != nil {
@@ -600,7 +613,7 @@ func (r ReleasePaced) Run(ctx context.Context, ids []string) ([]string, error) {
 
 // Pace is the verdict of the pace of a paced release on a count of what already
 // runs or is open: the usage reading it read, the room left under
-// ReleasePacedMax, and why it lets nothing go when it does not.
+// the count allowed, and why it lets nothing go when it does not.
 type Pace struct {
 	Reading UsageReading
 	// Room is how many more may be released at once; zero when Why is set.
@@ -623,10 +636,11 @@ func (p Pace) Held() string { return p.Why + p.hint }
 // checkPace is the one pace check of a paced release, used by ReleasePaced.Run
 // and by mw path set (whyStayHeld) for a story labelled model-story: the newest
 // usage reading must be current and not over line (ReleasePacedUsageLine when 0), and fewer
-// than ReleasePacedMax stories may already be running or open (active, of what,
+// than max stories (ReleasePacedMax when 0) may already be running or open (active, of what,
 // as the count says it). A reason is no error; a reading that cannot be read is.
-func checkPace(ctx context.Context, readings UsageReadings, line float64, now time.Time, active int, of string) (Pace, error) {
+func checkPace(ctx context.Context, readings UsageReadings, line float64, max int, now time.Time, active int, of string) (Pace, error) {
 	line = usageLineOf(line)
+	max = maxAtOnceOf(max)
 	const unreported = "no usage was reported (mw usage read, or mw usage set <percent>)"
 	if readings.Notes == nil {
 		return Pace{OnUsage: true, Why: unreported}, nil
@@ -648,10 +662,10 @@ func checkPace(ctx context.Context, readings UsageReadings, line float64, now ti
 			Why: fmt.Sprintf("usage %.1f%% of the week (read %s) is over %.0f%%",
 				reading.Percent, reading.At.UTC().Format(time.RFC3339), line)}, nil
 	}
-	room := ReleasePacedMax - active
+	room := max - active
 	if room <= 0 {
 		return Pace{Reading: reading,
-			Why: fmt.Sprintf("%d of %s running or open, at most %d at once", active, of, ReleasePacedMax)}, nil
+			Why: fmt.Sprintf("%d of %s running or open, at most %d at once", active, of, max)}, nil
 	}
 	return Pace{Reading: reading, Room: room}, nil
 }

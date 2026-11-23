@@ -207,7 +207,7 @@ func (s PathSet) whyStayHeld(ctx context.Context, id string, story, written Stor
 
 // whyOverThePace is why a story labelled model-story is not released now, by the
 // pace of mw release-paced (checkPace, the one check of both): the usage reading
-// missing, stale or over the line, or ReleasePacedMax model stories of its epic
+// missing, stale or over the line, or the count allowed (ReleasePacedMax, or the [pace] max_at_once) of model stories of its epic
 // already open or running. A story without the label is never paced, so "".
 func (s PathSet) whyOverThePace(ctx context.Context, id string, story StoryDetail) (string, error) {
 	if !hasLabel(story.Labels, LabelModelStory) {
@@ -226,7 +226,7 @@ func (s PathSet) whyOverThePace(ctx context.Context, id string, story StoryDetai
 		}
 	}
 	now := s.now()
-	pace, err := checkPace(ctx, s.Readings, s.UsageLine, now.UTC(), active, "its epic's model stories")
+	pace, err := checkPace(ctx, s.Readings, s.UsageLine, s.MaxAtOnce, now.UTC(), active, "its epic's model stories")
 	if err != nil {
 		return "", err
 	}

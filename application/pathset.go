@@ -54,6 +54,9 @@ type PathSet struct {
 	// UsageLine is the percent of the week's usage over which such a story stays
 	// held (the config's [pace] usage_line); zero is ReleasePacedUsageLine.
 	UsageLine float64
+	// MaxAtOnce is how many model stories of an epic may be open or running at
+	// once (the config's [pace] max_at_once); zero is ReleasePacedMax.
+	MaxAtOnce int
 
 	// Out is where the path that was set is printed. A nil Out prints nothing.
 	Out io.Writer

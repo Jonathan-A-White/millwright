@@ -702,3 +702,43 @@ func TestReleasePacedAtALineOf85StillRefusesOver85(t *testing.T) {
 		t.Errorf("expected none released and 'is over 85%%', got %v, %v:\n%s", released, err, out.String())
 	}
 }
+
+// The count is a key ([pace] max_at_once, mw-gq6.1695): ReleasePaced.MaxAtOnce moves
+// it, and zero is the default of ReleasePacedMax.
+func TestReleasePacedWithMaxAtOnceFiveReleasesOneMoreWhenFourRun(t *testing.T) {
+	running, held := application.StatusInProgress, application.StatusHeld
+	tracker, ids := pacedList(t, 30, running, running, running, running, held, held)
+	var out strings.Builder
+	released, err := application.ReleasePaced{
+		Tracker:   tracker,
+		Readings:  application.UsageReadings{Notes: tracker},
+		Now:       func() time.Time { return pacedNow },
+		MaxAtOnce: 5,
+		Out:       &out,
+	}.Run(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("releasing the list: %v\n%s", err, out.String())
+	}
+	if len(released) != 1 || released[0] != "p-5" {
+		t.Errorf("expected only p-5 released with 4 running and at most 5, got %v:\n%s", released, out.String())
+	}
+	comments, _ := tracker.StoryComments(context.Background(), "p-5")
+	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1].Text, "at most 5 at once") {
+		t.Errorf("expected the note to name the count of 5, got %+v", comments)
+	}
+}
+
+func TestReleasePacedWithMaxAtOnceUnsetKeepsThreeAtOnce(t *testing.T) {
+	running, held := application.StatusInProgress, application.StatusHeld
+	tracker, ids := pacedList(t, 30, running, running, running, held, held)
+	var out strings.Builder
+	released, err := application.ReleasePaced{
+		Tracker:  tracker,
+		Readings: application.UsageReadings{Notes: tracker},
+		Now:      func() time.Time { return pacedNow },
+		Out:      &out,
+	}.Run(context.Background(), ids)
+	if err != nil || len(released) != 0 || !strings.Contains(out.String(), "3 of the list running or open, at most 3 at once") {
+		t.Errorf("expected none released and 'at most 3 at once', got %v, %v:\n%s", released, err, out.String())
+	}
+}

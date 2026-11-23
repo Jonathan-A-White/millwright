@@ -126,6 +126,10 @@ func newPathSetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			maxAtOnce, err := config.PaceMaxAtOnce()
+			if err != nil {
+				return err
+			}
 			retired, err := config.RetiredHosts()
 			if err != nil {
 				return err
@@ -137,7 +141,7 @@ func newPathSetCmd() *cobra.Command {
 					cloudBook, cloudPlan = cloudStatus(dir, host)
 				}
 			}
-			_, err = application.PathSet{Tracker: gateway, Retired: retired, CloudBook: cloudBook, CloudPlan: cloudPlan, Readings: readings, UsageLine: usageLine, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
+			_, err = application.PathSet{Tracker: gateway, Retired: retired, CloudBook: cloudBook, CloudPlan: cloudPlan, Readings: readings, UsageLine: usageLine, MaxAtOnce: maxAtOnce, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
 				After: afterIDs, Hold: hold, OverClaim: overClaim, Force: force}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err

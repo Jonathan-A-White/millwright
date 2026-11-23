@@ -20,12 +20,17 @@ func pacedAfterLanding(dir string, gateway interface {
 	if err != nil {
 		return pacedUnreadable{err: err}
 	}
+	maxAtOnce, err := config.PaceMaxAtOnce()
+	if err != nil {
+		return pacedUnreadable{err: err}
+	}
 	return application.PacedAfterLanding{
 		Lists: vaultPacedLists{dir: dir},
 		Release: application.ReleasePaced{
 			Tracker:   gateway,
 			Readings:  application.UsageReadings{Notes: gateway},
 			UsageLine: line,
+			MaxAtOnce: maxAtOnce,
 			Rules:     rigRulesIfKnown(),
 		},
 	}

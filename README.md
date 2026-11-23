@@ -652,13 +652,13 @@ A long list of stories filed held, released over weeks at the epic's pace, is
 `mw release-paced <list-file>` (ids one a line, in release order; `#` lines and
 blank lines are left out). It un-holds the next held ones of the list unless
 `mw usage show` reads over 60% of the week (`[pace] usage_line` in the config moves the 60), and never leaves more than 3 of the
-list running or open: an open or running one counts against the 3 and is left
+list running or open (`[pace] max_at_once` in the config, `mw config set pace.max_at_once 5`, moves the 3): an open or running one counts against the count and is left
 as it is, a closed, missing, iced or Governor's-word-held one is skipped and
 named, and when it releases none it says why (the reading, the count, or a
 missing or stale reading). Each story released gets a `RELEASED by mw
 release-paced` comment quoting the reading and the count; `--dry-run` writes
-nothing and prints what it would release. The 3 and the 60 are constants
-(`ReleasePacedMax`, `ReleasePacedUsageLine`), not config keys. See
+nothing and prints what it would release. The 3 and the 60 are the
+defaults (`ReleasePacedMax`, `ReleasePacedUsageLine`) of the `[pace]` keys `max_at_once` and `usage_line`. See
 `application/release_test.go`.
 
 Nobody has to run it again by hand: `mw next` and `mw land` run the same release

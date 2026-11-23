@@ -367,3 +367,35 @@ func TestPathSetHeldLineForABugWithNoSweepNamesTheWayOut(t *testing.T) {
 		t.Errorf("expected the no-sweep held: line to name the way out, got %q", got)
 	}
 }
+
+// [pace] max_at_once (mw-gq6.1695): PathSet.MaxAtOnce moves the count of model
+// stories of an epic open or running at once; zero is ReleasePacedMax.
+func TestPathSetReleasesAModelStoryWhenFourAreOpenAndMaxAtOnceIsFive(t *testing.T) {
+	for _, tc := range []struct {
+		max      int
+		released bool
+	}{{5, true}, {0, false}} {
+		tracker, rules := aModelPassRig(t, 30)
+		for i := 0; i < 4; i++ {
+			id := fmt.Sprintf("mw-gq6.1%d", i)
+			tracker.AddStory("mw-gq6", domain.Story{ID: id, Title: "pass " + id})
+			if err := tracker.SetLabels(id, application.LabelModelStory); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var out strings.Builder
+		_, err := application.PathSet{Tracker: tracker, Rules: rules, Out: &out, After: []string{"mw-gq6.3"},
+			Readings: application.UsageReadings{Notes: tracker}, MaxAtOnce: tc.max, Now: func() time.Time { return pacedNow }}.
+			Run(context.Background(), "mw-gq6.2", "mw-gq6.1", nil)
+		if err != nil {
+			t.Fatalf("setting the path: %v", err)
+		}
+		held := statusOf(t, tracker, "mw-gq6.2") == application.StatusHeld
+		if held == tc.released {
+			t.Errorf("max_at_once %d: expected released=%v, got held=%v:\n%s", tc.max, tc.released, held, out.String())
+		}
+		if !tc.released && !strings.Contains(out.String(), "4 of its epic's model stories running or open, at most 3 at once") {
+			t.Errorf("expected the held: line to name the count of 3, got:\n%s", out.String())
+		}
+	}
+}

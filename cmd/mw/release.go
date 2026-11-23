@@ -90,13 +90,13 @@ func newReleasePacedCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "release-paced <list-file>",
-		Short: "Un-hold the next stories of a list file at the pace of the epic: at most 3 at once, none over 60% of the week (the [pace] usage_line key moves the 60)",
+		Short: "Un-hold the next stories of a list file at the pace of the epic: at most 3 at once, none over 60% of the week (the [pace] max_at_once and usage_line keys move the 3 and the 60)",
 		Long: "release-paced reads a list file of story ids, one a line, in release order (blank lines and\n" +
 			"lines starting # are left out), and un-holds the next ones that are held.\n\n" +
-			"The pace is the epic's: never more than 3 stories of the list running or open at once, and\n" +
-			"none while mw usage show reads over 60% of the week (mw config set pace.usage_line 85 moves\n" +
-			"the 60). A story of the list that is open or\n" +
-			"running counts against the 3 and is left as it is; one that is closed, not in the tracker,\n" +
+			"The pace is the epic's: never more than 3 stories of the list running or open at once (mw config\n" +
+			"set pace.max_at_once 5 moves the 3), and none while mw usage show reads over 60% of the week\n" +
+			"(mw config set pace.usage_line 85 moves the 60). A story of the list that is open or\n" +
+			"running counts against the count (3 unless pace.max_at_once says otherwise) is left as it is; one that is closed, not in the tracker,\n" +
 			"iced, held on the Governor's word, or whose acceptance holds a criterion that needs its own landing\n" +
 			"(a live URL of a served rig, or judged after the fix lands) is skipped and named. When it releases none it says why:\n" +
 			"the usage reading, the count, or that the reading is missing or stale (mw usage read).\n\n" +
@@ -134,10 +134,15 @@ func newReleasePacedCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			maxAtOnce, err := config.PaceMaxAtOnce()
+			if err != nil {
+				return err
+			}
 			_, err = application.ReleasePaced{
 				Tracker:   gateway,
 				Readings:  application.UsageReadings{Notes: mwGateway(dir, host)},
 				UsageLine: line,
+				MaxAtOnce: maxAtOnce,
 				Rules:     rigRulesIfKnown(),
 				DryRun:    dryRun,
 				Out:       cmd.OutOrStdout(),
