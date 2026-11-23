@@ -103,11 +103,17 @@ func ResultRedirectFrom(argv []string, stdinFile, resultFile, stderrFile string)
 // retry (`mw bd`), and the real bd is named to it by MW_BD_REAL. A host with no
 // bd, or no place to put the script, leaves the session the PATH it had. An
 // empty retry leaves line as it was.
+//
+// line runs in a subshell that exports the two variables, not behind a command
+// prefix of assignments: line is a '{ ... }' group when the stderr is kept
+// (ResultRedirect), and assignments in front of a '{' are a syntax error in bash,
+// which killed every launch (mw-gq6.1687). The subshell also keeps the PATH off
+// the mv, the heartbeat and the close-out that follow it.
 func WithBdShim(line string, retry []string) string {
 	if len(retry) == 0 {
 		return line
 	}
-	return BdShimSetup(retry) + BdShimEnv + line + "; " + BdShimCleanup
+	return BdShimSetup(retry) + "( " + BdShimEnv + line + " ); " + BdShimCleanup
 }
 
 // BdShimSetup is the shell that makes the directory holding the script that
@@ -120,9 +126,9 @@ func BdShimSetup(retry []string) string {
 		`if [ -z "$REAL" ] || [ -z "$SHIM" ] || ! { printf '%s\n' ` + script + ` > "$SHIM/bd" && chmod +x "$SHIM/bd"; }; then SHIM=; REAL=; fi; `
 }
 
-// BdShimEnv is what is put in front of the harness's command to give it the
-// script: assignments that last for that one command.
-const BdShimEnv = `MW_BD_REAL="$REAL" PATH="${SHIM:+$SHIM:}$PATH" `
+// BdShimEnv is what is put in front of the harness's line, inside the subshell
+// WithBdShim opens, to give it the script: exports that last for that subshell.
+const BdShimEnv = `export MW_BD_REAL="$REAL" PATH="${SHIM:+$SHIM:}$PATH"; `
 
 // BdShimCleanup takes the script's directory away once the session is over.
 const BdShimCleanup = `if [ -n "$SHIM" ]; then rm -rf "$SHIM"; fi`

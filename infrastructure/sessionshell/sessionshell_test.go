@@ -94,7 +94,7 @@ func TestBdShimIsOnlyAddedWhenALauncherAsksForIt(t *testing.T) {
 		t.Errorf("expected no retry to add nothing, got %q", got)
 	}
 	got := WithBdShim("agent go", []string{"mw", "bd"})
-	for _, want := range []string{"SHIM=$(mktemp -d)", `MW_BD_REAL="$REAL"`, "exec mw bd", "agent go; if [ -n \"$SHIM\" ]; then rm -rf \"$SHIM\"; fi"} {
+	for _, want := range []string{"SHIM=$(mktemp -d)", `MW_BD_REAL="$REAL"`, "exec mw bd", "( export MW_BD_REAL=", "agent go ); if [ -n \"$SHIM\" ]; then rm -rf \"$SHIM\"; fi"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in %q", want, got)
 		}
@@ -209,5 +209,113 @@ func TestTheHarnessStderrIsKeptBesideTheResultAndStillShown(t *testing.T) {
 func TestNoStderrFileLeavesTheLineAsItWas(t *testing.T) {
 	if got, want := ResultRedirect([]string{"agent", "go"}, "/v/r.json", ""), "agent go > /v/r.json.tmp; mv /v/r.json.tmp /v/r.json"; got != want {
 		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+// mw-gq6.1687: the launch line as dispatch composes it (ResultRedirectFrom, then
+// WithBdShim, WithHeartbeat, WithAfter, Prelude) is read by a shell, not only
+// compared as a string: bash -n must parse it, and both bash and sh must run the
+// stand-in harness under it with the result, the stderr file and the pane right,
+// and the shim's bd ahead of the real one on the harness's PATH alone.
+func TestTheWholeLaunchLineParsesAndRunsUnderBashAndSh(t *testing.T) {
+	for _, shell := range []string{"bash", "sh"} {
+		for _, withStdin := range []bool{false, true} {
+			name := shell + "/stdin-off"
+			if withStdin {
+				name = shell + "/stdin-on"
+			}
+			t.Run(name, func(t *testing.T) {
+				path, err := exec.LookPath(shell)
+				if err != nil {
+					t.Skipf("no %s on this host", shell)
+				}
+				dir := t.TempDir()
+				realBin := filepath.Join(dir, "realbin")
+				if err := os.MkdirAll(realBin, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				realBd := filepath.Join(realBin, "bd")
+				if err := os.WriteFile(realBd, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				harness := filepath.Join(dir, "harness")
+				body := "#!/bin/sh\n" +
+					"printf 'real=%s\\n' \"$MW_BD_REAL\"\n" +
+					"printf 'bd=%s\\n' \"$(command -v bd)\"\n" +
+					"printf 'stdin=%s\\n' \"$(cat 2>/dev/null)\"\n" +
+					"printf 'oops\\n' >&2\n"
+				if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				stdinFile := ""
+				if withStdin {
+					stdinFile = filepath.Join(dir, "boot.md")
+					if err := os.WriteFile(stdinFile, []byte("boot text"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				result := filepath.Join(dir, "result-1.json")
+				stderrFile := filepath.Join(dir, "stderr-1.log")
+				l := application.Launch{
+					Heartbeat:    []string{"true"},
+					HeartbeatLog: filepath.Join(dir, "hb.log"),
+					After:        []string{"true"},
+					AfterLog:     filepath.Join(dir, "next-1.log"),
+					BdRetry:      []string{"mw", "bd"},
+				}
+				line := ResultRedirectFrom([]string{harness}, stdinFile, result, stderrFile)
+				line = WithBdShim(line, l.BdRetry)
+				line = WithHeartbeat(line, l)
+				line = WithAfter(line, l)
+				line = Prelude(line, Env{ServerHost: "10.0.0.2"})
+
+				if out, err := exec.Command("bash", "-n", "-c", line).CombinedOutput(); err != nil {
+					t.Fatalf("bash -n refused the line: %v\n%s\n%s", err, out, line)
+				}
+				cmd := exec.Command(path, "-c", line)
+				cmd.Env = append(os.Environ(), "PATH="+realBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+				var pane strings.Builder
+				cmd.Stderr = &pane
+				if err := cmd.Run(); err != nil {
+					t.Fatalf("%s failed on the line: %v\n%s\n%s", shell, err, pane.String(), line)
+				}
+
+				got, err := os.ReadFile(result)
+				if err != nil {
+					t.Fatalf("expected the result in place: %v\n%s", err, pane.String())
+				}
+				lines := strings.Split(strings.TrimRight(string(got), "\n"), "\n")
+				if len(lines) != 3 {
+					t.Fatalf("expected three result lines, got %q", got)
+				}
+				if lines[0] != "real="+realBd {
+					t.Errorf("expected MW_BD_REAL to name the real bd %s, got %q", realBd, lines[0])
+				}
+				shimBd := strings.TrimPrefix(lines[1], "bd=")
+				if shimBd == realBd || filepath.Base(shimBd) != "bd" || filepath.Dir(shimBd) == realBin {
+					t.Errorf("expected the shim's bd ahead of the real one, got %q", lines[1])
+				}
+				wantStdin := "stdin="
+				if withStdin {
+					wantStdin += "boot text"
+				}
+				if lines[2] != wantStdin {
+					t.Errorf("expected %q, got %q", wantStdin, lines[2])
+				}
+				if _, err := os.Stat(filepath.Dir(shimBd)); err == nil {
+					t.Errorf("expected the shim's directory removed after the session")
+				}
+				if _, err := os.Stat(result + ".tmp"); err == nil {
+					t.Errorf("expected the temp result moved away")
+				}
+				kept, err := os.ReadFile(stderrFile)
+				if err != nil || string(kept) != "oops\n" {
+					t.Errorf("expected stderr-1.log to hold oops, got %q (%v)", kept, err)
+				}
+				if !strings.Contains(pane.String(), "oops\n") {
+					t.Errorf("expected the pane to show oops, got %q", pane.String())
+				}
+			})
+		}
 	}
 }
