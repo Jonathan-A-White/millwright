@@ -605,6 +605,14 @@ Feature: mw doctor
     And the doctor log holds "vault-gitignore cured"
     And the vault's .gitignore holds the line "runs/*/heartbeat-*.log"
 
+  Scenario: The real vault-gitignore check on a vault that committed a run's check file before its .gitignore named it untracks the file and keeps it on disk (mw-gq6.1692)
+    Given a git vault that committed "runs/mw-gq6.1/check-1-gate.out" before its .gitignore named it
+    When mw doctor's vault-gitignore check runs
+    Then mw doctor printed "runs/*/check-*"
+    And the doctor log holds "vault-gitignore cured"
+    And git tracks nothing the vault's .gitignore names
+    And the file "runs/mw-gq6.1/check-1-gate.out" is still in the vault
+
   Scenario: The real vault-gitignore check on a vault whose .gitignore holds every line of the template's is ok
     Given a vault whose .gitignore is the template's
     When mw doctor's vault-gitignore check runs
