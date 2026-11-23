@@ -255,7 +255,7 @@ type ReasonCount struct {
 // ConflictFile is a file the merge-conflict refusals of a block conflicted in,
 // and how many refusals it was in. Mark says the rig merges that file by a rule
 // that should have kept it from conflicting (ConflictMarkUnion, ...Version,
-// ...Changelog), so a hit there is a machinery bug; empty for any other file.
+// ...Changelog, ...Regenerated), so a hit there is a machinery bug; empty for any other file.
 type ConflictFile struct {
 	Path  string `json:"path"`
 	Count int    `json:"count"`
@@ -267,6 +267,9 @@ const (
 	ConflictMarkUnion     = "union"
 	ConflictMarkVersion   = "version"
 	ConflictMarkChangelog = "changelog"
+	// ConflictMarkRegenerated is a file of a regenerated_files entry whose
+	// generator should have settled the conflict.
+	ConflictMarkRegenerated = "regenerated"
 )
 
 // Quality is the measures of one window of one block.
@@ -867,8 +870,8 @@ func (r FactoryReport) blocks(entries []reportEntry, gates []GateTrend, keyOf fu
 }
 
 // markConflictFiles marks, in each rig block, the conflicted files the rig
-// merges by a rule: a file in union_merge_files, version_files or
-// changelog_files should never conflict, so its being here is a bug in the
+// merges by a rule: a file in union_merge_files, version_files,
+// changelog_files or regenerated_files should never conflict, so its being here is a bug in the
 // machinery (mw-gq6.559). A rig whose rules cannot be read is left unmarked.
 func (r FactoryReport) markConflictFiles(ctx context.Context, blocks []ReportBlock) {
 	if r.Rules == nil {
@@ -891,9 +894,22 @@ func (r FactoryReport) markConflictFiles(ctx context.Context, blocks []ReportBlo
 				files[j].Mark = ConflictMarkVersion
 			case conflictListed(rules.UnionMergeFiles, files[j].Path):
 				files[j].Mark = ConflictMarkUnion
+			case conflictRegenerated(rules.RegeneratedFiles, files[j].Path):
+				files[j].Mark = ConflictMarkRegenerated
 			}
 		}
 	}
+}
+
+// conflictRegenerated says file is one of the paths of an entry of
+// regenerated_files.
+func conflictRegenerated(entries []domain.RegeneratedFiles, file string) bool {
+	for _, entry := range entries {
+		if entry.Matches(file) {
+			return true
+		}
+	}
+	return false
 }
 
 // conflictListed says file is one of names: named in full or matched by a

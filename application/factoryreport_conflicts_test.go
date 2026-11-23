@@ -68,3 +68,23 @@ func TestAConflictInAFileTheRigMergesByRuleIsMarkedAsMachineryThatFailed(t *test
 		t.Errorf("expected the marked file in the printed wins:\n%s", b.String())
 	}
 }
+
+func TestMarkConflictFilesMarksRegenerated(t *testing.T) {
+	entries := conflictRefusals("lampas",
+		[]string{"docs/lxx-align/gen.txt", "src/x.go"}, []string{"docs/lxx-align/gen.txt"})
+	r := FactoryReport{Rules: rulesOf{"lampas": {
+		RegeneratedFiles: []domain.RegeneratedFiles{{Paths: []string{"docs/lxx-align/*.txt"}, Run: "npm run gen"}},
+	}}}
+	blocks := r.blocks(entries, nil, func(e reportEntry) string { return e.rig }, nil)
+	r.markConflictFiles(context.Background(), blocks)
+	marks := map[string]string{}
+	for _, f := range blocks[0].Quality.ConflictFiles {
+		marks[f.Path] = f.Mark
+	}
+	if marks["docs/lxx-align/gen.txt"] != "regenerated" {
+		t.Errorf("a conflicted regenerated file has mark %q, want %q", marks["docs/lxx-align/gen.txt"], "regenerated")
+	}
+	if marks["src/x.go"] != "" {
+		t.Errorf("an unlisted file has mark %q, want none", marks["src/x.go"])
+	}
+}
