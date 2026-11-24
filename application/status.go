@@ -674,6 +674,11 @@ type StatusReport struct {
 	// leaves there because the pin says why it must stay (PinWhy), by story id:
 	// "held by its pin: <why>" (mw-gq6.1165).
 	HeldByPin map[string]string
+	// PinsNoWhy are the open and held stories, on any host, pinned to a named host
+	// with no host_why of their own or their epic's: a dispatch tick moves such a
+	// pin to host=auto once the host has had no room for repath_no_room_minutes.
+	// A note, not a fault (mw-gq6.1702).
+	PinsNoWhy []string
 	// GivenBack are the ready stories the home gave back when the host that held
 	// them stopped answering, by story id: 'given back at <T>: <host> did not
 	// answer for 30 min' (mw-6ww.185.10).
@@ -1070,6 +1075,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.NoGristKey = s.noGristKey(report.Ready)
 	report.NoHostTakes = s.noHostTakes(ctx, report.Ready)
 	report.HeldByPin = s.heldByPin(ctx, report.Ready)
+	report.PinsNoWhy = s.pinsNoWhy(ctx, work)
 	report.GivenBack = givenBackLines(s.gaveBacks(ctx), report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by

@@ -341,6 +341,9 @@ func (r StatusReport) String() string {
 			wrapInto(&b, "    ", line)
 		}
 	}
+	if line := r.pinsNoWhyLine(); line != "" {
+		wrapInto(&b, "  ", line)
+	}
 	b.WriteString("\n")
 
 	if len(r.Waiting) > 0 {

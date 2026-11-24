@@ -20,7 +20,13 @@ func TestPathSetWarnsOfACriterionNeedingAHomeSecretOnAHostThatIsNotHome(t *testi
 		for _, host := range []string{"auto", "cloud4"} {
 			tracker, rules := aStoryWithAcceptance(t, acceptance)
 			var errOut strings.Builder
-			if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", []string{"host=" + host}); err != nil {
+			// A named host carries its host_why, so the warning of a pin with none
+			// (mw-gq6.1702) is not counted here.
+			pairs := []string{"host=" + host}
+			if host != "auto" {
+				pairs = append(pairs, "host_why=a test pins it")
+			}
+			if _, err := (application.PathSet{Tracker: tracker, Rules: rules, Err: &errOut}).Run(context.Background(), "mw-gq6.2", "mw-gq6.1", pairs); err != nil {
 				t.Fatalf("%s on %s: nothing is refused for it, got %v", name, host, err)
 			}
 			got := errOut.String()

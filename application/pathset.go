@@ -99,6 +99,11 @@ type PathSet struct {
 	Retired   []string
 	CloudBook CloudBook
 	CloudPlan CloudPlan
+
+	// RepathNoRoom is how long a pinned host may have no room before dispatch moves
+	// a pin with no host_why to host=auto: the config's repath_no_room_minutes,
+	// named in the warning of such a pin (mw-gq6.1702). Zero is DefaultRepathNoRoom.
+	RepathNoRoom time.Duration
 }
 
 // Run sets the path of story id. from names the sibling to copy the seven
@@ -308,6 +313,15 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 				now.Host, now.Rig, id)
 		}
 	}
+	// A pin with no host_why is moved to host=auto once its host has had no room
+	// for a while, so a path that writes one says so (mw-gq6.1702). Judged only
+	// when the command names a host itself: a host copied by --from, or the epic's,
+	// is the sibling's or the epic's to explain.
+	if s.Err != nil && named.Host != "" {
+		if line := pinNoWhyWarning(ctx, s.Rules, s.RepathNoRoom, id, story.Merged().Overlay(path)); line != "" {
+			fmt.Fprintln(s.Err, line)
+		}
+	}
 	// --from never copies files, so on a rig that expects them the seat that
 	// forgot files= is told now and not by a later mw path show (mw-gq6.1130).
 	if from != "" && named.Files == "" && s.Err != nil {
@@ -486,8 +500,10 @@ func orRig(rig string) string {
 }
 
 // settableKeys are the keys mw path set takes, as a refusal names them: the
-// eleven path keys and callers_ok (mw-gq6.672).
-var settableKeys = strings.Join(append(append([]string{}, domain.Fields...), domain.CallersOKField), ", ")
+// eleven path keys, callers_ok (mw-gq6.672) and host_why with the line on what
+// it does (mw-gq6.1702).
+var settableKeys = strings.Join(append(append([]string{}, domain.Fields...), domain.CallersOKField), ", ") +
+	", " + domain.HostWhyField + " (" + HostWhyHelp + ")"
 
 // parsePathPairs reads key=value settings into a path, refusing a key that is
 // not one of the eleven or callers_ok and a value left empty.

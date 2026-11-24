@@ -74,6 +74,10 @@ func newPathSetCmd() *cobra.Command {
 			"After the write, a story that mw dispatch would pass over is named, before it is un-held: no files key on a\n" +
 			"rig whose file says files_expected = true, a bug with no Sweep: line, a Tester story with no Landed story:\n" +
 			"line. A warning only; nothing is refused for it.\n\n" +
+			"host_why=\"<why>\" is the key that says " + application.HostWhyHelp + " (say, only the Laptop has Docker).\n" +
+			"A host named with no host_why on the story or its epic gets a WARN on stderr: mw dispatch moves the story to\n" +
+			"host=auto once that host has had no room for repath_no_room_minutes (60 by default), so add host_why=\"<why>\" to\n" +
+			"keep it. Nothing is refused (mw-gq6.1702).\n\n" +
 			"A path that pins a story to a home host (laptop or desktop) on a rig named under [heavy_net] gets a\n" +
 			"WARN on stderr naming host=auto: that rig installs dependencies, so its stories are not started while\n" +
 			"the host's network is metered, and a pin keeps any other host from taking them. It is set all the same.\n\n" +
@@ -141,7 +145,9 @@ func newPathSetCmd() *cobra.Command {
 					cloudBook, cloudPlan = cloudStatus(dir, host)
 				}
 			}
-			_, err = application.PathSet{Tracker: gateway, Retired: retired, CloudBook: cloudBook, CloudPlan: cloudPlan, Readings: readings, UsageLine: usageLine, MaxAtOnce: maxAtOnce, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
+			// A config that cannot be read costs the warning of a pin only its number of minutes.
+			repathNoRoom, _ := config.RepathNoRoom()
+			_, err = application.PathSet{Tracker: gateway, RepathNoRoom: repathNoRoom, Retired: retired, CloudBook: cloudBook, CloudPlan: cloudPlan, Readings: readings, UsageLine: usageLine, MaxAtOnce: maxAtOnce, Rigs: rigs, HeavyNet: heavy, RigFiles: rig.Files{}, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout(), Err: cmd.ErrOrStderr(),
 				After: afterIDs, Hold: hold, OverClaim: overClaim, Force: force}.
 				Run(cmd.Context(), args[0], from, args[1:])
 			return err

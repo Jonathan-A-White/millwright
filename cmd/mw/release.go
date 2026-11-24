@@ -47,7 +47,10 @@ func newReleaseCmd() *cobra.Command {
 			"address or the rig's site_url) or says it is judged after the fix lands, after landing or once it is live, is\n" +
 			"not released either: no Builder can meet it before landing. The release is refused, naming the criterion, and\n" +
 			"nothing in the epic is released; move it to a 'Verify strings:' line or to mw verify. --force \"<why>\" releases\n" +
-			"it anyway and writes the why on the story (mw-gq6.1686).",
+			"it anyway and writes the why on the story (mw-gq6.1686).\n\n" +
+			"A story pinned to a named host with no host_why (its own or its epic's) gets a WARN: mw dispatch moves it to\n" +
+			"host=auto once that host has had no room for repath_no_room_minutes; add host_why=\"<why>\" with mw path set\n" +
+			"to keep it. It is released all the same (mw-gq6.1702).",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
@@ -56,14 +59,17 @@ func newReleaseCmd() *cobra.Command {
 			}
 			// A rig table that cannot be read costs the release only the wrong-rig warning.
 			rigs, _ := config.Rigs()
+			// A config that cannot be read costs the warning of a pin only its number of minutes.
+			repathNoRoom, _ := config.RepathNoRoom()
 			_, err = application.Release{
-				Tracker:  gateway,
-				Rules:    rigRulesIfKnown(),
-				Rigs:     rigs,
-				RigFiles: rig.Files{},
-				OverHold: overHold,
-				Force:    force,
-				Out:      cmd.OutOrStdout(),
+				RepathNoRoom: repathNoRoom,
+				Tracker:      gateway,
+				Rules:        rigRulesIfKnown(),
+				Rigs:         rigs,
+				RigFiles:     rig.Files{},
+				OverHold:     overHold,
+				Force:        force,
+				Out:          cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

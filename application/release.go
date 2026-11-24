@@ -57,6 +57,11 @@ type Release struct {
 	// refused, naming the criterion. It is written on each story it lets through.
 	Force string
 
+	// RepathNoRoom is how long a pinned host may have no room before dispatch moves
+	// a pin with no host_why to host=auto (repath_no_room_minutes), named in the
+	// warning of such a pin (mw-gq6.1702). Zero is DefaultRepathNoRoom.
+	RepathNoRoom time.Duration
+
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -97,6 +102,7 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 			heldDetails = append(heldDetails, story)
 		}
 	}
+	warnPinNoWhy(ctx, r.Out, r.Rules, r.RepathNoRoom, heldDetails...)
 	if err := r.checkRunnable(ctx, heldDetails); err != nil {
 		return found, err
 	}
@@ -168,6 +174,7 @@ func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
 	warnNoFilesKey(ctx, r.Out, r.Rules, detail)
 	warnWrongRig(r.Out, r.Rigs, r.RigFiles, detail)
 	warnHomeSecret(r.Out, detail)
+	warnPinNoWhy(ctx, r.Out, r.Rules, r.RepathNoRoom, detail)
 	if err := r.checkRunnable(ctx, []StoryDetail{detail}); err != nil {
 		return found, err
 	}
