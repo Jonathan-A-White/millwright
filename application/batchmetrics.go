@@ -83,6 +83,9 @@ type BatchMetric struct {
 	// was one host's gap, or written before the fields.
 	MainTests []string `json:"main_tests,omitempty"`
 	MainBug   string   `json:"main_bug,omitempty"`
+	// MainTitles are the Playwright titles of MainTests, by the same names: a
+	// line a later head moves a test to is found by its title (mw-gq6.1707).
+	MainTitles map[string]string `json:"main_titles,omitempty"`
 }
 
 // Metric is the line the batch leaves, as of at.
@@ -104,7 +107,7 @@ func (r BatchReport) Metric(at time.Time) BatchMetric {
 	}
 	if r.HeldOnMainRed && !r.Landed {
 		m.MainRed, m.MainHead, m.MainBranch = true, r.Base, r.Target
-		m.MainTests, m.MainBug = r.mainTests, r.mainBug
+		m.MainTests, m.MainBug, m.MainTitles = r.mainTests, r.mainBug, r.mainTitles
 	}
 	if r.Tested {
 		m.GateRuns = max(r.GateRuns, 1)

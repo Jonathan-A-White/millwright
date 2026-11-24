@@ -133,3 +133,46 @@ func TestARigHeldOnMainsRedWithNoTestsKeptIsGatedAsBefore(t *testing.T) {
 		t.Errorf("expected the gate run with no check of main first, got %d runs, asked %v", a.checks.runs, a.named.asked)
 	}
 }
+
+// aBatchLandingAt is the batch's landing with a worktree of main at dir.
+type aBatchLandingAt struct {
+	*aBranchConflictLanding
+	dir string
+}
+
+func (l aBatchLandingAt) OpenLanding(context.Context, string, string) (string, error) {
+	return l.dir, nil
+}
+
+// A Playwright test that main moved a line is asked for by the line the hold's
+// line names, which names no test on the new main: the hold's line keeps the
+// title, and the recheck finds the test by it (mw-gq6.1707).
+func TestAMainRedRecheckFindsAMovedPlaywrightLine(t *testing.T) {
+	a := newAMainRedRecheck(t, mainRunsOnlyItsOwnLine().run)
+	a.named = mainRunsOnlyItsOwnLine()
+	a.land.Next.NamedChecks = a.named
+	a.land.Records = &batchFilesKept{put: map[string]string{}}
+	// Main now has the test at line 298; the hold named it at line 290.
+	a.land.Next.Landing = aBatchLandingAt{a.landing, aSpecOnMain(t, placeTitle, mainLine)}
+	if err := a.metrics.AppendBatch(context.Background(), application.BatchMetric{Kind: application.BatchKind,
+		At: time.Date(2026, 11, 24, 4, 0, 0, 0, time.UTC), Rig: "millwright", Host: "laptop", Batch: 595, Stories: 2,
+		IDs: []string{"mw-e.1", "mw-e.2"}, Outcome: application.BatchHeld, Red: true, MainRed: true, MainHead: "oldhead",
+		MainBranch: "main", MainTests: []string{placeSpec + ":290"}, MainTitles: map[string]string{placeSpec + ":290": placeTitle},
+		MainBug: mainRedCarrier}); err != nil {
+		t.Fatal(err)
+	}
+	a.run(t)
+
+	if len(a.named.asked) != 1 || strings.Join(a.named.asked[0], ",") != placeSpec+":298" {
+		t.Fatalf("expected main asked for the test at its own line 298, got %q", a.named.asked)
+	}
+	r := a.report
+	if r.Landed || !strings.Contains(r.Held, "main is red") || a.checks.runs != 0 {
+		t.Fatalf("expected the batch held on main's red with no gate run, got landed %v, held %q, %d runs", r.Landed, r.Held, a.checks.runs)
+	}
+	// The new line keeps the title under the line main has the test at now.
+	m := r.Metric(time.Date(2026, 11, 24, 16, 0, 0, 0, time.UTC))
+	if m.MainTitles[placeSpec+":298"] != placeTitle {
+		t.Errorf("expected the line to keep the title under main's line 298, got %+v", m.MainTitles)
+	}
+}

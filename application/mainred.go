@@ -242,6 +242,9 @@ type MainRed struct {
 	Took    time.Duration
 	Bug     string
 	NewBug  bool
+	// Titles are the Playwright titles of Tests, by the same names (nil when
+	// there are none): a later main that moved a test is asked by its title.
+	Titles map[string]string
 
 	// Gap is set when the home runs the same tests and passes them: the failure
 	// is this host's, and Bug is the bug filed against the host (mw-gq6.1395).
@@ -690,7 +693,7 @@ func (n Next) mainAloneNamed(ctx context.Context, c *closeOut, report *NextRepor
 	for i, test := range tests {
 		onMainNames[i] = onTarget[test]
 	}
-	red := &MainRed{Tests: onMainNames, Command: run.Command, Took: took, Gap: gap}
+	red := &MainRed{Tests: onMainNames, Command: run.Command, Took: took, Gap: gap, Titles: titlesOnMain(tests, onMainNames, titles)}
 	if gap != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone fails %s on %s (checked in %s), and %s passes them by name: host gap, not main's red", red.tests(), gap.Host, took.Round(time.Second), gap.Home))
 		return red
@@ -753,6 +756,21 @@ func ErrorLineOf(output string) string {
 		}
 	}
 	return LastMeaningfulLines(output, 1, notRunLineLong)
+}
+
+// titlesOnMain is the title of each test by the name main knows it by: titles
+// is by the names tests were asked for, onMain the names main has them at.
+func titlesOnMain(tests, onMain []string, titles map[string]string) map[string]string {
+	kept := map[string]string{}
+	for i, test := range tests {
+		if title := titles[test]; title != "" {
+			kept[onMain[i]] = title
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // namesOnTarget says how each failing test is asked for on the target, in dir,

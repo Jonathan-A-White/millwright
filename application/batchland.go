@@ -283,8 +283,9 @@ type BatchReport struct {
 	// mainTests and mainBug are the tests main fails alone, by main's names, and
 	// the bug that carries them, of a batch held on main's red: its line keeps
 	// them for the rig's next batch to run them again first (mw-gq6.1706).
-	mainTests []string
-	mainBug   string
+	mainTests  []string
+	mainBug    string
+	mainTitles map[string]string
 	// failingOwner is the one story of the batch whose branch alone changed
 	// the files of the tests that failed (findFailingOwner); empty when none.
 	failingOwner string

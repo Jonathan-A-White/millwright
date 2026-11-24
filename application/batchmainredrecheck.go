@@ -12,13 +12,13 @@ func (r *BatchReport) keepMainRed(red *MainRed) {
 	if red.Gap != nil {
 		return
 	}
-	r.mainTests, r.mainBug = red.Tests, red.Bug
+	r.mainTests, r.mainBug, r.mainTitles = red.Tests, red.Bug, red.Titles
 }
 
 // mainStillRed is the check made before a batch is merged and gated, for a rig
 // whose last batch was held on main's own red: the tests that hold named are run
-// by name on the target as it is now, alone (mainAlone's own run), and when they
-// still all fail the batch is held again at once, on the same carrier and the new
+// by name on the target as it is now, alone (mainAlone's own run), a Playwright
+// test at the line its kept title is at there, and when they still all fail the batch is held again at once, on the same carrier and the new
 // head, with no gate run: a gate costs half an hour, and the red was not touched
 // by the move (batch 677 of lampas, mw-gq6.1706). When they pass, or fail other
 // than as before, or cannot be run, or the carrier is closed (its fix is the
@@ -48,7 +48,7 @@ func (b BatchLand) mainStillRed(ctx context.Context, rigDir string, report *Batc
 	}
 	var again NextReport
 	bc := b.batchCloseOut(report, rigDir)
-	red := n.mainAloneNamed(ctx, bc, &again, held.MainTests, nil, report.Base, func() string {
+	red := n.mainAloneNamed(ctx, bc, &again, held.MainTests, held.MainTitles, report.Base, func() string {
 		return "they no longer fail as they did in " + BatchLabel(report.Rig, held.Batch)
 	})
 	if record := bc.recordPath(bc.mainLog); bc.mainLog != "" && record != "" {
