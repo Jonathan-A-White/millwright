@@ -1,11 +1,15 @@
 package sessionshell
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -317,5 +321,66 @@ func TestTheWholeLaunchLineParsesAndRunsUnderBashAndSh(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// mw-gq6.1699: a harness that ends at once, before the heartbeat has opened its
+// fifo, killed the heartbeat's subshell while it was blocked in that open, so
+// tee waited for ever for a writer and the line's `wait $HBT` never returned.
+// The heartbeat here sleeps before it writes and the harness is `true`, so the
+// kill lands first on every run; each run is bounded, and run under both shells.
+func TestHeartbeatLineEndsWhenTheHarnessEndsAtOnce(t *testing.T) {
+	dir := t.TempDir()
+	heartbeat := filepath.Join(dir, "heartbeat")
+	if err := os.WriteFile(heartbeat, []byte("#!/bin/sh\nsleep 1\necho beat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, shell := range []string{"sh", "bash"} {
+		for i := 0; i < 100; i++ {
+			shell, i := shell, i
+			t.Run(fmt.Sprintf("%s-%d", shell, i), func(t *testing.T) {
+				t.Parallel()
+				l := launch()
+				l.Heartbeat = []string{heartbeat}
+				l.HeartbeatLog = filepath.Join(t.TempDir(), "heartbeat-1.log")
+				line := WithHeartbeat("true", l)
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, shell, "-c", line)
+				cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+				cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+				cmd.WaitDelay = time.Second
+				if err := cmd.Run(); err != nil {
+					t.Errorf("expected the line to end cleanly within 20s, got %v (%q)", err, line)
+				}
+			})
+		}
+	}
+}
+
+// The heartbeat's words still reach its log when the harness outlasts them, and
+// a process the harness leaves running does not keep the line waiting on tee.
+func TestHeartbeatLogKeepsTheHeartbeatsWordsAndIsNotHeldByWhatTheHarnessLeaves(t *testing.T) {
+	dir := t.TempDir()
+	heartbeat := filepath.Join(dir, "heartbeat")
+	if err := os.WriteFile(heartbeat, []byte("#!/bin/sh\necho beat\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	l := launch()
+	l.Heartbeat = []string{heartbeat}
+	l.HeartbeatLog = filepath.Join(dir, "heartbeat-1.log")
+	line := WithHeartbeat("sleep 1; (sleep 25 &)", l)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", line)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = time.Second
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("expected the line to end within 15s, got %v", err)
+	}
+	kept, _ := os.ReadFile(l.HeartbeatLog)
+	if string(kept) != "beat\n" {
+		t.Errorf("expected the log to hold beat, got %q", kept)
 	}
 }

@@ -150,6 +150,11 @@ func WithHeartbeat(line string, l application.Launch) string {
 	if len(l.Heartbeat) == 0 {
 		return line
 	}
+	if l.HeartbeatLog != "" {
+		// The shell holds the fifo's write end on fd 9 (HeartbeatLine); the harness's
+		// line is given none, so nothing it leaves running can keep tee waiting.
+		line = "{ " + line + "; } 9>&-"
+	}
 	return HeartbeatLine(l) + line + "; kill $HB 2>/dev/null; wait $HB 2>/dev/null" + HeartbeatEnd(l)
 }
 
@@ -160,22 +165,30 @@ func WithHeartbeat(line string, l application.Launch) string {
 // would make $! tee's pid and the kill would miss the heartbeat, so the
 // heartbeat writes to a fifo that a backgrounded tee reads: $HB stays the
 // heartbeat itself. tee appends, so a later attempt's heartbeat adds to it.
+//
+// The shell itself opens the fifo's write end, on fd 9, before the heartbeat
+// starts, and the heartbeat is given it as its stdout (mw-gq6.1699). The open
+// waits for tee's own, so tee always has had a writer; had the heartbeat's
+// subshell made the open, a harness that ended at once could have its kill land
+// on that subshell while it was still blocked there, and tee would wait for a
+// writer for ever, and the wait on it with it. HeartbeatEnd closes fd 9.
 func HeartbeatLine(l application.Launch) string {
 	if l.HeartbeatLog == "" {
 		return ShellLine(l.Heartbeat) + " & HB=$!; "
 	}
 	return `HBD=$(mktemp -d); mkfifo "$HBD/w"; tee -a ` + ShellQuote(l.HeartbeatLog) + ` < "$HBD/w" & HBT=$!; ` +
-		ShellLine(l.Heartbeat) + ` > "$HBD/w" 2>&1 & HB=$!; `
+		`exec 9> "$HBD/w"; ` + ShellLine(l.Heartbeat) + ` >&9 2>&1 & HB=$!; `
 }
 
 // HeartbeatEnd is what settles the fifo HeartbeatLine made, once the heartbeat
-// is gone: tee ends on its own as the fifo's last writer closes, so it is
-// waited for, and the fifo's directory removed.
+// is gone: the shell closes its own write end (fd 9), and tee ends on its own as
+// the fifo's last writer closes, so it is waited for, and the fifo's directory
+// removed.
 func HeartbeatEnd(l application.Launch) string {
 	if l.HeartbeatLog == "" {
 		return ""
 	}
-	return `; wait $HBT 2>/dev/null; rm -rf "$HBD"`
+	return `; exec 9>&-; wait $HBT 2>/dev/null; rm -rf "$HBD"`
 }
 
 // WithAfter chains the launch's After on line, or leaves line as it was when
