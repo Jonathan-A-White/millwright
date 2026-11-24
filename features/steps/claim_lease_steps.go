@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -412,7 +411,7 @@ func (c *readyContext) aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt()
 		return fmt.Errorf("assembling the session: %w", err)
 	}
 
-	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+	if _, err := runBounded("a dispatched session's shell line runs its harness for a while, heartbeating alongside it", launchBound, spec.Command[0], spec.Command[1:]...); err != nil {
 		return fmt.Errorf("running the assembled shell line: %w", err)
 	}
 

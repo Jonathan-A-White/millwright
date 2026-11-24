@@ -98,26 +98,43 @@ func (c *nextContext) runLaunchLine(id string, killed bool) error {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		return err
 	}
-	harness := "#!/bin/sh\nprintf '%s\\n' '" + plainSuccess + "'\n"
+	// A real harness runs for a while, and the heartbeat is up beside it when
+	// it ends. The stand-in waits for the stand-in heartbeat to say so (a
+	// marker it leaves once its words are through the fifo to tee), a minute
+	// at most: a harness that ends at once can have the line's kill reach the
+	// heartbeat while it is still opening the fifo, leaving tee waiting for a
+	// writer that is gone and the line waiting for tee forever (mw-gq6.1697).
+	up := filepath.Join(bin, "heartbeat-up")
+	_ = os.Remove(up)
+	harness := "#!/bin/sh\ni=0\nuntil [ -e " + up + " ] || [ $i -ge 1200 ]; do sleep 0.05; i=$((i + 1)); done\n" +
+		"printf '%s\\n' '" + plainSuccess + "'\n"
 	if killed {
 		harness += "kill -KILL $PPID\n"
 	}
 	if err := os.WriteFile(filepath.Join(bin, claude.Program), []byte(harness), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(bin, "mw"), []byte("#!/bin/sh\necho \"mw $*: closed out by the scenario\"\n"), 0o755); err != nil {
+	stubMw := "#!/bin/sh\necho \"mw $*: closed out by the scenario\"\ncase \"$*\" in *--heartbeat*) : > " + up + " ;; esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "mw"), []byte(stubMw), 0o755); err != nil {
 		return err
 	}
 
-	cmd := exec.Command(spec.Command[0], spec.Command[1:]...)
-	cmd.Dir = spec.Dir
-	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	for name, value := range spec.Env {
-		cmd.Env = append(cmd.Env, name+"="+value)
+	step := "the session of " + id + " ends as its launch line runs it"
+	if killed {
+		step = "the session of " + id + " is killed as its launch line runs it"
 	}
-	out, err := cmd.CombinedOutput()
+	out, err := runBoundedIn(step, launchBound, func(cmd *exec.Cmd) {
+		cmd.Dir = spec.Dir
+		cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		for name, value := range spec.Env {
+			cmd.Env = append(cmd.Env, name+"="+value)
+		}
+	}, spec.Command[0], spec.Command[1:]...)
 	var exit *exec.ExitError
+	var hung boundError
 	switch {
+	case errors.As(err, &hung):
+		return err
 	case killed && errors.As(err, &exit):
 		return nil
 	case killed:

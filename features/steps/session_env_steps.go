@@ -2,9 +2,9 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -197,7 +197,7 @@ func (c *sessionEnvContext) theStoryLineRuns() error {
 		return fmt.Errorf("assembling the session: %w", err)
 	}
 	c.line = spec.Command[len(spec.Command)-1]
-	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+	if _, err := runBounded("a session's command line runs", launchBound, spec.Command[0], spec.Command[1:]...); err != nil {
 		return fmt.Errorf("running the assembled shell line: %w", err)
 	}
 	return nil
@@ -216,7 +216,11 @@ func (c *sessionEnvContext) theStoryLineRunsWithACloseOutSaying(out, errLine str
 	c.line = spec.Command[len(spec.Command)-1]
 	// The close-out fails, as a dying mw next does, so the line's own status
 	// is no verdict here: what the pane showed and what was kept are.
-	printed, _ := exec.Command(spec.Command[0], spec.Command[1:]...).CombinedOutput()
+	printed, err := runBounded("the story's line runs with a close-out that says a line on each stream", launchBound, spec.Command[0], spec.Command[1:]...)
+	var hung boundError
+	if errors.As(err, &hung) {
+		return err
+	}
 	c.pane = string(printed)
 	return nil
 }
@@ -252,7 +256,7 @@ func (c *sessionEnvContext) theSeatCommandRuns() error {
 		return fmt.Errorf("assembling the seat window: %w", err)
 	}
 	c.seat = spec.Command
-	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+	if _, err := runBounded("a session's command line runs", launchBound, spec.Command[0], spec.Command[1:]...); err != nil {
 		return fmt.Errorf("running the seat window's command: %w", err)
 	}
 	got, err := os.ReadFile(filepath.Join(c.dir, "kickoff.out"))
@@ -452,7 +456,7 @@ func (c *sessionEnvContext) aBuilderSessionRuns() error {
 		return fmt.Errorf("assembling the session: %w", err)
 	}
 	c.line = spec.Command[len(spec.Command)-1]
-	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+	if _, err := runBounded("a session's command line runs", launchBound, spec.Command[0], spec.Command[1:]...); err != nil {
 		return fmt.Errorf("running the assembled shell line: %w", err)
 	}
 	return nil
@@ -472,7 +476,7 @@ func (c *sessionEnvContext) aSeatWindowRuns() error {
 		return fmt.Errorf("assembling the seat window: %w", err)
 	}
 	c.seat = spec.Command
-	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+	if _, err := runBounded("a session's command line runs", launchBound, spec.Command[0], spec.Command[1:]...); err != nil {
 		return fmt.Errorf("running the seat window's command: %w", err)
 	}
 	return nil
