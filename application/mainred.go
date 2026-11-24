@@ -887,8 +887,8 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 			}
 			// A bug of one host's gap carries that host's story only, and a bug of
 			// main's red carries no host's.
-			if (red.Gap != nil) != strings.HasPrefix(d.Story.Title, "[bug] host gap: ") ||
-				(red.Gap != nil && !strings.HasPrefix(d.Story.Title, "[bug] host gap: "+red.Gap.Host+":")) {
+			if (red.Gap != nil) != strings.HasPrefix(d.Story.Title, HostGapCarrierPrefix) ||
+				(red.Gap != nil && !strings.HasPrefix(d.Story.Title, HostGapCarrierPrefix+red.Gap.Host+":")) {
 				continue
 			}
 			red.Bug = d.Story.ID
@@ -900,7 +900,7 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 	story := NewStory{
 		EpicID:     c.detail.EpicID,
 		Standalone: c.detail.EpicID == "",
-		Title:      red.Title("[bug] main is red: "),
+		Title:      red.Title(MainRedCarrierPrefix),
 		Description: fmt.Sprintf("%s fails on %s by itself, with no story merged in: %s.\n\nFound by mw next on %s while closing out %s, whose merged result failed the same tests; "+
 			"`%s` fails them too in a clean worktree of %s. Until it is fixed every landing of %s that runs the rig's tests meets the same failure, and the story is held on this bug (mw-gq6.645).\n",
 			red.tests(), c.target, red.tests(), n.Host, c.id, red.Command, c.target, c.path.Rig),
@@ -915,7 +915,7 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 		story = NewStory{
 			EpicID:     c.detail.EpicID,
 			Standalone: c.detail.EpicID == "",
-			Title:      red.Title(fmt.Sprintf("[bug] host gap: %s: %s fails ", gap.Host, gap.Line)),
+			Title:      red.Title(fmt.Sprintf(HostGapCarrierPrefix+"%s: %s fails ", gap.Host, gap.Line)),
 			Description: fmt.Sprintf("%s fails on %s on %s, and passes on %s (the home): this is %s's gap, not main's red.\n\nThe error line: %s\n\nFound by mw next on %s while closing out %s, whose merged result failed the same tests; "+
 				"`%s` fails them in a clean worktree of %s on %s, and %s passes them by name. The story is held on this bug until it is fixed, and then its close-out runs again (mw-gq6.1395).\n",
 				red.tests(), c.target, gap.Host, gap.Home, gap.Host, gap.Line, n.Host, c.id, red.Command, c.target, gap.Host, gap.Home),

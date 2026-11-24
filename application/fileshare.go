@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -44,6 +45,43 @@ const (
 	// NeedsFilesKey is a ready story that names no files, on a rig that expects them.
 	NeedsFilesKey
 )
+
+// The titles mw next and mw land file the bug that carries a red main under
+// (mw-gq6.645, mw-gq6.1395); carriedBy files them and IsRedMainCarrier knows them.
+const (
+	MainRedCarrierPrefix = "[bug] main is red: "
+	HostGapCarrierPrefix = "[bug] host gap: "
+)
+
+// IsRedMainCarrier says a story is the bug mw next or mw land filed for a red
+// main, or for a host's gap that fails main's tests: one predicate for mw
+// dispatch, mw status and the cloud's demand (mw-gq6.1705).
+func IsRedMainCarrier(detail StoryDetail) bool {
+	title := strings.TrimSpace(detail.Story.Title)
+	return strings.HasPrefix(title, MainRedCarrierPrefix) || strings.HasPrefix(title, HostGapCarrierPrefix)
+}
+
+// waitsOnTheCarrier says a story's landing is itself held on the bug that carries
+// main's red, so that bug must not wait for it: it is queued for its batch on
+// the same target as the carrier, which the batch holds on main's red, or it is
+// held on main's red by its own close-out (MainRedState). Each lands only after
+// the carrier does, so a carrier held for its files would be a cycle with no end
+// (lampas mw-y1k16cd and mw-fnvjof.17.263, mw-gq6.1705). A story a Builder is
+// running, or one held or refused for any other reason, is no such story.
+func waitsOnTheCarrier(carrier, other StoryDetail) bool {
+	if other.Merged().Branch != carrier.Merged().Branch {
+		return false
+	}
+	if QueuedForBatch(other) {
+		return true
+	}
+	for _, label := range other.Labels {
+		if wait, held := strings.CutPrefix(strings.TrimSpace(label), MainRedState+":"); held && wait != MainRedFixed {
+			return true
+		}
+	}
+	return false
+}
 
 // String is the share as mw dispatch and mw status say it.
 func (s FileShare) String() string {
@@ -124,6 +162,7 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 		return FileShare{}, false
 	}
 	ours := domain.FileList(path.Files)
+	carrier := IsRedMainCarrier(ready)
 	expects := f.filesExpected(ctx, path.Rig)
 	if len(ours) == 0 {
 		if !expects {
@@ -140,6 +179,11 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 		if running.Story.ID == ready.Story.ID || theirs.Rig != path.Rig || claimsNoFiles(theirs) {
 			continue
 		}
+		// A red-main carrier lands first and a story whose landing waits on it
+		// meets it at the batch (mw-gq6.1705).
+		if carrier && waitsOnTheCarrier(ready, running) {
+			continue
+		}
 		// What the story has really changed, as mw next recorded it where any host
 		// reads it, counts with its files key (mw-gq6.406).
 		if file, ok := domain.SharedFile(ours, append(domain.FileList(theirs.Files), running.FilesChanged...)); ok {
@@ -152,7 +196,7 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 			return FileShare{File: file, With: running.Story.ID}, true
 		}
 	}
-	return f.sharedWithKept(ctx, ours, path.Rig, ready.Story.ID)
+	return f.sharedWithKept(ctx, ours, ready)
 }
 
 // sharedWithKept is the first held story on the rig whose kept branch is ahead
@@ -160,10 +204,14 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 // story whose branch is not there, has been merged or has no commits beyond its
 // target has nothing to lose, and holds nothing back. A story held on another
 // host has its branch there, which this host cannot read: it holds nothing back.
-func (f *fileShares) sharedWithKept(ctx context.Context, ours []string, rig, readyID string) (FileShare, bool) {
+func (f *fileShares) sharedWithKept(ctx context.Context, ours []string, ready StoryDetail) (FileShare, bool) {
+	rig, readyID, carrier := ready.Merged().Rig, ready.Story.ID, IsRedMainCarrier(ready)
 	for _, held := range f.kept {
 		theirs := held.Merged()
 		if held.Story.ID == readyID || theirs.Rig != rig || claimsNoFiles(theirs) {
+			continue
+		}
+		if carrier && waitsOnTheCarrier(ready, held) {
 			continue
 		}
 		branch := f.branchChanged(ctx, held)

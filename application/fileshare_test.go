@@ -142,3 +142,98 @@ func TestAHeldStoryWithItsBranchNotAheadHoldsNothingBack(t *testing.T) {
 		t.Fatalf("a held story with nothing on its branch holds back a story: %+v", got)
 	}
 }
+
+// The deadlock of lampas, 2026-11-24 (mw-gq6.1705): the red-main carrier mw-y1k16cd
+// was held on a file a story queued for landing names, and that story's landing
+// was held on the carrier.
+func redMainCarrier(id, files string) StoryDetail {
+	carrier := openStory(id, "bugfix", files)
+	carrier.Story.Title = "[bug] main is red: appearance.spec.ts:207"
+	carrier.Labels = []string{LabelBug}
+	return carrier
+}
+
+func queuedStory(id, files string) StoryDetail {
+	queued := openStory(id, "feature", files)
+	queued.Status = "in_progress"
+	queued.Labels = []string{RunState + ":" + RunQueued}
+	return queued
+}
+
+func TestAReadyRedMainCarrierIsNotHeldOnAFileAQueuedStoryNames(t *testing.T) {
+	shares := &fileShares{rules: filesRules()}
+	shares.add(queuedStory("mw-t.1", "tests/e2e/appearance.spec.ts"))
+	if got, waits := shares.shared(context.Background(), redMainCarrier("mw-t.2", "tests/e2e/appearance.spec.ts")); waits {
+		t.Fatalf("the carrier waits for a story queued on the carrier itself: %+v", got)
+	}
+	// A story queued on another host is read the same.
+	away := &fileShares{rules: filesRules()}
+	away.addAway(queuedStory("mw-t.1", "tests/e2e/appearance.spec.ts"), "desktop")
+	if got, waits := away.shared(context.Background(), redMainCarrier("mw-t.2", "tests/e2e/appearance.spec.ts")); waits {
+		t.Fatalf("the carrier waits for a story queued on desktop: %+v", got)
+	}
+}
+
+func TestAReadyRedMainCarrierStillWaitsForAStoryABuilderIsRunning(t *testing.T) {
+	shares := &fileShares{rules: filesRules()}
+	running := openStory("mw-t.1", "feature", "tests/e2e/appearance.spec.ts")
+	running.Status = "in_progress"
+	shares.add(running)
+	got, waits := shares.shared(context.Background(), redMainCarrier("mw-t.2", "tests/e2e/appearance.spec.ts"))
+	if !waits || got.With != "mw-t.1" || got.File != "tests/e2e/appearance.spec.ts" {
+		t.Fatalf("expected the carrier to wait for the running mw-t.1, got %+v, %v", got, waits)
+	}
+}
+
+func TestAReadyStoryThatIsNoCarrierIsStillHeldOnAFileAQueuedStoryNames(t *testing.T) {
+	shares := &fileShares{rules: filesRules()}
+	shares.add(queuedStory("mw-t.1", "tests/e2e/appearance.spec.ts"))
+	got, waits := shares.shared(context.Background(), openStory("mw-t.2", "feature", "tests/e2e/appearance.spec.ts"))
+	if !waits || got.With != "mw-t.1" {
+		t.Fatalf("expected an ordinary story to wait for the queued mw-t.1, got %+v, %v", got, waits)
+	}
+}
+
+func TestACarrierIsNotHeldOnAStoryHeldOnItsRedOrOnAnotherTarget(t *testing.T) {
+	onRed := openStory("mw-t.1", "feature", "a.go")
+	onRed.Status = "in_progress"
+	onRed.Labels = []string{RunState + ":" + RunCloseOutAgain, MainRedState + ":mw-t.2"}
+	shares := &fileShares{rules: filesRules()}
+	shares.add(onRed)
+	if got, waits := shares.shared(context.Background(), redMainCarrier("mw-t.2", "a.go")); waits {
+		t.Fatalf("the carrier waits for the story held on it: %+v", got)
+	}
+	// A queued story landing on another branch does not wait on this carrier.
+	other := queuedStory("mw-t.3", "a.go")
+	other.Defaults.Branch = "release"
+	shares = &fileShares{rules: filesRules()}
+	shares.add(other)
+	if _, waits := shares.shared(context.Background(), redMainCarrier("mw-t.4", "a.go")); !waits {
+		t.Fatal("the carrier does not wait for a story queued for another branch")
+	}
+}
+
+func TestACarrierIsRecognisedByTheTitleMwNextAndMwLandFileItUnder(t *testing.T) {
+	for title, want := range map[string]bool{
+		"[bug] main is red: TestA, TestB":                true,
+		"[bug] host gap: cloud2: go fails TestA":         true,
+		"[bug] mw dispatch holds a carrier on files":     false,
+		"main is red: TestA":                             false,
+		"[feature] show that main is red: on the screen": false,
+	} {
+		story := openStory("mw-t.1", "bugfix", "a.go")
+		story.Story.Title = title
+		if got := IsRedMainCarrier(story); got != want {
+			t.Errorf("IsRedMainCarrier(%q) = %v, want %v", title, got, want)
+		}
+	}
+}
+
+func TestAReadyCarrierIsNotHeldOrFoldedForAFileAQueuedStoryNamesInTheCloudDemand(t *testing.T) {
+	ready := []StoryDetail{redMainCarrier("mw-t.2", "a.go")}
+	ready[0].Defaults.Host = "auto"
+	waiting, held, folded := readyDemand(context.Background(), []StoryDetail{queuedStory("mw-t.1", "a.go")}, ready)
+	if waiting != 1 || held != 0 || folded != 0 {
+		t.Fatalf("expected the carrier to wait for a box, got waiting %d, held %d, folded %d", waiting, held, folded)
+	}
+}
