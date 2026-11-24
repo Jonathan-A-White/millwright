@@ -382,6 +382,83 @@ func TestABoxWithARunningSessionBesideAQueuedClaimStaysBusy(t *testing.T) {
 	}
 }
 
+// A box that holds a rig's live batch claim is landing that rig's batch (and
+// its fixer, whose session is no story's): it runs no story session, yet it is
+// not idle, and it is not destroyed under the landing (mw-gq6.1701).
+func TestABoxHoldingARigsLiveBatchClaimIsNotIdleAndIsNotDestroyedUnderTheLanding(t *testing.T) {
+	now := time.Date(2026, 11, 24, 4, 50, 0, 0, time.UTC)
+	tracker := queuedOnBox(t)
+	for _, id := range []string{"mw-q.2", "mw-q.3"} {
+		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim := func(expires time.Time) {
+		t.Helper()
+		lease := application.CrossSlotLease{Holder: "batch-land@cloud1", Host: "cloud1", Token: "tok", Taken: now, Expires: expires}
+		if err := tracker.SetNote(context.Background(), application.BatchClaimKey("millwright"), lease.Note()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-3 * time.Hour), IdleSince: now.Add(-time.Hour)}}}}
+	check := func(at time.Time) {
+		t.Helper()
+		_, err := application.CloudCheck{
+			Work: tracker, Stories: tracker, Notes: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+			Plan: cloudPlan, Now: func() time.Time { return at },
+		}.Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim(now.Add(application.BatchClaimTTL))
+	check(now)
+	if len(book.State.Boxes) != 1 || !book.State.Boxes[0].IdleSince.IsZero() {
+		t.Fatalf("expected cloud1 busy and up while its batch claim is live, got %+v", book.State.Boxes)
+	}
+	check(now.Add(cloudPlan.Idle))
+	if len(book.State.Boxes) != 1 {
+		t.Fatalf("expected cloud1 up %s later while it holds a renewed claim, got %+v", cloudPlan.Idle, book.State.Boxes)
+	}
+	// A claim that ran out is a landing whose host went away: the box is idle again.
+	later := now.Add(cloudPlan.Idle)
+	claim(later.Add(-time.Minute))
+	check(later)
+	if len(book.State.Boxes) != 1 || book.State.Boxes[0].IdleSince.IsZero() {
+		t.Fatalf("expected cloud1 idle once its claim ran out, got %+v", book.State.Boxes)
+	}
+	check(later.Add(cloudPlan.Idle))
+	if len(book.State.Boxes) != 0 {
+		t.Errorf("expected cloud1 destroyed after %s idle, got %+v", cloudPlan.Idle, book.State.Boxes)
+	}
+}
+
+// A batch claim another host holds does not keep this box up.
+func TestABatchClaimHeldByAnotherHostDoesNotKeepABoxUp(t *testing.T) {
+	now := time.Date(2026, 11, 24, 4, 50, 0, 0, time.UTC)
+	tracker := queuedOnBox(t)
+	for _, id := range []string{"mw-q.2", "mw-q.3"} {
+		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lease := application.CrossSlotLease{Holder: "batch-land@desktop", Host: "desktop", Token: "tok", Taken: now, Expires: now.Add(application.BatchClaimTTL)}
+	if err := tracker.SetNote(context.Background(), application.BatchClaimKey("millwright"), lease.Note()); err != nil {
+		t.Fatal(err)
+	}
+	book := &apptest.FakeCloudBook{State: application.CloudState{Month: "2026-11", Boxes: []application.CloudBox{{Name: "cloud1", Up: now.Add(-3 * time.Hour), IdleSince: now.Add(-time.Hour)}}}}
+	_, err := application.CloudCheck{
+		Work: tracker, Stories: tracker, Notes: tracker, Provider: &apptest.FakeCloud{}, Book: book, Host: "desktop",
+		Plan: cloudPlan, Now: func() time.Time { return now },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(book.State.Boxes) != 0 {
+		t.Errorf("expected cloud1 destroyed, idle past %s with no claim of its own, got %+v", cloudPlan.Idle, book.State.Boxes)
+	}
+}
+
 // checkHandedBack asserts what destroying cloud1 did to the stories of
 // queuedOnBox, and that the text says so: every claim the box held is given
 // back (mw-gq6.1127), whatever became of its session, and re-pathed to

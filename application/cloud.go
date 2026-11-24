@@ -710,7 +710,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.checkBoxes(ctx)
 	p.seeDispatch(ctx)
 	p.dropUndispatched(ctx, work)
-	p.markIdle(work)
+	p.markIdle(ctx, work)
 	p.setCaps(ctx)
 	p.setPaces(ctx)
 	p.setSessionDenies(ctx)
@@ -1375,13 +1375,14 @@ func claimedOnBox(work WorkInHand, box string) bool {
 	return false
 }
 
-func (p *cloudPass) markIdle(work WorkInHand) {
+func (p *cloudPass) markIdle(ctx context.Context, work WorkInHand) {
+	landing := p.landingOn(ctx, work)
 	for i := range p.state.Boxes {
 		box := &p.state.Boxes[i]
 		if box.Making || box.Restoring {
 			continue
 		}
-		busy := sessions(work, box.Name, p.now) > 0
+		busy := sessions(work, box.Name, p.now) > 0 || landing[box.Name]
 		switch {
 		case busy && !box.IdleSince.IsZero():
 			box.IdleSince = time.Time{}
