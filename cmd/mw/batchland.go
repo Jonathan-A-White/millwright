@@ -57,6 +57,19 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 		// The batch lines: a batch held red together lands in parts next
 		// (mw-gq6.1246, mw-6ww.119.11.1.2).
 		History: mwVault(dir, host),
+		// A rig whose last batch was held on main's own red is not landed again
+		// until main's head on the origin moves (mw-gq6.1704).
+		MainHead: func(ctx context.Context, rig, branch string) (string, error) {
+			current, err := config.Rigs()
+			if err != nil {
+				return "", err
+			}
+			rigDir, ok := current[rig]
+			if !ok {
+				return "", fmt.Errorf("%s is not a rig of this host", rig)
+			}
+			return originHead(ctx, rigDir, branch)
+		},
 		// A due batch the home would wait for (its load at its cores, or its gate
 		// lock held by another rig's gate) is landed on another host with room, over
 		// ssh (mw-gq6.1616).

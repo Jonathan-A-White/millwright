@@ -276,6 +276,10 @@ type BatchReport struct {
 	// Fixer is the one fixer the batch was given (Land Rush 5), nil when it
 	// was given none.
 	Fixer *BatchFixing
+	// HeldOnMainRed says the batch was held because main's own red failed its
+	// tests too (the bug that carries it named in Held): the batch's line then
+	// holds Base as main's head (mw-gq6.1704).
+	HeldOnMainRed bool
 	// failingOwner is the one story of the batch whose branch alone changed
 	// the files of the tests that failed (findFailingOwner); empty when none.
 	failingOwner string
@@ -738,6 +742,7 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		bc, red := b.mainAlone(ctx, rigDir, report, nr, gate.Checked)
 		if red != nil {
 			if n.holdBatchOnMainRed(ctx, bc, nr, red) {
+				report.HeldOnMainRed = true
 				report.Held = fmt.Sprintf("main is red: %s, carried by %s; no fixer was started and the stories stay queued", red.tests(), red.Bug)
 				if red.Gap != nil {
 					report.Held = fmt.Sprintf("host gap: %s: %s; %s passes %s by name; carried by %s; no fixer was started and the stories stay queued", red.Gap.Host, red.Gap.Line, red.Gap.Home, red.tests(), red.Bug)
@@ -1727,6 +1732,10 @@ type BatchLandings struct {
 	// batch: one held red with more than one story is landed again in parts,
 	// at once (mw-gq6.1246, mw-6ww.119.11.1.2). Nil reads none.
 	History BatchHistory
+	// MainHead reads the head of branch on the origin of rig, for a rig whose
+	// last batch was held on main's own red: it is not landed again until the
+	// head moves (mw-gq6.1704). Nil, or a read that fails, holds nothing back.
+	MainHead func(ctx context.Context, rig, branch string) (string, error)
 	// Elsewhere, Load and GateHolder are how a due batch is landed on another host
 	// when the home is busy (mw-gq6.1616): Load is the home's own, GateHolder says
 	// whose gate holds its gate lock, "" for nobody, and Elsewhere is the host
@@ -1938,6 +1947,12 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 		}
 		settings := rules.LandingSettings()
 		q := queues[name]
+		// A rig whose last batch was held on main's own red is not gated again
+		// while main's head is where that batch held: every landing, whole or in
+		// parts, meets the same red (batches 674 and 675 of lampas, mw-gq6.1704).
+		if b.waitsOnMain(ctx, name, rigBatches(batches, name)) {
+			continue
+		}
 		// A batch held red with more than one story in it is landed again in
 		// parts, at once the first time: one story's red held the rest, and the
 		// next batch would take them all again with it (batch 524 of lampas,
@@ -1973,6 +1988,22 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 		}
 	}
 	return due, errors.Join(errs...)
+}
+
+// waitsOnMain says the rig's last batch was held on main's own red and main's
+// head on the origin is still the one it was held at. A head that cannot be read
+// waits for nothing: the rig is landed as before.
+func (b *BatchLandings) waitsOnMain(ctx context.Context, rig string, lines []BatchMetric) bool {
+	held, ok := HeldOnMainRed(lines)
+	if !ok || b.MainHead == nil {
+		return false
+	}
+	branch := held.MainBranch
+	if branch == "" {
+		return false
+	}
+	head, err := b.MainHead(ctx, rig, branch)
+	return err == nil && head != "" && head == held.MainHead
 }
 
 // requirements reads a rig's file as a landing does: a key this mw does not
@@ -2221,6 +2252,11 @@ func (b *BatchLandings) landHeld(ctx context.Context, d batchDue) error {
 				return err
 			}
 			errs = append(errs, err)
+			// A part held on main's own red says the rest would meet it too:
+			// they stay queued until main's head moves (mw-gq6.1704).
+			if _, onMain := HeldOnMainRed(rigBatches(readBatches(ctx, b.History), d.rig)); onMain {
+				break
+			}
 		}
 	}
 	return errors.Join(errs...)

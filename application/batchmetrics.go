@@ -69,6 +69,14 @@ type BatchMetric struct {
 	// HandedBack are the stories a batch of one handed back to a Builder for
 	// being red alone again: their count of holds starts again (mw-gq6.1637).
 	HandedBack []string `json:"handed_back,omitempty"`
+	// MainRed says the batch was held because main itself is red, the failing
+	// tests failing on main alone, carried by a bug: no story is at fault, so
+	// its stories are not landed again in parts, and the rig is not landed again
+	// while main's head, MainHead on MainBranch, is where this batch held
+	// (mw-gq6.1704). A line written before the field reads as not main-red.
+	MainRed    bool   `json:"main_red,omitempty"`
+	MainHead   string `json:"main_head,omitempty"`
+	MainBranch string `json:"main_branch,omitempty"`
 }
 
 // Metric is the line the batch leaves, as of at.
@@ -87,6 +95,9 @@ func (r BatchReport) Metric(at time.Time) BatchMetric {
 	m.HandedBack = storyIDs(r.RedAloneBack)
 	if m.heldRed() && len(m.IDs) > 1 {
 		m.Suspect = r.suspect()
+	}
+	if r.HeldOnMainRed && !r.Landed {
+		m.MainRed, m.MainHead, m.MainBranch = true, r.Base, r.Target
 	}
 	if r.Tested {
 		m.GateRuns = max(r.GateRuns, 1)
@@ -170,8 +181,25 @@ func rigBatches(lines []BatchMetric, rig string) []BatchMetric {
 }
 
 // heldRed says the batch was held after its tests ran red on it: the stories',
-// not the host's, which holds a batch it never tested.
-func (m BatchMetric) heldRed() bool { return m.Outcome == BatchHeld && m.Red }
+// not the host's, which holds a batch it never tested, and not main's own red,
+// which no story made (mw-gq6.1704).
+func (m BatchMetric) heldRed() bool { return m.Outcome == BatchHeld && m.Red && !m.MainRed }
+
+// heldOnMainRed says the batch was held because main itself is red, the head it
+// was held at being MainHead.
+func (m BatchMetric) heldOnMainRed() bool {
+	return m.Outcome == BatchHeld && m.MainRed && m.MainHead != ""
+}
+
+// HeldOnMainRed is the rig's last batch, when it was held on main's own red: the
+// rig is not landed again until main's head is no longer the batch's MainHead
+// (mw-gq6.1704). A batch since, landed or held otherwise, ends the wait.
+func HeldOnMainRed(lines []BatchMetric) (BatchMetric, bool) {
+	if len(lines) == 0 || !lines[len(lines)-1].heldOnMainRed() {
+		return BatchMetric{}, false
+	}
+	return lines[len(lines)-1], true
+}
 
 // HeldRedTogether is the rig's last batch held red with more than one story in
 // it, reached from the end of lines past the batches of one story that were
@@ -184,6 +212,11 @@ func HeldRedTogether(lines []BatchMetric) (BatchMetric, bool) {
 	var heldAlone []string
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := lines[i]
+		// Main's own red holds every part alike: no story is at fault, so there
+		// is nothing to split (mw-gq6.1704).
+		if line.Outcome == BatchHeld && line.MainRed {
+			return BatchMetric{}, false
+		}
 		if len(line.IDs) == 1 {
 			if line.heldRed() {
 				heldAlone = append(heldAlone, line.IDs[0])
