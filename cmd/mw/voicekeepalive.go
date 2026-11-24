@@ -111,6 +111,11 @@ func voiceKeepAlive(host, envPath string, out io.Writer, dryRun bool) (*applicat
 	if dryRun {
 		return keep, nil
 	}
+	day, hour, err := config.VoiceKeepAliveWhen()
+	if err != nil {
+		return nil, err
+	}
+	keep.When = &application.VoiceKeepAliveWhen{Day: day, Hour: hour}
 	dir, err := config.Vault()
 	if err != nil {
 		return nil, err
@@ -142,13 +147,16 @@ func newVoiceKeepAliveCmd() *cobra.Command {
 		Short: "Text 'Testing' from the church's Google Voice number, as the monthly job does",
 		Long: "voice-keepalive sends this month's text from the church's Google Voice number: one email from\n" +
 			application.VoiceKeepAliveAccount + " over Gmail SMTP to the number's Voice text address, which Google\n" +
-			"sends as an SMS. The follower runs it every few hours on the home, and it sends once a month. The app\n" +
-			"password and the text address are read from the mode-600 file ~/" + application.VoiceKeepAliveEnvFile + "\n" +
+			"sends as an SMS. It sends once a month, at 9 pm Eastern (America/New_York) on the 1st, or at the first\n" +
+			"check after that if the home was off then; the follower checks every hour on the home. The day and the\n" +
+			"hour are the [voice_keepalive] keys day (1 to 28, default 1) and hour (0 to 23, default 21) of\n" +
+			"~/.config/mw/config.toml: mw config set voice_keepalive.day 15 and mw config set voice_keepalive.hour 20.\n" +
+			"The app password and the text address are read from the mode-600 file ~/" + application.VoiceKeepAliveEnvFile + "\n" +
 			"(CHURCH_VOICE_APP_PASSWORD, CHURCH_VOICE_TEXT_ADDRESS), or --env <file>. The file turns the job on:\n" +
 			"with no file the job is off ('off: no church-voice.env'), nothing is sent and nothing is posted. With a\n" +
 			"file that holds no password or address, or a send that fails, the Governor gets one alarm a month.\n\n" +
 			"  mw voice-keepalive --dry-run     print the email, send and post nothing, on any host\n" +
-			"  mw voice-keepalive               send now if this month's text is not sent (the home only)",
+			"  mw voice-keepalive               send now if this month's text is due and not sent (the home only)",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			host, err := config.Host()

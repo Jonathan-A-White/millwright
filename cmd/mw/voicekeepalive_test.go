@@ -70,3 +70,12 @@ func TestVoiceKeepAliveHelpSaysTheFileTurnsItOn(t *testing.T) {
 		t.Errorf("the help does not say the file turns the job on:\n%s", newVoiceKeepAliveCmd().Long)
 	}
 }
+
+func TestVoiceKeepAliveHelpSaysWhenItSendsAndHowToChangeIt(t *testing.T) {
+	long := newVoiceKeepAliveCmd().Long
+	for _, want := range []string{"9 pm Eastern", "on the 1st", "[voice_keepalive]", "mw config set voice_keepalive.day", "mw config set voice_keepalive.hour"} {
+		if !strings.Contains(long, want) {
+			t.Errorf("the help lacks %q:\n%s", want, long)
+		}
+	}
+}

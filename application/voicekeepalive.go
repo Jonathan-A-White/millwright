@@ -20,9 +20,29 @@ import (
 const VoiceKeepAliveJobName = "voice-keepalive"
 
 // VoiceKeepAliveEvery is how often the job looks at whether this month's text
-// is sent: often enough that a file put in place, or a failed send, is tried
-// again within hours, rarely enough not to hammer Gmail.
-const VoiceKeepAliveEvery = 6 * time.Hour
+// is due: hourly, so a home that is up sends within the hour of the day it is set
+// to (9 pm Eastern by default), and a file put in place, or a failed send, is
+// tried again within the hour. A check that finds nothing due or the month done
+// is a skipped pass and costs no call to Gmail.
+const VoiceKeepAliveEvery = time.Hour
+
+// VoiceKeepAliveZone is the zone the month, the day and the hour of the text are
+// counted in: the Governor's.
+const VoiceKeepAliveZone = "America/New_York"
+
+// VoiceKeepAliveDefaultDay and VoiceKeepAliveDefaultHour are when the month's text
+// is sent from when the [voice_keepalive] table says nothing: the 1st, 21:00.
+// config.DefaultVoiceKeepAliveDay and DefaultVoiceKeepAliveHour are the same.
+const (
+	VoiceKeepAliveDefaultDay  = 1
+	VoiceKeepAliveDefaultHour = 21
+)
+
+// VoiceKeepAliveWhen is the day of the month and the hour (0 to 23, in
+// VoiceKeepAliveZone) from which the month's text is sent.
+type VoiceKeepAliveWhen struct {
+	Day, Hour int
+}
 
 // VoiceKeepAliveAccount is the Gmail account the Voice number belongs to.
 const VoiceKeepAliveAccount = "whiteplainsnac@gmail.com"
@@ -122,18 +142,34 @@ type VoiceKeepAlive struct {
 	Send func(ctx context.Context, cfg VoiceKeepAliveConfig, mail VoiceMail) error
 	// Home says whether this host is the home: only the home sends.
 	Home func(ctx context.Context) (bool, error)
+	// When is the day and hour the month's text is due from; nil is the 1st at
+	// 21:00 America/New_York.
+	When *VoiceKeepAliveWhen
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 	// Out is where the dry run's mail and what was done are printed.
 	Out io.Writer
 }
 
-func (k *VoiceKeepAlive) month() string {
-	if k.Now != nil {
-		return k.Now().UTC().Format("2006-01")
+// when is the moment this month's text is due from, and the month it is of, both
+// counted in VoiceKeepAliveZone, with the moment now is.
+func (k *VoiceKeepAlive) when() (month string, due, now time.Time, err error) {
+	zone, err := time.LoadLocation(VoiceKeepAliveZone)
+	if err != nil {
+		return "", time.Time{}, time.Time{}, fmt.Errorf("loading the zone %s: %w", VoiceKeepAliveZone, err)
 	}
-	//mw:realclock the default clock, when no Now is injected: the host's time
-	return time.Now().UTC().Format("2006-01")
+	if k.Now != nil {
+		now = k.Now().In(zone)
+	} else {
+		//mw:realclock the default clock, when no Now is injected: the host's time
+		now = time.Now().In(zone)
+	}
+	day, hour := VoiceKeepAliveDefaultDay, VoiceKeepAliveDefaultHour
+	if k.When != nil {
+		day, hour = k.When.Day, k.When.Hour
+	}
+	due = time.Date(now.Year(), now.Month(), day, hour, 0, 0, 0, zone)
+	return now.Format("2006-01"), due, now, nil
 }
 
 func (k *VoiceKeepAlive) say(format string, args ...any) {
@@ -157,7 +193,10 @@ func VoiceKeepAliveJob(run func(context.Context) error) SpringJob {
 // nothing, on any host. A month whose text is already sent, or a host that is
 // not the home, is a skipped pass.
 func (k *VoiceKeepAlive) Run(ctx context.Context, dryRun bool) error {
-	month := k.month()
+	month, due, now, err := k.when()
+	if err != nil {
+		return err
+	}
 	if !dryRun {
 		if at, err := k.Home(ctx); err != nil {
 			return err
@@ -170,6 +209,9 @@ func (k *VoiceKeepAlive) Run(ctx context.Context, dryRun bool) error {
 		}
 		if sent != "" {
 			return SkippedPass("the Voice text of " + month + " is sent")
+		}
+		if now.Before(due) {
+			return SkippedPass("the Voice text of " + month + " is not due until " + due.Format("2006-01-02 15:04 MST"))
 		}
 	}
 	cfg, err := k.Creds(ctx)
@@ -196,7 +238,7 @@ func (k *VoiceKeepAlive) Run(ctx context.Context, dryRun bool) error {
 	}
 	if err := k.Send(ctx, cfg, mail); err != nil {
 		what := strings.ReplaceAll(err.Error(), cfg.AppPassword, "[app password]")
-		return k.fail(ctx, false, month, "send", errors.New(what), "Church Voice number keep-alive: the monthly 'Testing' text did not send: "+what+". It is tried again within hours.")
+		return k.fail(ctx, false, month, "send", errors.New(what), "Church Voice number keep-alive: the monthly 'Testing' text did not send: "+what+". It is tried again within the hour.")
 	}
 	// Noted after the send, so a note that fails is a second text, not a missed one.
 	if err := k.Notes.SetNote(ctx, VoiceKeepAliveSentKey(month), k.stamp()); err != nil {

@@ -86,7 +86,7 @@ func TestVoiceKeepAliveSendsTestingOnceAMonth(t *testing.T) {
 	if !errors.As(err, &skipped) || len(v.mails) != 1 {
 		t.Fatalf("a second run in the month should skip: %v, %d mails", err, len(v.mails))
 	}
-	v.now = time.Date(2026, time.December, 1, 9, 0, 0, 0, time.UTC)
+	v.now = time.Date(2026, time.December, 2, 9, 0, 0, 0, time.UTC)
 	if err := v.keep.Run(ctx, false); err != nil || len(v.mails) != 2 {
 		t.Fatalf("the next month sends again: %v, %d mails", err, len(v.mails))
 	}
@@ -203,9 +203,94 @@ func TestVoiceKeepAliveEnvIsReadFromKeyValueLines(t *testing.T) {
 	}
 }
 
-func TestVoiceKeepAliveJobRunsEveryFewHoursOnTheFollowersClock(t *testing.T) {
+func TestVoiceKeepAliveJobChecksHourlyOnTheFollowersClock(t *testing.T) {
 	job := application.VoiceKeepAliveJob(func(context.Context) error { return nil })
-	if job.Name != "voice-keepalive" || job.Every <= 0 || job.Every > 24*time.Hour {
-		t.Errorf("job %+v", job)
+	if job.Name != "voice-keepalive" || job.Every <= 0 || job.Every > time.Hour {
+		t.Errorf("job %+v: it must check at least hourly so a send lands in the hour of the day", job)
+	}
+}
+
+func eastern(t *testing.T, year int, month time.Month, day, hour, min int) time.Time {
+	t.Helper()
+	zone, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return time.Date(year, month, day, hour, min, 0, 0, zone)
+}
+
+func TestVoiceKeepAliveSendsAtNineInTheEveningEasternOnTheFirst(t *testing.T) {
+	ctx := context.Background()
+	v := newVoiceKeep()
+	v.now = eastern(t, 2026, time.December, 1, 20, 59)
+	var skipped *application.SkippedPassError
+	if err := v.keep.Run(ctx, false); !errors.As(err, &skipped) || len(v.mails) != 0 {
+		t.Fatalf("20:59 ET on the 1st: want a skipped pass and no mail, got %v, %d mails", err, len(v.mails))
+	}
+	v.now = eastern(t, 2026, time.December, 1, 21, 5)
+	if err := v.keep.Run(ctx, false); err != nil || len(v.mails) != 1 {
+		t.Fatalf("21:05 ET on the 1st: want one mail, got %v, %d mails", err, len(v.mails))
+	}
+	v.now = eastern(t, 2026, time.December, 1, 22, 5)
+	if err := v.keep.Run(ctx, false); !errors.As(err, &skipped) || len(v.mails) != 1 {
+		t.Fatalf("22:05 ET: want a skipped pass and still one mail, got %v, %d mails", err, len(v.mails))
+	}
+}
+
+func TestVoiceKeepAliveOfAHomeThatWasOffSendsAtTheFirstCheckAfter(t *testing.T) {
+	v := newVoiceKeep()
+	v.now = eastern(t, 2026, time.December, 2, 8, 0)
+	if err := v.keep.Run(context.Background(), false); err != nil || len(v.mails) != 1 {
+		t.Fatalf("08:00 ET on the 2nd with December unsent: want one mail, got %v, %d mails", err, len(v.mails))
+	}
+}
+
+func TestVoiceKeepAliveCountsTheMonthInEasternNotUTC(t *testing.T) {
+	v := newVoiceKeep()
+	// 23:30 ET on 30 November is 04:30Z on 1 December: still November in New York.
+	v.now = eastern(t, 2026, time.November, 30, 23, 30)
+	if v.now.UTC().Month() != time.December {
+		t.Fatalf("the test's instant is not December in UTC: %s", v.now.UTC())
+	}
+	// November's text went by hand: its note reads as sent.
+	if err := v.notes.SetNote(context.Background(), application.VoiceKeepAliveSentKey("2026-11"), "by hand"); err != nil {
+		t.Fatal(err)
+	}
+	var skipped *application.SkippedPassError
+	if err := v.keep.Run(context.Background(), false); !errors.As(err, &skipped) || len(v.mails) != 0 {
+		t.Fatalf("23:30 ET on 30 November: want a skipped pass and no mail, got %v, %d mails", err, len(v.mails))
+	}
+}
+
+func TestVoiceKeepAliveSendsAfterNineInTheEveningInSummerTimeToo(t *testing.T) {
+	v := newVoiceKeep()
+	v.now = eastern(t, 2027, time.April, 1, 20, 59)
+	var skipped *application.SkippedPassError
+	if err := v.keep.Run(context.Background(), false); !errors.As(err, &skipped) || len(v.mails) != 0 {
+		t.Fatalf("20:59 EDT on 1 April: want no mail, got %v, %d mails", err, len(v.mails))
+	}
+	v.now = eastern(t, 2027, time.April, 1, 21, 5)
+	if err := v.keep.Run(context.Background(), false); err != nil || len(v.mails) != 1 {
+		t.Fatalf("21:05 EDT on 1 April: want one mail, got %v, %d mails", err, len(v.mails))
+	}
+}
+
+func TestVoiceKeepAliveDayAndHourAreSettable(t *testing.T) {
+	v := newVoiceKeep()
+	v.keep.When = &application.VoiceKeepAliveWhen{Day: 15, Hour: 20}
+	var skipped *application.SkippedPassError
+	v.now = eastern(t, 2026, time.December, 15, 19, 59)
+	if err := v.keep.Run(context.Background(), false); !errors.As(err, &skipped) || len(v.mails) != 0 {
+		t.Fatalf("19:59 ET on the 15th: want no mail, got %v, %d mails", err, len(v.mails))
+	}
+	v.now = eastern(t, 2026, time.December, 15, 20, 5)
+	if err := v.keep.Run(context.Background(), false); err != nil || len(v.mails) != 1 {
+		t.Fatalf("20:05 ET on the 15th: want one mail, got %v, %d mails", err, len(v.mails))
+	}
+}
+
+func TestVoiceKeepAliveDefaultsAreTheFirstAtNine(t *testing.T) {
+	if application.VoiceKeepAliveDefaultDay != 1 || application.VoiceKeepAliveDefaultHour != 21 {
+		t.Errorf("defaults are day %d hour %d", application.VoiceKeepAliveDefaultDay, application.VoiceKeepAliveDefaultHour)
 	}
 }
