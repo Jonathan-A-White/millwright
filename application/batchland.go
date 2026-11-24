@@ -558,6 +558,7 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport, 
 	SortOldestQueued(queue)
 	queue = b.narrow(queue, report)
 	queue = b.leaveOutHeldAlone(ctx, rig, queue, report)
+	queue = b.leaveCarrierFirst(ctx, rig, queue, report)
 	if len(queue) == 0 {
 		return nil, nil
 	}
@@ -1832,9 +1833,15 @@ type batchDue struct {
 	// adopted is a landing begun before this follower, waited for and not begun
 	// again, there or elsewhere.
 	adopted bool
+	// carrier is the open bug that carries the rig's main-red hold, landed alone
+	// while main's head is unchanged (mw-gq6.1708); "" for any other landing.
+	carrier string
 }
 
 func (d batchDue) String() string {
+	if d.carrier != "" {
+		return fmt.Sprintf("%s (%s carries main's red, landed alone)", d.rig, d.carrier)
+	}
 	if d.heldRed > 0 {
 		return fmt.Sprintf("%s (%d queued, batch %d held red, landed in parts)", d.rig, d.queued, d.heldRed)
 	}
@@ -1962,7 +1969,10 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 		// A rig whose last batch was held on main's own red is not gated again
 		// while main's head is where that batch held: every landing, whole or in
 		// parts, meets the same red (batches 674 and 675 of lampas, mw-gq6.1704).
-		if b.waitsOnMain(ctx, name, rigBatches(batches, name)) {
+		// The carrier of that red, queued, is the one landing that does not wait:
+		// its landing moves the head (mw-gq6.1708).
+		carrier, waits := b.redCarrierDue(ctx, name, rigBatches(batches, name), q)
+		if waits {
 			continue
 		}
 		// A batch held red with more than one story in it is landed again in
@@ -1987,6 +1997,10 @@ func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
 			} else if now.Sub(found.at) < settings.BatchEvery {
 				continue
 			}
+		}
+		if carrier != "" {
+			due = append(due, batchDue{rig: name, queued: 1, queue: q, carrier: carrier})
+			continue
 		}
 		if alone > 0 {
 			due = append(due, batchDue{rig: name, each: true, queued: alone, queue: q, heldRed: together.Batch,
@@ -2167,6 +2181,9 @@ func (b *BatchLandings) pending(ctx context.Context, due []batchDue) ([]batchDue
 // leaves the queue as long as it was stops the drain, so that it cannot go on
 // for ever.
 func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
+	if d.carrier != "" {
+		return b.landCarrier(ctx, d)
+	}
 	if !d.each {
 		return b.landWhole(ctx, d)
 	}

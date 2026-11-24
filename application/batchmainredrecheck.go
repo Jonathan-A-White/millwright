@@ -22,14 +22,21 @@ func (r *BatchReport) keepMainRed(red *MainRed) {
 // head, with no gate run: a gate costs half an hour, and the red was not touched
 // by the move (batch 677 of lampas, mw-gq6.1706). When they pass, or fail other
 // than as before, or cannot be run, or the carrier is closed (its fix is the
-// move), or the hold kept no tests, the batch goes on to its gate as before. It
-// says whether the batch was held.
+// move), or the hold kept no tests, or the batch holds the carrier itself (its
+// own gate proves its fix, mw-gq6.1708), the batch goes on to its gate as
+// before. It says whether the batch was held.
 func (b BatchLand) mainStillRed(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport) bool {
 	if b.Metrics == nil || b.Next.Tracker == nil {
 		return false
 	}
 	held, ok := HeldOnMainRed(rigBatches(readBatches(ctx, b.Metrics), report.Rig))
 	if !ok || len(held.MainTests) == 0 || held.MainBug == "" || held.MainBranch != report.Target {
+		return false
+	}
+	// A batch that holds the carrier is the one landing the red does not hold: its
+	// own gate proves the fix, and its landing is what moves main (mw-gq6.1708).
+	if _, ok := held.redCarrierIn(storyIDs(report.Queue)); ok {
+		nr.Notes = append(nr.Notes, fmt.Sprintf("%s, which carries %s's red, is in this batch: it is gated without a check of the red first", held.MainBug, report.Target))
 		return false
 	}
 	n := b.Next
