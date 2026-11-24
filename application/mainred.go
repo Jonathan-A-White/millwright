@@ -512,7 +512,18 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		return nil
 	}
 	tests := TestNamesOf(failed.Output)
-	if len(tests) == 0 {
+	return n.mainAloneNamed(ctx, c, report, tests, PlaywrightTitles(failed.Output), base, func() string {
+		return n.whoseFailure(ctx, c, report, failed, base)
+	})
+}
+
+// mainAloneNamed is mainAlone for tests already named, by the names TestNamesOf
+// gives them, with titles the Playwright titles of them (nil when there are none):
+// a batch's check of the tests its rig's last hold on main's red named runs it on
+// the new main before the gate (mw-gq6.1706). whose says whose the failure is,
+// where main does not fail them all the same way.
+func (n Next) mainAloneNamed(ctx context.Context, c *closeOut, report *NextReport, tests []string, titles map[string]string, base string, whose func() string) *MainRed {
+	if n.NamedChecks == nil || len(tests) == 0 {
 		return nil
 	}
 	began := n.now()
@@ -544,7 +555,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 	}()
 	// A Playwright test is asked for on main at the line main has it at, which
 	// a branch that added a line above it has moved (mw-gq6.967).
-	onTarget, added := namesOnTarget(dir, tests, PlaywrightTitles(failed.Output))
+	onTarget, added := namesOnTarget(dir, tests, titles)
 	label := func(test, label string) string {
 		if added[test] {
 			return NotOnMain
@@ -628,7 +639,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		labelNotRun(report, tests, n.namedWhy(ctx, "the command to run them by name did not start", c, report, run.Output))
 		return nil
 	case run.Passed:
-		report.Notes = append(report.Notes, fmt.Sprintf("main alone passes %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
+		report.Notes = append(report.Notes, fmt.Sprintf("main alone passes %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), whose()))
 		labelMain(report, labelNote(tests, at, func(test string) string { return label(test, BranchOnly) }))
 		return nil
 	}
@@ -669,7 +680,7 @@ func (n Next) mainAlone(ctx context.Context, c *closeOut, report *NextReport, fa
 		return label(test, BranchOnly)
 	}))
 	if !allOnMain {
-		report.Notes = append(report.Notes, fmt.Sprintf("main alone fails other tests than %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), n.whoseFailure(ctx, c, report, failed, base)))
+		report.Notes = append(report.Notes, fmt.Sprintf("main alone fails other tests than %s (checked in %s): %s", strings.Join(tests, ", "), took.Round(time.Second), whose()))
 		return nil
 	}
 	// The bug that carries main's red names the tests by main's own lines, which

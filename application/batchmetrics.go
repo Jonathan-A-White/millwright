@@ -77,6 +77,12 @@ type BatchMetric struct {
 	MainRed    bool   `json:"main_red,omitempty"`
 	MainHead   string `json:"main_head,omitempty"`
 	MainBranch string `json:"main_branch,omitempty"`
+	// MainTests are the tests that failed on main alone, by main's own names, and
+	// MainBug the bug that carries them: the next batch of the rig runs them on the
+	// new main before it gates anything (mw-gq6.1706). Both empty for a hold that
+	// was one host's gap, or written before the fields.
+	MainTests []string `json:"main_tests,omitempty"`
+	MainBug   string   `json:"main_bug,omitempty"`
 }
 
 // Metric is the line the batch leaves, as of at.
@@ -98,6 +104,7 @@ func (r BatchReport) Metric(at time.Time) BatchMetric {
 	}
 	if r.HeldOnMainRed && !r.Landed {
 		m.MainRed, m.MainHead, m.MainBranch = true, r.Base, r.Target
+		m.MainTests, m.MainBug = r.mainTests, r.mainBug
 	}
 	if r.Tested {
 		m.GateRuns = max(r.GateRuns, 1)

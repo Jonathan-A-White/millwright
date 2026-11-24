@@ -280,6 +280,11 @@ type BatchReport struct {
 	// tests too (the bug that carries it named in Held): the batch's line then
 	// holds Base as main's head (mw-gq6.1704).
 	HeldOnMainRed bool
+	// mainTests and mainBug are the tests main fails alone, by main's names, and
+	// the bug that carries them, of a batch held on main's red: its line keeps
+	// them for the rig's next batch to run them again first (mw-gq6.1706).
+	mainTests []string
+	mainBug   string
 	// failingOwner is the one story of the batch whose branch alone changed
 	// the files of the tests that failed (findFailingOwner); empty when none.
 	failingOwner string
@@ -670,6 +675,11 @@ func (b BatchLand) dryRun(ctx context.Context, rigDir string, report *BatchRepor
 // one gate run and the push. It says Landed, or Held and why.
 func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.EpicRequirements, report *BatchReport, nr *NextReport) {
 	n := b.Next
+	// A rig whose last batch was held on main's own red is not gated again for a
+	// move of main's head that left that red alone (mw-gq6.1706).
+	if b.mainStillRed(ctx, rigDir, report, nr) {
+		return
+	}
 	b.mergeAll(ctx, dir, rigDir, rules.MergeRules(), report)
 	// A branch set aside for its conflicts is the fixer's to merge, before the
 	// version is raised and the tests are run: what it merges then gets its
@@ -743,6 +753,7 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		if red != nil {
 			if n.holdBatchOnMainRed(ctx, bc, nr, red) {
 				report.HeldOnMainRed = true
+				report.keepMainRed(red)
 				report.Held = fmt.Sprintf("main is red: %s, carried by %s; no fixer was started and the stories stay queued", red.tests(), red.Bug)
 				if red.Gap != nil {
 					report.Held = fmt.Sprintf("host gap: %s: %s; %s passes %s by name; carried by %s; no fixer was started and the stories stay queued", red.Gap.Host, red.Gap.Line, red.Gap.Home, red.tests(), red.Bug)
@@ -1160,6 +1171,69 @@ func (b BatchLand) mainAlone(ctx context.Context, rigDir string, report *BatchRe
 		report.Records = append(report.Records, record)
 	}
 	return bc, red
+}
+
+// keepMainRed says which tests and which bug the batch's line keeps for the
+// rig's next batch. A host's gap is not main's red: the home passes those tests,
+// so nothing is kept to check them by.
+func (r *BatchReport) keepMainRed(red *MainRed) {
+	if red.Gap != nil {
+		return
+	}
+	r.mainTests, r.mainBug = red.Tests, red.Bug
+}
+
+// mainStillRed is the check made before a batch is merged and gated, for a rig
+// whose last batch was held on main's own red: the tests that hold named are run
+// by name on the target as it is now, alone (mainAlone's own run), and when they
+// still all fail the batch is held again at once, on the same carrier and the new
+// head, with no gate run: a gate costs half an hour, and the red was not touched
+// by the move (batch 677 of lampas, mw-gq6.1706). When they pass, or fail other
+// than as before, or cannot be run, or the carrier is closed (its fix is the
+// move), or the hold kept no tests, the batch goes on to its gate as before. It
+// says whether the batch was held.
+func (b BatchLand) mainStillRed(ctx context.Context, rigDir string, report *BatchReport, nr *NextReport) bool {
+	if b.Metrics == nil || b.Next.Tracker == nil {
+		return false
+	}
+	held, ok := HeldOnMainRed(rigBatches(readBatches(ctx, b.Metrics), report.Rig))
+	if !ok || len(held.MainTests) == 0 || held.MainBug == "" || held.MainBranch != report.Target {
+		return false
+	}
+	n := b.Next
+	carrier, err := n.Tracker.ShowBeads(ctx, []string{held.MainBug})
+	if err != nil {
+		nr.Notes = append(nr.Notes, fmt.Sprintf("%s's red was not run again before the gate: %s, which carries it, could not be read: %v", report.Target, held.MainBug, err))
+		return false
+	}
+	open := false
+	for _, d := range carrier {
+		open = open || (d.Story.ID == held.MainBug && !d.Closed())
+	}
+	if !open {
+		nr.Notes = append(nr.Notes, fmt.Sprintf("%s, which carried %s's red in %s, is closed: the batch is gated", held.MainBug, report.Target, BatchLabel(report.Rig, held.Batch)))
+		return false
+	}
+	var again NextReport
+	bc := b.batchCloseOut(report, rigDir)
+	red := n.mainAloneNamed(ctx, bc, &again, held.MainTests, nil, report.Base, func() string {
+		return "they no longer fail as they did in " + BatchLabel(report.Rig, held.Batch)
+	})
+	if record := bc.recordPath(bc.mainLog); bc.mainLog != "" && record != "" {
+		report.Records = append(report.Records, record)
+	}
+	nr.Notes = append(nr.Notes, again.Notes...)
+	if red == nil || red.Gap != nil || ctx.Err() != nil {
+		return false
+	}
+	red.Bug = held.MainBug
+	nr.MainRed = red
+	report.MainLabels = again.MainLabels
+	report.HeldOnMainRed = true
+	report.keepMainRed(red)
+	report.Held = fmt.Sprintf("main is red: %s, carried by %s; they failed on %s alone before the batch was made, as in %s, so the rig's tests were not run on the batch and the stories stay queued",
+		red.tests(), red.Bug, shortCommit(report.Base), BatchLabel(report.Rig, held.Batch))
+	return true
 }
 
 // batchCloseOut is the batch itself as the gate takes it: named for the
