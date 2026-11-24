@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,10 +112,52 @@ func validEnvName(name string) bool {
 	return true
 }
 
-// environ is the process environment with the claude env file's assignments on
-// top, later ones winning as they would in a shell.
+// environ is the process environment, less what tunes claude (inheritedEnv),
+// with the claude env file's assignments on top, later ones winning as they
+// would in a shell. The file's lines are all kept: they are written for claude.
 func (g *Grinder) environ() []string {
-	return append(os.Environ(), ClaudeEnv(g.claudeEnvFile)...)
+	return append(inheritedEnv(os.Environ()), ClaudeEnv(g.claudeEnvFile)...)
+}
+
+// tuningPrefixes begin the names of the variables that change which model
+// claude asks, where it asks it, or how it thinks, caches, compacts or retries:
+// every ANTHROPIC_ and CLAUDE name, and the ones claude reads under neither.
+var tuningPrefixes = []string{
+	"ANTHROPIC_",
+	"CLAUDE_",
+	"CLAUDECODE",
+	"MAX_THINKING_",
+	"MAX_STRUCTURED_OUTPUT_",
+	"DISABLE_INTERLEAVED_THINKING",
+	"DISABLE_PROMPT_CACHING",
+	"ENABLE_PROMPT_CACHING",
+	"DISABLE_COMPACT",
+	"DISABLE_AUTO_COMPACT",
+	"FALLBACK_FOR_ALL_PRIMARY_MODELS",
+	"USE_API_CONTEXT_MANAGEMENT",
+	"API_TIMEOUT_MS",
+}
+
+// loginNames are the names among tuningPrefixes' that say who claude is logged
+// in as, not how it reads: the subscription's token (GrindEnv drops it from a
+// grind billed to a key) and the directory the login is kept in.
+var loginNames = []string{OAuthTokenEnv, "CLAUDE_CONFIG_DIR"}
+
+// inheritedEnv is what a grind takes from the environment of the process that
+// runs it: all of environ but the variables tuningPrefixes name, loginNames
+// excepted, so that what the mill's service happens to hold does not change
+// how a grist is read (mw-gq6.1710).
+func inheritedEnv(environ []string) []string {
+	env := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		tunes := slices.ContainsFunc(tuningPrefixes, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
+		if tunes && !slices.Contains(loginNames, name) {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
 }
 
 // NewGrinder is the grinder that runs Program.

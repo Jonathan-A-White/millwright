@@ -3353,6 +3353,16 @@ names no cause), never the grist's content. A grind's instructions reach claude
 as `--system-prompt-file` (a file in the grind's own directory, never an
 argument: one argument may not pass 131,072 bytes), and a prompt over 64 KiB on
 its standard input. `mw grist smoke` warns of instructions over 100,000 bytes.
+A grind's claude, cold, warm or a talk's, takes the environment of the process
+that runs it less what tunes claude: every variable named `ANTHROPIC_*`,
+`CLAUDE_*`, `CLAUDECODE*`, `MAX_THINKING_*`, `MAX_STRUCTURED_OUTPUT_*`,
+`DISABLE_PROMPT_CACHING*`, `ENABLE_PROMPT_CACHING*`,
+`DISABLE_INTERLEAVED_THINKING*`, `DISABLE_COMPACT*`, `DISABLE_AUTO_COMPACT*`,
+`FALLBACK_FOR_ALL_PRIMARY_MODELS*`, `USE_API_CONTEXT_MANAGEMENT*` and
+`API_TIMEOUT_MS*`, so that what the mill's service happens to hold does not
+change how a grist is read (mw-gq6.1710). `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CONFIG_DIR`, which say who
+is logged in, are kept, and so is every line of `~/.config/mw/claude.env`: a
+variable a grind is meant to have goes there.
 A grist's `grist`
 header may carry `model` and `effort`: they replace the grind file's for that
 grist, and must be within `[grist]` `models` and `efforts`, else the grist is
