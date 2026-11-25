@@ -204,6 +204,9 @@ func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
 		if atOnce {
 			cause = fmt.Sprintf("in conflict with %s, not the batch", report.Target)
 		}
+		if b.leftToANewAttempt(ctx, s.ID, report) {
+			continue
+		}
 		if why := b.handBack(ctx, *s, report); why != "" {
 			report.Notes = append(report.Notes, fmt.Sprintf("%s was %s, but it could not be handed back to a Builder to rebase, so it stays queued: %s", s.ID, cause, why))
 			continue
@@ -216,6 +219,26 @@ func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
 		}
 		report.Notes = append(report.Notes, fmt.Sprintf("%s was handed back to a Builder to rebase on %s: %s", s.ID, report.Target, conflictedFilesOrNone(*s)))
 	}
+}
+
+// leftToANewAttempt says story id is no longer queued for batch landing when
+// the batch comes to act on it: mw retry gave it a new attempt, or a Builder or
+// the Mayor took it, since the batch took it, and its run state and claim are
+// that attempt's now (mw-gq6.1735). It is read fresh off the story, as
+// landedNow is; a story that cannot be read is taken to be queued still, as it
+// was before, so that a tracker that cannot answer is not a reason to leave it.
+// A note in the report says the story was left alone.
+func (b BatchLand) leftToANewAttempt(ctx context.Context, id string, report *BatchReport) bool {
+	n := b.Next
+	if n.Tracker == nil {
+		return false
+	}
+	detail, err := n.Tracker.ShowStory(ctx, id)
+	if err != nil || QueuedForBatch(detail) {
+		return false
+	}
+	report.Notes = append(report.Notes, fmt.Sprintf("%s was taken by this batch, but it is no longer queued for batch landing (a new attempt was given it since), so the batch left it alone", id))
+	return true
 }
 
 // waitsOnItsFixer says nothing of the batch merged and it was given its fixer,
