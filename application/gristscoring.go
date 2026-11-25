@@ -278,7 +278,7 @@ func (g GristGrind) keepRun(ctx context.Context, w *gristWork) {
 		},
 		Timing: GristRunTiming{
 			Txid: w.record.Txid, App: w.plain.Grist.App, Kind: w.plain.Grist.Kind,
-			Model: w.model, ModelID: w.result.ModelID, Effort: w.effort,
+			Model: w.model, ModelID: w.result.ModelID, HarnessVersion: w.result.HarnessVersion, Effort: w.effort,
 			Sent: sentTime(w.record.Ts), Received: w.received.UTC(), ScoredAt: utcPtr(w.scoredAt),
 			HarnessStarted: w.harnessStarted.UTC(), Answered: w.answered.UTC(),
 			ScoringSeconds: w.scoringSeconds, Scorers: w.scorerSeconds,

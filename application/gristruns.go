@@ -99,7 +99,11 @@ type GristRunTiming struct {
 	Model string `json:"model"`
 	// ModelID is the model id the harness's result named, as on the grind's
 	// line; left out when it named none, and by runs kept before it was.
-	ModelID        string             `json:"model_id,omitempty"`
+	ModelID string `json:"model_id,omitempty"`
+	// HarnessVersion is the Claude Code version that ran the grind, as on the
+	// grind's line; left out when none was read, and by runs kept before it
+	// was (mw-gq6.1712).
+	HarnessVersion string             `json:"harness_version,omitempty"`
 	Effort         string             `json:"effort"`
 	Sent           *time.Time         `json:"sent,omitempty"`
 	Received       time.Time          `json:"received"`

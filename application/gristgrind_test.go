@@ -359,3 +359,56 @@ func TestGristGrindALiveGristIsNeverJudgedByAGrindFileItBrings(t *testing.T) {
 		})
 	}
 }
+
+// A grind's line and the timing of its kept run name the Claude Code version
+// the grinder said ran it, so a grind that answers differently on the mill
+// than in a shell can be laid beside the shell's `claude --version` after the
+// fact (mw-gq6.1712). A grind that failed keeps it too, and a result that
+// names none writes no harness_version at all.
+func TestGristLineKeepsTheHarnessVersion(t *testing.T) {
+	const version = "2.1.7 (Claude Code)"
+	for name, tc := range map[string]struct {
+		result application.SessionResult
+		err    error
+		status string
+	}{
+		"answered": {application.SessionResult{Subtype: "success", HarnessVersion: version,
+			Answer: json.RawMessage(`{"items":[],"placeName":"x"}`)}, nil, application.GristAnswered},
+		"ran out of time": {application.SessionResult{HarnessVersion: version}, application.ErrGrindTimedOut, application.GristFailed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mill, _, grinder := aSmallMill(t)
+			runs := &apptest.FakeGristRuns{}
+			mill.Runs = runs
+			grinder.Result, grinder.Err = tc.result, tc.err
+			if _, err := mill.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			lines, _ := mill.State.Lines(context.Background())
+			if len(lines) != 1 || lines[0].Status != tc.status {
+				t.Fatalf("expected one %s line, got %+v", tc.status, lines)
+			}
+			line, _ := json.Marshal(lines[0])
+			if want := `"harness_version":"` + version + `"`; !strings.Contains(string(line), want) {
+				t.Errorf("expected %s in the grinds.jsonl line, got %s", want, line)
+			}
+			if len(runs.Kept) != 1 {
+				t.Fatalf("expected one run kept, got %+v", runs.Kept)
+			}
+			timing, _ := json.Marshal(runs.Kept[0])
+			if want := `"harness_version":"` + version + `"`; !strings.Contains(string(timing), want) {
+				t.Errorf("expected %s in the kept run's timing, got %s", want, timing)
+			}
+		})
+	}
+
+	bare, _, bareGrinder := aSmallMill(t)
+	bareGrinder.Result = application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[],"placeName":"x"}`)}
+	if _, err := bare.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lines, _ := bare.State.Lines(context.Background())
+	if line, _ := json.Marshal(lines); strings.Contains(string(line), "harness_version") {
+		t.Errorf("expected no harness_version from a result that names none, got %s", line)
+	}
+}

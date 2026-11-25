@@ -98,7 +98,9 @@ func (f *FakeGrinder) Grind(ctx context.Context, call application.GrindCall) (ap
 		}
 	}
 	if f.Err != nil {
-		return application.SessionResult{}, f.Err
+		// As the real grinder does, a grind that failed still says which
+		// harness version ran it, and nothing else of the result.
+		return application.SessionResult{HarnessVersion: f.Result.HarnessVersion}, f.Err
 	}
 	return f.Result, nil
 }

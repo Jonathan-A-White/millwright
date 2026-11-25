@@ -92,6 +92,11 @@ type SessionResult struct {
 	// messages, or of objects), whole, for a reader that looks in them for a
 	// phrase; empty when it printed none.
 	ErrorsText string
+	// HarnessVersion is what the harness program said of its own version
+	// (`claude --version`) when the adapter that ran the session read it: a
+	// grind's, cold or warm, even one that failed or ran out of time. Empty
+	// when the adapter read none: the result file itself does not say.
+	HarnessVersion string
 }
 
 // Finished reports whether the session got where it was going. Anything else —
