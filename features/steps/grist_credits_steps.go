@@ -54,8 +54,10 @@ type creditsContext struct {
 // standIn is the claude program of this feature. It logs, one line a start,
 // its pid, whether it was started cold or warm and the ANTHROPIC_API_KEY it
 // saw ("-" for none); keeps its arguments; and prints the answer the key-result
-// file names when it has a key, else the good answer.
+// file names when it has a key, else the good answer. Asked --version, it
+// answers as claude does and logs nothing.
 const standIn = `#!/bin/sh
+if [ "$*" = --version ]; then echo '2.1.7 (Claude Code)'; exit 0; fi
 dir=$(dirname "$0")
 if [ -n "${ANTHROPIC_API_KEY+x}" ]; then k="$ANTHROPIC_API_KEY"; else k=-; fi
 mode=cold
