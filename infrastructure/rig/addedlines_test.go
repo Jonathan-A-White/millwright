@@ -46,3 +46,30 @@ func TestAddedLinesOfABranchThatIsNotThereAreNone(t *testing.T) {
 		t.Errorf("expected no lines and no error, got %+v, %v", got, err)
 	}
 }
+
+func TestAddedLinesNameAFileWithANonASCIIPath(t *testing.T) {
+	here := aRigWithAServer(t)
+	write(t, here, "base.txt", "x\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Base")
+	run(t, here, "git", "push", "-q", "origin", "main")
+	run(t, here, "git", "checkout", "-q", "-b", "mw/story")
+	write(t, here, "é.go", "first\n")
+	write(t, here, "with space.go", "second\n")
+	write(t, here, "quo\"te.go", "third\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The story's change")
+
+	got, err := rig.New().AddedLines(context.Background(), here, "main", "mw/story")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []application.AddedLine{
+		{Path: "quo\"te.go", Number: 1, Text: "third"},
+		{Path: "with space.go", Number: 1, Text: "second"},
+		{Path: "é.go", Number: 1, Text: "first"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("expected %+v, got %+v", want, got)
+	}
+}
