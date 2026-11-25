@@ -121,6 +121,7 @@ func (a aSetAsideBatch) run(t *testing.T) {
 func TestABatchOfSixThatSetsOneAsideLandsTheFiveFirstAndLeavesTheOneQueuedWithANote(t *testing.T) {
 	a := aBatchOf(t, 6, "mw-e.4")
 	a.landing.onlyBesideMates("mw-e.4")
+	aQueuedInTheTracker(t, a)
 	a.run(t)
 
 	r := a.report
