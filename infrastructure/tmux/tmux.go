@@ -526,7 +526,10 @@ func runBounded(ctx context.Context, deadline time.Duration, out, errs io.Writer
 	defer cancel()
 	cmd := exec.CommandContext(bounded, program, args...)
 	cmd.Stdout, cmd.Stderr = out, errs
-	cmd.WaitDelay = time.Second
+	// A tmux that has ended is given ten seconds to close its output: on a busy
+	// host a successful one can take more than one, and a shorter wait reports it
+	// as failed (mw-gq6.1746).
+	cmd.WaitDelay = 10 * time.Second
 	err := cmd.Run()
 	if err != nil && ctx.Err() == nil && errors.Is(bounded.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("did not finish in %s and was stopped (a tmux server that is stopped or stuck does not answer): %w", deadline, bounded.Err())

@@ -46,7 +46,10 @@ func (r Runner) Run(ctx context.Context, dir, command string) (string, error) {
 	cmd.Dir = dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
+	// A command that has ended is given ten seconds to close its output: on a
+	// busy host a successful one can take more than one, and a shorter wait
+	// reports it as failed (mw-gq6.1746).
+	cmd.WaitDelay = 10 * time.Second
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return string(out), fmt.Errorf("gave up after %s", timeout)
