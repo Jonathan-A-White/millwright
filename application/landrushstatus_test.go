@@ -120,3 +120,39 @@ func TestStatusSaysTheQueueIsNotWatchedForAQueuedStoryOnARigThisHostDoesNotHave(
 		}
 	}
 }
+
+// mw-gq6.1748: a queued story whose path cannot be read was skipped by both
+// loops over the queue, so mw status showed nothing for it while the batches
+// handed it back or left it out. It is named under LAND RUSH, as left out and
+// why, and is not counted as queued.
+func TestLandRushNamesAQueuedStoryWhosePathCannotBeRead(t *testing.T) {
+	ctx := context.Background()
+	now, _ := time.Parse("2006-01-02 15:04", landRushNow)
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("lp-1", domain.Path{Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelOpus, Effort: domain.EffortHigh, Host: "laptop"})
+	tracker.AddStory("lp-1", domain.Story{ID: "lp-1.1", Title: "A story with a bad model", Overrides: domain.Path{Model: "no-such-model"}})
+	mustDo(t, tracker.ClaimStory(ctx, "lp-1.1"))
+	queue(t, tracker, "lp-1.1")
+	detail, _ := tracker.ShowStory(ctx, "lp-1.1")
+	if _, err := detail.Path(); err == nil {
+		t.Fatal("the test does not drive what it names: the story's path can be read")
+	}
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("lampas", domain.EpicRequirements{Landing: domain.LandingSettings{Mode: domain.LandingBatch}})
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Host: "laptop", Seat: "builder",
+		Rigs:  map[string]string{"lampas": "/rigs/lampas"},
+		Rules: rules, Batches: &apptest.FakeBatchMetrics{},
+		Now: func() time.Time { return now },
+	}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := report.String()
+	for _, want := range []string{"lampas: 0 queued", "left out: lp-1.1", "path cannot be read"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in:\n%s", want, out)
+		}
+	}
+}
