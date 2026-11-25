@@ -491,8 +491,11 @@ func (n Next) foundPlace(lines []string, finder domain.Path, beads []StoryDetail
 		return foundPlacing{elsewhere: true, path: foundNoRigPlace(strings.Join(paths, ","), finder)}
 	}
 
-	// No file leads with another rig's directory: the words may name one.
-	text := strings.Join(lines, " ")
+	// No file leads with another rig's directory: the words may name one. A
+	// rig's name inside a file the lines name (infrastructure/postern/x.go) is
+	// part of that file and not a word about a rig, so the files are left out
+	// of the words (mw-gq6.1754).
+	text := foundWithoutFiles(strings.Join(lines, " "))
 	named := map[string]bool{}
 	for lower, rig := range byName {
 		if foundNamesRig(text, lower) {
@@ -511,6 +514,18 @@ func (n Next) foundPlace(lines []string, finder domain.Path, beads []StoryDetail
 		}
 	}
 	return foundPlacing{elsewhere: true, path: foundNoRigPlace(foundFiles(lines, ""), finder)}
+}
+
+// foundWithoutFiles is text with each file it names (and its ':line') replaced
+// by a space.
+func foundWithoutFiles(text string) string {
+	return foundPathPattern.ReplaceAllStringFunc(text, func(match string) string {
+		path, _, _ := strings.Cut(match, ":")
+		if dot := strings.LastIndex(path, "."); dot < 0 || (!strings.Contains(path, "/") && !foundBareExtensions[path[dot+1:]]) {
+			return match
+		}
+		return " "
+	})
 }
 
 var (
