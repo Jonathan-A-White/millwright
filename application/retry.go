@@ -601,7 +601,9 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	}
 	report.Own = own
 
-	if own >= report.most {
+	// --hold never has the story dispatched again, so the two refusals below, which
+	// guard the next attempt, do not apply to it (mw-gq6.1719).
+	if own >= report.most && !r.Hold {
 		return r.refuse(report, exhaustedWhy(tried, own, report.most, uncounted))
 	}
 
@@ -611,7 +613,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	// where the claim is given back.
 	if at, handedBack, err := handedBackOf(ctx, r.Tracker, detail); err != nil {
 		return report, fmt.Errorf("retrying %s: reading whether its Builder handed it back: %w", storyID, err)
-	} else if handedBack && strings.TrimSpace(r.RePathed) == "" {
+	} else if handedBack && strings.TrimSpace(r.RePathed) == "" && !r.Hold {
 		return r.refuse(report, fmt.Sprintf(
 			"its Builder handed it back on %s and nothing says what changed since, so the next Builder would hand it back the same way: "+
 				"say what changed with %s", handedBackDay(at), repathedWith(storyID)))

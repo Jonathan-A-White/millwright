@@ -55,7 +55,8 @@ func newRetryCmd() *cobra.Command {
 			"A story its Builder handed back (its newest hand-back comment opens HANDED BACK) is refused,\n" +
 			"and mw dispatch passes it over, until a comment opening RE-PATHED: follows it: the same Builder\n" +
 			"given the same story hands it back the same way. --repathed \"<what changed>\" writes that\n" +
-			"comment, once the retry is past its refusals, and goes on.\n\n" +
+			"comment, once the retry is past its refusals, and goes on. --hold needs no such comment, nor an\n" +
+			"attempts count under max_attempts: it never has the story started again.\n\n" +
 			"A story whose last attempt mw next refused at the gate or the merge, or stopped at its turn cap,\n" +
 			"keeps its branch (mw-1ljpo9.7): the worktree is taken away, the branch is not, and the next\n" +
 			"dispatch cuts the next attempt from it, rebased onto the target, so the fix is a delta. A branch\n" +
