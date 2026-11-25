@@ -110,6 +110,12 @@ EOF
 # apt-get: root only, and installing a package puts its command on PATH.
 standin "$STAND" apt-get <<'EOF'
 #!/bin/sh
+# a -o option is not a call of its own: install.sh asks apt to wait for the dpkg
+# lock that unattended-upgrades holds (mw-gq6.1758); it is noted apart and dropped
+while [ "$1" = -o ]; do
+	echo "apt-option $2" >>"$FAKE_CALLS"
+	shift 2
+done
 echo "apt-get $*" >>"$FAKE_CALLS"
 [ "$(id -u)" = 0 ] || { echo "E: Could not open lock file - are you root?" >&2; exit 100; }
 case $1 in
@@ -255,7 +261,7 @@ run() {
 	OUT=$(cd "$W/cwd" && env -i PATH="$W/bin:$REAL$PATH_EXTRA" HOME="$W/home" TMPDIR="$W/tmp" \
 		FAKE_UID="$UID_NOW" FAKE_CALLS="$W/calls" FAKE_WORLD="$W" FAKE_STOCK="$STOCK" FAKE_BIN="$W/bin" \
 		FAKE_PINS="$REPO_ROOT/$PINS" \
-		MW_INSTALL_OS_RELEASE="$W/os-release" MW_HOME="$MW_HOME_DIR" MW_GO_ROOT="$GO_ROOT" \
+		MW_INSTALL_OS_RELEASE="$W/os-release" MW_INSTALL_APT_CONF_DIR="$W/apt.conf.d" MW_HOME="$MW_HOME_DIR" MW_GO_ROOT="$GO_ROOT" \
 		$ENVX "$SH" "$SCRIPT_RUN" "$@" 2>&1) || RC=$?
 }
 # runpiped: the same, with the script fed to sh on stdin, as curl | sh would.
@@ -266,7 +272,7 @@ runpiped() {
 	OUT=$(cd "$W/cwd" && env -i PATH="$W/bin:$REAL$PATH_EXTRA" HOME="$W/home" TMPDIR="$W/tmp" \
 		FAKE_UID="$UID_NOW" FAKE_CALLS="$W/calls" FAKE_WORLD="$W" FAKE_STOCK="$STOCK" FAKE_BIN="$W/bin" \
 		FAKE_PINS="$REPO_ROOT/$PINS" \
-		MW_INSTALL_OS_RELEASE="$W/os-release" MW_HOME="$MW_HOME_DIR" MW_GO_ROOT="$GO_ROOT" \
+		MW_INSTALL_OS_RELEASE="$W/os-release" MW_INSTALL_APT_CONF_DIR="$W/apt.conf.d" MW_HOME="$MW_HOME_DIR" MW_GO_ROOT="$GO_ROOT" \
 		$ENVX "$SH" -s -- "$@" <"$REPO_ROOT/$SCRIPT" 2>&1) || RC=$?
 }
 
@@ -451,6 +457,7 @@ run
 rc_is 0
 steps_are "1 apt 2 rig 3 go 4 bd 5 build 6 link"
 in_order '^apt-get update' "^apt-get install -y --no-install-recommends $NOAPT_PKGS\$" "^curl .*$GO_URL" "^curl .*$BD_URL" '^make build'
+called '^apt-option DPkg::Lock::Timeout=600$'
 notcalled '^git clone'
 called "^make build \(in $W/rig, go=$GO_ROOT/bin/go\)"
 "$GO_ROOT/bin/go" version | grep -Fq "go$GO_VERSION" || fail "$NAME: no Go $GO_VERSION under $GO_ROOT"

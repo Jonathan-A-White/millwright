@@ -25,7 +25,8 @@
 # before changing anything. --dry-run prints every step and changes nothing.
 #
 # Settings: MW_HOME (the rig), MW_BIN (where bd and the mw link go), MW_GO_ROOT
-# (where Go goes), MW_INSTALL_OS_RELEASE (the os-release file; for the check).
+# (where Go goes), MW_INSTALL_OS_RELEASE (the os-release file; for the check),
+# MW_INSTALL_APT_CONF_DIR (the apt.conf.d directory; for the check).
 
 set -eu
 
@@ -122,6 +123,7 @@ bd_label() { if [ "$PINS_KNOWN" = 1 ]; then echo "bd $BD_VERSION"; else echo "bd
 
 # --- a system this script can act on ------------------------------------------
 OS_RELEASE=${MW_INSTALL_OS_RELEASE:-/etc/os-release}
+APT_CONF_DIR=${MW_INSTALL_APT_CONF_DIR:-/etc/apt/apt.conf.d}
 os_field() { sed -n "s/^$1=//p" "$OS_RELEASE" 2>/dev/null | head -n 1 | tr -d "\"'"; }
 os_id=$(os_field ID)
 os_like=$(os_field ID_LIKE)
@@ -221,9 +223,16 @@ if [ -z "$missing" ]; then
 	skip "all of them are installed"
 else
 	[ "$ROOT" = 1 ] || printf '    needs root: run this script as root, or install them yourself\n'
-	if act "apt-get update"; then apt-get update; fi
+	# A fresh Ubuntu box's unattended-upgrades holds the dpkg lock for a while, and
+	# apt-get fails at once on it unless told to wait (mw-gq6.1758). A host whose
+	# apt.conf.d already sets the wait (contrib/boost-bootstrap.sh writes it) needs
+	# no option; any other gets it on each apt-get here.
+	APT_WAIT="-o DPkg::Lock::Timeout=600"
+	if [ -f "$APT_CONF_DIR/90boost-dpkg-lock-wait" ]; then APT_WAIT=""; fi
 	# shellcheck disable=SC2086
-	if act "$INSTALL_CMD"; then DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $missing; fi
+	if act "apt-get update"; then apt-get $APT_WAIT update; fi
+	# shellcheck disable=SC2086
+	if act "$INSTALL_CMD"; then DEBIAN_FRONTEND=noninteractive apt-get $APT_WAIT install -y --no-install-recommends $missing; fi
 fi
 
 # --- 2. the rig ----------------------------------------------------------------------
