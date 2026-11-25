@@ -32,6 +32,11 @@ func namesSha(description, sha string) bool {
 	return false
 }
 
+// namesAnySha says the bug's description names a main it failed at.
+func namesAnySha(description string) bool {
+	return namedShas.MatchString(description)
+}
+
 // settlePassedBug is what a dispatch does with a bug whose check passed on its
 // rig's main. When main is the very sha the bug names, no story has landed since
 // it failed, so nothing fixed it: it failed and passed at one commit, which is a
@@ -40,8 +45,9 @@ func namesSha(description, sha string) bool {
 // returns what recheckBug does: fixed is true when the story is dealt with and
 // is not to be dispatched.
 //
-// A bug mw next filed from a Builder's finding (LabelFoundAtClose) names no sha,
-// and its check may already have passed when it was filed (a finder's command
+// A bug mw next filed from a Builder's finding (LabelFoundAtClose) names a sha
+// only when its command was seen to fail there (mw-gq6.1740). One that names none
+// may have had a check that already passed when it was filed (a finder's command
 // that was not read to fail at its own commit is filed all the same), so a pass
 // on main shows no story fixed it: it is held for the Mayor, not closed
 // (mw-gq6.1737).
@@ -50,7 +56,7 @@ func (d Dispatch) settlePassedBug(ctx context.Context, detail StoryDetail, rig s
 	if namesSha(detail.Description, found.Sha) {
 		return d.holdFlakyBug(ctx, id, rig, check, found, report)
 	}
-	if slices.Contains(detail.Labels, LabelFoundAtClose) {
+	if slices.Contains(detail.Labels, LabelFoundAtClose) && !namesAnySha(detail.Description) {
 		return d.holdFoundBug(ctx, id, rig, check, found, report)
 	}
 	one := FixedOnMain{StoryID: id, Spec: check.String(), Sha: found.Sha, Tests: found.Tests}
