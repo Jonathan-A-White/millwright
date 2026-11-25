@@ -763,6 +763,38 @@ func TestFoundAtCloseFindingUsingARigNameAsACommonWordKeepsItsRig(t *testing.T) 
 	}
 }
 
+// A finding of a story on rig R is filed on rig R when the only trace of another
+// rig is a rig's name inside a file it names (a folder or a file name that is
+// not led by that rig's directory): the file's own words are not the finding's
+// words about a rig (mw-gq6.1754, seen on mw-2ky9evf: infrastructure/postern/
+// transcriber.go of a millwright story was filed with rig=postern).
+func TestFoundAtCloseRigNameInsideAFilesPathDoesNotMoveTheBug(t *testing.T) {
+	for name, c := range map[string]struct{ finding, files string }{
+		"a folder of the path": {
+			"The reader drops a row (infrastructure/legend/transcriber.go:12). AC: go test ./application passes. By design? no",
+			"infrastructure/legend/transcriber.go",
+		},
+		"a bare file name": {
+			"The reader drops a row (legend.go:12). AC: go test ./application passes. By design? no",
+			"legend.go",
+		},
+		"a folder and another file": {
+			"The reader drops a row (infrastructure/Cairn/reader.go:12 and package.json:3). AC: go test ./application passes. By design? no",
+			"infrastructure/Cairn/reader.go,package.json",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			filed := aFindingOfAnotherRigRun(t, c.finding)
+			if len(filed) != 1 {
+				t.Fatalf("expected 1 bug filed, got %d", len(filed))
+			}
+			if got := filed[0]; got.Rig != "lampas" || got.Files != c.files || got.Branch != "main" {
+				t.Errorf("expected rig=lampas files=%s branch=main, got %s", c.files, got.Summary())
+			}
+		})
+	}
+}
+
 // A finding whose rig cannot be told is filed with no rig, never the reporting
 // story's: its files name two other rigs, or one of them and one of its own.
 func TestFoundAtCloseFindingWhoseRigCannotBeToldIsFiledWithNoRig(t *testing.T) {
