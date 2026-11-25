@@ -20,6 +20,7 @@ import (
 type aRegeneratingLanding struct {
 	*aBranchConflictLanding
 	seen    []domain.MergeRules
+	trials  []domain.MergeRules
 	refuses map[string]bool
 }
 
@@ -31,8 +32,12 @@ func (l *aRegeneratingLanding) MergeUnion(context.Context, string, string, []str
 	return application.Landed{}, fmt.Errorf("MergeUnion was used for a rig that lists generated files")
 }
 
-func (l *aRegeneratingLanding) MergeRuled(_ context.Context, _, branch string, rules domain.MergeRules) (application.Landed, error) {
-	l.seen = append(l.seen, rules)
+func (l *aRegeneratingLanding) MergeRuled(_ context.Context, dir, branch string, rules domain.MergeRules) (application.Landed, error) {
+	if dir == trialDir {
+		l.trials = append(l.trials, rules)
+	} else {
+		l.seen = append(l.seen, rules)
+	}
 	if l.refuses[branch] {
 		return application.Landed{}, &application.MergeConflict{Files: []string{"docs/lxx-align/gen.txt"},
 			Said: application.ErrMergeConflict.Error() + ": CONFLICT (regenerated): docs/lxx-align/gen.txt by `npm run gen` failed: exit status 1; its last lines: boom"}
@@ -53,6 +58,10 @@ func TestABatchRegeneratesAGeneratedFileOfARigThatListsItAndSaysSo(t *testing.T)
 
 	if len(landing.seen) != 2 || !strings.Contains(fmt.Sprint(landing.seen[0]), "npm run gen") || len(landing.seen[0].Union) != 1 {
 		t.Errorf("expected each branch merged by the rig's rules, union and regenerated both, got %+v", landing.seen)
+	}
+	// The one that conflicted is tried on main alone by the same rules.
+	if len(landing.trials) != 1 || fmt.Sprint(landing.trials[0]) != fmt.Sprint(landing.seen[0]) {
+		t.Errorf("expected mw-e.2 tried on main alone by the rig's rules, got %+v", landing.trials)
 	}
 	r := a.report
 	if len(r.Merged) != 1 || r.Merged[0].ID != "mw-e.1" {

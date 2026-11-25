@@ -119,11 +119,12 @@ type BatchMetrics interface {
 // naming the batch's commit and its own merge commit, with a chain stamp and a
 // ledger line naming the batch; the rig's checkout is brought up, and the
 // after-landing command and the grist smoke run once. A set-aside story stays
-// queued, and the Mayor is mailed its name and its conflict.
+// queued, or is handed back (handBackRepeaters), and the Mayor is mailed its name
+// and its conflict.
 //
 // A red gate, a batch of which nothing merged, and a push that fails push
-// nothing: the batch is held, every story in it stays queued, and the Mayor is
-// mailed each story and why. The fixer that mends a held batch is Land Rush 5's;
+// nothing: the batch is held, every story in it not handed back stays queued, and
+// the Mayor is mailed each story and why. The fixer that mends a held batch is Land Rush 5's;
 // a batch of which nothing merged only because every branch conflicts is given
 // it too.
 //
@@ -211,9 +212,11 @@ type BatchStory struct {
 	ByFixer bool
 	// ConflictSetAsides is how many batches, this one included, set the story
 	// aside for a conflict (BatchConflictsField); HandedBack says this one gave it
-	// back to a Builder to rebase, for the second time (MaxBatchConflicts).
-	ConflictSetAsides int
-	HandedBack        bool
+	// back to a Builder: for the second time (MaxBatchConflicts), or at once when
+	// it ConflictsWithTarget, not merging into the target even without its mates.
+	ConflictSetAsides   int
+	HandedBack          bool
+	ConflictsWithTarget bool
 
 	detail StoryDetail
 	path   domain.Path
@@ -699,10 +702,10 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	// of which every branch was set aside for its conflicts is given it before
 	// the push: only when nothing is left for the fixer to merge, or none can
 	// start, is that batch held. A batch of which some branches merged lands
-	// those first, tested as merged, and the ones set aside stay queued: the green
-	// part is never held for a fixer, which a slow one held for 13 hours in
-	// batch 595 of lampas (mw-qqxlwm3.2). The next batch finds them alone, and
-	// gives them the fixer then.
+	// those first, tested as merged, and the ones set aside are not waited for:
+	// the green part is never held for a fixer, which a slow one held for 13
+	// hours in batch 595 of lampas (mw-qqxlwm3.2). handBackRepeaters says which
+	// of them stay queued.
 	if b.mayFix() && report.conflicted() && len(report.Merged) == 0 {
 		why := fmt.Sprintf("%s set aside for conflicts", strings.Join(storyIDs(report.SetAside), ", "))
 		if !b.fix(ctx, dir, rigDir, rules, report, why, nr) {
@@ -918,17 +921,7 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union domai
 		landed, err := n.mergeBy(ctx, dir, s.Branch, union)
 		if err != nil {
 			if Conflicted(err) {
-				s.Conflicts = ConflictLines(err.Error())
-				s.Why = "it conflicts with the batch: " + strings.Join(s.Conflicts, "; ")
-				s.ConflictFiles = ConflictFiles(err)
-				if len(s.ConflictFiles) > 0 {
-					s.Why += ". " + ConflictedFilesLine(s.ConflictFiles)
-				}
-				fields := map[string]string{}
-				if len(s.ConflictFiles) > 0 {
-					fields[ConflictFilesField] = strings.Join(s.ConflictFiles, ",")
-				}
-				b.countSetAside(ctx, &s, report, fields)
+				b.countConflict(ctx, &s, err, rigDir, union, report)
 			} else {
 				s.Why = "it could not be merged: " + firstLine(err.Error())
 				b.countSetAside(ctx, &s, report, nil)
@@ -1245,7 +1238,7 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 	}
 	outcome := fmt.Sprintf("landed %s on %s, %d stories: %s\n", report.Commit, report.Target, len(report.Merged), strings.Join(storyIDs(report.Merged), ", "))
 	if !report.Landed {
-		outcome = fmt.Sprintf("held: %s\nnothing was pushed; %s stays at %s, and every story in the batch stays queued\n", report.Held, report.Target, report.Base)
+		outcome = fmt.Sprintf("held: %s\nnothing was pushed; %s stays at %s, and every story in the batch stays queued unless named below as handed back\n", report.Held, report.Target, report.Base)
 	}
 	if !report.Landed {
 		outcome += report.fixerBundleLines()
@@ -1258,7 +1251,7 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 		outcome += fmt.Sprintf("held red alone again, handed back to a Builder: %s\n", strings.Join(storyIDs(report.RedAloneBack), ", "))
 	}
 	if len(back) > 0 {
-		outcome += fmt.Sprintf("set aside for a conflict again, handed back to a Builder to rebase: %s\n", strings.Join(storyIDs(back), ", "))
+		outcome += fmt.Sprintf("set aside, handed back to a Builder to rebase: %s\n", strings.Join(storyIDs(back), ", "))
 	}
 	files := []struct{ name, contents string }{
 		{BatchOrderFile, report.mergeOrder()},
@@ -1370,7 +1363,7 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 		fmt.Fprintf(&body, "mw land on %s landed %s on %s at %s, but set these aside; each stays queued (run=queued, open and claimed) for a later batch, unless it says it was handed back to a Builder to rebase:\n\n",
 			n.Host, report.Label(), report.Target, shortCommit(report.Commit))
 	} else {
-		fmt.Fprintf(&body, "mw land on %s held %s: %s.\nNothing was pushed: %s stays at %s on %s. Every story below stays queued (run=queued, open and claimed).\n\n",
+		fmt.Fprintf(&body, "mw land on %s held %s: %s.\nNothing was pushed: %s stays at %s on %s. Every story below stays queued (run=queued, open and claimed), unless it says it was handed back to a Builder to rebase.\n\n",
 			n.Host, report.Label(), firstLine(report.heldWhy()), report.Target, shortCommit(report.Base), n.remote())
 	}
 	listed := report.SetAside
@@ -1571,7 +1564,7 @@ func (r BatchReport) String() string {
 		}
 	} else {
 		fmt.Fprintf(&b, "  HELD    %s\n", firstLine(r.Held))
-		fmt.Fprintf(&b, "          nothing was pushed; every story in the batch stays queued\n")
+		fmt.Fprintf(&b, "          nothing was pushed; every story in the batch not handed back stays queued\n")
 	}
 	switch {
 	case r.Checkout.Moved:

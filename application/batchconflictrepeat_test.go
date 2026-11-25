@@ -57,9 +57,10 @@ func aLaterBatch(a aSetAsideBatch, number int) aSetAsideBatch {
 }
 
 func TestAStorySetAsideForAConflictTwiceInARowIsHandedBackToBeRebasedNotQueuedAgain(t *testing.T) {
-	a := aBatchOf(t, 3, "mw-e.1")
+	a := aBatchOf(t, 3, "mw-e.2")
+	a.landing.onlyBesideMates("mw-e.2")
 	a = aQueuedClaim(t, a)
-	const id = "mw-e.1"
+	const id = "mw-e.2"
 
 	a.run(t)
 	if got := a.tracker.State(id, application.RunState); got != application.RunQueued {
@@ -87,17 +88,19 @@ func TestAStorySetAsideForAConflictTwiceInARowIsHandedBackToBeRebasedNotQueuedAg
 	if joined := strings.Join(second.report.Notes, "\n"); !strings.Contains(joined, id+" was handed back") {
 		t.Errorf("expected a note in the report that %s was handed back, got %q", id, second.report.Notes)
 	}
-	for _, other := range []string{"mw-e.2", "mw-e.3"} {
+	for _, other := range []string{"mw-e.1", "mw-e.3"} {
 		if got := second.tracker.State(other, application.RunState); got != application.RunQueued && !second.report.Landed {
 			t.Errorf("expected %s untouched, got run=%q", other, got)
 		}
 	}
 }
 
-// A story set aside for a conflict that has not conflicted before is not handed back:
-// the next batch may find it merging, once what it conflicted with has landed.
+// A story set aside for a conflict with its batch mates that has not conflicted
+// before is not handed back: the next batch may find it merging, once what it
+// conflicted with has landed.
 func TestAStorySetAsideForAConflictOnceStaysQueued(t *testing.T) {
 	a := aBatchOf(t, 3, "mw-e.2")
+	a.landing.onlyBesideMates("mw-e.2")
 	a = aQueuedClaim(t, a)
 	a.run(t)
 
