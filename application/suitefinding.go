@@ -8,6 +8,21 @@ import (
 )
 
 var _ FindingRechecker = Suite{}
+var _ FindingRecheckerAt = Suite{}
+
+// RecheckFindingAt runs a finding's command in a worktree of its own cut at the
+// commit rev names, the finder's own (mw-gq6.1733): a command that passes there
+// reproduces nothing of the finding. It counts no lines.
+func (s Suite) RecheckFindingAt(ctx context.Context, rig, rev, command string) (FindingAnswer, error) {
+	rigDir, known := s.Rigs[rig]
+	if !known {
+		return FindingAnswer{}, fmt.Errorf("%s is no rig of this host: the config file's [rigs] table does not name it", rig)
+	}
+	if rev == "" || command == "" {
+		return FindingAnswer{}, fmt.Errorf("a finding is read at a commit only for a command and a commit: got %q and %q", command, rev)
+	}
+	return s.recheckFinding(ctx, rig, rigDir, rev, command, nil)
+}
 
 // RecheckFinding reads a finding against the head of rig's origin, in a
 // worktree of its own (mw-gq6.1245): it runs command there when it is not empty,
@@ -19,7 +34,12 @@ func (s Suite) RecheckFinding(ctx context.Context, rig, command string, files []
 	if !known {
 		return FindingAnswer{}, fmt.Errorf("%s is no rig of this host: the config file's [rigs] table does not name it", rig)
 	}
-	dir, head, release, err := s.cutTree(ctx, rig, rigDir, RecheckTreePrefix)
+	return s.recheckFinding(ctx, rig, rigDir, "", command, files)
+}
+
+// recheckFinding is RecheckFinding in the tree cut at rev (empty: origin's head).
+func (s Suite) recheckFinding(ctx context.Context, rig, rigDir, rev, command string, files []FindingLine) (FindingAnswer, error) {
+	dir, head, release, err := s.cutTreeAt(ctx, rig, rigDir, RecheckTreePrefix, rev)
 	if err != nil {
 		return FindingAnswer{}, err
 	}

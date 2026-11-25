@@ -1115,6 +1115,14 @@ func foundScriptWord(word string) bool {
 	return strings.HasPrefix(strings.TrimPrefix(word, "./"), "scripts/")
 }
 
+// FindingRecheckerAt is a FindingRechecker that can also run a finding's
+// command at a commit of the rig's own history, the finder's: a command that
+// passes there already reproduces nothing of the finding (mw-gq6.1733).
+type FindingRecheckerAt interface {
+	FindingRechecker
+	RecheckFindingAt(ctx context.Context, rig, rev, command string) (FindingAnswer, error)
+}
+
 // foundSpecAsk is a SpecRechecker for one finding, so that the read of main is
 // made under the host's gate lock as a bug's own re-run is (rerunUnderGate).
 type foundSpecAsk struct {
@@ -1181,7 +1189,79 @@ func (n Next) findingOnMain(ctx context.Context, c *closeOut, report *NextReport
 		report.Notes = append(report.Notes, fmt.Sprintf("the finding of %s was not read against main, so its bug is filed: %s: %s", c.id, bug.item.What, firstLine(err.Error())))
 		return false, ""
 	}
-	return foundFixedOnMain(ask.command, ask.files, ask.answer)
+	fixed, how = foundFixedOnMain(ask.command, ask.files, ask.answer)
+	if !fixed || ask.command == "" {
+		return fixed, how
+	}
+	// A command that passes on main is a fix only if it failed where the finder
+	// saw the fault unfixed; at landing time main is the finder's own tree, so a
+	// test that already passed there passes on main whatever was fixed
+	// (mw-gq6.1733).
+	if !n.reproducedAtFinder(ctx, c, report, ask.command) {
+		return false, ""
+	}
+	return fixed, how
+}
+
+// finderRev is the commit a landing's report says the story's work came to
+// target as, taken to the finder's own tree: the story's tip when the merge made
+// a commit of its own (its second parent), else the commit itself.
+func finderRev(landed Landed) string {
+	if landed.Commit == "" {
+		return ""
+	}
+	if landed.FastForward {
+		return landed.Commit
+	}
+	return landed.Commit + "^2"
+}
+
+// reproducedAtFinder says whether command shows the fault at the finder's own
+// commit: it failed there, or it named a test that commit did not have. When it
+// does not (it passed there), or the commit could not be read, a note says why
+// and the bug is filed (mw-gq6.1733).
+func (n Next) reproducedAtFinder(ctx context.Context, c *closeOut, report *NextReport, command string) bool {
+	at, ok := n.FindingChecks.(FindingRecheckerAt)
+	rev := finderRev(report.How)
+	if !ok || rev == "" {
+		report.Notes = append(report.Notes, fmt.Sprintf("the command `%s` of the finding of %s was not run at the finder's commit, so it is not known to reproduce the finding and its bug is filed", command, c.id))
+		return false
+	}
+	askCtx, cancel := context.WithTimeout(ctx, foundCheckBound)
+	defer cancel()
+	// The finder's commit is read under the same gate lock as main was.
+	var answer FindingAnswer
+	_, err := rerunUnderGate(askCtx, foundAtAsk{func(ctx context.Context, rig string) (FindingAnswer, error) {
+		return at.RecheckFindingAt(ctx, rig, rev, command)
+	}, &answer}, n.GateLock, DispatchGateWait, n.Host, c.id, c.path.Rig, "", func(note string) {
+		report.Notes = append(report.Notes, note)
+	})
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the command `%s` of the finding of %s was not run at the finder's commit %s, so its bug is filed: %s", command, c.id, short(rev), firstLine(err.Error())))
+		return false
+	}
+	if !answer.Ran {
+		report.Notes = append(report.Notes, fmt.Sprintf("the command `%s` of the finding of %s did not run at the finder's commit %s, so its bug is filed", command, c.id, short(rev)))
+		return false
+	}
+	ran := !foundNoTestsToRun.MatchString(answer.Tail) || !strings.HasPrefix(command, "go test")
+	if answer.Passed && ran {
+		report.Notes = append(report.Notes, fmt.Sprintf("the command `%s` passes at the finder's commit %s too, so it does not reproduce the finding of %s; its bug is filed", command, short(answer.Sha), c.id))
+		return false
+	}
+	return true
+}
+
+// foundAtAsk is a SpecRechecker for a finding's command at the finder's commit.
+type foundAtAsk struct {
+	run    func(ctx context.Context, rig string) (FindingAnswer, error)
+	answer *FindingAnswer
+}
+
+func (a foundAtAsk) Recheck(ctx context.Context, rig, _ string) (SpecRecheck, error) {
+	var err error
+	*a.answer, err = a.run(ctx, rig)
+	return SpecRecheck{Sha: a.answer.Sha}, err
 }
 
 // foundCheckBound is the longest a read of main for one finding may take.
