@@ -213,7 +213,8 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		return filed, nil
 	}
 
-	if how := f.fixedOnMain(ctx, testerID, path.Rig, TesterLandedCommit(tester), finding); how != "" {
+	how, failedAt := f.fixedOnMain(ctx, testerID, path.Rig, TesterLandedCommit(tester), finding)
+	if how != "" {
 		filed.FixedOnMain = how
 		f.say("not filed: already fixed on main: %s (%s)\n", finding.Title, how)
 		f.say("  put 'already fixed on main' under the finding in FINDINGS\n")
@@ -263,7 +264,7 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		EpicID:      landed.EpicID,
 		Standalone:  landed.EpicID == "",
 		Title:       title,
-		Description: testerFindingDescription(landedID, testerID, finding),
+		Description: testerFindingDescription(landedID, testerID, finding, failedAt),
 		Acceptance:  strings.TrimSpace(finding.Acceptance),
 		Priority:    testerFindingPriority(finding.Kind),
 		Overrides:   path,
@@ -384,9 +385,12 @@ func passingDepFault(err error) bool {
 // fixedOnMain is how the acceptance of a bug finding passes on main as merged
 // now, or empty: for a taste finding, an acceptance that names no cheap command,
 // or a read of main that could not be made, which is said and files the finding.
-func (f TesterFiler) fixedOnMain(ctx context.Context, testerID, rig, seenAt string, finding TesterFinding) string {
+// failedAt is the commit of main the command was seen to fail at, which the
+// story filed names as its main's sha (mw-gq6.1742); it is empty when the
+// command was not seen to fail.
+func (f TesterFiler) fixedOnMain(ctx context.Context, testerID, rig, seenAt string, finding TesterFinding) (how, failedAt string) {
 	if f.Main == nil || finding.Kind != TesterKindBug {
-		return ""
+		return "", ""
 	}
 	command := ""
 	for _, line := range strings.Split(finding.Acceptance, "\n") {
@@ -398,7 +402,7 @@ func (f TesterFiler) fixedOnMain(ctx context.Context, testerID, rig, seenAt stri
 		}
 	}
 	if command == "" {
-		return ""
+		return "", ""
 	}
 	ask := &foundSpecAsk{checks: f.Main, command: command}
 	askCtx, cancel := context.WithTimeout(ctx, foundCheckBound)
@@ -406,18 +410,21 @@ func (f TesterFiler) fixedOnMain(ctx context.Context, testerID, rig, seenAt stri
 	_, err := rerunUnderGate(askCtx, ask, f.GateLock, DispatchGateWait, f.Host, testerID, rig, "", func(note string) { f.say("  note: %s\n", note) })
 	if err != nil {
 		f.say("  note: the finding was not read against main, so it is filed: %s\n", firstLine(err.Error()))
-		return ""
+		return "", ""
+	}
+	if ask.answer.Ran && !ask.answer.Passed {
+		return "", ask.answer.Sha
 	}
 	fixed, how := foundFixedOnMain(command, nil, ask.answer)
 	if !fixed {
-		return ""
+		return "", ""
 	}
 	// A command that passes on main is a fix only if it failed where the Tester
 	// saw the fault: the commit its story names (mw-gq6.1736).
 	if !f.reproducedWhereSeen(ctx, testerID, rig, seenAt, command) {
-		return ""
+		return "", ""
 	}
-	return how
+	return how, ""
 }
 
 // reproducedWhereSeen says whether command shows the fault at seenAt, the commit
@@ -468,7 +475,15 @@ func orStandalone(epic string) string {
 // testerFindingDescription is the body of a filed finding: the finding as the
 // Tester wrote it, where it came from, the shot, a suggested fix marked as
 // provisional, and how the Governor would see it fixed.
-func testerFindingDescription(landed, tester string, finding TesterFinding) string {
+//
+// failedAt is the commit the finding's command was seen to fail at, when it
+// was: the story then ends with the line 'Main's sha: <commit>' that mw suite
+// and mw next write, so a dispatch that finds the check passing on a main that
+// has moved closes it as fixed, and holds it when main is that very commit. A
+// story with no such line is one nothing showed to have failed (its command
+// passed where the Tester saw the fault, did not run, or named none), and a
+// dispatch holds it when its check passes (mw-gq6.1742).
+func testerFindingDescription(landed, tester string, finding TesterFinding, failedAt string) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(finding.Finding))
 	fmt.Fprintf(&b, "\n\n%s. Source: Tester on %s (%s).\n", TesterFindingMarker, landed, tester)
@@ -479,6 +494,9 @@ func testerFindingDescription(landed, tester string, finding TesterFinding) stri
 		fmt.Fprintf(&b, "Suggested fix: %s: %s\n", TesterProvisionalFix, fix)
 	}
 	fmt.Fprintf(&b, "\nHOW TO CHECK IT, for the Governor:\n%s\n", strings.TrimSpace(finding.HowToCheck))
+	if failedAt = strings.TrimSpace(failedAt); failedAt != "" {
+		fmt.Fprintf(&b, "\nMain's sha: %s\n", failedAt)
+	}
 	return b.String()
 }
 
