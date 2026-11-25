@@ -212,6 +212,7 @@ func newCheckCmd() *cobra.Command {
 				SpecChecks:     checks,
 				NamedChecks:    checks,
 				Changes:        worktrees,
+				AddedLines:     worktrees,
 				Slot:           slot,
 				GateLock:       gateLock,
 				Parts:          checks,

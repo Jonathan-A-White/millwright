@@ -541,6 +541,11 @@ type Next struct {
 	// neither.
 	Changes BranchChanges
 
+	// AddedLines reads the lines a story's branch adds, so that a branch whose
+	// own diff says it is unfinished is refused unless the closing comment
+	// accepts the gap (mw-gq6.1713). Nil looks at none.
+	AddedLines BranchAddedLines
+
 	// Errors is the common-errors register a landing reads to say, of a bug's
 	// 'For common errors:' line, whether its class is already there
 	// (mw-gq6.420). A nil Errors reads every class as new.
@@ -2175,6 +2180,13 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		return found
 	}
 
+	// What the commits add that says the work is unfinished: a line the story's
+	// own diff marks as unfinished is not a landing unless the closing comment
+	// accepts the gap (mw-gq6.1713).
+	if refusal, refused := n.unfinishedMarkRefusal(ctx, c, report, base); refused && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+		return found
+	}
+
 	// What the formula says the session was to do. A step still open is a step
 	// the session did not do, whatever the code looks like.
 	// A check (all) only reads: it says the closing-comment step would be closed.
@@ -2551,51 +2563,6 @@ func (n Next) closingCommentRefusal(ctx context.Context, c *closeOut, report *Ne
 	return Refusal{ReasonNoClosingComment, fmt.Sprintf("the formula of %s is finished, but the story has no closing comment written after its newest commit", c.id),
 		"A closing comment has HOW TO CHECK IT, for the Governor (or the line 'Internal: nothing for the Governor to look at') and 'For the rig memory:'. " +
 			"A closed 'Write the closing comment' step is not one: write the comment on the story, after the last commit, and run mw next again."}, true
-}
-
-// StubCommentBytes is the size under which a comment after a story's newest
-// commit is a stub, not a closing comment (mw-gq6.1045).
-const StubCommentBytes = 40
-
-// StubCommentCure is what a stub closing comment is told: bd 1.3.0 reads no
-// stdin dash, so 'bd comments add <id> -' posts the text '-'.
-const StubCommentCure = "bd comments add takes -f <file>, not -"
-
-// StubHeldSaid is what the HELD: comment of a story held for a stub closing
-// comment adds to why it is held.
-const StubHeldSaid = "Its work is done and committed; the Mayor writes the closing comment and releases it."
-
-// quoteStub is a stub comment between single quotes, as the refusal quotes it.
-func quoteStub(text string) string { return "'" + strings.TrimSpace(text) + "'" }
-
-// byteCount is n with its unit: '1 byte', '3 bytes'.
-func byteCount(n int) string {
-	if n == 1 {
-		return "1 byte"
-	}
-	return fmt.Sprintf("%d bytes", n)
-}
-
-// stubCommentOnStory is the newest comment written after the newest commit of
-// the story's branch when it is under StubCommentBytes, and whether there is
-// one. A read that failed is the error, not a no.
-func (n Next) stubCommentOnStory(ctx context.Context, c *closeOut, report *NextReport, base string) (string, bool, error) {
-	committed, comments, err := n.newestCommitAndComments(ctx, c, report, base)
-	if err != nil {
-		return "", false, err
-	}
-	var newest time.Time
-	var text string
-	found := false
-	for _, comment := range comments {
-		if comment.Created.After(committed) && !comment.Created.Before(newest) {
-			newest, text, found = comment.Created, strings.TrimSpace(comment.Text), true
-		}
-	}
-	if !found || len(text) >= StubCommentBytes {
-		return "", false, nil
-	}
-	return text, true, nil
 }
 
 // bulletList is lines, one to a line, each after a '- '.

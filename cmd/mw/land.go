@@ -184,11 +184,12 @@ func newLandCmd() *cobra.Command {
 				return err
 			}
 			next := withHostNextRoom(application.Next{
-				Tracker:   gateway,
-				Worktrees: worktrees,
-				Landing:   worktrees,
-				Changes:   worktrees,
-				Checks:    checks,
+				Tracker:    gateway,
+				Worktrees:  worktrees,
+				Landing:    worktrees,
+				Changes:    worktrees,
+				AddedLines: worktrees,
+				Checks:     checks,
 
 				// The batch's gate runs the rig's related-tests line when it has
 				// one, on the union of its stories' files (mw-gq6.601), and the
