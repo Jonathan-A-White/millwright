@@ -97,3 +97,33 @@ func TestADispatchHoldsAFoundBugThatPassesAtTheShaItFailedAt(t *testing.T) {
 		t.Errorf("the bug's status is %q, want it held (%q)", d.Status, apptest.StatusDeferred)
 	}
 }
+
+// A finding that quotes "main at <sha>" in its own words does not make its bug
+// one that failed at that commit: only the 'Main's sha:' line the filing writes
+// does, so a bug with none is held when its check passes (mw-gq6.1741).
+func TestADispatchHoldsAFoundBugWhoseFindingQuotesAMainAtSha(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aFoundBug(t, tracker, "mw-gq6.1")
+	d, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted := strings.Replace(d.Description, "> A clip is dropped (src/audio.ts:12)", "> A clip is dropped on main at 21bc605 (src/audio.ts:12)", 1)
+	if quoted == d.Description {
+		t.Fatal("the fixture's quoted line was not found")
+	}
+	if err := tracker.SetDescription("mw-gq6.1", quoted); err != nil {
+		t.Fatal(err)
+	}
+	dispatch.Rechecks = &stubRechecks{answer: application.SpecRecheck{Spec: greekSpec, Sha: "9f3c2ab41d0e", Passed: true, Tests: 3, Tail: "  3 passed\n"}}
+
+	if _, err := dispatch.Run(context.Background()); err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got := tracker.CloseReason("mw-gq6.1"); got != "" {
+		t.Errorf("the bug was closed as %q: its quoted finding names a main, but its description has no Main's sha line", got)
+	}
+	if d, _ := tracker.ShowStory(context.Background(), "mw-gq6.1"); d.Status != apptest.StatusDeferred {
+		t.Errorf("the bug's status is %q, want it held (%q)", d.Status, apptest.StatusDeferred)
+	}
+}
