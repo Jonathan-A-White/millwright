@@ -302,3 +302,38 @@ func TestReleaseQueuedHeldByLeavesAClaimTakenAgainBySameActorAlone(t *testing.T)
 		t.Errorf("expected no update, got %q", asked)
 	}
 }
+
+// CommentOnStoryIfQueued reads the story back and writes no comment on one that
+// is no longer queued for batch landing (mw-gq6.1744).
+func TestCommentOnStoryIfQueuedWritesNothingOnAStoryNoLongerQueued(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"show": `[{"id": "t-1", "assignee": "mw@elsewhere", "status": "in_progress", "labels": ["run:running"]}]`,
+	})
+	err := gateway.CommentOnStoryIfQueued(context.Background(), "t-1", "stays queued")
+	if !errors.Is(err, application.ErrStoryMovedOn) {
+		t.Fatalf("expected an error wrapping ErrStoryMovedOn, got %v", err)
+	}
+	asked, rerr := os.ReadFile(log)
+	if rerr != nil {
+		t.Fatalf("reading what bd was asked: %v", rerr)
+	}
+	if strings.Contains(string(asked), "comment") {
+		t.Errorf("expected no comment, got %q", asked)
+	}
+}
+
+func TestCommentOnStoryIfQueuedCommentsOnAStoryStillQueued(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"show": `[{"id": "t-1", "assignee": "mw@laptop", "status": "in_progress", "labels": ["run:queued"]}]`,
+	})
+	if err := gateway.CommentOnStoryIfQueued(context.Background(), "t-1", "stays queued"); err != nil {
+		t.Fatalf("commenting: %v", err)
+	}
+	asked, rerr := os.ReadFile(log)
+	if rerr != nil {
+		t.Fatalf("reading what bd was asked: %v", rerr)
+	}
+	if !strings.Contains(string(asked), "comment t-1 stays queued") {
+		t.Errorf("expected the comment, got %q", asked)
+	}
+}

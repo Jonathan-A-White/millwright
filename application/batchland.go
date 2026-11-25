@@ -845,7 +845,6 @@ func (b BatchLand) noteSetAside(ctx context.Context, report *BatchReport) {
 		}
 		line := fmt.Sprintf("%s was set aside by %s (%s); the other %s landed on %s at %s without waiting for it, and it stays queued",
 			s.ID, report.Label(), firstLine(s.Why), countStories(len(report.Merged)), report.Target, shortCommit(report.Commit))
-		report.Notes = append(report.Notes, line)
 		next := "This story stays queued."
 		if len(s.Conflicts) > 0 {
 			next = fmt.Sprintf("This story stays queued; if the next batch sets it aside for a conflict too, it is handed back to a Builder to rebase it on %s.", report.Target)
@@ -854,7 +853,21 @@ func (b BatchLand) noteSetAside(ctx context.Context, report *BatchReport) {
 		}
 		comment := fmt.Sprintf("Set aside by %s: %s\nThe other %s landed on %s at %s without waiting for it. %s",
 			report.Label(), s.Why, countStories(len(report.Merged)), report.Target, shortCommit(report.Commit), next)
-		if err := writeRetrying(ctx, n, nil, "the note on a story set aside", func() error { return n.Tracker.CommentOnStory(ctx, s.ID, comment) }); err != nil {
+		left := false
+		err := writeRetrying(ctx, n, nil, "the note on a story set aside", func() error {
+			err := n.Tracker.CommentOnStoryIfQueued(ctx, s.ID, comment)
+			if errors.Is(err, ErrStoryMovedOn) {
+				left = true // a retry landed since the re-read above: its note would be false
+				return nil
+			}
+			return err
+		})
+		if left {
+			report.Notes = append(report.Notes, b.leftAloneNote(s.ID))
+			continue
+		}
+		report.Notes = append(report.Notes, line)
+		if err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the note saying why %s was set aside could not be written on it: %v", s.ID, err))
 		}
 	}

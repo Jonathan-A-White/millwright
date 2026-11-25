@@ -1046,6 +1046,18 @@ func (g *Gateway) CommentOnStory(ctx context.Context, id, text string) error {
 	return err
 }
 
+// CommentOnStoryIfQueued implements application.WorkTracker: the story is read
+// back just before the comment, and one no longer queued for batch landing is
+// left without it, the error wrapping application.ErrStoryMovedOn (mw-gq6.1744).
+// A story that cannot be read is taken to be queued still, as the batch's own
+// re-read takes it.
+func (g *Gateway) CommentOnStoryIfQueued(ctx context.Context, id, text string) error {
+	if detail, err := g.ShowStory(ctx, id); err == nil && !application.QueuedForBatch(detail) {
+		return fmt.Errorf("%s is no longer queued for batch landing, so nothing was written: %w", id, application.ErrStoryMovedOn)
+	}
+	return g.CommentOnStory(ctx, id, text)
+}
+
 // StoryComments implements application.WorkTracker. bd lists them oldest first;
 // they are put in that order here too, by the time each says it was left, so
 // that a caller taking the newest never depends on it.
