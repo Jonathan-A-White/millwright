@@ -29,3 +29,16 @@ func (f *FakeTracker) ReleaseQueuedHeldBy(_ context.Context, id, holder string, 
 		return nil
 	})
 }
+
+// CommentOnStoryIfQueued implements application.WorkTracker: the comment is
+// written only on a story still labelled queued for batch landing, in the one
+// write; a story that is not is left as it is and the error wraps
+// application.ErrStoryMovedOn.
+func (f *FakeTracker) CommentOnStoryIfQueued(ctx context.Context, id, text string) error {
+	f.note("CommentOnStoryIfQueued")
+	detail, err := f.ShowStory(ctx, id)
+	if err == nil && !application.QueuedForBatch(detail) {
+		return fmt.Errorf("comment on %s: it is no longer queued: %w", id, application.ErrStoryMovedOn)
+	}
+	return f.CommentOnStory(ctx, id, text)
+}

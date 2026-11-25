@@ -996,6 +996,15 @@ type WorkTracker interface {
 	// CommentOnStory appends one comment to a story.
 	CommentOnStory(ctx context.Context, id, text string) error
 
+	// CommentOnStoryIfQueued is CommentOnStory for a note that is true only of a
+	// story still queued for batch landing, as the batch's "stays queued" note is:
+	// the story is read in the same call, just before the comment, and one that is
+	// no longer queued (mw retry gave it a new attempt since the caller read it) is
+	// left without the comment and the error wraps ErrStoryMovedOn (mw-gq6.1744).
+	// A comment cannot be conditional in bd itself, so the span left is one read
+	// and one write, not the caller's whole run.
+	CommentOnStoryIfQueued(ctx context.Context, id, text string) error
+
 	// StoryComments lists the comments left on a story, oldest first. It reads
 	// and writes nothing, and a story with no comments has an empty list.
 	StoryComments(ctx context.Context, id string) ([]Comment, error)
@@ -1041,7 +1050,7 @@ func (e *ClaimHeldError) Error() string {
 	return fmt.Sprintf("%s is already claimed by %s, so it was not taken", e.ID, e.Holder)
 }
 
-// ErrStoryMovedOn is what ReleaseQueuedHeldBy's error wraps when the story is no
+// ErrStoryMovedOn is what ReleaseQueuedHeldBy's and CommentOnStoryIfQueued's error wraps when the story is no
 // longer held by the actor it was read as held by: nothing was written, and the
 // claim and run state on it are another attempt's (mw-gq6.1738).
 var ErrStoryMovedOn = errors.New("the story has changed hands since it was read")
