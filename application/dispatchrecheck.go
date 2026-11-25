@@ -37,6 +37,21 @@ func namesAnySha(description string) bool {
 	return namedShas.MatchString(description)
 }
 
+// withoutQuoted is a found bug's description less the lines that quote the
+// finding ('> ' lines): what a Builder wrote there, 'main at <sha>' included, is
+// not a commit the bug's command was seen to fail at, which only the 'Main's sha:'
+// line of the filing says (mw-gq6.1741).
+func withoutQuoted(description string) string {
+	lines := strings.Split(description, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if !strings.HasPrefix(line, ">") {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
 // settlePassedBug is what a dispatch does with a bug whose check passed on its
 // rig's main. When main is the very sha the bug names, no story has landed since
 // it failed, so nothing fixed it: it failed and passed at one commit, which is a
@@ -54,10 +69,15 @@ func namesAnySha(description string) bool {
 // label but names a sha on the same terms, and is held the same (mw-gq6.1742).
 func (d Dispatch) settlePassedBug(ctx context.Context, detail StoryDetail, rig string, check BugCheck, found SpecRecheck, report *DispatchReport) (said string, fixed bool) {
 	id := detail.Story.ID
-	if namesSha(detail.Description, found.Sha) {
+	description := detail.Description
+	foundAtClose := slices.Contains(detail.Labels, LabelFoundAtClose)
+	if foundAtClose {
+		description = withoutQuoted(description)
+	}
+	if namesSha(description, found.Sha) {
 		return d.holdFlakyBug(ctx, id, rig, check, found, report)
 	}
-	if finder := findingsFinder(detail); finder != "" && !namesAnySha(detail.Description) {
+	if finder := findingsFinder(detail); finder != "" && !namesAnySha(description) {
 		return d.holdFoundBug(ctx, id, rig, finder, check, found, report)
 	}
 	one := FixedOnMain{StoryID: id, Spec: check.String(), Sha: found.Sha, Tests: found.Tests}
