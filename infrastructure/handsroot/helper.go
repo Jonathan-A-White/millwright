@@ -260,7 +260,7 @@ func (h Helper) execute(ctx context.Context, req domain.HandsRequest, stdout, st
 	cmd.Stdout, cmd.Stderr = stdout, stdout
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 10 * time.Second
 	err := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		fmt.Fprintf(stderr, "mw-hands-root: gave up on step %s after %s\n", req.ID, h.Timeout)

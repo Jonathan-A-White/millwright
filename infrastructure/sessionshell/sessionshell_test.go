@@ -14,6 +14,10 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
+// pipeGrace is how long these tests let a finished line close its output: they
+// want to see a process the line leaves running not hold it, so it stays short.
+const pipeGrace = time.Second
+
 func TestShellQuoteLeavesPlainWordsAloneAndWrapsTheRest(t *testing.T) {
 	for _, word := range []string{"claude", "--model", "/a/b/boot.md", "a,b=c+d%e@f:g"} {
 		if got := ShellQuote(word); got != word {
@@ -349,7 +353,7 @@ func TestHeartbeatLineEndsWhenTheHarnessEndsAtOnce(t *testing.T) {
 				cmd := exec.CommandContext(ctx, shell, "-c", line)
 				cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 				cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-				cmd.WaitDelay = time.Second
+				cmd.WaitDelay = pipeGrace
 				if err := cmd.Run(); err != nil {
 					t.Errorf("expected the line to end cleanly within 20s, got %v (%q)", err, line)
 				}
@@ -375,7 +379,7 @@ func TestHeartbeatLogKeepsTheHeartbeatsWordsAndIsNotHeldByWhatTheHarnessLeaves(t
 	cmd := exec.CommandContext(ctx, "sh", "-c", line)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = pipeGrace
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("expected the line to end within 15s, got %v", err)
 	}

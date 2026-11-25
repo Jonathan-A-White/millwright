@@ -62,7 +62,9 @@ func (Host) OldHomeAnswers(ctx context.Context, ssh []string, wait time.Duration
 
 	cmd := exec.CommandContext(ctx, ssh[0], args...)
 	// A ProxyCommand's own child can hold ssh's output open after ssh is killed.
-	cmd.WaitDelay = time.Second
+	// Five seconds, not one (a loaded host closes a pipe late, mw-gq6.1746), and
+	// not ten: a stalled ssh must still end the question well inside ten.
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return true, nil
@@ -321,7 +323,7 @@ func CreateBeadsUserOn(ctx context.Context, port, user, password string) (string
 		sqlString(user), sqlString(password), sqlString(user))
 
 	cmd := exec.CommandContext(ctx, "dolt", "--host", "127.0.0.1", "--port", port, "--user", "root", "--no-tls", "sql")
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 10 * time.Second
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "DOLT_CLI_PASSWORD=") {
 			cmd.Env = append(cmd.Env, kv)
@@ -464,7 +466,7 @@ func (h Host) MayorUp(ctx context.Context) (bool, string, error) {
 func run(ctx context.Context, dir, program string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 10 * time.Second
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

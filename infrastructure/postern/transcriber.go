@@ -61,7 +61,7 @@ func (t *CommandTranscriber) Transcribe(ctx context.Context, audioPath string) (
 	cmd := exec.CommandContext(ctx, t.argv[0], args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 10 * time.Second
 	var out, errs bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errs
 	if err := cmd.Run(); err != nil {
