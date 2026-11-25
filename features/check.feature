@@ -29,6 +29,18 @@ Feature: Checking a branch before its session ends
     And the check prints: undefined: Ledger
     And the check wrote nothing to the tracker, the ledger, the vault or git
 
+  Scenario: A What's new line the rig's changelog check refuses fails the check
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the rig's file in the vault names the changelog check "! grep -qw maths public/changelog.json"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" carries the closing comment "Done.\nWhat's new: New: A maths topic"
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the check prints: the rig's changelog check fails with the story's What's new line written into public/changelog.json, CHANGELOG.md
+    And the check prints: A maths topic
+
   Scenario: Tests that could not be run are not reported as failing
     Given the rig's tests cannot be run, saying "make: go: No such file or directory"
     When a session checks "mw-gq6.1"

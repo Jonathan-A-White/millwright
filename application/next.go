@@ -2203,6 +2203,12 @@ func (n Next) refusalsRead(ctx context.Context, c *closeOut, report *NextReport,
 		return found
 	}
 
+	// The story's What's new line, checked as the landing will write it, before
+	// any gate or trusted pass: neither has seen it (changelogcheck.go).
+	if refusal, refused := n.changelogCheckRefusal(ctx, c, report, base); refused && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+		return found
+	}
+
 	// A batch landing trusts mw check's own run at this very commit, and does
 	// not run the rig's tests, or the changed specs after them, a second time:
 	// the batch's gate runs them again on the merged result (plans/0117, Q2).

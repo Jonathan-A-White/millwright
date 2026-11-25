@@ -21,6 +21,8 @@ import (
 // registerNextChangelogSteps registers the changelog steps of features/next.feature.
 func registerNextChangelogSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's file in the vault also names the changelog files "([^"]*)" and "([^"]*)"$`, c.theRigNamesChangelogFiles)
+	ctx.Given(`^the rig's file in the vault names the changelog check "([^"]*)"$`, c.theRigNamesAChangelogCheck)
+	ctx.When(`^the story "([^"]*)" is then given the closing comment "([^"]*)"$`, c.theStoryCarriesTheClosingComment)
 	ctx.Given(`^the rig's main already holds a changelog with the entry "([^"]*)" saying "([^"]*)"$`, c.theRigsMainHoldsAChangelog)
 	ctx.Given(`^the story "([^"]*)" seeded a changelog entry "([^"]*)" saying "([^"]*)"$`, c.theStorySeededAnEntry)
 	ctx.Given(`^the story "([^"]*)" added the version files at "([^"]*)"$`, c.theStoryAddedVersionFiles)
@@ -44,6 +46,17 @@ func (c *nextContext) theRigNamesChangelogFiles(first, second string) error {
 	}
 	defer f.Close()
 	_, err = fmt.Fprintf(f, "changelog_files = [%q, %q]\n", first, second)
+	return err
+}
+
+func (c *nextContext) theRigNamesAChangelogCheck(command string) error {
+	path := filepath.Join(c.vault, application.RigsDir, c.rigKey()+vault.RigFileExt)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "changelog_check = '%s'\n", command)
 	return err
 }
 
