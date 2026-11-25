@@ -905,8 +905,12 @@ type WorkTracker interface {
 	// unassigned, conditional on holder, the actor the story was read as assigned
 	// to (an empty holder asks for a story nobody holds). A story that has changed
 	// hands since the read, as mw retry gives a new attempt, is left exactly as it
-	// is and the error wraps ErrStoryMovedOn (mw-gq6.1738).
-	ReleaseQueuedHeldBy(ctx context.Context, id, holder string) error
+	// is and the error wraps ErrStoryMovedOn (mw-gq6.1738). It is conditional on
+	// the claim too: claimedAt is when the claim the story was read under was
+	// made (StoryDetail.ClaimedAt; zero asks for no such check), so a claim given
+	// back and taken again by the same actor, as a same-host retry does, is as
+	// moved on as one taken by another (mw-gq6.1743).
+	ReleaseQueuedHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error
 
 	// ClearRunState takes every run:* label (RunStates) and the run state they
 	// record off a story, in one write, as a claim does. A give-back keeps

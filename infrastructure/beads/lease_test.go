@@ -261,7 +261,7 @@ func TestReleaseQueuedHeldByClearsTheRunStateAndGivesTheClaimBackInOneGuardedUpd
 	gateway, log := leaseStandIn(t, map[string]string{
 		"update": `[{"id": "t-1"}]`,
 	})
-	if err := gateway.ReleaseQueuedHeldBy(context.Background(), "t-1", "mw@laptop"); err != nil {
+	if err := gateway.ReleaseQueuedHeldBy(context.Background(), "t-1", "mw@laptop", time.Time{}); err != nil {
 		t.Fatalf("releasing: %v", err)
 	}
 	asked, err := os.ReadFile(log)
@@ -278,5 +278,27 @@ func TestReleaseQueuedHeldByClearsTheRunStateAndGivesTheClaimBackInOneGuardedUpd
 		if want := "--remove-label run:" + run; !strings.Contains(string(asked), want) {
 			t.Errorf("expected bd to be asked %q, got %q", want, asked)
 		}
+	}
+}
+
+// A claim given back and taken again by the same actor is the same holder, which
+// bd's guard cannot tell from the claim the caller read: ReleaseQueuedHeldBy
+// reads the story back and writes nothing when its claim was made at another
+// time (mw-gq6.1743).
+func TestReleaseQueuedHeldByLeavesAClaimTakenAgainBySameActorAlone(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"show": `[{"id": "t-1", "assignee": "mw@laptop", "status": "in_progress", "metadata": {"claimed_at": "2026-11-25T09:00:00Z"}}]`,
+	})
+	read := time.Date(2026, 11, 25, 8, 0, 0, 0, time.UTC)
+	err := gateway.ReleaseQueuedHeldBy(context.Background(), "t-1", "mw@laptop", read)
+	if !errors.Is(err, application.ErrStoryMovedOn) {
+		t.Fatalf("expected an error wrapping ErrStoryMovedOn, got %v", err)
+	}
+	asked, rerr := os.ReadFile(log)
+	if rerr != nil {
+		t.Fatalf("reading what bd was asked: %v", rerr)
+	}
+	if strings.Contains(string(asked), "update") {
+		t.Errorf("expected no update, got %q", asked)
 	}
 }
