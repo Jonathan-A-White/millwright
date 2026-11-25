@@ -417,7 +417,8 @@ func (b BatchLand) afterFixer(ctx context.Context, dir, rigDir string, report *B
 // in every one, since the batch was red as a whole.
 func (r BatchReport) resolvedByFixer(id string) bool {
 	f := r.Fixer
-	if f == nil || !f.Started {
+	// A fixer that failed mended nothing, whatever the batch landed.
+	if f == nil || !f.Started || f.Failed != "" {
 		return false
 	}
 	for _, merged := range f.Merged {
@@ -738,7 +739,9 @@ func holdsAll(have, want []string) bool {
 // line of its records, never another hold (mw-gq6.865).
 func (b BatchLand) bundleFixer(ctx context.Context, dir string, report *BatchReport) {
 	f := report.Fixer
-	if f == nil || !f.Started || f.Stopped != nil || f.From == "" || b.Records == nil {
+	// What it kept already, for a batch made again without a story (mw-qqxlwm3.6),
+	// is not kept twice.
+	if f == nil || !f.Started || f.Stopped != nil || f.From == "" || b.Records == nil || f.Bundle != "" || f.BundleSaid != "" {
 		return
 	}
 	n := b.Next
