@@ -1877,11 +1877,13 @@ func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, erro
 	}
 	queues := map[string]batchQueue{}
 	for _, detail := range work.Queued() {
-		path, err := detail.Path()
-		if err != nil {
-			continue
+		// A story whose path cannot be read is counted where the batch will
+		// answer it (handBackUnreadablePath): in the rig its own path names.
+		rig := detail.Merged().Rig
+		if path, err := detail.Path(); err == nil {
+			rig = path.Rig
 		}
-		b.addToQueue(queues, rigs, path.Rig, detail.Story.ID, detail.QueuedAt)
+		b.addToQueue(queues, rigs, rig, detail.Story.ID, detail.QueuedAt)
 	}
 	return finishQueues(queues), nil
 }
@@ -1896,8 +1898,17 @@ func finishQueues(queues map[string]batchQueue) map[string]batchQueue {
 }
 
 // addToQueue counts a story queued at queuedAt in the queue of its rig, if the
-// rig is checked out on this host.
+// rig is checked out on this host. A story that names no rig (its path cannot be
+// read, and nothing says whose it is) is answered by whichever batch reads it
+// first, so it is counted in the first rig of this host by name.
 func (b *BatchLandings) addToQueue(queues map[string]batchQueue, rigs map[string]string, rig, id string, queuedAt time.Time) {
+	if rig == "" {
+		for name := range rigs {
+			if rig == "" || name < rig {
+				rig = name
+			}
+		}
+	}
 	if _, here := rigs[rig]; !here {
 		return
 	}

@@ -167,7 +167,7 @@ func (c keptConn) QueryContext(_ context.Context, query string, _ []driver.Named
 			return &keptRows{cols: cols, rows: [][]driver.Value{
 				{"lp-2", `{"queued_at":"2026-10-18T09:30:00Z"}`, epic, "open", int64(0), int64(1)},
 				{"lp-1", `{"queued_at":"2026-10-18T09:00:00Z","size":"S"}`, epic, "in_progress", int64(1), int64(0)},
-				{"lp-3", `{}`, nil, "open", int64(0), int64(0)}, // no epic, so no path: not a story a rig can land
+				{"lp-3", `{}`, nil, "open", int64(0), int64(0)}, // no epic, so no path: read with no rig, for the batch to answer (mw-gq6.1747)
 				{"mw-1", `{"rig":"millwright"}`, epic, "open", int64(1), int64(1)},
 			}}, nil
 		}
@@ -392,10 +392,11 @@ func TestQueuedStoriesAreReadOverTheKeptConnectionWithoutStartingABd(t *testing.
 	want := []application.QueuedStory{
 		{ID: "lp-2", Rig: "lampas", QueuedAt: time.Date(2026, 10, 18, 9, 30, 0, 0, time.UTC), Status: "open", Blocked: true},
 		{ID: "lp-1", Rig: "lampas", QueuedAt: time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC), Status: "in_progress", Claimed: true},
+		{ID: "lp-3", Status: "open"},
 		{ID: "mw-1", Rig: "millwright", Status: "open", Claimed: true, Blocked: true},
 	}
 	if !reflect.DeepEqual(queued, want) {
-		t.Fatalf("expected the two lampas stories and the millwright one, got %+v", queued)
+		t.Fatalf("expected the two lampas stories, the one with no rig and the millwright one, got %+v", queued)
 	}
 	if got := bdsStarted(t, asked); got != 0 {
 		t.Fatalf("expected no bd started, got %d", got)

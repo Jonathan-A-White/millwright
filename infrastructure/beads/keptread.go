@@ -459,7 +459,8 @@ func (g *Gateway) QueuedStories(ctx context.Context) ([]application.QueuedStory,
 }
 
 // readQueuedStories reads the queued stories from db. A story whose Path is not
-// a whole one is left out, as a listing of the work in hand leaves it out.
+// a whole one is read with the rig its path names, which may be none: the batch
+// that lands that rig answers it (mw-gq6.1747).
 func readQueuedStories(ctx context.Context, db *sql.DB) ([]application.QueuedStory, error) {
 	bounded, cancel := context.WithTimeout(ctx, headQueryBound)
 	defer cancel()
@@ -478,13 +479,16 @@ func readQueuedStories(ctx context.Context, db *sql.DB) ([]application.QueuedSto
 			return nil, err
 		}
 		story := bead{ID: id, Metadata: metadataOf(own)}
-		path, err := domain.Story{Overrides: domain.PathFromMetadata(story.pathMetadata())}.
-			PathFrom(domain.PathFromMetadata(bead{Metadata: metadataOf(parent)}.pathMetadata()))
-		if err != nil {
-			continue
+		defaults := domain.PathFromMetadata(bead{Metadata: metadataOf(parent)}.pathMetadata())
+		storyPath := domain.PathFromMetadata(story.pathMetadata())
+		// A path that is not a whole one is still queued: the batch answers
+		// it, so the rig it names (none, maybe) is kept (mw-gq6.1747).
+		rig := defaults.Overlay(storyPath).Rig
+		if path, err := (domain.Story{Overrides: storyPath}).PathFrom(defaults); err == nil {
+			rig = path.Rig
 		}
 		stories = append(stories, application.QueuedStory{
-			ID: id, Rig: path.Rig, QueuedAt: story.queuedAt(), Status: status, Claimed: claimed, Blocked: blocked,
+			ID: id, Rig: rig, QueuedAt: story.queuedAt(), Status: status, Claimed: claimed, Blocked: blocked,
 		})
 	}
 	return stories, rows.Err()
