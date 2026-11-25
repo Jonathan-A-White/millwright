@@ -238,3 +238,52 @@ func TestRetryRepathedOfAnUnclaimedHandedBackStoryHasNoClaimToGiveBack(t *testin
 		t.Errorf("the RE-PATHED: comment should follow the hand-back, got %q", got)
 	}
 }
+
+// A --hold never dispatches the story again, so the next Builder cannot hand it
+// back the same way: the claim is given back and the story held with no
+// RE-PATHED: comment (mw-gq6.1719).
+func TestRetryHoldOnAHandedBackStoryNeedsNoRepathed(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	if err := tracker.CommentOnStoryAt("mw-gq6.1", handBackText, handedBackOn); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	retry := aRetry(tracker, &fakeRetryLanding{NoWorktree: true}, &apptest.FakeVaultFiles{}, &out)
+	retry.Hold = true
+
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil || !report.ClaimReleased || !report.Held || report.RePathed {
+		t.Fatalf("expected the claim given back and the story held, got %+v, %v\n%s", report, err, out.String())
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !detail.Held() || detail.Assignee != "" {
+		t.Errorf("expected the story held and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+	for _, text := range tracker.Comments("mw-gq6.1") {
+		if strings.HasPrefix(text, application.RePathedMark) {
+			t.Errorf("no RE-PATHED: comment should be written under --hold, got %q", tracker.Comments("mw-gq6.1"))
+		}
+	}
+}
+
+// An exhausted story is refused a plain retry, which would have it started
+// again, and held under --hold, which does not (mw-gq6.1719).
+func TestRetryHoldOfAStoryWithItsAttemptsSpentHoldsItAndAPlainRetryStillRefuses(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	retry := aRetry(tracker, &fakeRetryLanding{NoWorktree: true}, &apptest.FakeVaultFiles{}, &strings.Builder{})
+	retry.MaxAttempts = 1
+
+	if _, err := retry.Run(context.Background(), "mw-gq6.1"); err == nil || !strings.Contains(err.Error(), "attempts exhausted") {
+		t.Fatalf("expected a plain retry refused at attempts exhausted, got %v", err)
+	}
+	retry.Hold = true
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil || !report.ClaimReleased || !report.Held {
+		t.Fatalf("expected --hold to give the claim back and hold the story, got %+v, %v", report, err)
+	}
+}
