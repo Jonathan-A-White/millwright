@@ -21,6 +21,24 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// On a busy host the output of a git that has ended can take more than a second
+// to close and be read to its end. The stand-in leaves a short sleep holding the
+// pipe to stand for that: the command succeeded, and is not reported as failed.
+func TestAGitThatSucceededIsNotFailedForOutputThatClosesLate(t *testing.T) {
+	program := filepath.Join(t.TempDir(), "git")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\necho said\nsleep 2 &\n"), 0o755); err != nil {
+		t.Fatalf("writing the stand-in for git: %v", err)
+	}
+
+	out, err := gitcmd.Command(context.Background(), program, t.TempDir(), "status").Output()
+	if err != nil {
+		t.Fatalf("expected a git that exited 0 to succeed, got %v", err)
+	}
+	if string(out) != "said\n" {
+		t.Errorf("expected all it printed, got %q", out)
+	}
+}
+
 // A stand-in git writes what it was given to a file, so the test can check the
 // command without a real stalled connection.
 func TestACommandRunsInAProcessGroupOfItsOwnWithGitsGuards(t *testing.T) {
