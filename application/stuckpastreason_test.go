@@ -101,3 +101,58 @@ func TestStuckPastReasonLeavesAnIcedStoryAndAnUnparentedOneInItsOwnGroup(t *test
 		t.Errorf("output does not say 'no epic':\n%s", out)
 	}
 }
+
+// pastReasonHeld adds a held story under mw-e1 whose comments are given in
+// order, and returns whether the survey lists it as past its reason. mw-e1.1
+// (closed) is the bead the comments name.
+func pastReasonHeld(t *testing.T, comments ...string) bool {
+	t.Helper()
+	f := pastReasonFixture(t)
+	f.graph.Add("mw-e1.20", "under test", "deferred", "task", nil, domain.BeadEdge{To: "mw-e1", Kind: domain.EdgeParentChild})
+	f.tracker.AddStory("mw-s", domain.Story{ID: "mw-e1.20", Title: "under test"})
+	for _, text := range comments {
+		mustDo(t, f.tracker.CommentOnStory(t.Context(), "mw-e1.20", text))
+	}
+	for _, group := range f.find(t).PastReason {
+		for _, hold := range group.Holds {
+			if hold.ID == "mw-e1.20" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestStuckPastReasonIsNotPastWhileADateInItsHoldIsAhead(t *testing.T) {
+	// stuckNow is 2026-10-19.
+	if pastReasonHeld(t, "HELD: 2026-12-16 check; waits on mw-e1.1 landing and being verified") {
+		t.Error("a hold naming a closed bead and 2026-12-16 is past its reason on 2026-10-19")
+	}
+	// The date stands in a later comment, the hold itself being the bead alone.
+	if pastReasonHeld(t, "HELD: waits on mw-e1.1", "Mayor 12: its dep is met; stays HELD for its date: run this on or after 2026-12-16") {
+		t.Error("a hold whose later comment names a date ahead is past its reason")
+	}
+	if !pastReasonHeld(t, "HELD: 2026-10-01 check; waits on mw-e1.1") {
+		t.Error("a hold naming a closed bead and a date gone by is not past its reason")
+	}
+	if !pastReasonHeld(t, "HELD: on or after 2026-10-19; waits on mw-e1.1") {
+		t.Error("a hold naming today's date is not past its reason")
+	}
+}
+
+func TestStuckPastReasonIsNotPastWhileItWaitsOnTheGovernor(t *testing.T) {
+	for _, comments := range [][]string{
+		{"HELD: waits on mw-e1.1 and his word on the colour"},
+		{"HELD: mw-e1.1 landed; waits for his answer"},
+		{"HELD: waits on mw-e1.1", "Mayor 1031: HELD for the Governor. The fix is a design choice he makes."},
+		{"HELD: waits on mw-e1.1", "QUESTION for Monday: which fix, A or B?"},
+		{"HELD: waits on mw-e1.1", "OVER-CLAIM: held over the claim of mw@laptop: the story needs the Governor's design choice"},
+	} {
+		if pastReasonHeld(t, comments...) {
+			t.Errorf("a hold that waits on the Governor is past its reason: %q", comments)
+		}
+	}
+	if !pastReasonHeld(t, "HELD: waits on mw-e1.1 and the file it makes") {
+		t.Error("a hold on a closed bead alone is not past its reason")
+	}
+}

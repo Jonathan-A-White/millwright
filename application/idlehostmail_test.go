@@ -44,6 +44,10 @@ func anIdleHost(t *testing.T, mail bool) (dispatch *application.Dispatch, tracke
 	heldBehind("mw-gq6.10", "mw-gq6.9")
 	heldBehind("mw-gq6.11", "mw-gq6.9")
 	heldBehind("mw-gq6.12", "mw-gq6.1")
+	// Rightly held though the bead they name has closed: a date still ahead of
+	// the clock (2026-11-22), and the Governor's word.
+	heldBehind("mw-gq6.13", "mw-gq6.9, and stays held for its date: run this on or after 2026-12-16")
+	heldBehind("mw-gq6.14", "mw-gq6.9 and the Governor's answer")
 
 	tick = func(after time.Duration) {
 		t.Helper()

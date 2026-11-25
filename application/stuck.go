@@ -184,7 +184,8 @@ type StuckFinder interface {
 // Apart from the roots, it lists the held stories past their reason
 // (StuckReport.PastReason): held, no blocker unfinished, no label that gives a
 // reason, whose newest hold comment names beads in the graph that have all
-// closed. A story whose reason names one still open, or names no bead, is not.
+// closed. A story whose reason names one still open, or names no bead, is not;
+// nor is one whose hold also waits for a date still ahead or the Governor's word.
 //
 // A root is listed only when some live bead (open or in progress, not an epic)
 // waits behind it over 'blocks' links, through live beads only. It reads and
@@ -248,7 +249,7 @@ func (s StuckSurvey) Find(ctx context.Context) (StuckReport, error) {
 				roots = append(roots, root)
 			}
 		}
-		pastReason = pastReasonHolds(byID, unlabelled, said)
+		pastReason = pastReasonHolds(byID, unlabelled, said, now)
 	}
 	if s.Claims != nil {
 		stale, err := s.Claims.StaleClaims(ctx, now.Add(-StuckClaimAge))
@@ -311,12 +312,13 @@ var beadRef = regexp.MustCompile(`\bmw-[a-z0-9]+(?:\.[0-9]+)*\b`)
 
 // pastReasonHolds are the held stories among ids whose newest hold comment
 // names beads of the graph that have all closed (and at least one), grouped by
-// epic: the epics in id order, those with no parent last.
-func pastReasonHolds(byID map[string]domain.GraphBead, ids []string, said map[string][]Comment) []StuckEpicHolds {
+// epic: the epics in id order, those with no parent last. A hold whose words
+// still stand beyond the beads (holdStillStands) is not past its reason.
+func pastReasonHolds(byID map[string]domain.GraphBead, ids []string, said map[string][]Comment, now time.Time) []StuckEpicHolds {
 	byEpic := map[string][]StuckPastReason{}
 	for _, id := range ids {
 		reason := newestHoldComment(said[id])
-		if reason == "" {
+		if reason == "" || holdStillStands(said[id], now) {
 			continue
 		}
 		var closed []string
@@ -357,6 +359,42 @@ func pastReasonHolds(byID map[string]domain.GraphBead, ids []string, said map[st
 		return groups[a].Epic < groups[b].Epic
 	})
 	return groups
+}
+
+// isoDate is a date written YYYY-MM-DD in a hold's words.
+var isoDate = regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}\b`)
+
+// waitsOnGovernor matches the phrasing hold comments use for a wait on the
+// Governor: 'HELD for the Governor', 'the Governor's design choice', 'his word',
+// 'his answer', and a question put to him ('QUESTION for ...').
+var waitsOnGovernor = regexp.MustCompile(`(?i)\bfor the governor\b|\bon the governor\b|\bthe governor's (word|answer|call|choice|decision|design choice)\b|\bhis (word|answer|call|choice|decision|design choice|question)\b|^\s*question for\b`)
+
+// holdStillStands is whether the newest hold comment, or a comment after it,
+// says the hold waits on more than the beads it names: a date (YYYY-MM-DD) that
+// is still ahead of now, or the Governor's word. A date is ahead when its day
+// has not begun (UTC); the day itself is past.
+func holdStillStands(comments []Comment, now time.Time) bool {
+	last := -1
+	for n := len(comments) - 1; n >= 0; n-- {
+		if IsHoldComment(comments[n].Text) {
+			last = n
+			break
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	for _, c := range comments[last:] {
+		if waitsOnGovernor.MatchString(c.Text) {
+			return true
+		}
+		for _, day := range isoDate.FindAllString(c.Text, -1) {
+			if at, err := time.Parse("2006-01-02", day); err == nil && at.After(now) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // newestHoldComment is the text of the last comment IsHoldComment accepts, the
