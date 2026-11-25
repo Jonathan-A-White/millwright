@@ -315,7 +315,7 @@ func (a ApartProcess) scope(ctx context.Context) string {
 	ask, cancel := context.WithTimeout(ctx, apartScopeAsk)
 	defer cancel()
 	probe := exec.CommandContext(ask, "systemctl", "--user", "is-system-running")
-	probe.WaitDelay = time.Second
+	probe.WaitDelay = 10 * time.Second
 	if out, err := probe.Output(); err != nil && len(out) == 0 {
 		return ""
 	}

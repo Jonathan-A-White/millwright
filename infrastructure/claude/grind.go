@@ -411,7 +411,7 @@ func (g *Grinder) Grind(ctx context.Context, call application.GrindCall) (applic
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 10 * time.Second
 	var out, errs bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errs
 	runErr := cmd.Run()
@@ -497,7 +497,7 @@ func (g *Grinder) Warm(call application.GrindCall) (application.WarmSession, err
 	cmd.Dir = call.Dir
 	cmd.Env = GrindEnv(g.environ(), call)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 10 * time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

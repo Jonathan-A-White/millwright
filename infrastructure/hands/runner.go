@@ -98,7 +98,7 @@ func (r Runner) Run(ctx context.Context, job application.HandsJob) (application.
 	cmd.Stdout, cmd.Stderr = output, output
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 10 * time.Second
 
 	err = cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {

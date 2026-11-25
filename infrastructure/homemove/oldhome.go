@@ -67,7 +67,7 @@ func (Host) remote(ctx context.Context, ssh []string, script string) (stdout str
 	args := append([]string{"-o", "BatchMode=yes", "-o", "ServerAliveInterval=15"}, ssh[1:]...)
 	args = append(args, "sh -c "+quote(remoteEnv+script))
 	cmd := exec.CommandContext(ctx, ssh[0], args...)
-	cmd.WaitDelay = time.Second
+	cmd.WaitDelay = 10 * time.Second
 	var out, errs bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errs
 	runErr := cmd.Run()
