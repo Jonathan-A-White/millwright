@@ -339,7 +339,7 @@ func TestABoxWhoseOnlyClaimIsQueuedForABatchGoesIdleAndIsDestroyed(t *testing.T)
 	now := time.Date(2026, 10, 30, 23, 30, 0, 0, time.UTC)
 	tracker := queuedOnBox(t)
 	for _, id := range []string{"mw-q.2", "mw-q.3"} {
-		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1"); err != nil {
+		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1", time.Time{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -389,7 +389,7 @@ func TestABoxHoldingARigsLiveBatchClaimIsNotIdleAndIsNotDestroyedUnderTheLanding
 	now := time.Date(2026, 11, 24, 4, 50, 0, 0, time.UTC)
 	tracker := queuedOnBox(t)
 	for _, id := range []string{"mw-q.2", "mw-q.3"} {
-		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1"); err != nil {
+		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1", time.Time{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -438,7 +438,7 @@ func TestABatchClaimHeldByAnotherHostDoesNotKeepABoxUp(t *testing.T) {
 	now := time.Date(2026, 11, 24, 4, 50, 0, 0, time.UTC)
 	tracker := queuedOnBox(t)
 	for _, id := range []string{"mw-q.2", "mw-q.3"} {
-		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1"); err != nil {
+		if err := tracker.ReleaseClaimHeldBy(context.Background(), id, "mw@cloud1", time.Time{}); err != nil {
 			t.Fatal(err)
 		}
 	}

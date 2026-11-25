@@ -167,7 +167,7 @@ func TestReleaseClaimHeldByNamesTheHolderAsTheGuard(t *testing.T) {
 	gateway, log := leaseStandIn(t, map[string]string{
 		"update": `[{"id": "t-1"}]`,
 	})
-	if err := gateway.ReleaseClaimHeldBy(context.Background(), "t-1", "mw@desktop"); err != nil {
+	if err := gateway.ReleaseClaimHeldBy(context.Background(), "t-1", "mw@desktop", time.Time{}); err != nil {
 		t.Fatalf("releasing: %v", err)
 	}
 	asked, err := os.ReadFile(log)
@@ -185,7 +185,7 @@ func TestHoldClaimHeldByLeavesTheStoryDeferredInTheOneUpdate(t *testing.T) {
 	gateway, log := leaseStandIn(t, map[string]string{
 		"update": `[{"id": "t-1"}]`,
 	})
-	if err := gateway.HoldClaimHeldBy(context.Background(), "t-1", "mw@laptop"); err != nil {
+	if err := gateway.HoldClaimHeldBy(context.Background(), "t-1", "mw@laptop", time.Time{}); err != nil {
 		t.Fatalf("holding: %v", err)
 	}
 	asked, err := os.ReadFile(log)
@@ -300,6 +300,37 @@ func TestReleaseQueuedHeldByLeavesAClaimTakenAgainBySameActorAlone(t *testing.T)
 	}
 	if strings.Contains(string(asked), "update") {
 		t.Errorf("expected no update, got %q", asked)
+	}
+}
+
+// ReleaseClaimHeldBy and HoldClaimHeldBy are conditional on the claim they were
+// read under as ReleaseQueuedHeldBy is: a claim given back and taken again by
+// the same actor writes nothing (mw-gq6.1751).
+func TestClaimGiveBacksLeaveAClaimTakenAgainBySameActorAlone(t *testing.T) {
+	read := time.Date(2026, 11, 25, 8, 0, 0, 0, time.UTC)
+	for name, giveBack := range map[string]func(*beads.Gateway) error{
+		"release": func(g *beads.Gateway) error {
+			return g.ReleaseClaimHeldBy(context.Background(), "t-1", "mw@laptop", read)
+		},
+		"hold": func(g *beads.Gateway) error {
+			return g.HoldClaimHeldBy(context.Background(), "t-1", "mw@laptop", read)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gateway, log := leaseStandIn(t, map[string]string{
+				"show": `[{"id": "t-1", "assignee": "mw@laptop", "status": "in_progress", "metadata": {"claimed_at": "2026-11-25T09:00:00Z"}}]`,
+			})
+			if err := giveBack(gateway); !errors.Is(err, application.ErrStoryMovedOn) {
+				t.Fatalf("expected an error wrapping ErrStoryMovedOn, got %v", err)
+			}
+			asked, rerr := os.ReadFile(log)
+			if rerr != nil {
+				t.Fatalf("reading what bd was asked: %v", rerr)
+			}
+			if strings.Contains(string(asked), "update") {
+				t.Errorf("expected no update, got %q", asked)
+			}
+		})
 	}
 }
 

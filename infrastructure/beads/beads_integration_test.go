@@ -510,7 +510,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading who holds %s: %v", storyID, err)
 	}
-	if err := gateway.HoldClaimHeldBy(ctx, storyID, claimed.Assignee); err != nil {
+	if err := gateway.HoldClaimHeldBy(ctx, storyID, claimed.Assignee, time.Time{}); err != nil {
 		t.Fatalf("giving back the claim on %s to held: %v", storyID, err)
 	}
 	if detail, err := gateway.ShowStory(ctx, storyID); err != nil || !detail.Held() || detail.Assignee != "" {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -52,7 +53,7 @@ func (s SetAside) Run(ctx context.Context, rig, id, why string) error {
 	if strings.EqualFold(strings.TrimSpace(detail.Status), StatusHeld) {
 		return fmt.Errorf("setting %s aside: it is held already: mw release %s puts it back in the queue", id, id)
 	}
-	if err := givenBackAs(ctx, s.Tracker, id, StatusHeld, holdQueued(ctx, s.Tracker, id, detail.Assignee)); err != nil {
+	if err := givenBackAs(ctx, s.Tracker, id, StatusHeld, holdQueued(ctx, s.Tracker, id, detail.Assignee, detail.ClaimedAt)); err != nil {
 		return fmt.Errorf("setting %s aside: its claim could not be given back held: %w", id, err)
 	}
 	comment := fmt.Sprintf(HeldCommentPrefix+" %s %s\nmw land %s --set-aside on %s took it out of the batch queue. Its branch %s is kept at the origin, its claim was given back and the story is held: the next batch is made of the rest. mw release %s puts it back in the queue.",
@@ -72,11 +73,11 @@ func (s SetAside) Run(ctx context.Context, rig, id, why string) error {
 // host's actor, so bd would refuse a guard naming one that is not there
 // (mw-gq6.1661): it is held with HoldStory, which asks for the story to be
 // unassigned.
-func holdQueued(ctx context.Context, tracker WorkTracker, id, holder string) error {
+func holdQueued(ctx context.Context, tracker WorkTracker, id, holder string, claimedAt time.Time) error {
 	if holder == "" {
 		return tracker.HoldStory(ctx, id)
 	}
-	return tracker.HoldClaimHeldBy(ctx, id, holder)
+	return tracker.HoldClaimHeldBy(ctx, id, holder, claimedAt)
 }
 
 // countConflictSetAside is how many batches have set story id aside for a

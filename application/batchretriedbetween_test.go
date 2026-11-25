@@ -68,7 +68,7 @@ func TestABatchLeavesAloneAStoryRetriedWhileItRanBetween(t *testing.T) {
 			}
 		}
 		must(a.tracker.ClearRunState(ctx, id))
-		must(a.tracker.ReleaseClaimHeldBy(ctx, id, holder))
+		must(a.tracker.ReleaseClaimHeldBy(ctx, id, holder, time.Time{}))
 		must(a.tracker.ClaimAs(id, "mw@elsewhere", time.Now().Add(time.Hour)))
 		must(a.tracker.SetStoryState(ctx, id, application.RunState, application.RunRunning, "retried"))
 	}}
@@ -157,7 +157,7 @@ func TestABatchLeavesAloneAStoryRetriedAndReclaimedBySameActor(t *testing.T) {
 			}
 		}
 		must(a.tracker.ClearRunState(ctx, id))
-		must(a.tracker.ReleaseClaimHeldBy(ctx, id, holder))
+		must(a.tracker.ReleaseClaimHeldBy(ctx, id, holder, time.Time{}))
 		must(a.tracker.ClaimStory(ctx, id)) // the same actor, as the host's dispatch is
 		must(a.tracker.SetStoryMetadata(ctx, id, claimedAt(first.Add(time.Hour))))
 		must(a.tracker.SetStoryState(ctx, id, application.RunState, application.RunRunning, "retried"))

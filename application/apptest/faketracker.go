@@ -1661,28 +1661,32 @@ func (f *FakeTracker) WorkInHand(_ context.Context) (application.WorkInHand, err
 // fake's own Actor, mirroring the real gateway's --if-assignee guard: a claim
 // another actor holds — set up with ClaimAs — is left exactly as it is.
 func (f *FakeTracker) ReleaseClaim(ctx context.Context, id string) error {
-	return f.release(ctx, id, f.me(), "ReleaseClaim")
+	return f.release(ctx, id, f.me(), time.Time{}, "ReleaseClaim")
 }
 
 // ReleaseClaimHeldBy implements application.WorkTracker. It is conditional on
-// the holder named, not the fake's own Actor; an empty holder is the Actor.
-func (f *FakeTracker) ReleaseClaimHeldBy(ctx context.Context, id, holder string) error {
+// the holder named, not the fake's own Actor; an empty holder is the Actor. It is
+// conditional on the claim too, as ReleaseQueuedHeldBy is: a story whose latest
+// claim was made at some other time than claimedAt (zero asks for no check) was
+// given back and taken again since it was read, and the error wraps
+// application.ErrStoryMovedOn.
+func (f *FakeTracker) ReleaseClaimHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error {
 	if holder == "" {
 		holder = f.me()
 	}
-	return f.release(ctx, id, holder, "ReleaseClaimHeldBy")
+	return f.release(ctx, id, holder, claimedAt, "ReleaseClaimHeldBy")
 }
 
 // HoldClaimHeldBy implements application.WorkTracker: ReleaseClaimHeldBy that
 // leaves the story held, not open, in the one write.
-func (f *FakeTracker) HoldClaimHeldBy(ctx context.Context, id, holder string) error {
+func (f *FakeTracker) HoldClaimHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error {
 	if holder == "" {
 		holder = f.me()
 	}
-	return f.release(ctx, id, holder, "HoldClaimHeldBy")
+	return f.release(ctx, id, holder, claimedAt, "HoldClaimHeldBy")
 }
 
-func (f *FakeTracker) release(_ context.Context, id, holder, noted string) error {
+func (f *FakeTracker) release(_ context.Context, id, holder string, claimedAt time.Time, noted string) error {
 	f.note(noted)
 	f.mu.Lock()
 	var fault *ReleaseFault
@@ -1701,6 +1705,9 @@ func (f *FakeTracker) release(_ context.Context, id, holder, noted string) error
 	return f.write(id, func(s *fakeStory) error {
 		if s.detail.Assignee != holder {
 			return fmt.Errorf("release %s: held by %q, not %s", id, s.detail.Assignee, holder)
+		}
+		if !claimedAt.IsZero() && !s.detail.ClaimedAt.Equal(claimedAt) {
+			return fmt.Errorf("release %s: its claim was made at %s, not %s: %w", id, s.detail.ClaimedAt.Format(time.RFC3339), claimedAt.Format(time.RFC3339), application.ErrStoryMovedOn)
 		}
 		if noted == "HoldClaimHeldBy" {
 			s.detail.Status = StatusDeferred
