@@ -40,7 +40,8 @@ func (e ClosedEpic) Line() string {
 // ClosedEpicsWithOpenChildren lists each closed epic with stories not closed
 // under it, the epic with most first. Open children of a closed epic drop out
 // of mw brief and the weighing by vision (mw-gq6.1720). An epic the tracker
-// does not know is passed over.
+// does not know is passed over, and so is a molecule (a formula run, not an
+// epic).
 func ClosedEpicsWithOpenChildren(ctx context.Context, stories TesterStories, tracker WorkTracker) ([]ClosedEpic, error) {
 	all, err := stories.StoriesSince(ctx, time.Time{})
 	if err != nil {
@@ -66,7 +67,9 @@ func ClosedEpicsWithOpenChildren(ctx context.Context, stories TesterStories, tra
 	}
 	var found []ClosedEpic
 	for _, b := range beads {
-		if b.Closed() {
+		// A molecule is a formula run: mw closes its steps, the Mayor never moves
+		// them, and one read mid-close shows a step open under a closed root.
+		if b.Closed() && b.Type != "molecule" && !strings.Contains(b.Story.ID, "-mol-") {
 			found = append(found, ClosedEpic{ID: b.Story.ID, Open: open[b.Story.ID], Reason: b.CloseReason})
 		}
 	}

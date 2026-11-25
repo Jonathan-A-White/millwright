@@ -62,3 +62,34 @@ func TestDoctorNamesAClosedEpicWithOpenChildren(t *testing.T) {
 		t.Errorf("expected ok once its children are closed, got %v: %s", verdict, why)
 	}
 }
+
+// mw-gq6.1725: a closed molecule (a formula run) is not an epic: mw closes its
+// steps, the Mayor never moves them, so a step still open at the read is not
+// work lost under a closed epic.
+func TestAClosedMoleculeIsNotAClosedEpicWithOpenChildren(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	lampas := domain.Path{Rig: "lampas", Branch: "main"}
+	tracker.AddEpic("mw-old", lampas)
+	tracker.AddStory("mw-old", domain.Story{ID: "mw-old.1", Title: "A bug"})
+	tracker.ShutEpic("mw-old", "moved on")
+	for _, id := range []string{"mw-mol-whole", "mw-mol-step"} {
+		tracker.AddStory("", domain.Story{ID: id, Title: "A formula run"})
+		mustDo(t, tracker.SetType(id, "molecule"))
+		mustDo(t, tracker.SetStatus(id, apptest.StatusClosed))
+	}
+	tracker.AddStory("mw-mol-whole", domain.Story{ID: "mw-mol-whole.1", Title: "Understand"})
+	mustDo(t, tracker.SetStatus("mw-mol-whole.1", apptest.StatusClosed))
+	tracker.AddStory("mw-mol-step", domain.Story{ID: "mw-mol-step.1", Title: "Understand"})
+	tracker.AddStory("mw-mol-step", domain.Story{ID: "mw-mol-step.2", Title: "Commit"})
+	mustDo(t, tracker.SetStatus("mw-mol-step.1", apptest.StatusClosed))
+
+	found, err := application.ClosedEpicsWithOpenChildren(ctx, tracker, tracker)
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+
+	if len(found) != 1 || found[0].ID != "mw-old" {
+		t.Errorf("expected only the closed epic mw-old named, got %+v", found)
+	}
+}
