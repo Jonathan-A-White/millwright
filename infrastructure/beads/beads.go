@@ -1280,9 +1280,13 @@ func passingFault(said string) (string, bool) {
 	return "", false
 }
 
-// killGrace is how long a bd that has been told to stop is given to let go of
-// its output before mw stops waiting for it.
-const killGrace = time.Second
+// killGrace is how long a bd that has ended, or been told to stop, is given to
+// let go of its output before mw stops waiting for it. On a busy host a bd that
+// exited 0 can take more than a second to close its output, and a shorter wait
+// reports that success as a failure (mw-gq6.1746). A stop kills the whole
+// process group, which closes the output at once, so a stopped bd does not wait
+// this long.
+const killGrace = 10 * time.Second
 
 // breakerWaits are the waits between the tries of a bd that failed fast because
 // its Dolt client's circuit breaker is open: a little longer than the 5 s
