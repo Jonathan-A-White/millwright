@@ -17,10 +17,14 @@ import (
 
 // redCarrierIn is the carrier of the hold line m records when it is among ids,
 // the stories queued, and its landing is worth trying: a hold whose own batch
-// held the carrier says its fix did not mend main's red, so it waits for main's
-// head as before.
+// was the carrier alone says its fix did not mend main's red, so it waits for
+// main's head as before. A batch that held the carrier with other stories says
+// nothing of it: any of them may have made the red, and the carrier was never
+// tried alone, so it is landed alone and not left for the Mayor (batch 694 of
+// lampas held mw-fnvjof.17.290 with five others, and the follower did not ask
+// again for an hour, mw-gq6.1749).
 func (m BatchMetric) redCarrierIn(ids []string) (string, bool) {
-	if m.MainBug == "" || !slices.Contains(ids, m.MainBug) || slices.Contains(m.IDs, m.MainBug) {
+	if m.MainBug == "" || !slices.Contains(ids, m.MainBug) || slices.Equal(m.IDs, []string{m.MainBug}) {
 		return "", false
 	}
 	return m.MainBug, true
