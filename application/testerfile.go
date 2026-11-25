@@ -474,14 +474,15 @@ func orStandalone(epic string) string {
 
 // testerFindingDescription is the body of a filed finding: the finding as the
 // Tester wrote it, where it came from, the shot, a suggested fix marked as
-// provisional, and how the Governor would see it fixed. failedAt is the commit
-// the finding's command was seen to fail at, when it was: the story then ends
-// with the line 'Main's sha: <commit>' that mw suite and mw next write, so a
-// dispatch that finds the check passing on a main that has moved closes it as
-// fixed, and holds it when main is that very commit. A story with no such line
-// is one nothing showed to have failed (its command passed where the Tester saw
-// the fault, did not run, or named none), and a dispatch holds it when its check
-// passes (mw-gq6.1742).
+// provisional, and how the Governor would see it fixed.
+//
+// failedAt is the commit the finding's command was seen to fail at, when it
+// was: the story then ends with the line 'Main's sha: <commit>' that mw suite
+// and mw next write, so a dispatch that finds the check passing on a main that
+// has moved closes it as fixed, and holds it when main is that very commit. A
+// story with no such line is one nothing showed to have failed (its command
+// passed where the Tester saw the fault, did not run, or named none), and a
+// dispatch holds it when its check passes (mw-gq6.1742).
 func testerFindingDescription(landed, tester string, finding TesterFinding, failedAt string) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(finding.Finding))
