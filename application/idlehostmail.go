@@ -80,7 +80,7 @@ func (d Dispatch) pastReason(ctx context.Context, report *DispatchReport) int {
 	if !ok {
 		return 0
 	}
-	found, err := StuckSurvey{Graph: graph, Comments: d.Tracker}.Find(ctx)
+	found, err := StuckSurvey{Graph: graph, Comments: d.Tracker, Now: d.Now}.Find(ctx)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the holds past their reason could not be counted for the idle-host mail: %v", err))
 		return 0
