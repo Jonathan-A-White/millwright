@@ -407,6 +407,30 @@ func (n Next) gristExampleRefusal(ctx context.Context, c *closeOut, report *Next
 	return Refusal{ReasonGristExampleUnproved, why, said}, true
 }
 
+// keepEarlierPush makes the branch in the worktree one the remote's copy can be
+// fast-forwarded to before it is pushed for the home to prove (mw-gq6.1756): an
+// earlier attempt on another host pushed mw/<id> and its evals failed, so this
+// attempt was cut fresh from the target, and its push would be refused as not a
+// fast-forward for ever. The remote's tip is merged in keeping this attempt's
+// files (Landing.KeepOrigin, as pushQueued does), so it stays reachable and
+// nothing is forced or overwritten; a remote that moves after it was read still
+// refuses the push. It says in a sentence what it kept, "" when nothing, and a
+// tip that could not be read is a note: the push says what is wrong if anything is.
+func (n Next) keepEarlierPush(ctx context.Context, c *closeOut, report *NextReport) string {
+	kept, err := n.Landing.KeepOrigin(ctx, c.worktree, n.remote(), c.branch)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("origin's %s could not be read to merge it in: %s", c.branch, firstLine(err.Error())))
+		return ""
+	}
+	if !kept.Merged {
+		return ""
+	}
+	said := fmt.Sprintf("%s at %s held %s, an earlier attempt's tip this attempt's branch did not contain: merged it in keeping this attempt's files, so it is kept and the branch is now at %s.",
+		c.branch, n.remote(), shortCommit(kept.Remote), shortCommit(kept.Head))
+	report.Notes = append(report.Notes, said)
+	return " " + said
+}
+
 // unprovedFromAHostWithNoMill is what the stop of a branch that adds a grind
 // example says when this host holds no grist test key, so cannot run the live
 // eval and never will (mw-1knt69p): it pushes the branch to the remote, where
@@ -423,7 +447,10 @@ func (n Next) unprovedFromAHostWithNoMill(ctx context.Context, c *closeOut, repo
 	if n.Host != "" {
 		where = fmt.Sprintf("%s holds no grist test key, so it cannot run the live eval a grind example needs. ", n.Host)
 	}
-	var pushed string
+	var pushed, kept string
+	if n.Landing != nil {
+		kept = n.keepEarlierPush(ctx, c, report)
+	}
 	if n.Landing == nil {
 		pushed = "The branch was not pushed: this host has no way to push it."
 		headline = "this host holds no grist test key and could not push the branch"
@@ -435,7 +462,7 @@ func (n Next) unprovedFromAHostWithNoMill(ctx context.Context, c *closeOut, repo
 	} else {
 		c.branchPushed = true
 		headline = fmt.Sprintf("Pushed %s to %s; from the home run %s", c.branch, n.remote(), strings.Join(runs, " and "))
-		pushed = fmt.Sprintf("Pushed %s to %s.", c.branch, n.remote())
+		pushed = fmt.Sprintf("Pushed %s to %s.", c.branch, n.remote()) + kept
 		if n.RetryFromBranch {
 			pushed += " The next attempt, on whichever host takes the story, continues it."
 		}

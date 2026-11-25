@@ -19,6 +19,10 @@ type pushingLanding struct{ *readFailLanding }
 
 func (pushingLanding) Push(context.Context, string, string, string) error { return nil }
 
+func (pushingLanding) KeepOrigin(context.Context, string, string, string) (KeptOrigin, error) {
+	return KeptOrigin{}, nil
+}
+
 func gristProofNext(comments ...Comment) (Next, *closeOut) {
 	at := time.Now()
 	landing := &readFailLanding{committed: at}

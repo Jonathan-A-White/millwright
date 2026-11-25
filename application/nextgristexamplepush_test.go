@@ -20,6 +20,10 @@ func (p *pushedBranches) Push(_ context.Context, dir, remote, branch string) err
 	return p.err
 }
 
+func (p *pushedBranches) KeepOrigin(context.Context, string, string, string) (KeptOrigin, error) {
+	return KeptOrigin{}, nil
+}
+
 func unprovedOn(t *testing.T, key func() bool, landing Landing, comment string) (Refusal, bool, *NextReport) {
 	t.Helper()
 	report := &NextReport{}
