@@ -258,3 +258,29 @@ func landedIDs(r *application.BatchReport) []string {
 	}
 	return ids
 }
+
+// aLandingThatCannotBeMadeAgain opens the batch's first worktree and no other.
+type aLandingThatCannotBeMadeAgain struct{ *aRebuildingLanding }
+
+func (l *aLandingThatCannotBeMadeAgain) OpenLanding(context.Context, string, string) (string, error) {
+	return "", io.ErrClosedPipe
+}
+
+// mw-qqxlwm3.7: findFailingOwner was never called, so a held batch's line did not
+// carry its own suspect. A batch held red that could not be made again without
+// the story whose tests failed still names it, from the failing tests' files.
+func TestAHeldRedBatchLineCarriesTheStoryWhoseTestsFailedAsItsSuspect(t *testing.T) {
+	a := aBatchOfThreeWithARedStory(t, true, "")
+	a.land.Next.Landing = &aLandingThatCannotBeMadeAgain{a.rebuilding}
+	a.checks.passes = []bool{false}
+	a.checks.outputs = []string{redStoryGateOutput}
+	a.land.Fix = false
+	a.run(t)
+
+	if a.report.Landed {
+		t.Fatalf("expected the batch held, got landed with %q", a.report.Held)
+	}
+	if m := a.report.Metric(time.Now()); m.Outcome != application.BatchHeld || !m.Red || m.Suspect != "mw-e.2" {
+		t.Errorf("expected a held red line naming mw-e.2 as its suspect, got %+v", m)
+	}
+}
