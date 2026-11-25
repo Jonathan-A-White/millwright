@@ -121,6 +121,23 @@ Feature: Checking a branch before its session ends
     And the check prints: bd comments add takes -f <file>, not -
     And the check wrote nothing to the tracker, the ledger, the vault or git
 
+  # mw-gq6.1713: a branch whose own diff adds a line that says the work is
+  # unfinished is not a landing unless the closing comment accepts the gap.
+  Scenario: A branch that adds a line saying the work is unfinished fails the check, naming the file and line
+    Given a commit on the branch of "mw-gq6.1" adds the line "// <marker>: only John 3" to "grinds/enduringword.go"
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the check prints: grinds/enduringword.go:3
+    And the check prints: only John 3
+    And the check prints: Accepted gap:
+    And the check wrote nothing to the tracker, the ledger, the vault or git
+
+  Scenario: A closing comment with an Accepted gap line lets such a branch pass the check
+    Given a commit on the branch of "mw-gq6.1" adds the line "// <marker>: only John 3" to "grinds/enduringword.go"
+    And the comment "Built John 3 only.\nAccepted gap: the Mayor files the other chapters as .4.\nInternal: nothing for the Governor to look at\nFor the rig memory:\nnothing" was written on "mw-gq6.1" after its newest commit
+    When a session checks "mw-gq6.1"
+    Then the check passes
+
   Scenario: Every check that fails is printed at once, not only the first
     Given a commit on the branch of "mw-gq6.1" carries "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
     And a formula was poured for "mw-gq6.1" and one of its steps is still open
