@@ -7001,6 +7001,19 @@ rather than adding a second. `none` writes no entry, and a rig without the key w
 changelog. A story that raised the version itself gets its entry under that version in a
 separate commit, `What's new X.Y.Z (<story id>)`. See `features/next.feature`.
 
+Because the line is written only at landing, no gate on a story's branch sees it, and a
+rig whose tests refuse a word in the text it shows would first fail on the batch. Such a
+rig also says `changelog_check = "<command line>"` (single quotes when the command holds
+double ones): its checks of the shown text. Before the story's own gate, and whether or
+not an earlier pass is trusted, `mw check` and `mw next` open a throwaway worktree at the
+story's branch, write the version and the line into it as a landing does (the title when
+there is no `What's new:` line yet), and run the command there. A command that fails stops
+the story as `tests-fail`, naming the line; a new closing comment with another `What's
+new:` line changes it. Nothing is written on the branch. The worktree is fresh, so the
+command installs what it needs first (`npm ci && npx vitest run <file>`). `none`, or a
+rig without the key, runs nothing. mws older than the key stop on it everywhere but at a
+landing, so update the hosts before adding it.
+
 ## Licence
 
 millwright is released under the MIT licence; see [LICENSE](LICENSE).
