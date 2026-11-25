@@ -44,8 +44,9 @@ type talkContext struct {
 // waits until the run named in it has started. A run asked for key points (its
 // --json-schema names key_points, features/grist_talk_cap.feature) answers
 // them, empty when key-points-empty exists, and exits 1 when key-points-fail
-// does.
+// does. Asked --version, it answers as claude does and logs no run.
 const talkStandIn = `#!/bin/sh
+if [ "$*" = --version ]; then echo '2.1.7 (Claude Code)'; exit 0; fi
 dir=$(dirname "$0")
 mode=cold
 case "$*" in *--input-format*) mode=warm;; esac

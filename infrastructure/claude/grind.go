@@ -40,6 +40,9 @@ const GrindTools = "Read"
 type Grinder struct {
 	program       string
 	claudeEnvFile string
+	// versions keeps what program said of its version, read again only
+	// when its install changes.
+	versions *grindVersions
 }
 
 // Grinder satisfies the ports.
@@ -162,7 +165,7 @@ func inheritedEnv(environ []string) []string {
 
 // NewGrinder is the grinder that runs Program.
 func NewGrinder(opts ...GrinderOption) *Grinder {
-	g := &Grinder{program: Program}
+	g := &Grinder{program: Program, versions: &grindVersions{}}
 	for _, opt := range opts {
 		opt(g)
 	}
@@ -372,7 +375,10 @@ func GrindSchema(schema string) (string, error) {
 // too long for an argument (PromptOnStdin), runs in a
 // process group of its own, and is killed with the whole group at the
 // call's timeout. What it prints is its result JSON, read even when it
-// exits non-zero: an error result says why.
+// exits non-zero: an error result says why. The result names the version the
+// program said it was before it ran (HarnessVersion), and so does a result
+// returned with an error once the program has been started, which holds
+// nothing else (mw-gq6.1712).
 func (g *Grinder) Grind(ctx context.Context, call application.GrindCall) (application.SessionResult, error) {
 	args, err := GrindArgs(call)
 	if err != nil {
@@ -385,12 +391,14 @@ func (g *Grinder) Grind(ctx context.Context, call application.GrindCall) (applic
 	if timeout <= 0 {
 		timeout = DefaultGrindTimeout
 	}
+	version := g.harnessVersion(ctx)
+	failed := application.SessionResult{HarnessVersion: version}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	null, err := os.Open(os.DevNull)
 	if err != nil {
-		return application.SessionResult{}, err
+		return failed, err
 	}
 	defer null.Close()
 
@@ -408,22 +416,32 @@ func (g *Grinder) Grind(ctx context.Context, call application.GrindCall) (applic
 	cmd.Stdout, cmd.Stderr = &out, &errs
 	runErr := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return application.SessionResult{}, fmt.Errorf("%w: %s gave up after %s", application.ErrGrindTimedOut, g.program, timeout)
+		return failed, fmt.Errorf("%w: %s gave up after %s", application.ErrGrindTimedOut, g.program, timeout)
 	}
 	if ctx.Err() != nil {
-		return application.SessionResult{}, fmt.Errorf("%s: %w", g.program, ctx.Err())
+		return failed, fmt.Errorf("%s: %w", g.program, ctx.Err())
 	}
 	result, readErr := application.ReadSessionResult(out.String())
 	if readErr != nil {
 		if runErr != nil {
-			return application.SessionResult{}, fmt.Errorf("%s: %w%s", g.program, runErr, lastWords(errs.String()))
+			return failed, fmt.Errorf("%s: %w%s", g.program, runErr, lastWords(errs.String()))
 		}
-		return application.SessionResult{}, fmt.Errorf("%s: %w", g.program, readErr)
+		return failed, fmt.Errorf("%s: %w", g.program, readErr)
 	}
 	if runErr != nil {
 		result.IsError = true
 	}
+	result.HarnessVersion = version
 	return result, nil
+}
+
+// harnessVersion is what the grinder's program says of its own version, or ""
+// when it cannot say: read once for each install of it (grindVersions).
+func (g *Grinder) harnessVersion(ctx context.Context) string {
+	if g.versions == nil {
+		return readGrindVersion(ctx, g.program)
+	}
+	return g.versions.read(ctx, g.program)
 }
 
 // lastWords is the last line a command wrote to its standard error, set
@@ -464,7 +482,8 @@ func WarmArgs(call application.GrindCall) ([]string, error) {
 // call.Dir and a process group of its own, and waits on its standard input:
 // claude loads everything it loads before it reads its message there, and
 // asks the model nothing until it has one. Its input closed with no message,
-// it ends having asked nothing.
+// it ends having asked nothing. Its answer names the version the program said
+// it was before the session was started, as a cold grind's does.
 func (g *Grinder) Warm(call application.GrindCall) (application.WarmSession, error) {
 	args, err := WarmArgs(call)
 	if err != nil {
@@ -473,6 +492,7 @@ func (g *Grinder) Warm(call application.GrindCall) (application.WarmSession, err
 	if err := WriteSystemPrompt(call); err != nil {
 		return nil, err
 	}
+	version := g.harnessVersion(context.Background())
 	cmd := exec.Command(g.program, args...)
 	cmd.Dir = call.Dir
 	cmd.Env = GrindEnv(g.environ(), call)
@@ -482,7 +502,7 @@ func (g *Grinder) Warm(call application.GrindCall) (application.WarmSession, err
 	if err != nil {
 		return nil, err
 	}
-	s := &warmSession{program: g.program, cmd: cmd, stdin: stdin, done: make(chan struct{})}
+	s := &warmSession{program: g.program, version: version, cmd: cmd, stdin: stdin, done: make(chan struct{})}
 	cmd.Stdout, cmd.Stderr = &s.out, &s.errs
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("%s: %w", g.program, err)
@@ -498,6 +518,9 @@ func (g *Grinder) Warm(call application.GrindCall) (application.WarmSession, err
 // message.
 type warmSession struct {
 	program string
+	// version is what program said of its version before the session was
+	// started: its answer's HarnessVersion.
+	version string
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	out     resultLine
@@ -530,10 +553,11 @@ func (s *warmSession) Answer(ctx context.Context, prompt string, timeout time.Du
 	}
 	var message streamMessage
 	message.Type, message.Message.Role, message.Message.Content = "user", "user", prompt
+	failed := application.SessionResult{HarnessVersion: s.version}
 	line, err := json.Marshal(message)
 	if err != nil {
 		s.Retire()
-		return application.SessionResult{}, err
+		return failed, err
 	}
 	// The write may block on a session that reads nothing; it ends when the
 	// session is killed, and an error is the session having ended already.
@@ -549,21 +573,22 @@ func (s *warmSession) Answer(ctx context.Context, prompt string, timeout time.Du
 	case <-s.done:
 	case <-timer.C:
 		s.kill()
-		return application.SessionResult{}, fmt.Errorf("%w: %s gave up after %s", application.ErrGrindTimedOut, s.program, timeout)
+		return failed, fmt.Errorf("%w: %s gave up after %s", application.ErrGrindTimedOut, s.program, timeout)
 	case <-ctx.Done():
 		s.kill()
-		return application.SessionResult{}, fmt.Errorf("%s: %w", s.program, ctx.Err())
+		return failed, fmt.Errorf("%s: %w", s.program, ctx.Err())
 	}
 	result, readErr := application.ReadSessionResult(s.out.last())
 	if readErr != nil {
 		if s.runErr != nil {
-			return application.SessionResult{}, fmt.Errorf("%s: %w%s", s.program, s.runErr, lastWords(s.errs.String()))
+			return failed, fmt.Errorf("%s: %w%s", s.program, s.runErr, lastWords(s.errs.String()))
 		}
-		return application.SessionResult{}, fmt.Errorf("%s: %w", s.program, readErr)
+		return failed, fmt.Errorf("%s: %w", s.program, readErr)
 	}
 	if s.runErr != nil {
 		result.IsError = true
 	}
+	result.HarnessVersion = s.version
 	return result, nil
 }
 

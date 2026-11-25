@@ -489,7 +489,13 @@ type GrindLine struct {
 	// ModelID), where Model is the alias the grind was run with; left out
 	// when the result named none, and on lines written before it was kept.
 	ModelID string `json:"model_id,omitempty"`
-	Effort  string `json:"effort,omitempty"`
+	// HarnessVersion is the Claude Code version that ran the grind, as
+	// `claude --version` prints it (SessionResult's HarnessVersion), so a grind
+	// that answers differently on the mill than in a shell can be laid beside
+	// the shell's own version after the fact; left out when no harness ran or
+	// none was read, and on lines written before it was kept (mw-gq6.1712).
+	HarnessVersion string `json:"harness_version,omitempty"`
+	Effort         string `json:"effort,omitempty"`
 	// Billing is what the grind was billed to: "api" (the key of [grist]
 	// api_credits) or "subscription". A grist that ran no grind, a resting
 	// refusal among them, billed nothing and says "none" (BillingNone); a line

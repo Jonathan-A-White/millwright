@@ -116,9 +116,11 @@ func (c *gristEvalContext) aRigCheckout(kind, model, effort string) error {
 		}
 	}
 	// The stand-in claude: which model, which photo (its content is its
-	// name), and a log line with the directory and the modes it saw.
+	// name), and a log line with the directory and the modes it saw. Asked
+	// --version, it answers as claude does and logs nothing.
 	c.program = filepath.Join(c.root, "claude")
 	script := `#!/bin/sh
+if [ "$*" = --version ]; then echo '2.1.7 (Claude Code)'; exit 0; fi
 model=""
 prompt=""
 while [ $# -gt 0 ]; do

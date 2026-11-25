@@ -84,9 +84,14 @@ func TestGrindSchemaDropsSchemaAndIDAndKeepsDefs(t *testing.T) {
 	}
 }
 
+// standInVersion is what a grind's stand-in for claude says it is.
+const standInVersion = "2.1.7 (Claude Code)"
+
 // grindStandIn writes a shell script standing in for claude and returns its
-// path. It writes its arguments, NUL-separated, its working directory and
-// what its standard input is to files beside itself, then runs body.
+// path. Asked --version, it says standInVersion, as claude does, and nothing
+// else; otherwise it writes its arguments, NUL-separated, its working
+// directory and what its standard input is to files beside itself, then runs
+// body.
 func grindStandIn(t *testing.T, body string) (program, seen string) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -95,6 +100,7 @@ func grindStandIn(t *testing.T, body string) (program, seen string) {
 	seen = t.TempDir()
 	program = filepath.Join(seen, "claude")
 	script := "#!/bin/sh\n" +
+		"if [ \"$*\" = --version ]; then echo '" + standInVersion + "'; exit 0; fi\n" +
 		"printf '%s\\0' \"$@\" > " + filepath.Join(seen, "args") + "\n" +
 		"pwd > " + filepath.Join(seen, "cwd") + "\n" +
 		"readlink /proc/self/fd/0 > " + filepath.Join(seen, "stdin") + "\n" +
