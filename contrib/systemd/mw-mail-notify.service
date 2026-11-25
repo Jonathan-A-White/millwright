@@ -42,4 +42,6 @@ TimeoutStartSec=4min
 # host with: make the kernel's OOM killer pick it first, and cap it so a
 # runaway `mw sync` cannot itself starve the host.
 OOMScoreAdjust=500
-MemoryMax=384M
+# 768M, not 384M: a run logged a 384.5M memory peak with 100.4M of swap, at the
+# old cap, on 2026-11-23 (its usual runs are 16-80M; mw-gq6.1732).
+MemoryMax=768M
