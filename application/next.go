@@ -3311,46 +3311,6 @@ func (n Next) fileCodemapTrim(ctx context.Context, c *closeOut, report *NextRepo
 	report.Notes = append(report.Notes, fmt.Sprintf("filed %s: docs/codemap.md is %d bytes over its %d-byte cap", id, over, codemapCap))
 }
 
-// changelogEntry is the note a landing writes into the rig's changelog files:
-// the story's newest What's new: line, or its title when it has none, under
-// today's date (UTC). Its Text is empty when the story says "What's new: none".
-// The version is the landing's to fill in.
-func (n Next) changelogEntry(ctx context.Context, c *closeOut, report *NextReport) (domain.ChangelogEntry, error) {
-	entry, _, err := n.changelogNote(ctx, c, report)
-	return entry, err
-}
-
-// changelogNote is changelogEntry, and says whether the sentence is the
-// story's title for want of a What's new: line, which a batch's fixer is told
-// (mw-gq6.942).
-func (n Next) changelogNote(ctx context.Context, c *closeOut, report *NextReport) (entry domain.ChangelogEntry, fromTitle bool, err error) {
-	comments, err := readRetrying(ctx, n, report, "the comments", func() ([]Comment, error) { return n.Tracker.StoryComments(ctx, c.id) })
-	if err != nil {
-		return domain.ChangelogEntry{}, false, fmt.Errorf("the comments on %s could not be read for its What's new line: %w", c.id, err)
-	}
-	texts := make([]string, len(comments))
-	for i, comment := range comments {
-		texts[i] = comment.Text
-	}
-	bug := domain.IsBugStory(c.detail.Type, c.detail.Story.Title) || slices.Contains(c.detail.Labels, "bug")
-	kind := domain.ChangelogNew
-	if bug {
-		kind = domain.ChangelogFixed
-	}
-	note, found := domain.NewestWhatsNew(texts)
-	switch {
-	case found && note.None:
-		return domain.ChangelogEntry{}, false, nil
-	case found:
-		if note.Kind != "" {
-			kind = note.Kind
-		}
-	default:
-		note.Text, fromTitle = domain.NoteFromTitle(c.detail.Story.Title, c.path.Rig), true
-	}
-	return domain.ChangelogEntry{Date: n.now().UTC().Format("2006-01-02"), Story: c.id, Kind: kind, Text: note.Text}, fromTitle, nil
-}
-
 // carryOn brings the hosts level and dispatches whatever is ready now. It runs
 // only once the story is closed, so that the other host sees a closed story
 // rather than a claimed one, and so that what is dispatched next accounts for
