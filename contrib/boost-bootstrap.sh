@@ -391,10 +391,28 @@ all_packages() {
 	echo "${all% }"
 }
 
+# apt_lock_wait: make every apt run of this script wait for the dpkg lock instead
+# of failing on it. A fresh Ubuntu box's unattended-upgrades takes the lock for a
+# while after the first apt-get, and the apt-get that step 10's
+# `playwright install --with-deps` runs would fail at once (mw-gq6.1757). Every
+# apt run reads apt.conf.d, so one file there covers them all. It is written
+# before the first apt-get, and stays: it changes no package.
+APT_LOCK_FILE=$FS_ROOT/etc/apt/apt.conf.d/90boost-dpkg-lock-wait
+APT_LOCK_TEXT='DPkg::Lock::Timeout "600";'
+apt_lock_wait() {
+	if same 644 "$APT_LOCK_FILE" "$APT_LOCK_TEXT"; then
+		skip "apt already waits for the dpkg lock ($APT_LOCK_FILE)"
+	elif act "write $APT_LOCK_FILE ($APT_LOCK_TEXT: every apt-get, and the one playwright --with-deps runs, waits up to ten minutes for the dpkg lock)"; then
+		printf '%s\n' "$APT_LOCK_TEXT" | as_root tee "$APT_LOCK_FILE" >/dev/null
+		as_root chmod 644 "$APT_LOCK_FILE"
+	fi
+}
+
 s_packages() {
 	local p miss="" all
 	all=$(all_packages)
 	step packages "$all"
+	apt_lock_wait
 	for p in $all; do have_pkg "$p" || miss="$miss $p"; done
 	miss=${miss# }
 	if [ -z "$miss" ]; then
