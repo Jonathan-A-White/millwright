@@ -1330,6 +1330,15 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			overrides = place.path
 			epicID, standalone = "", true
 		}
+		// A parent that is closed drops its open children off the maps: the bug
+		// goes where the epic said its work moved, else to the nearest open
+		// ancestor (mw-gq6.1720).
+		parentWhy := ""
+		if epicID != "" {
+			if chosen, alone, why := OpenParent(ctx, n.Tracker, epicID); why != "" {
+				epicID, standalone, parentWhy = chosen, alone, why
+			}
+		}
 		acceptance := bug.acceptance()
 		if bug.item != nil && bug.item.Size != "" {
 			overrides.Size = bug.item.Size
@@ -1354,6 +1363,16 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			break
 		}
 		report.Notes = append(report.Notes, fmt.Sprintf("filed %s, held: %s found it and did not fix it", id, c.id))
+		if parentWhy != "" {
+			note := fmt.Sprintf("filed %s.", parentWhy)
+			report.Notes = append(report.Notes, fmt.Sprintf("%s %s", id, note))
+			block = append(block, fmt.Sprintf("%s was %s", id, note))
+			if err := writeRetrying(ctx, n, report, "the parent note of a bug for a finding not fixed", func() error {
+				return n.Tracker.CommentOnStory(ctx, id, strings.ToUpper(note[:1])+note[1:])
+			}); err != nil {
+				report.Notes = append(report.Notes, fmt.Sprintf("%s was filed, but its parent note (%s) could not be written: %v", id, note, err))
+			}
+		}
 		if acceptance == "" {
 			// A bug with no AC from the Builder is held for that reason, written where
 			// mw stuck and the Mayor read a hold's reason (mw-gq6.1124).

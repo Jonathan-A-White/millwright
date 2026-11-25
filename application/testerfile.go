@@ -278,6 +278,9 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	// --deps checks every dependency for a cycle inside the create, and when that
 	// read times out on a busy server the create is undone and nothing is filed
 	// (mw-gq6.1467). A wait that still fails is named, not fatal to the filing.
+	if why := UnderOpenParent(ctx, f.Tracker, &story); why != "" {
+		f.say("filed %s\n", why)
+	}
 	id, err := f.Tracker.CreateStory(ctx, story)
 	if err != nil {
 		return filed, fmt.Errorf("filing the finding: %w", err)

@@ -213,6 +213,9 @@ func (n Next) landedWithoutACs(ctx context.Context, c *closeOut, report *NextRep
 		Overrides: FiledPath(c.path, "", TesterKindBug),
 		Labels:    []string{LabelBug, LabelFriction},
 	}
+	if why := UnderOpenParent(ctx, n.Tracker, &story); why != "" {
+		report.Notes = append(report.Notes, "the bug for an unmet AC of "+c.id+" is filed "+why)
+	}
 	var id string
 	err := writeRetrying(ctx, n, report, "the bug for an unmet AC", func() error {
 		var err error

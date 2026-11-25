@@ -760,6 +760,9 @@ func (f *FakeTracker) epicBead(id string, epic application.EpicDetail) applicati
 	bead.Story.Overrides = epic.Defaults
 	bead.Status = epic.Status
 	bead.Priority = epic.Priority
+	if epic.Status == StatusClosed && bead.CloseReason == "" {
+		bead.CloseReason = f.epicShut[id]
+	}
 	return bead
 }
 

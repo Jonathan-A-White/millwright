@@ -954,6 +954,9 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 			Labels:     []string{LabelBug},
 		}
 	}
+	if why := UnderOpenParent(ctx, n.Tracker, &story); why != "" {
+		report.Notes = append(report.Notes, "the bug that carries main's red is filed "+why)
+	}
 	var id string
 	err := writeRetrying(ctx, n, report, "the bug that carries main's red", func() error {
 		var err error
