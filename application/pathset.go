@@ -122,6 +122,7 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 	}
 
 	var path domain.Path
+	copiedNote := ""
 	if s.Hold != "" && strings.TrimSpace(s.Hold) == "" {
 		return domain.Path{}, fmt.Errorf("setting a path: --hold needs a reason, as --hold \"waits for the demo\"")
 	}
@@ -173,6 +174,15 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		path.CallersOK = ""
 		if path.Rig == "" {
 			return domain.Path{}, fmt.Errorf("the story %s has no rig, so there is no path to copy from it: nothing was written", from)
+		}
+		// A host pin is copied only with its host_why: with none, dispatch would
+		// move the copy to auto after a while, a surprise, so it is written as
+		// host=auto now and the output says so (mw-gq6.1714). A host the command
+		// names is its own.
+		if named.Host == "" && path.Host != "" && path.Host != domain.HostAuto && strings.TrimSpace(path.HostWhy) == "" {
+			copiedNote = fmt.Sprintf("host=%s was not copied from %s: it has no host_why, so a pin copied from it would not stay; host=auto was written instead (to pin it, mw path set %s host=%s host_why=\"<why>\")",
+				path.Host, from, id, path.Host)
+			path.Host = domain.HostAuto
 		}
 	}
 	path = path.Overlay(named)
@@ -253,6 +263,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		// set (mw-gq6.371).
 		now := story.Merged().Overlay(path)
 		fmt.Fprintf(s.Out, "Set the path of %s:\n%s", id, pathLines(now))
+		if copiedNote != "" {
+			fmt.Fprintln(s.Out, copiedNote)
+		}
 		if hostNote != "" {
 			fmt.Fprintln(s.Out, hostNote)
 		}

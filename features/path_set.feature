@@ -15,6 +15,7 @@ Feature: Setting and showing a story's path
       | effort    | high         |
       | formula   | tdd-feature  |
       | host      | laptop       |
+      | host_why  | the cache is on the Laptop |
       | attempts  | 2            |
       | molecule  | mw-mol-xyz   |
       | claimed_at | 2026-10-11T10:00:00Z |
@@ -31,6 +32,7 @@ Feature: Setting and showing a story's path
       | effort    | high         |
       | formula   | tdd-feature  |
       | host      | laptop       |
+      | host_why  | the cache is on the Laptop |
     And the path-set took exactly 1 write
     And the path-set printed the line: rig=millwright
     And the path-set printed the line: host=laptop
@@ -101,14 +103,37 @@ Feature: Setting and showing a story's path
 
   Scenario: Copying a sibling's path never copies its files
     Given the path-set story "F" is open with the metadata:
-      | rig   | lampas         |
-      | host  | laptop         |
-      | files | src/Reader.tsx |
+      | rig      | lampas         |
+      | host     | laptop         |
+      | host_why | the cache is on the Laptop |
+      | files    | src/Reader.tsx |
     When the path of "B" is set from "F"
     Then setting the path succeeds
     And the story "B" has exactly the metadata:
+      | rig      | lampas |
+      | host     | laptop |
+      | host_why | the cache is on the Laptop |
+
+  # host_why (mw-gq6.1714): a host pin is copied only with its host_why; a pin
+  # with none is written as host=auto, and the output says so.
+
+  Scenario: Copying a host pin copies its host_why with it
+    When the path of "B" is set from "A"
+    Then setting the path succeeds
+    And the story "B" has the path key "host" as "laptop"
+    And the story "B" has the path key "host_why" as "the cache is on the Laptop"
+    And the path-set printed nothing mentioning: was not copied
+
+  Scenario: Copying a host pin that has no host_why writes host=auto and says so
+    Given the path-set story "N" is open with the metadata:
       | rig  | lampas |
       | host | laptop |
+    When the path of "B" is set from "N"
+    Then setting the path succeeds
+    And the story "B" has exactly the metadata:
+      | rig  | lampas |
+      | host | auto   |
+    And the path-set printed a line mentioning: host=laptop was not copied from N: it has no host_why
 
   # bump (mw-gq6.527): the story's own, like files; the only value is minor.
 

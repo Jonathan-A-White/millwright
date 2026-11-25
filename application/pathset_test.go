@@ -749,3 +749,92 @@ func TestPathSetSaysNothingOfServedBeadsToAStoryPinnedToAHomeHost(t *testing.T) 
 		t.Errorf("a story pinned to the laptop has its beads; got %q", errOut.String())
 	}
 }
+
+// mw-gq6.1714: path set --from copies a host pin only with its host_why; a pin
+// with no why is written as host=auto, and the output says so. The table is the
+// rule of every other key --from copies or drops.
+func TestPathSetFromCopiesAHostPinWithItsHostWhy(t *testing.T) {
+	const why = "the Morpheus cache is made on the Laptop"
+	tracker := aVaultWithTwoFormulas()
+	pinnedTo(tracker, "mw-gq6.4", "laptop", domain.HostWhyField, why)
+	var out strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Out: &out}).Run(context.Background(), "mw-gq6.2", "mw-gq6.4", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2")
+	if got := detail.Merged(); got.Host != "laptop" || got.HostWhy != why {
+		t.Errorf("want host=laptop with its host_why, got host=%q host_why=%q", got.Host, got.HostWhy)
+	}
+	if strings.Contains(out.String(), "host_why") && strings.Contains(out.String(), "not copied") {
+		t.Errorf("a pin copied with its why must not say it was not copied: %q", out.String())
+	}
+}
+
+func TestPathSetFromWritesHostAutoForAPinWithNoHostWhyAndSaysSo(t *testing.T) {
+	tracker := aVaultWithTwoFormulas()
+	pinnedTo(tracker, "mw-gq6.4", "laptop")
+	var out strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Out: &out}).Run(context.Background(), "mw-gq6.2", "mw-gq6.4", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2")
+	if got := detail.Merged(); got.Host != domain.HostAuto || got.HostWhy != "" {
+		t.Errorf("want host=auto and no host_why, got host=%q host_why=%q", got.Host, got.HostWhy)
+	}
+	for _, want := range []string{"host=laptop", "not copied", "host_why", "host=auto"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the output lacks %q: %q", want, out.String())
+		}
+	}
+}
+
+// A host named on the command line is the command's own: the sibling's missing
+// why does not turn it into auto.
+func TestPathSetFromKeepsAHostNamedOnTheCommandOverASiblingPinWithNoWhy(t *testing.T) {
+	tracker := aVaultWithTwoFormulas()
+	pinnedTo(tracker, "mw-gq6.4", "laptop")
+	var out strings.Builder
+	if _, err := (application.PathSet{Tracker: tracker, Out: &out}).Run(context.Background(), "mw-gq6.2", "mw-gq6.4", []string{"host=desktop"}); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	if got := storyHost(t, tracker, "mw-gq6.2"); got != "desktop" {
+		t.Errorf("want host=desktop, got %q", got)
+	}
+	if strings.Contains(out.String(), "not copied") {
+		t.Errorf("a host named on the command needs no such line: %q", out.String())
+	}
+}
+
+// Every key --from copies or drops, and its rule.
+func TestPathSetFromRuleOfEveryKey(t *testing.T) {
+	tracker := aVaultWithTwoFormulas()
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.4", Title: "sibling", Overrides: domain.Path{
+		Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelSonnet,
+		Effort: domain.EffortHigh, Formula: "tdd-feature", Host: "laptop", HostWhy: "the cache is there",
+		Size: domain.Size("S"), Bump: domain.BumpMinor, CallersOK: "the callers are mine", MaxTurns: "60", Files: "a.go",
+	}})
+	if _, err := (application.PathSet{Tracker: tracker}).Run(context.Background(), "mw-gq6.2", "mw-gq6.4", nil); err != nil {
+		t.Fatalf("setting the path: %v", err)
+	}
+	detail, _ := tracker.ShowStory(context.Background(), "mw-gq6.2")
+	got := detail.Merged()
+	for key, rule := range map[string]struct{ got, want string }{
+		"rig: copied":                         {got.Rig, "millwright"},
+		"branch: copied":                      {got.Branch, "main"},
+		"harness: copied":                     {string(got.Harness), string(domain.HarnessClaude)},
+		"model: copied":                       {string(got.Model), string(domain.ModelSonnet)},
+		"effort: copied":                      {string(got.Effort), string(domain.EffortHigh)},
+		"formula: copied":                     {got.Formula, "tdd-feature"},
+		"host: copied, with its host_why":     {got.Host, "laptop"},
+		"host_why: copied, only with a host":  {got.HostWhy, "the cache is there"},
+		"size: dropped, the story's own":      {string(got.Size), ""},
+		"bump: dropped, the story's own":      {got.Bump, ""},
+		"callers_ok: dropped, for the files":  {got.CallersOK, ""},
+		"max_turns: copied, as it always was": {got.MaxTurns, "60"},
+		"files: dropped, the story's own":     {got.Files, ""},
+	} {
+		if rule.got != rule.want {
+			t.Errorf("%s: got %q, want %q", key, rule.got, rule.want)
+		}
+	}
+}

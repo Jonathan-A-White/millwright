@@ -322,7 +322,7 @@ func TestPinWhyIsTheReasonAPinMustStay(t *testing.T) {
 func TestPathSetCopiedFromAStoryPinnedToARetiredHostWritesAuto(t *testing.T) {
 	tracker := aVaultWithTwoFormulas()
 	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.3", Title: "on the desktop",
-		Overrides: domain.Path{Rig: "millwright", Host: "desktop"}})
+		Overrides: domain.Path{Rig: "millwright", Host: "desktop", HostWhy: "the GPU is on the desktop"}})
 	var out strings.Builder
 	path, err := application.PathSet{Tracker: tracker, Retired: []string{"desktop"}, Out: &out}.
 		Run(context.Background(), "mw-gq6.2", "mw-gq6.3", nil)

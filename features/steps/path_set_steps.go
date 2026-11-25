@@ -102,6 +102,8 @@ func InitializePathSetScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the path-set added the blockers before it wrote the path and released the story$`, c.theWritesCameInOrder)
 	ctx.Then(`^the path-set printed exactly (\d+) line starting: (.+)$`, c.printedLinesStarting)
 	ctx.Then(`^the path-set printed the line containing: (.+)$`, c.printedALineContaining)
+	ctx.Then(`^the path-set printed a line mentioning: (.+)$`, c.printedALineMentioning)
+	ctx.Then(`^the path-set printed nothing mentioning: (.+)$`, c.printedNothingMentioning)
 	ctx.Then(`^setting the path succeeds$`, c.settingSucceeds)
 	ctx.Then(`^setting the path is refused, saying: (.+)$`, c.settingIsRefusedSaying)
 	ctx.Then(`^nothing was written$`, c.nothingWasWritten)
@@ -435,4 +437,18 @@ func (c *pathSetContext) printedALineContaining(text string) error {
 		}
 	}
 	return fmt.Errorf("expected a held: line containing %q, got:\n%s", text, c.printed.String())
+}
+
+func (c *pathSetContext) printedALineMentioning(text string) error {
+	if !strings.Contains(c.printed.String(), text) {
+		return fmt.Errorf("expected a line mentioning %q, got:\n%s", text, c.printed.String())
+	}
+	return nil
+}
+
+func (c *pathSetContext) printedNothingMentioning(text string) error {
+	if strings.Contains(c.printed.String(), text) {
+		return fmt.Errorf("expected nothing mentioning %q, got:\n%s", text, c.printed.String())
+	}
+	return nil
 }
