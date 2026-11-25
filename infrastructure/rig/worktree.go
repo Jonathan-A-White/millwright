@@ -672,11 +672,11 @@ func (w *Worktrees) DiffLines(ctx context.Context, rigDir, base, branch, name st
 		case strings.HasPrefix(line, "diff --git "):
 			inHunk = false
 		case !inHunk && strings.HasPrefix(line, "--- "):
-			if old, ok := strings.CutPrefix(line, "--- a/"); ok {
+			if old, ok := diffHeaderPath(line, "--- ", "a/"); ok {
 				path = old
 			}
 		case !inHunk && strings.HasPrefix(line, "+++ "):
-			if added, ok := strings.CutPrefix(line, "+++ b/"); ok {
+			if added, ok := diffHeaderPath(line, "+++ ", "b/"); ok {
 				path = added
 			}
 		case strings.HasPrefix(line, "@@"):

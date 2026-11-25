@@ -33,9 +33,7 @@ func (w *Worktrees) AddedLines(ctx context.Context, rigDir, base, branch string)
 			inHunk = false
 		case !inHunk && strings.HasPrefix(line, "+++ "):
 			path = ""
-			if added, ok := strings.CutPrefix(line, "+++ b/"); ok {
-				path = added
-			}
+			path, _ = diffHeaderPath(line, "+++ ", "b/")
 		case strings.HasPrefix(line, "@@"):
 			inHunk = true
 			number = hunkStart(line)
@@ -45,6 +43,29 @@ func (w *Worktrees) AddedLines(ctx context.Context, rigDir, base, branch string)
 		}
 	}
 	return lines, nil
+}
+
+// diffHeaderPath is the file a "--- a/<path>" or "+++ b/<path>" line of a git
+// diff names: marker is "--- " or "+++ ", prefix the "a/" or "b/" the diff was
+// asked to put before it. Git quotes a path holding a non-ASCII or special
+// character as a C string ("b/\303\251.go") and ends one holding a space with
+// a tab; both are undone here. A header that names no file ("/dev/null") gives
+// "" and false.
+func diffHeaderPath(line, marker, prefix string) (string, bool) {
+	name, ok := strings.CutPrefix(line, marker)
+	if !ok {
+		return "", false
+	}
+	if strings.HasPrefix(name, `"`) {
+		unquoted, err := strconv.Unquote(name)
+		if err != nil {
+			return "", false
+		}
+		name = unquoted
+	} else {
+		name = strings.TrimSuffix(name, "\t")
+	}
+	return strings.CutPrefix(name, prefix)
 }
 
 // hunkStart is the first line a hunk header's new side covers: the c of

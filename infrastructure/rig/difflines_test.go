@@ -47,3 +47,29 @@ func TestADiffOfABranchThatIsNotThereIsEmpty(t *testing.T) {
 		t.Errorf("expected no lines and no error, got %+v, %v", got, err)
 	}
 }
+
+func TestDiffLinesNameAFileInADirectoryWithANonASCIIName(t *testing.T) {
+	here := aRigWithAServer(t)
+	write(t, here, "é/package-lock.json", "old\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Lockfile")
+	run(t, here, "git", "push", "-q", "origin", "main")
+	run(t, here, "git", "checkout", "-q", "-b", "mw/story")
+	write(t, here, "é/package-lock.json", "new\n")
+	write(t, here, "a b/package-lock.json", "spaced\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The story's change")
+
+	got, err := rig.New().DiffLines(context.Background(), here, "main", "mw/story", "package-lock.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []application.DiffLine{
+		{Path: "a b/package-lock.json", Text: "spaced", Added: true},
+		{Path: "é/package-lock.json", Text: "old"},
+		{Path: "é/package-lock.json", Text: "new", Added: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("expected %+v, got %+v", want, got)
+	}
+}
