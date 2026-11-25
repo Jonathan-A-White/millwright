@@ -164,7 +164,7 @@ func acNotMetDescription(c *closeOut, found ACNotMet, host string) string {
 // a mail to the Mayor. A bug of the same title, open or closed, is the one
 // already filed, so a close-out run again files nothing (mw-gq6.602).
 func (n Next) landedWithoutACs(ctx context.Context, c *closeOut, report *NextReport, again bool, comments []Comment) (verdict, block string) {
-	found := n.withoutMayorsToRun(c, comments, closingACNotMet(comments))
+	found := withoutOptionalACs(n.withoutMayorsToRun(c, comments, closingACNotMet(comments)), c.detail.Acceptance)
 	if !found.Found() {
 		return MailLanded, ""
 	}
@@ -228,4 +228,57 @@ func (n Next) landedWithoutACs(ctx context.Context, c *closeOut, report *NextRep
 	}
 	report.Notes = append(report.Notes, fmt.Sprintf("filed %s, held: %s landed without its AC %s", id, c.id, found.Words()))
 	return verdict, block + "\nFiled: " + id + ", held."
+}
+
+// optionalCriterion marks a criterion of an acceptance field that asks for
+// something only if it is cheap: 'Optional and preferred if small'. Its closing
+// comment says which was done, so 'AC 2 NOT done' answers it (mw-gq6.1602).
+var optionalCriterion = regexp.MustCompile(`(?i)\boptional(?:ly)?\b|\bif small\b`)
+
+// saysOnlyOptionalUnmet reports whether sentence names criteria by number, every
+// one of them a criterion of acceptance that is optional. A sentence that names
+// no number, one the acceptance does not have, or one criterion that is not
+// optional is not: it stands as said unmet. A number inside quotes is named,
+// not said.
+func saysOnlyOptionalUnmet(sentence, acceptance string) bool {
+	matches := acRefNumber.FindAllStringSubmatch(maskQuoted(sentence), -1)
+	if len(matches) == 0 {
+		return false
+	}
+	for _, m := range matches {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return false
+		}
+		text, found := acceptanceCriterion(acceptance, n)
+		if !found || !optionalCriterion.MatchString(text) {
+			return false
+		}
+	}
+	return true
+}
+
+// withoutOptionalUnmet is sentences less those that say only optional criteria
+// are unmet (saysOnlyOptionalUnmet).
+func withoutOptionalUnmet(sentences []string, acceptance string) []string {
+	var kept []string
+	for _, s := range sentences {
+		if !saysOnlyOptionalUnmet(s, acceptance) {
+			kept = append(kept, s)
+		}
+	}
+	return kept
+}
+
+// withoutOptionalACs is found less the criteria of acceptance that are optional:
+// 'AC 2 NOT done' of one is not a bug to file (mw-gq6.1602).
+func withoutOptionalACs(found ACNotMet, acceptance string) ACNotMet {
+	var kept []int
+	for _, n := range found.ACs {
+		if text, ok := acceptanceCriterion(acceptance, n); !ok || !optionalCriterion.MatchString(text) {
+			kept = append(kept, n)
+		}
+	}
+	found.ACs = kept
+	return found
 }

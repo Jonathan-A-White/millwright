@@ -50,12 +50,14 @@ func (h MayorHanded) Comment() string {
 // left out that hand a criterion to the Mayor: a line that names criteria, each
 // of whose text in acceptance names the Mayor as its runner, and says it was
 // handed to him. A criterion that does not name him, one the acceptance does not
-// have, or a line with no hand-over still stands unmet (mw-gq6.1578).
+// have, or a line with no hand-over still stands unmet (mw-gq6.1578). A sentence
+// that says only optional criteria are unmet ('Optional and preferred if small')
+// is left out too: the comment says which was done (mw-gq6.1602).
 func UnmetCriteriaAfterHandoff(comment, acceptance string) (unmet []string, handed MayorHanded) {
 	handed.Texts = map[int]string{}
 	seen := map[int]bool{}
 	for _, line := range strings.Split(comment, "\n") {
-		sentences := UnmetCriteria(line)
+		sentences := withoutOptionalUnmet(UnmetCriteria(line), acceptance)
 		if len(sentences) == 0 {
 			continue
 		}
