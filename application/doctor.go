@@ -421,8 +421,11 @@ type Doctor struct {
 	// of those is a bd call, or a cure that may make one, and one that is still
 	// running at the end is cut and said (a cure as cure-failed, a note or the
 	// verdict as note-failed in the log) instead of leaving the run to systemd's
-	// timeout; one that would begin after it does not begin (mw-gq6.1330). Zero
-	// sets no end for them, and a zero RunBudget sets none either.
+	// timeout; one that would begin after it does not begin (mw-gq6.1330). The
+	// doctor's own state and log calls are held too: one still running at the end is
+	// cut and the run ends with an error that says so, a call that records what a cut
+	// step did being given StepBudget (mw-gq6.1364). Zero sets no end for them, and
+	// a zero RunBudget sets none either.
 	StepBudget time.Duration
 
 	// Load says the host's load for a reason that names it, as "41.2"; nil, or
@@ -449,6 +452,10 @@ type Doctor struct {
 	// is ok clears its note only when it is there (nil, when the listing
 	// failed or there is no Notes, clears every one).
 	noted *notedKeys
+
+	// logCut is whether the log has been left behind at the run's end: a call
+	// of it that is cut once is not waited on again (mw-gq6.1364).
+	logCut *bool
 }
 
 // notedKeys is the set of this host's doctor notes held at the start of a run.
@@ -488,6 +495,7 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 	}
 
 	d.began = d.now()
+	d.logCut = new(bool)
 	if dryRun {
 		ctx = context.WithValue(ctx, doctorDryRunKey{}, true)
 	} else {
@@ -757,7 +765,7 @@ func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (Docto
 	}
 
 	if reason == "" {
-		if err := d.State.Reset(ctx, name); err != nil {
+		if err := d.held(ctx, func(ctx context.Context) error { return d.State.Reset(ctx, name) }); err != nil {
 			return DoctorResult{}, fmt.Errorf("resetting %s's doctor state: %w", name, err)
 		}
 		if err := d.append(ctx, result); err != nil {
@@ -767,7 +775,7 @@ func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (Docto
 		return result, nil
 	}
 
-	episode, err := d.State.Load(ctx, name)
+	episode, err := d.load(ctx, name)
 	if err != nil {
 		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
 	}
@@ -779,7 +787,7 @@ func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (Docto
 		return DoctorResult{}, err
 	}
 	d.clearNote(ctx, name)
-	if err := d.State.Save(ctx, name, DoctorEpisode{LastOKReason: reason}); err != nil {
+	if err := d.save(ctx, name, DoctorEpisode{LastOKReason: reason}); err != nil {
 		return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
 	}
 	return result, nil
@@ -797,7 +805,7 @@ func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool
 		return result, nil
 	}
 
-	episode, err := d.State.Load(ctx, name)
+	episode, err := d.load(ctx, name)
 	if err != nil {
 		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
 	}
@@ -810,7 +818,7 @@ func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool
 	}
 	d.writeNote(ctx, name, result)
 	episode.LastCannotTellReason = reason
-	if err := d.State.Save(ctx, name, episode); err != nil {
+	if err := d.save(ctx, name, episode); err != nil {
 		return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
 	}
 	return result, nil
@@ -890,7 +898,7 @@ func durationEnd(s string, i int) int {
 func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dryRun bool) (DoctorResult, error) {
 	name := check.Name()
 
-	episode, err := d.State.Load(ctx, name)
+	episode, err := d.load(ctx, name)
 	if err != nil {
 		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
 	}
@@ -916,7 +924,7 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 			if capped && !episode.DampedNoted {
 				if d.writeNote(ctx, name, result) {
 					episode.DampedNoted = true
-					if err := d.State.Save(ctx, name, episode); err != nil {
+					if err := d.save(ctx, name, episode); err != nil {
 						return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
 					}
 				}
@@ -944,7 +952,7 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 		// this cure ran, for the wait before the next.
 		episode.Cures, episode.FirstFaulty, episode.DampedNoted = 0, time.Time{}, false
 	}
-	if err := d.State.Save(ctx, name, episode); err != nil {
+	if err := d.save(ctx, name, episode); err != nil {
 		return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
 	}
 
@@ -976,10 +984,52 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 // append writes one result to the log, dated.
 func (d Doctor) append(ctx context.Context, result DoctorResult) error {
 	dated := d.now().UTC().Format(time.RFC3339) + " " + result.line()
-	if err := d.Log.Append(ctx, dated); err != nil {
+	if d.logCut != nil && *d.logCut {
+		return fmt.Errorf("appending to the doctor log: %s", d.overRunEnd())
+	}
+	err, cut := d.heldCut(ctx, func(ctx context.Context) error { return d.Log.Append(ctx, dated) })
+	if cut && d.logCut != nil {
+		*d.logCut = true
+	}
+	if err != nil {
 		return fmt.Errorf("appending to the doctor log: %w", err)
 	}
 	return nil
+}
+
+// load reads a check's episode, held to the run's end (mw-gq6.1364).
+func (d Doctor) load(ctx context.Context, name string) (episode DoctorEpisode, err error) {
+	err = d.held(ctx, func(ctx context.Context) (err error) {
+		episode, err = d.State.Load(ctx, name)
+		return err
+	})
+	return episode, err
+}
+
+// save keeps a check's episode, held to the run's end (mw-gq6.1364).
+func (d Doctor) save(ctx context.Context, name string, episode DoctorEpisode) error {
+	return d.held(ctx, func(ctx context.Context) error { return d.State.Save(ctx, name, episode) })
+}
+
+// held runs fn, a call of the doctor's own state or log, within the run's end.
+func (d Doctor) held(ctx context.Context, fn func(context.Context) error) error {
+	err, _ := d.heldCut(ctx, fn)
+	return err
+}
+
+// heldCut is held that says too whether fn was left behind. What these calls
+// record is about what the steps did, so one made after a cut step has the end
+// to itself: it is given StepBudget when less of it is left, and the run ends
+// by that, not by systemd's timeout.
+func (d Doctor) heldCut(ctx context.Context, fn func(context.Context) error) (err error, cut bool) {
+	left, bounded := d.stepLeft()
+	if !bounded {
+		return fn(ctx), false
+	}
+	if left < d.StepBudget {
+		left = d.StepBudget
+	}
+	return d.within(ctx, left, fn, d.overRunEnd())
 }
 
 // writeNote sets a check's own note to this result, dated, with its last
@@ -1060,7 +1110,17 @@ func (d Doctor) readNoted(ctx context.Context) *notedKeys {
 // log, oldest first; none of them, on a log Read cannot answer, is not a
 // failure — the note is written with what there is.
 func (d Doctor) checkLogLines(ctx context.Context, check string) []string {
-	lines, err := d.Log.Read(ctx)
+	if d.logCut != nil && *d.logCut {
+		return nil
+	}
+	var lines []string
+	err, cut := d.heldCut(ctx, func(ctx context.Context) (err error) {
+		lines, err = d.Log.Read(ctx)
+		return err
+	})
+	if cut && d.logCut != nil {
+		*d.logCut = true
+	}
 	if err != nil {
 		return nil
 	}
