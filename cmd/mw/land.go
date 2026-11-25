@@ -31,9 +31,9 @@ func newLandCmd() *cobra.Command {
 			"has it (mw/<story>) by the rig's union rules (union_merge_files); a branch that does not merge\n" +
 			"is set aside with git's conflict list and stays queued, unless it does not merge into the target\n" +
 			"alone either (a trial merge without the other stories): that one conflicts with the target, not\n" +
-			"the batch, which no later batch can clear, so it is handed back to a Builder to rebase at once\n" +
-			"(after the batch's fixer, when it is given one, has not merged it). One set aside a second time\n" +
-			"for any reason is handed back too. It raises the version once for the batch\n" +
+			"the batch, which no later batch can clear, so it is handed back to a Builder to rebase at once,\n" +
+			"unless nothing merged and the batch is given its fixer. One set aside a second time for any\n" +
+			"reason is handed back too. It raises the version once for the batch\n" +
 			"(version_files), with one changelog entry per story (changelog_files), and runs the rig's tests\n" +
 			"once on the batch, under this host's gate lock and after letting a busy host calm.\n\n" +
 			"Only when that run passes is the target branch pushed: a fast-forward, never forced. Each story\n" +

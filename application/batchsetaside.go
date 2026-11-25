@@ -180,9 +180,8 @@ func (r BatchReport) setAsideSplit() (queued, back []BatchStory) {
 }
 
 // handBackRepeaters answers a story that conflicts with the target branch itself
-// (ConflictsWithTarget) at once, after the batch's fixer, if it was given one, has
-// not merged it, and unless a fixer is still owed to it (mw-gq6.1609); and one set
-// aside, for a conflict with the batch or any other reason, for the
+// (ConflictsWithTarget) at once (mw-gq6.1609), unless it is the batch's fixer's to
+// merge (waitsOnItsFixer); and one set aside, for a conflict with the batch or any other reason, for the
 // MaxBatchConflicts'th time. Only a batch of which every branch conflicts is given
 // its fixer (landIn), so a story that conflicts beside branches that merge is
 // never given it: it stayed run=queued, the next batch took it, it conflicted
@@ -197,7 +196,7 @@ func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
 	n := b.Next
 	for i := range report.SetAside {
 		s := &report.SetAside[i]
-		atOnce := s.ConflictsWithTarget && !report.fixerStillOwed()
+		atOnce := s.ConflictsWithTarget && !report.waitsOnItsFixer()
 		if (s.ConflictSetAsides < MaxBatchConflicts && !atOnce) || n.Tracker == nil {
 			continue
 		}
@@ -219,12 +218,12 @@ func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
 	}
 }
 
-// fixerStillOwed says nothing of the batch merged and the fixer it is to be
-// given was kept from starting, or stopped, by the host or the harness: the
-// batch tried again gives it one afresh (mw-gq6.472, mw-2891blf.19), so what
-// conflicts waits for that and is not handed back at once.
-func (r BatchReport) fixerStillOwed() bool {
-	return len(r.Merged) == 0 && r.Fixer != nil && (!r.Fixer.Started || r.Fixer.Stopped != nil)
+// waitsOnItsFixer says nothing of the batch merged and it was given its fixer,
+// started or not: that fixer is what answers its conflicts, and the batch, held,
+// is tried again (mw-gq6.503, mw-gq6.472, mw-2891blf.19). What conflicts is then
+// handed back only on its MaxBatchConflicts'th set-aside.
+func (r BatchReport) waitsOnItsFixer() bool {
+	return len(r.Merged) == 0 && r.Fixer != nil
 }
 
 // handBack takes story s off the batch queue, gives its claim back and says on

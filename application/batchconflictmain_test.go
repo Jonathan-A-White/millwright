@@ -134,31 +134,40 @@ func TestAStoryWhoseTrialMergeOnMainCannotBeMadeStaysQueuedAndIsNoted(t *testing
 	}
 }
 
-func TestAnAllConflictBatchGivesItsFixerTheStoriesBeforeAnyIsHandedBack(t *testing.T) {
-	a := aQueuedClaim(t, aBatchOf(t, 2, "mw-e.1", "mw-e.2"))
-	a.run(t)
+// A batch every branch of which conflicts is given its one fixer: its stories are
+// that fixer's, and stay queued with the held batch (mw-gq6.503). The second
+// set-aside hands them back, whether the fixer ran or could not be started.
+func TestAnAllConflictBatchIsGivenItsFixerAndHandsBackAtTheSecondSetAside(t *testing.T) {
+	for name, startErr := range map[string]error{"the fixer merges nothing": nil, "the fixer cannot start": errors.New("tmux is gone")} {
+		t.Run(name, func(t *testing.T) {
+			a := aQueuedClaim(t, aBatchOf(t, 2, "mw-e.1", "mw-e.2"))
+			a.runner.StartErr = startErr
+			a.run(t)
 
-	if got := a.runner.Started(); len(got) != 1 {
-		t.Fatalf("expected the batch given its one fixer, got %v", got)
-	}
-	// The fixer merged neither (the fake's branches are not in its batch), so both
-	// are handed back at once, not left for a later batch.
-	for _, id := range []string{"mw-e.1", "mw-e.2"} {
-		handedBack(t, a, id, withMain)
+			if a.report.Fixer == nil {
+				t.Fatalf("expected the batch given its one fixer, got none (held %q)", a.report.Held)
+			}
+			for _, id := range []string{"mw-e.1", "mw-e.2"} {
+				if got := a.tracker.State(id, application.RunState); got != application.RunQueued {
+					t.Fatalf("expected %s left queued with the batch its fixer was given, got run=%q", id, got)
+				}
+			}
+			second := aLaterBatch(a, 596)
+			second.run(t)
+			for _, id := range []string{"mw-e.1", "mw-e.2"} {
+				handedBack(t, second, id, withMain)
+			}
+		})
 	}
 }
 
-// A fixer the host kept from starting is given the batch afresh (mw-gq6.472,
-// mw-2891blf.19), so its stories wait for it; the second set-aside hands them back.
-func TestAStoryOwedAFixerThatCouldNotStartWaitsForItOnce(t *testing.T) {
+// A fixer that merges nothing is no part of a batch given none: a story left alone
+// in one that may start no fixer is handed back at once.
+func TestAnAllConflictBatchThatMayStartNoFixerHandsItsStoryBackAtOnce(t *testing.T) {
 	a := aQueuedClaim(t, aBatchOf(t, 1, "mw-e.1"))
-	a.runner.StartErr = errors.New("tmux is gone")
+	a.land.Fix = false
 	a.run(t)
 
-	if got := a.tracker.State("mw-e.1", application.RunState); got != application.RunQueued {
-		t.Fatalf("expected mw-e.1 left queued for the fixer still owed to it, got run=%q (held %q)", got, a.report.Held)
-	}
-	second := aLaterBatch(a, 596)
-	second.run(t)
-	handedBack(t, second, "mw-e.1", withMain)
+	handedBack(t, a, "mw-e.1", withMain)
+	notSaidToStayQueued(t, a, "mw-e.1")
 }
