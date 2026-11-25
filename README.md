@@ -350,7 +350,8 @@ uses that one), runs `make build` and links `mw` into `~/.local/bin` (or
 when already done, so running it again is safe. `sh scripts/install.sh
 --dry-run` prints the steps and changes nothing. It never runs `sudo`: when
 packages are missing it prints the one `apt-get install` command that needs
-root and stops before changing anything; run that with `sudo`, then run the
+root (with `-o DPkg::Lock::Timeout=600`, so it waits for a lock
+unattended-upgrades holds) and stops before changing anything; run that with `sudo`, then run the
 line again. On any other system it prints what it would need and exits
 non-zero.
 

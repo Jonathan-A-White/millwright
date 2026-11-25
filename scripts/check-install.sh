@@ -412,7 +412,7 @@ snap >"$T/before"
 run --dry-run
 rc_is 0
 steps_are "1 apt 2 rig 3 go 4 bd 5 build 6 link"
-has "apt-get install -y --no-install-recommends $NOAPT_PKGS"
+has "apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends $NOAPT_PKGS"
 has "$GO_ROOT"
 has "$GO_VERSION"
 has "$BD_VERSION"
@@ -504,7 +504,7 @@ snap >"$T/before"
 run
 rc_not0
 has 'needs root'
-has "apt-get install -y --no-install-recommends $NOAPT_PKGS"
+has "apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends $NOAPT_PKGS"
 notcalled "$MUTATING"
 unchanged "$(cat "$T/before")"
 ok

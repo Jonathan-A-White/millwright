@@ -162,7 +162,14 @@ have_pkg() {
 missing=""
 for p in $PKGS; do have_pkg "$p" || missing="$missing $p"; done
 missing=${missing# }
-INSTALL_CMD="apt-get install -y --no-install-recommends $missing"
+# A fresh Ubuntu box's unattended-upgrades holds the dpkg lock for a while, and
+# apt-get fails at once on it unless told to wait (mw-gq6.1758). A host whose
+# apt.conf.d already sets the wait (contrib/boost-bootstrap.sh writes it) needs
+# no option; any other gets it on each apt-get here, and in the install command
+# printed for a user who is not root to run by hand (mw-gq6.1759).
+APT_WAIT="-o DPkg::Lock::Timeout=600"
+if [ -f "$APT_CONF_DIR/90boost-dpkg-lock-wait" ]; then APT_WAIT=""; fi
+INSTALL_CMD="apt-get${APT_WAIT:+ $APT_WAIT} install -y --no-install-recommends $missing"
 
 if [ "$ROOT" = 0 ] && [ -n "$missing" ] && [ "$DRY" = 0 ]; then
 	{
@@ -223,12 +230,6 @@ if [ -z "$missing" ]; then
 	skip "all of them are installed"
 else
 	[ "$ROOT" = 1 ] || printf '    needs root: run this script as root, or install them yourself\n'
-	# A fresh Ubuntu box's unattended-upgrades holds the dpkg lock for a while, and
-	# apt-get fails at once on it unless told to wait (mw-gq6.1758). A host whose
-	# apt.conf.d already sets the wait (contrib/boost-bootstrap.sh writes it) needs
-	# no option; any other gets it on each apt-get here.
-	APT_WAIT="-o DPkg::Lock::Timeout=600"
-	if [ -f "$APT_CONF_DIR/90boost-dpkg-lock-wait" ]; then APT_WAIT=""; fi
 	# shellcheck disable=SC2086
 	if act "apt-get update"; then apt-get $APT_WAIT update; fi
 	# shellcheck disable=SC2086

@@ -19,6 +19,18 @@ import (
 // holds the files the script reads as /etc/apt/apt.conf.d; put files there first.
 func installAptCalls(t *testing.T, confDir string) []string {
 	t.Helper()
+	_, calls := installRun(t, confDir, "0")
+	if calls == nil {
+		t.Fatal("install.sh ran no apt-get")
+	}
+	return calls
+}
+
+// installRun runs scripts/install.sh as the user whose id the stand-in id prints
+// ("0" is root) and returns its combined output and each line the stand-in
+// apt-get recorded (nil when it ran none).
+func installRun(t *testing.T, confDir, uid string) (string, []string) {
+	t.Helper()
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh to run install.sh with")
@@ -46,7 +58,7 @@ func installAptCalls(t *testing.T, confDir string) []string {
 	}
 	calls := filepath.Join(dir, "calls")
 	stands := map[string]string{
-		"id":      "echo 0\n",
+		"id":      "echo " + uid + "\n",
 		"apt-get": `echo "$*" >>"` + calls + "\"\n",
 		// the run is over once step 1 is: the Go download is refused
 		"curl": "exit 1\n",
@@ -70,9 +82,9 @@ func installAptCalls(t *testing.T, confDir string) []string {
 	out, _ := cmd.CombinedOutput() // it stops at the Go step; step 1 is what is read
 	text, err := os.ReadFile(calls)
 	if err != nil {
-		t.Fatalf("install.sh ran no apt-get:\n%s", out)
+		return string(out), nil
 	}
-	return strings.Split(strings.TrimSpace(string(text)), "\n")
+	return string(out), strings.Split(strings.TrimSpace(string(text)), "\n")
 }
 
 func TestInstallWaitsForTheDpkgLockOnAHostThatDoesNotSetIt(t *testing.T) {
@@ -102,5 +114,38 @@ func TestInstallLeavesAptAloneOnAHostThatSetsTheWaitInAptConf(t *testing.T) {
 		if strings.Contains(c, aptLockWord) {
 			t.Errorf("apt-get %q repeats a wait apt.conf.d already sets", c)
 		}
+	}
+}
+
+// mw-gq6.1759: a user who is not root is told the one apt-get install command to
+// run by hand; run on a fresh box it failed on the dpkg lock as the script's own
+// run did before mw-gq6.1758, because the printed command had no wait.
+func TestInstallPrintedCommandWaits(t *testing.T) {
+	out, calls := installRun(t, t.TempDir(), "1000")
+	if calls != nil {
+		t.Fatalf("a user who is not root ran apt-get: %q", calls)
+	}
+	var printed string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "apt-get") && strings.Contains(l, "install") && strings.HasPrefix(strings.TrimSpace(l), "apt-get") {
+			printed = l
+		}
+	}
+	if printed == "" {
+		t.Fatalf("install.sh printed no apt-get install command:\n%s", out)
+	}
+	if !strings.Contains(printed, aptLockWord) {
+		t.Errorf("the command printed for a user to run by hand does not pass %s: %q", aptLockWord, printed)
+	}
+}
+
+func TestInstallPrintedCommandLeavesAptAloneOnAHostThatSetsTheWaitInAptConf(t *testing.T) {
+	conf := t.TempDir()
+	if err := os.WriteFile(filepath.Join(conf, "90boost-dpkg-lock-wait"), []byte(aptLockWord+" \"600\";\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := installRun(t, conf, "1000")
+	if strings.Contains(out, aptLockWord) {
+		t.Errorf("the printed command repeats a wait apt.conf.d already sets:\n%s", out)
 	}
 }
