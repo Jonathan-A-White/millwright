@@ -109,6 +109,11 @@ func (b BatchLand) countSetAside(ctx context.Context, s *BatchStory, report *Bat
 		fields = map[string]string{}
 	}
 	fields[BatchConflictsField] = strconv.Itoa(s.ConflictSetAsides)
+	// A story mw retry gave a new attempt since the batch took it is not this
+	// batch's to write on (mw-gq6.1735, mw-gq6.1739).
+	if b.noLongerQueued(ctx, s.ID) {
+		return
+	}
 	if werr := writeRetrying(ctx, n, nil, "the count of set-asides", func() error { return n.Tracker.SetStoryMetadata(ctx, s.ID, fields) }); werr != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("how many batches set %s aside, and the files it conflicted in, could not be recorded on it: %v", s.ID, werr))
 	}
@@ -229,16 +234,23 @@ func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
 // was before, so that a tracker that cannot answer is not a reason to leave it.
 // A note in the report says the story was left alone.
 func (b BatchLand) leftToANewAttempt(ctx context.Context, id string, report *BatchReport) bool {
+	if !b.noLongerQueued(ctx, id) {
+		return false
+	}
+	report.Notes = append(report.Notes, fmt.Sprintf("%s was taken by this batch, but it is no longer queued for batch landing (a new attempt was given it since), so the batch left it alone", id))
+	return true
+}
+
+// noLongerQueued is leftToANewAttempt's read without the note, for a step that
+// only has to write nothing: the note is said once, by the step that acts on the
+// story at the end of the run.
+func (b BatchLand) noLongerQueued(ctx context.Context, id string) bool {
 	n := b.Next
 	if n.Tracker == nil {
 		return false
 	}
 	detail, err := n.Tracker.ShowStory(ctx, id)
-	if err != nil || QueuedForBatch(detail) {
-		return false
-	}
-	report.Notes = append(report.Notes, fmt.Sprintf("%s was taken by this batch, but it is no longer queued for batch landing (a new attempt was given it since), so the batch left it alone", id))
-	return true
+	return err == nil && !QueuedForBatch(detail)
 }
 
 // waitsOnItsFixer says nothing of the batch merged and it was given its fixer,
