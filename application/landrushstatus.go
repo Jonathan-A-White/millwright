@@ -88,10 +88,10 @@ func (s Status) landRushStatuses(ctx context.Context, work WorkInHand) []LandRus
 	}
 	unwatched := map[string]bool{}
 	for _, detail := range work.Queued() {
-		if path, err := detail.Path(); err == nil {
-			if _, here := s.Rigs[path.Rig]; !here && !unwatched[path.Rig] {
-				unwatched[path.Rig] = true
-				names = append(names, path.Rig)
+		if rig, _ := queuedRig(detail); rig != "" {
+			if _, here := s.Rigs[rig]; !here && !unwatched[rig] {
+				unwatched[rig] = true
+				names = append(names, rig)
 			}
 		}
 	}
@@ -107,12 +107,23 @@ func (s Status) landRushStatuses(ctx context.Context, work WorkInHand) []LandRus
 		}
 		one := LandRushStatus{Rig: name, Unwatched: unwatched[name]}
 		for _, detail := range work.QueuedHeld() {
-			if path, err := detail.Path(); err == nil && path.Rig == name {
+			if rig, _ := queuedRig(detail); rig == name {
 				one.LeftOut = append(one.LeftOut, detail.Story.ID+" is held, so the batch leaves it out")
 			}
 		}
 		for _, detail := range work.Queued() {
-			if path, err := detail.Path(); err != nil || path.Rig != name {
+			rig, readable := queuedRig(detail)
+			if !readable {
+				// A batch hands such a story back or leaves it out; until then
+				// the report names it (mw-gq6.1748). One that names no rig is
+				// named under each batch rig, for any batch may read it.
+				if rig == "" || rig == name {
+					_, perr := detail.Path()
+					one.LeftOut = append(one.LeftOut, fmt.Sprintf("%s is queued, but its path cannot be read, so the batch leaves it out: %v", detail.Story.ID, perr))
+				}
+				continue
+			}
+			if rig != name {
 				continue
 			}
 			if branch, gone := s.branchGone(ctx, name, detail.Story.ID); gone {
@@ -148,6 +159,16 @@ func (s Status) landRushStatuses(ctx context.Context, work WorkInHand) []LandRus
 		out = append(out, one)
 	}
 	return out
+}
+
+// queuedRig is the rig a queued story lands on and whether its path could be
+// read. When it cannot, the rig is the one its epic's defaults and its own
+// overrides name, empty when they name none.
+func queuedRig(detail StoryDetail) (string, bool) {
+	if path, err := detail.Path(); err == nil {
+		return path.Rig, true
+	}
+	return detail.Merged().Rig, false
 }
 
 // branchGone says the story's branch is not at the rig's origin, as the rig
