@@ -101,6 +101,7 @@ FAIL	example.com/app/pkg	0.01s
 func aBatchOfThreeWithARedStory(t *testing.T, ownerNamed bool, result string) aRedStoryBatch {
 	t.Helper()
 	a := aBatchOf(t, 3)
+	aQueuedInTheTracker(t, a)
 	rebuilding := &aRebuildingLanding{aBranchConflictLanding: aBranchConflictLanding{conflicts: map[string]bool{}}}
 	rebuilding.AheadCount = 1
 	a.land.Next.Landing = rebuilding
@@ -282,5 +283,21 @@ func TestAHeldRedBatchLineCarriesTheStoryWhoseTestsFailedAsItsSuspect(t *testing
 	}
 	if m := a.report.Metric(time.Now()); m.Outcome != application.BatchHeld || !m.Red || m.Suspect != "mw-e.2" {
 		t.Errorf("expected a held red line naming mw-e.2 as its suspect, got %+v", m)
+	}
+}
+
+// aQueuedInTheTracker makes each story of the batch what mw land reads: claimed,
+// and run=queued, as a batch finds it, so that it is still queued when the batch
+// comes to write on it (mw-gq6.1735).
+func aQueuedInTheTracker(t *testing.T, a aSetAsideBatch) {
+	t.Helper()
+	ctx := context.Background()
+	for _, s := range a.report.Queue {
+		if err := a.tracker.ClaimStory(ctx, s.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.tracker.SetStoryState(ctx, s.ID, application.RunState, application.RunQueued, "queued"); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

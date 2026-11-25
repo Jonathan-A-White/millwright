@@ -835,6 +835,9 @@ func (b BatchLand) noteSetAside(ctx context.Context, report *BatchReport) {
 		if s.HandedBack {
 			continue // handBackRepeaters has said so on it
 		}
+		if b.leftToANewAttempt(ctx, s.ID, report) {
+			continue
+		}
 		line := fmt.Sprintf("%s was set aside by %s (%s); the other %s landed on %s at %s without waiting for it, and it stays queued",
 			s.ID, report.Label(), firstLine(s.Why), countStories(len(report.Merged)), report.Target, shortCommit(report.Commit))
 		report.Notes = append(report.Notes, line)
