@@ -1166,10 +1166,13 @@ func foundFixedOnMain(command string, lines []FindingLine, a FindingAnswer) (fix
 // bug is filed (mw-gq6.1245): its AC command when that is cheap and
 // deterministic, else the file and line it names. fixed says main passes, and
 // the bug is not filed; a finding that cannot be checked, or whose read could
-// not be made (a note says why), is filed as it was.
-func (n Next) findingOnMain(ctx context.Context, c *closeOut, report *NextReport, bug foundBug) (fixed bool, how string) {
+// not be made (a note says why), is filed as it was. failedAt is the commit
+// where the command was seen to fail, which the bug filed from the finding names
+// as its main's sha (mw-gq6.1740); it is empty when the command was not seen to
+// fail anywhere.
+func (n Next) findingOnMain(ctx context.Context, c *closeOut, report *NextReport, bug foundBug) (fixed bool, how, failedAt string) {
 	if n.FindingChecks == nil || bug.item == nil || ctx.Err() != nil {
-		return false, ""
+		return false, "", ""
 	}
 	ask := &foundSpecAsk{checks: n.FindingChecks, command: foundCheckCommand(bug.item.AC)}
 	for _, ref := range foundRefs(bug.item.What) {
@@ -1178,7 +1181,7 @@ func (n Next) findingOnMain(ctx context.Context, c *closeOut, report *NextReport
 		}
 	}
 	if ask.command == "" && len(ask.files) == 0 {
-		return false, ""
+		return false, "", ""
 	}
 	askCtx, cancel := context.WithTimeout(ctx, foundCheckBound)
 	defer cancel()
@@ -1187,20 +1190,23 @@ func (n Next) findingOnMain(ctx context.Context, c *closeOut, report *NextReport
 	})
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the finding of %s was not read against main, so its bug is filed: %s: %s", c.id, bug.item.What, firstLine(err.Error())))
-		return false, ""
+		return false, "", ""
 	}
 	fixed, how = foundFixedOnMain(ask.command, ask.files, ask.answer)
+	if ask.command != "" && ask.answer.Ran && !ask.answer.Passed {
+		failedAt = ask.answer.Sha
+	}
 	if !fixed || ask.command == "" {
-		return fixed, how
+		return fixed, how, failedAt
 	}
 	// A command that passes on main is a fix only if it failed where the finder
 	// saw the fault unfixed; at landing time main is the finder's own tree, so a
 	// test that already passed there passes on main whatever was fixed
 	// (mw-gq6.1733).
 	if !n.reproducedAtFinder(ctx, c, report, ask.command) {
-		return false, ""
+		return false, "", ""
 	}
-	return fixed, how
+	return fixed, how, ""
 }
 
 // finderRev is the commit a landing's report says the story's work came to
@@ -1267,7 +1273,15 @@ func (a foundAtAsk) Recheck(ctx context.Context, rig, _ string) (SpecRecheck, er
 // foundCheckBound is the longest a read of main for one finding may take.
 const foundCheckBound = 5 * time.Minute
 
-func foundDescription(c *closeOut, bug foundBug, host string, filed domain.Path) string {
+// foundDescription words a finding's bug. failedAt is the commit the finding's
+// command was seen to fail at, when it was: the bug then ends with the line
+// 'Main's sha: <commit>' that mw suite writes for a failing file, so a dispatch
+// that finds the check passing on a main that has moved closes the bug as fixed,
+// and holds it when main is that very commit. A bug with no such line is one
+// nothing showed to have failed (its command passed at the finder's commit, or
+// named none), and a dispatch holds it when its check passes (mw-gq6.1737,
+// mw-gq6.1740).
+func foundDescription(c *closeOut, bug foundBug, host string, filed domain.Path, failedAt string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (%s) landed, and its closing comment lists %s under 'Found, not fixed:':\n\n", c.id, c.detail.Story.Title, thisOrThese(len(bug.said())))
 	for _, line := range bug.said() {
@@ -1278,6 +1292,9 @@ func foundDescription(c *closeOut, bug foundBug, host string, filed domain.Path)
 	}
 	fmt.Fprintf(&b, "\nFinder %s ran on %s/%s; the bug runs on the rig default, %s/%s; the Mayor may raise it with a reason.\n", c.id, c.path.Model, c.path.Effort, filed.Model, filed.Effort)
 	fmt.Fprintf(&b, "\nSeen by: %s\n\nThe Builder saw it and did not fix it, and nobody has checked it since. Read it, word what is to be done and its acceptance (the Builder's, if it gave one, is in the acceptance field), and release this bug, or close it if it is not one.\n\nSource: mw next on %s (mw-t5shinh.24).\n", c.id, host)
+	if failedAt != "" {
+		fmt.Fprintf(&b, "\nMain's sha: %s\n", failedAt)
+	}
 	return b.String()
 }
 
@@ -1377,7 +1394,8 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			block = append(block, fmt.Sprintf("Already filed: %s. %s", id, strings.Join(bug.lines, " ")))
 			continue
 		}
-		if fixed, how := n.findingOnMain(ctx, c, report, bug); fixed {
+		fixed, how, failedAt := n.findingOnMain(ctx, c, report, bug)
+		if fixed {
 			said := strings.Join(bug.said(), " ")
 			dropped := fmt.Sprintf("already fixed on main: %s (%s; %s's finding, so no bug is filed)", said, how, c.id)
 			n.keepJoin(ctx, c, report, dropped)
@@ -1427,7 +1445,7 @@ func (n Next) filedFromFoundNotFixed(ctx context.Context, c *closeOut, report *N
 			EpicID:      epicID,
 			Standalone:  standalone,
 			Title:       bug.title,
-			Description: foundDescription(c, bug, n.Host, overrides),
+			Description: foundDescription(c, bug, n.Host, overrides, failedAt),
 			Acceptance:  acceptance,
 			Priority:    foundBugPriority,
 			Overrides:   overrides,
