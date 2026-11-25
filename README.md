@@ -2137,7 +2137,12 @@ mw land lampas             # merge, test once, push main only when green
 
 In a landing worktree detached at the target branch as the origin has it, the
 queued branches are merged oldest queued first by the rig's union rules; one
-that does not merge is set aside with git's conflict list and stays queued. The
+that does not merge is set aside with git's conflict list and stays queued. One
+that does not merge into the target alone either (a trial merge without the other
+stories) conflicts with main, not the batch: no later batch can clear that, so it
+is handed back to a Builder to rebase at once, after the batch's fixer, if it was
+given one, has not merged it. A story set aside a second time, for any reason, is
+handed back too. The
 version is raised once, with one changelog entry per story, and the rig's tests
 run once on the batch under the host's gate lock and calm rule. Only when they
 pass is main pushed, a fast-forward: each story is closed run=landed with a

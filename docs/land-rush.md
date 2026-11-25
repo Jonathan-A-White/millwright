@@ -110,15 +110,27 @@ story, and nothing is pushed that has not passed the whole gate as merged. No
 fixer is started for the ones set aside before the push (batch 595 of lampas
 once held five clean stories about 13 hours for one fixer).
 
-A set-aside story stays queued (`run=queued`, open and claimed, its branch
-untouched and never pushed untested). A note says why, on the story itself
-("Set aside by batch N of the rig: ...", with the conflicted files) and in the
-batch's report; the Mayor's "Set aside" mail names it and its conflict. The next
-batch takes it with the others: when it then conflicts alone, every branch of
-that batch is set aside for its conflicts, and that batch is given its one
-fixer before the push (see [The fixer](#the-fixer)). A fixer that succeeds lands
-the story in that batch; one that fails holds only that batch, which has
-nothing else in it. Only a red gate on the merged part holds the merged part.
+A story that conflicts only with its batch mates stays queued (`run=queued`,
+open and claimed, its branch untouched and never pushed untested). A note says
+why, on the story itself ("Set aside by batch N of the rig: ...", with the
+conflicted files) and in the batch's report; the Mayor's "Set aside" mail names
+it and its conflict. The next batch takes it with the others.
+
+A story that conflicts with main alone cannot be cleared by waiting
+(mw-gq6.1609). Once a merge into the batch conflicts, mw tries the branch on the
+target without its batch mates, in a landing worktree of its own (not needed
+while nothing has merged: the batch is then the target). When that conflicts too,
+the story is handed back at once: its run state is cleared, its claim given back,
+a comment and the mail say it "conflicts with main, not the batch", and the next
+dispatch tick takes it as a new attempt to rebase it. A batch of which every
+branch conflicts is first given its one fixer (see [The fixer](#the-fixer)): what
+the fixer merges lands, and what it does not is handed back. When the host or the
+harness kept that fixer from starting, or stopped it, the stories wait for the
+next batch's fixer instead.
+
+Whatever the cause, a story set aside by a second batch is handed back the same
+way and not queued again (mw-gq6.1631, mw-gq6.1632). Only a red gate on the
+merged part holds the merged part.
 
 Green with nothing set aside lands the batch: each story is closed
 `run=landed` with a ledger line naming the batch, a chain stamp and a Landed
@@ -194,7 +206,7 @@ puts it back.
 
 Every way a batch is held, who it holds and what frees them. "Held" means
 nothing was pushed and every story named stays queued (`run=queued`, open and
-claimed). The middle column says whether one story's trouble holds stories
+claimed), unless it was handed back to a Builder (see above). The middle column says whether one story's trouble holds stories
 that are green: a batch that sets branches aside for conflicts lands the rest
 first (above), and so does a red batch that can name the one story whose tests
 failed, also when its fixer fails (above); a red batch that cannot name one story
@@ -203,9 +215,9 @@ story's unreadable changelog entry holds the batch.
 
 | Case | Who is held | What frees it |
 |---|---|---|
-| Some branches merged, others set aside for conflicts or AI attribution | No one: the merged ones land; the set-aside ones stay queued with a note | The next batch takes them; when every branch of a batch conflicts it is given its one fixer |
-| Every branch set aside for conflicts, and no fixer is started (host gives way, no room, harness hold) | The stories set aside, which are all of that batch | The host calm again; the next batch, after `batch_every` |
-| Every branch set aside for conflicts, and the fixer fails (out of turns, error, killed, stopped by the harness) | The stories set aside, all of that batch; the fixer's uncommitted files are kept as `fixer-uncommitted.diff` | After a failure: the next batch gives them a fixer afresh, after `batch_every`; after a harness stop, once its hold has passed |
+| Some branches merged, others set aside for conflicts or AI attribution | No one: the merged ones land; one that conflicts with main alone is handed back, the others stay queued with a note | The next batch takes the queued ones; a second set-aside hands a story back |
+| Every branch set aside for conflicts, and no fixer is started (host gives way, no room, harness hold) | The stories set aside, which are all of that batch | The host calm again; the next batch, after `batch_every`; one set aside a second time is handed back |
+| Every branch set aside for conflicts, and the fixer fails (out of turns, error, killed, stopped by the harness) | After a harness stop, the stories set aside; after a failure, no one. The fixer's uncommitted files are kept as `fixer-uncommitted.diff` | After a failure: each story is handed back to a Builder; after a harness stop, the next batch gives them a fixer once its hold has passed |
 | The rig's tests are red on the merged part, and one story's branch alone changed the failing tests' files | That story only: it is left out with a note naming its failing tests, and the green rest is tested as merged without it and lands in the same batch | The story is taken by the next batch; queued alone and red again it is held red alone |
 | The rig's tests are red on the merged part, and no one story can be named | The whole merged part: one story's red holds the green ones for this one gate | The follower lands again at once, in parts: two halves, else one story at a time; the story held red alone is left out until the rig lands again |
 | The tests are red and the fixer fails (out of turns, error, killed), and it or the failing tests' files name one story | That story only, as above: its fixer's commits are kept in `fixer.bundle`, the green rest lands without waiting for the drain | The story is taken by the next batch |
