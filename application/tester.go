@@ -93,6 +93,22 @@ func TesterLanded(d StoryDetail) string {
 	return ""
 }
 
+// TesterLandedCommit is the commit a Tester story's landed-story line names
+// ("(landed on main of lampas at abc1234)"), the one the Tester drove; "" when
+// it names none.
+func TesterLandedCommit(d StoryDetail) string {
+	for _, line := range strings.Split(d.Description, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), TesterLandedLine); ok {
+			if m := testerLandedAt.FindStringSubmatch(rest); m != nil {
+				return m[1]
+			}
+		}
+	}
+	return ""
+}
+
+var testerLandedAt = regexp.MustCompile(`\bat ([0-9a-f]{7,40})\)`)
+
 // NamesNoLandedStory reports whether d is a Tester story whose description has
 // no TesterLandedLine: its session could run and then file nothing (mw-gq6.594).
 func NamesNoLandedStory(d StoryDetail) bool {

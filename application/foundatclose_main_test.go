@@ -604,3 +604,48 @@ func TestASuiteReadsAFindingsCommandAtTheFindersCommit(t *testing.T) {
 		t.Errorf("expected an error for a rig this host does not have")
 	}
 }
+
+// A Tester's bug finding whose acceptance command passes where the Tester saw
+// the fault (the commit its story names) reproduces nothing, so its pass on main
+// is no sign of a fix: the finding is filed, and says why (mw-gq6.1736).
+func TestATesterFindingWhoseCommandAlsoPassedWhereItWasSeenIsFiled(t *testing.T) {
+	finding := testerFinding()
+	finding.Acceptance = "go test ./application -run TestReaderKeepsItsPage passes\nSweep: every viewport effect in src/ is grepped for state it drops"
+	passes := application.FindingAnswer{Sha: "abc1234", Ran: true, Passed: true, Tail: "ok  \tx\t0.1s"}
+	main := &stubFindingChecks{
+		answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: "ok  \tx\t0.1s"},
+		at:     &passes,
+	}
+
+	tracker, rules := testerFileEpic(t)
+	var out strings.Builder
+	filed, err := application.TesterFiler{Tracker: tracker, Rules: rules, Main: main, Out: &out}.File(context.Background(), "mw-e.2", finding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filed.ID == "" || filed.FixedOnMain != "" {
+		t.Fatalf("expected the finding filed, got %+v", filed)
+	}
+	if main.atRev != "abc1234" || main.atCommand != "go test ./application -run TestReaderKeepsItsPage" || main.rig != "lampas" {
+		t.Errorf("expected the command run for lampas at the commit the Tester story names, got %q at %q for %q", main.atCommand, main.atRev, main.rig)
+	}
+	if !strings.Contains(out.String(), "does not reproduce the finding") {
+		t.Errorf("expected a note that the command does not reproduce the finding, got %q", out.String())
+	}
+
+	// A command that failed there and passes on main is still a fix.
+	tracker, rules = testerFileEpic(t)
+	fixed := &stubFindingChecks{answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: "ok"}}
+	got, err := application.TesterFiler{Tracker: tracker, Rules: rules, Main: fixed}.File(context.Background(), "mw-e.2", finding)
+	if err != nil || got.ID != "" || got.FixedOnMain == "" {
+		t.Errorf("expected a command that failed where it was seen to drop the finding, got %+v, %v", got, err)
+	}
+
+	// A commit that cannot be read for the command files the finding.
+	tracker, rules = testerFileEpic(t)
+	unread := &stubFindingChecks{answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: "ok"}, atErr: errors.New("no such commit")}
+	got, err = application.TesterFiler{Tracker: tracker, Rules: rules, Main: unread}.File(context.Background(), "mw-e.2", finding)
+	if err != nil || got.ID == "" {
+		t.Errorf("expected the finding filed when the tested commit cannot be read, got %+v, %v", got, err)
+	}
+}

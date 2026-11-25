@@ -213,7 +213,7 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 		return filed, nil
 	}
 
-	if how := f.fixedOnMain(ctx, testerID, path.Rig, finding); how != "" {
+	if how := f.fixedOnMain(ctx, testerID, path.Rig, TesterLandedCommit(tester), finding); how != "" {
 		filed.FixedOnMain = how
 		f.say("not filed: already fixed on main: %s (%s)\n", finding.Title, how)
 		f.say("  put 'already fixed on main' under the finding in FINDINGS\n")
@@ -384,7 +384,7 @@ func passingDepFault(err error) bool {
 // fixedOnMain is how the acceptance of a bug finding passes on main as merged
 // now, or empty: for a taste finding, an acceptance that names no cheap command,
 // or a read of main that could not be made, which is said and files the finding.
-func (f TesterFiler) fixedOnMain(ctx context.Context, testerID, rig string, finding TesterFinding) string {
+func (f TesterFiler) fixedOnMain(ctx context.Context, testerID, rig, seenAt string, finding TesterFinding) string {
 	if f.Main == nil || finding.Kind != TesterKindBug {
 		return ""
 	}
@@ -408,10 +408,48 @@ func (f TesterFiler) fixedOnMain(ctx context.Context, testerID, rig string, find
 		f.say("  note: the finding was not read against main, so it is filed: %s\n", firstLine(err.Error()))
 		return ""
 	}
-	if fixed, how := foundFixedOnMain(command, nil, ask.answer); fixed {
-		return how
+	fixed, how := foundFixedOnMain(command, nil, ask.answer)
+	if !fixed {
+		return ""
 	}
-	return ""
+	// A command that passes on main is a fix only if it failed where the Tester
+	// saw the fault: the commit its story names (mw-gq6.1736).
+	if !f.reproducedWhereSeen(ctx, testerID, rig, seenAt, command) {
+		return ""
+	}
+	return how
+}
+
+// reproducedWhereSeen says whether command shows the fault at seenAt, the commit
+// the Tester story names: it failed there, or it named a test that commit did
+// not have. When it passed there, or the commit could not be read, a note says
+// why and the finding is filed.
+func (f TesterFiler) reproducedWhereSeen(ctx context.Context, testerID, rig, seenAt, command string) bool {
+	at, ok := f.Main.(FindingRecheckerAt)
+	if !ok || seenAt == "" {
+		f.say("  note: the command `%s` was not run where the Tester saw the fault, so it is not known to reproduce the finding and it is filed\n", command)
+		return false
+	}
+	askCtx, cancel := context.WithTimeout(ctx, foundCheckBound)
+	defer cancel()
+	var answer FindingAnswer
+	_, err := rerunUnderGate(askCtx, foundAtAsk{func(ctx context.Context, rig string) (FindingAnswer, error) {
+		return at.RecheckFindingAt(ctx, rig, seenAt, command)
+	}, &answer}, f.GateLock, DispatchGateWait, f.Host, testerID, rig, "", func(note string) { f.say("  note: %s\n", note) })
+	if err != nil {
+		f.say("  note: the command `%s` was not run at %s, where the Tester saw the fault, so the finding is filed: %s\n", command, short(seenAt), firstLine(err.Error()))
+		return false
+	}
+	if !answer.Ran {
+		f.say("  note: the command `%s` did not run at %s, where the Tester saw the fault, so the finding is filed\n", command, short(seenAt))
+		return false
+	}
+	ran := !foundNoTestsToRun.MatchString(answer.Tail) || !strings.HasPrefix(command, "go test")
+	if answer.Passed && ran {
+		f.say("  note: the command `%s` passes at %s, where the Tester saw the fault, so it does not reproduce the finding; it is filed\n", command, short(seenAt))
+		return false
+	}
+	return true
 }
 
 func (f TesterFiler) say(format string, args ...any) {
