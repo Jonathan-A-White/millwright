@@ -69,6 +69,13 @@ type EpicRequirements struct {
 	// them (mw-gq6.349). It is no requirement of an epic either, so Any does
 	// not count it.
 	FilesExpected bool
+	// TermsTitle (terms_title) is a regular expression: on a rig that sets it, a
+	// story whose title matches is not released until its bead holds a line
+	// beginning TERMS: (the host's terms read and the clause quoted), so that a
+	// crawl of a new web source is not released against a host's terms
+	// (mw-gq6.1726). Empty guards none. It is no requirement of an epic either, so
+	// Any does not count it.
+	TermsTitle string
 	// ReleaseOnPath says the rig's held stories are released by the command that
 	// completes them: mw path set --after <ids|none> adds the dependencies, sets
 	// the path and releases the story it was told what it waits on, unless the

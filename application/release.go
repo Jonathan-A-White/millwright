@@ -103,6 +103,9 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 		}
 	}
 	warnPinNoWhy(ctx, r.Out, r.Rules, r.RepathNoRoom, heldDetails...)
+	if err := r.checkTerms(ctx, heldDetails); err != nil {
+		return found, err
+	}
 	if err := r.checkRunnable(ctx, heldDetails); err != nil {
 		return found, err
 	}
@@ -175,6 +178,9 @@ func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
 	warnWrongRig(r.Out, r.Rigs, r.RigFiles, detail)
 	warnHomeSecret(r.Out, detail)
 	warnPinNoWhy(ctx, r.Out, r.Rules, r.RepathNoRoom, detail)
+	if err := r.checkTerms(ctx, []StoryDetail{detail}); err != nil {
+		return found, err
+	}
 	if err := r.checkRunnable(ctx, []StoryDetail{detail}); err != nil {
 		return found, err
 	}
@@ -695,6 +701,14 @@ func (r ReleasePaced) choose(ctx context.Context, held []string, details map[str
 		}
 		for _, id := range batch {
 			story := details[id]
+			line, err := termsRefusal(ctx, r.Rules, r.Tracker.StoryComments, id, story.Merged().Rig, story.Story.Title, story.Description, comments[id])
+			if err != nil {
+				return nil, err
+			}
+			if line != "" {
+				r.print(fmt.Sprintf("%s, skipped (put a line beginning %s in a comment on %s, then release it)\n", line, TermsLinePrefix, id))
+				continue
+			}
 			if line := notRunnableRefusal(ctx, r.Rules, id, story.Merged().Rig, story.Acceptance); line != "" {
 				r.print(fmt.Sprintf("%s, skipped (mw release --force \"<why>\" %s to release it anyway)\n", line, id))
 				continue

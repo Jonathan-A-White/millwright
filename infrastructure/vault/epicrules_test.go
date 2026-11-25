@@ -752,3 +752,27 @@ func TestFeatureShareMustLieFromItsMinimumToItsMaximumAndTheRefusalNamesBothKeys
 		}
 	}
 }
+
+func TestARigsFileReadsTermsTitleAndRefusesWhatIsNoRegularExpression(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+
+	writeRigFile(t, dir, "sermon-index", "terms_title = \"^sermon-index: source \" # a new web source\n")
+	got, err := v.EpicRequirements(context.Background(), "sermon-index")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	if got.TermsTitle != "^sermon-index: source" {
+		t.Errorf("TermsTitle = %q, want the quoted expression", got.TermsTitle)
+	}
+	if got.Any() {
+		t.Errorf("terms_title is no requirement of an epic, but Any() = true")
+	}
+
+	for _, bad := range []string{`^source`, `"(unclosed"`, `["a", "b"]`} {
+		writeRigFile(t, dir, "sermon-index", "terms_title = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "sermon-index"); err == nil || !strings.Contains(err.Error(), "terms_title") {
+			t.Errorf("terms_title = %s: err = %v, want a refusal naming terms_title", bad, err)
+		}
+	}
+}
