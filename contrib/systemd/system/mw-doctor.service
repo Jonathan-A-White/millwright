@@ -55,4 +55,7 @@ TimeoutStartSec=4min
 # may kill it first, before the seat or anything else on the host: make the
 # kernel's OOM killer pick it first, and cap what it may use.
 OOMScoreAdjust=500
-MemoryMax=384M
+# 1G, not the 384M of the other short units: the run's bd reads (one process per
+# story, side by side) count in this cgroup, and on cloud4 it peaked at 384.0M
+# with 497.7M in swap, at the old cap, on 2026-11-25 (mw-gq6.1731).
+MemoryMax=1G

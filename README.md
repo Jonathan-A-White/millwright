@@ -6800,7 +6800,7 @@ them put the Laptop at load 44 of 20 cores and held dispatch, two close-outs and
 batch for calm (mw-gq6.483). `contrib/underload_test.go` proves the cap, the
 zero-loop case on a busy host, and each way the loops end.
 
-`OOMScoreAdjust=500` and `MemoryMax=384M` are also set directly on
+`OOMScoreAdjust=500` and `MemoryMax=384M` (1G on `mw-doctor.service` and `mw-host-sweep.service`) are also set directly on
 `mw-mail-notify.service`, `mw-health.service`, `mw-doctor.service` and
 `mw-host-sweep.service`, so a memory squeeze on the host picks one of these
 ticks over the seat or the blog, and none of the four can itself run the host
