@@ -145,3 +145,28 @@ Feature: a host keeps the mw it runs level with the factory rig's main
     When the host's tick looks at its mw
     Then the second rig is still at its old commit
     And the build did not run
+
+  # mw-gq6.1605: a rig whose after-landing slot is held by a running deploy is passed
+  # over this tick, not waited for, so one rig's long deploy holds back no other rig's.
+  Scenario: A rig whose after-landing slot is held is passed over and the next rig is deployed
+    Given the host's build command makes bin/mw
+    And the host names that command for two more rigs, "postern" and "trade-tracker", checked out at the same old commit, and not for millwright
+    And the host is home
+    And another process holds the after-landing slot of "postern"
+    When the host's tick looks at its mw
+    Then "trade-tracker" is at origin's main
+    And the build ran once, in "trade-tracker", at origin's main
+    And "postern" is at origin's main
+    And the tick's line says: self-update: postern at <new>, not yet deployed: its after-landing slot is held by
+    And the tick's line says: the next tick tries again
+
+  Scenario: When the held slot is freed the next tick deploys the first rig
+    Given the host's build command makes bin/mw
+    And the host names that command for two more rigs, "postern" and "trade-tracker", checked out at the same old commit, and not for millwright
+    And the host is home
+    And another process holds the after-landing slot of "postern"
+    And the host's tick has looked at its mw
+    And the other process gives the after-landing slot of "postern" back
+    When the host's tick looks at its mw
+    Then the build ran in "postern" and in "trade-tracker", each once, at origin's main
+    And the tick's line says: self-update: postern at <new>, not yet deployed, deployed by the home
