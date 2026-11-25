@@ -69,6 +69,8 @@ type specsRecord struct {
 	LeftOut []string `json:"left_out,omitempty"`
 	Output  string   `json:"output,omitempty"`
 	Error   string   `json:"error,omitempty"`
+	// Notes are what the run has to say besides its result: that it was run twice.
+	Notes []string `json:"notes,omitempty"`
 }
 
 func (r specsRecord) checked() SpecsChecked {
@@ -76,6 +78,15 @@ func (r specsRecord) checked() SpecsChecked {
 		Checked: Checked{Command: r.Command, Passed: r.Result == specsPassed, NotRun: r.Result == specsNotRun, Output: r.Output},
 		Specs:   r.Specs,
 		LeftOut: r.LeftOut,
+	}
+}
+
+// specsCalm is the part of a Next that reads the host's load and waits for it to
+// calm, as a part of a check does, for the detached specs' run again.
+func (k Check) specsCalm() Next {
+	return Next{
+		Load: k.Load, LoadPoll: k.LoadPoll, LoadBound: k.partSlotWait(), LoadWait: k.LoadWait,
+		SpecChecks: k.SpecChecks, Host: k.Host, Out: k.Out,
 	}
 }
 
@@ -147,7 +158,19 @@ func (k Check) checkSpecsWorker(ctx context.Context, report CheckReport, c *clos
 	if remote == "" {
 		remote = DefaultRemote
 	}
-	run, err := k.SpecChecks.RunSpecs(ctx, c.path.Rig, c.worktree, StartPoint(remote, c.target))
+	base := StartPoint(remote, c.target)
+	n := k.specsCalm()
+	before, _ := n.readLoad(ctx)
+	run, err := k.SpecChecks.RunSpecs(ctx, c.path.Rig, c.worktree, base)
+	// A failure read with the host far over its cores is the host's more than the
+	// story's: it is run once more when the host calms, the second run standing, and
+	// a host that does not calm is not-run (mw-gq6.1080).
+	var notRun error
+	if err == nil && len(run.Specs) > 0 && !run.NotRun && !run.Passed {
+		var said NextReport
+		run, err, notRun = n.specsRunAgain(ctx, c, &said, c.worktree, base, before, run)
+		rec.Notes = said.Notes
+	}
 	if after, herr := k.Landing.RefHead(ctx, c.rigDir, c.branch); tip != "" && (herr != nil || after != tip) {
 		rec.Tip = partNoTip
 	}
@@ -156,6 +179,8 @@ func (k Check) checkSpecsWorker(ctx context.Context, report CheckReport, c *clos
 	switch {
 	case err != nil:
 		rec.Result, rec.Error = specsError, err.Error()
+	case notRun != nil:
+		rec.Result, rec.Error = specsNotRun, "the changed specs failed and were not run again: "+firstLine(notRun.Error())
 	case run.NotRun:
 		rec.Result = specsNotRun
 	case run.Passed, len(run.Specs) == 0:
@@ -220,6 +245,15 @@ func (d detachedSpecs) RunSpecs(ctx context.Context, _, _, _ string) (SpecsCheck
 		}
 		if rec.Result == specsError {
 			return SpecsChecked{}, errors.New(rec.Error)
+		}
+		if rec.Result == specsNotRun && rec.Error != "" {
+			// Failed on a host that never calmed: not run again, so not a verdict.
+			return SpecsChecked{}, errors.New(rec.Error)
+		}
+		if k.Out != nil {
+			for _, note := range rec.Notes {
+				fmt.Fprintf(k.Out, "  note    %s\n", note)
+			}
 		}
 		return rec.checked(), nil
 	}
