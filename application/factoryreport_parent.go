@@ -11,7 +11,7 @@ import (
 const ParentNoteMember = "the member"
 
 // epicsMoved counts the epics that had a story closed or claimed in the window,
-// leaving a Tester's stories out; it names none.
+// leaving a Tester's stories and a formula run's steps out; it names none.
 func (r FactoryReportResult) epicsMoved(stories []StoryDetail) int {
 	inWindow := func(at time.Time) bool {
 		if at.IsZero() {
@@ -22,7 +22,8 @@ func (r FactoryReportResult) epicsMoved(stories []StoryDetail) int {
 	}
 	moved := map[string]bool{}
 	for _, d := range stories {
-		if d.IsEpic || d.EpicID == "" || IsTesterStory(d) {
+		// A molecule is a formula run, not an epic: its steps are closed by mw.
+		if d.IsEpic || d.EpicID == "" || strings.Contains(d.EpicID, "-mol-") || IsTesterStory(d) {
 			continue
 		}
 		if inWindow(d.ClosedAt) || inWindow(d.ClaimedAt) {
