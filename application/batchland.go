@@ -560,7 +560,7 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport, 
 	for _, detail := range work.Queued() {
 		path, err := detail.Path()
 		if err != nil {
-			report.Notes = append(report.Notes, fmt.Sprintf("%s is queued, but its path cannot be read, so it is left out: %v", detail.Story.ID, err))
+			b.handBackUnreadablePath(ctx, rig, detail, err, report)
 			continue
 		}
 		if path.Rig != rig {
