@@ -245,6 +245,12 @@ type MainRed struct {
 	// Titles are the Playwright titles of Tests, by the same names (nil when
 	// there are none): a later main that moved a test is asked by its title.
 	Titles map[string]string
+	// Sha is the commit of main the tests were seen to fail at, read from the
+	// landing worktree they ran in ("" when it could not be read): the bug that
+	// carries the red names it as 'Main's sha:', so a dispatch that sees its check
+	// pass at that very commit holds it as a flake, not closes it as fixed
+	// (mw-gq6.1750).
+	Sha string
 
 	// Gap is set when the home runs the same tests and passes them: the failure
 	// is this host's, and Bug is the bug filed against the host (mw-gq6.1395).
@@ -259,6 +265,15 @@ type HostGap struct {
 	// Line is the error line of the failing run, as the Builder of the bug is to
 	// find it.
 	Line string
+}
+
+// shaLine is the line 'Main's sha: <commit>' that ends a bug's description, as
+// mw suite writes it for a failing file, or "" when the commit is not known.
+func (m MainRed) shaLine() string {
+	if sha := strings.TrimSpace(m.Sha); sha != "" {
+		return fmt.Sprintf("\nMain's sha: %s\n", sha)
+	}
+	return ""
 }
 
 // Reason is the code a story held on this finding is filed under.
@@ -556,6 +571,8 @@ func (n Next) mainAloneNamed(ctx context.Context, c *closeOut, report *NextRepor
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
 		}
 	}()
+	// The commit the landing worktree is at is the one the tests are run on.
+	landedAt, _ := n.Landing.RefHead(ctx, dir, "HEAD")
 	// A Playwright test is asked for on main at the line main has it at, which
 	// a branch that added a line above it has moved (mw-gq6.967).
 	onTarget, added := namesOnTarget(dir, tests, titles)
@@ -693,7 +710,7 @@ func (n Next) mainAloneNamed(ctx context.Context, c *closeOut, report *NextRepor
 	for i, test := range tests {
 		onMainNames[i] = onTarget[test]
 	}
-	red := &MainRed{Tests: onMainNames, Command: run.Command, Took: took, Gap: gap, Titles: titlesOnMain(tests, onMainNames, titles)}
+	red := &MainRed{Tests: onMainNames, Command: run.Command, Took: took, Gap: gap, Titles: titlesOnMain(tests, onMainNames, titles), Sha: landedAt}
 	if gap != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("main alone fails %s on %s (checked in %s), and %s passes them by name: host gap, not main's red", red.tests(), gap.Host, took.Round(time.Second), gap.Home))
 		return red
@@ -932,7 +949,7 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 		Title:      red.Title(MainRedCarrierPrefix),
 		Description: fmt.Sprintf("%s fails on %s by itself, with no story merged in: %s.\n\nFound by mw next on %s while closing out %s, whose merged result failed the same tests; "+
 			"`%s` fails them too in a clean worktree of %s. Until it is fixed every landing of %s that runs the rig's tests meets the same failure, and the story is held on this bug (mw-gq6.645).\n",
-			red.tests(), c.target, red.tests(), n.Host, c.id, red.Command, c.target, c.path.Rig),
+			red.tests(), c.target, red.tests(), n.Host, c.id, red.Command, c.target, c.path.Rig) + red.shaLine(),
 		Acceptance: fmt.Sprintf("1. %s pass on %s, run by name.\n2. The rig's gate passes.\nSweep: none, because mw next found the failure by running the tests on %s alone.", red.tests(), c.target, c.target),
 		Priority:   1,
 		Overrides:  path,
@@ -947,7 +964,7 @@ func (n Next) carriedBy(ctx context.Context, c *closeOut, report *NextReport, re
 			Title:      red.Title(fmt.Sprintf(HostGapCarrierPrefix+"%s: %s fails ", gap.Host, gap.Line)),
 			Description: fmt.Sprintf("%s fails on %s on %s, and passes on %s (the home): this is %s's gap, not main's red.\n\nThe error line: %s\n\nFound by mw next on %s while closing out %s, whose merged result failed the same tests; "+
 				"`%s` fails them in a clean worktree of %s on %s, and %s passes them by name. The story is held on this bug until it is fixed, and then its close-out runs again (mw-gq6.1395).\n",
-				red.tests(), c.target, gap.Host, gap.Home, gap.Host, gap.Line, n.Host, c.id, red.Command, c.target, gap.Host, gap.Home),
+				red.tests(), c.target, gap.Host, gap.Home, gap.Host, gap.Line, n.Host, c.id, red.Command, c.target, gap.Host, gap.Home) + red.shaLine(),
 			Acceptance: fmt.Sprintf("1. %s pass on %s, run by name on %s.\n2. The rig's gate passes on %s.\nSweep: other tools the rig's tests need that %s lacks; see the rig's README and contrib/boost-bootstrap.sh.", red.tests(), c.target, gap.Host, gap.Host, gap.Host),
 			Priority:   1,
 			Overrides:  path,

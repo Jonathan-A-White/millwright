@@ -181,3 +181,51 @@ func TestAMainRedBugGetsItsOwnModelAndEffortNotTheFinders(t *testing.T) {
 		t.Errorf("expected the main-red bug on sonnet at high, got %s at %s", got.Model, got.Effort)
 	}
 }
+
+// aLandingAtACommit answers HEAD of the landing worktree with a commit, as git does.
+type aLandingAtACommit struct {
+	*aMainLanding
+	sha string
+}
+
+func (l aLandingAtACommit) RefHead(ctx context.Context, dir, ref string) (string, error) {
+	if ref == "HEAD" {
+		return l.sha, nil
+	}
+	return l.aMainLanding.RefHead(ctx, dir, ref)
+}
+
+// mw-gq6.1750: the bug mw next files for main's red named its tests and no
+// "Main's sha:", so a dispatch that saw its check pass at the very commit it
+// failed at closed it as fixed instead of holding it as a flake.
+func TestAMainRedBugNamesTheCommitItFailedAt(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", theSourceStory())
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	landing := aLandingAtACommit{aMainLanding: &aMainLanding{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}}, sha: sha}
+	named := &namedTestsThat{run: failingOnMain("--- FAIL: TestA (0.01s)\n--- FAIL: TestB (0.01s)\nFAIL\n")}
+	before := tracker.Stories()
+	report, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: landing, Landing: landing,
+		Checks: twoFailingTests{}, Slot: aSlot{}, Mailbox: apptest.NewFakeMailbox(),
+		NamedChecks: named, MainAloneBound: 0,
+		LoadWait: func(context.Context, time.Duration) error { return nil },
+		Seat:     "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(ctx, "mw-x.1")
+	if report.Reason != application.ReasonMainRed {
+		t.Fatalf("expected the story held on main's red, got %q (%v)", report.Reason, err)
+	}
+	filed := theTestersFiled(t, tracker, before)
+	if len(filed) != 1 {
+		t.Fatalf("expected 1 main-red bug filed, got %d: %+v", len(filed), filed)
+	}
+	if want := "Main's sha: " + sha; !strings.Contains(filed[0].Description, want) {
+		t.Errorf("expected the bug to name the commit it failed at (%q), got:\n%s", want, filed[0].Description)
+	}
+}
