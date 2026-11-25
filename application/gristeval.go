@@ -35,6 +35,9 @@ type GristEval struct {
 	Now func() time.Time
 	// Out is where the report is printed; nil prints nothing.
 	Out io.Writer
+	// APIKey is the Anthropic API key each grind is billed to, as the mill's
+	// grind on its API login is; empty grinds on the subscription login.
+	APIKey string
 }
 
 // GristEvalRequest is one eval.
@@ -75,6 +78,8 @@ type GristEvalRow struct {
 	Error    string          `json:"error,omitempty"`
 	NotRun   string          `json:"notRun,omitempty"`
 	Answer   json.RawMessage `json:"answer,omitempty"`
+	// Login is what the grind was billed to: BillingAPI or BillingSubscription.
+	Login string `json:"login"`
 }
 
 // GristEvalModel is what one model did over every photo. Photos counts every
@@ -108,6 +113,9 @@ type GristEvalReport struct {
 	Rows   []GristEvalRow
 	Models []GristEvalModel
 	Notes  []string
+	// Login is the line that says which login ground every row, and that no
+	// app's request went with it: a result here is not the live mill's.
+	Login string
 	// JSONL and Markdown are the files written, full paths.
 	JSONL    string
 	Markdown string
@@ -117,6 +125,9 @@ type GristEvalReport struct {
 // summary a model, then the names behind the counts.
 func (r GristEvalReport) String() string {
 	var b strings.Builder
+	if r.Login != "" {
+		fmt.Fprintf(&b, "%s\n", r.Login)
+	}
 	for _, note := range r.Notes {
 		fmt.Fprintf(&b, "note: %s\n", note)
 	}
@@ -131,6 +142,9 @@ func (r GristEvalReport) String() string {
 func (r GristEvalReport) markdown() string {
 	var b strings.Builder
 	b.WriteString("# mw grist eval\n\n")
+	if r.Login != "" {
+		fmt.Fprintf(&b, "%s\n\n", r.Login)
+	}
 	for _, note := range r.Notes {
 		fmt.Fprintf(&b, "- %s\n", note)
 	}
@@ -249,7 +263,7 @@ func (e GristEval) Run(ctx context.Context, req GristEvalRequest) (GristEvalRepo
 	if err != nil {
 		return report, err
 	}
-	report.Notes = notes
+	report.Notes, report.Login = notes, e.login()
 	if len(photos) == 0 {
 		return report, fmt.Errorf("nothing to evaluate in %s: no photo (.jpg, .jpeg, .png or .webp) has a .txt beside it", req.Photos)
 	}
@@ -309,7 +323,7 @@ func (e GristEval) Run(ctx context.Context, req GristEvalRequest) (GristEvalRepo
 // grindPhoto runs the grind once on one photo copied, private, into a
 // directory of its own that is removed afterwards.
 func (e GristEval) grindPhoto(ctx context.Context, plain GristPlaintext, photo evalPhoto, model, effort, instructions, schema string, timeout time.Duration) GristEvalRow {
-	row := GristEvalRow{Photo: photo.name, Model: model, Effort: effort, Missed: []string{}, Extra: []string{}}
+	row := GristEvalRow{Photo: photo.name, Model: model, Effort: effort, Missed: []string{}, Extra: []string{}, Login: e.billing()}
 	fail := func(why string) GristEvalRow {
 		row.Error = why
 		return row
@@ -332,7 +346,9 @@ func (e GristEval) grindPhoto(ctx context.Context, plain GristPlaintext, photo e
 		return fail("could not copy the photo into the grind's directory")
 	}
 	started := e.now()
-	result, err := e.Grinder.Grind(ctx, gristGrindCall(dir, plain, []string{copied}, model, effort, instructions, schema, timeout))
+	call := gristGrindCall(dir, plain, []string{copied}, model, effort, instructions, schema, timeout)
+	call.APIKey = e.APIKey
+	result, err := e.Grinder.Grind(ctx, call)
 	row.Seconds = e.now().Sub(started).Seconds()
 	row.CostUSD, row.Fuel = result.CostUSD, result.Fuel
 	if status, reason := gristOutcome(result, err, schema, e.now()); status != GristAnswered {
@@ -582,6 +598,27 @@ func evalAnswered(answer json.RawMessage) (names []string, unsure int, ok bool) 
 		add(l.Text)
 	}
 	return names, unsure, true
+}
+
+// billing is what each of the eval's grinds is billed to: BillingAPI with an
+// API key, else BillingSubscription.
+func (e GristEval) billing() string {
+	if e.APIKey != "" {
+		return BillingAPI
+	}
+	return BillingSubscription
+}
+
+// login is the report's line naming the login every grind ran on. The eval
+// grinds in this process with no app's request, where the live mill grinds
+// in its own with the request, on the login its credits choose; a clean
+// result was read as the live mill's when the login differed (mw-gq6.1711).
+func (e GristEval) login() string {
+	on := "the subscription login (no API key)"
+	if e.billing() == BillingAPI {
+		on = "the API key"
+	}
+	return "login: ground on " + on + ", in this process and with no app's request, so a result here is not the live mill's"
 }
 
 func (e GristEval) now() time.Time {
