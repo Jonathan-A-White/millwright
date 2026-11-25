@@ -21,7 +21,7 @@
 | Network* | application/network.go | network |
 | CardLog, ReportSentLog | application/card.go, reportsend.go | {cardlog,reportlog} |
 | CloseOutMarks, LiveHeartbeats, UserProcesses (Tester) | application/closeout.go, application/liveheartbeats.go, application/testerleftovers.go | {closeout,procs,benchflag} |
-| Worktrees, Rebases, BranchChanges, BranchAddedLines (unfinishedmark.go: unfinished-mark), RigFiles | application/worktrees.go, application/unfinishedmark.go, application/wrongrig.go | rig/{worktree,addedlines,rigfiles}.go |
+| Worktrees, Rebases, BranchChanges, RigFiles | application/worktrees.go, application/wrongrig.go | rig/{worktree,rigfiles}.go |
 | HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | {hostload,hostlock/gate.go,ticketq,cloud,vault/{cloudbook,benchmarks}.go} |
 | MemberHost | application/member.go | member |
 | TickLog, Notifier, HomeMoveHost, OldHome, {Vault,Tracker}Birth | application/{millhandtick,homemove,init}.go | {ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go |

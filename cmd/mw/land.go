@@ -184,12 +184,15 @@ func newLandCmd() *cobra.Command {
 				return err
 			}
 			next := withHostNextRoom(application.Next{
-				Tracker:    gateway,
-				Worktrees:  worktrees,
-				Landing:    worktrees,
-				Changes:    worktrees,
+				Tracker:   gateway,
+				Worktrees: worktrees,
+				Landing:   worktrees,
+				Changes:   worktrees,
+				Checks:    checks,
+
+				// A batch's story whose own diff says it is unfinished is refused
+				// as mw next refuses it (mw-gq6.1713).
 				AddedLines: worktrees,
-				Checks:     checks,
 
 				// The batch's gate runs the rig's related-tests line when it has
 				// one, on the union of its stories' files (mw-gq6.601), and the
