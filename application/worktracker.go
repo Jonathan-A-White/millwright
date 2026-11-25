@@ -891,14 +891,18 @@ type WorkTracker interface {
 	// conditional on holder, the actor the story is assigned to, rather than on
 	// this actor. It is how a retry on one host gives back a claim a dispatch on
 	// another host made, whose actor is that host's. An empty holder asks for
-	// ReleaseClaim.
-	ReleaseClaimHeldBy(ctx context.Context, id, holder string) error
+	// ReleaseClaim. It is conditional on the claim too: claimedAt is when the
+	// claim the story was read under was made (StoryDetail.ClaimedAt; zero asks
+	// for no such check), so a claim given back and taken again by the same
+	// actor, as a same-host retry does, is as moved on as one taken by another,
+	// and the error wraps ErrStoryMovedOn (mw-gq6.1751).
+	ReleaseClaimHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error
 
 	// HoldClaimHeldBy is ReleaseClaimHeldBy that leaves the story held
 	// (StatusHeld) rather than open, in the one write: no dispatcher can take
 	// the story between the give-back and the hold (mw-gq6.597). It is
-	// conditional on holder the same way.
-	HoldClaimHeldBy(ctx context.Context, id, holder string) error
+	// conditional on holder and on claimedAt the same way.
+	HoldClaimHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error
 
 	// ReleaseQueuedHeldBy gives back the claim of a story a batch took, in the
 	// one write: every run:* label is cleared and the story goes open and

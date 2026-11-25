@@ -51,7 +51,7 @@ func holdLandedDemo(ctx context.Context, tracker WorkTracker, id, outcome, holde
 		if holder == "" {
 			holder = detail.Assignee
 		}
-		if err := tracker.ReleaseClaimHeldBy(ctx, id, holder); err != nil {
+		if err := tracker.ReleaseClaimHeldBy(ctx, id, holder, detail.ClaimedAt); err != nil {
 			return notes, fmt.Errorf("giving back the claim on the demo %s: %w", id, err)
 		}
 	}

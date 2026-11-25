@@ -339,6 +339,11 @@ type RetryReport struct {
 	// give-back is guarded on.
 	holder string
 
+	// claimedAt is when that claim was made, as the retry read it (zero when none
+	// recorded it): the give-back is guarded on it too, so a claim given back and
+	// taken again by the same actor in between is left alone (mw-gq6.1751).
+	claimedAt time.Time
+
 	// unclaimed says the story had no claim at all when the retry read it, open
 	// (one a dispatch passed over) or held (one whose claim an earlier stop gave
 	// back and a person then held), so there is none to give back (mw-gq6.611).
@@ -625,7 +630,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	// bundles whatever it left, as it does for any leftover in the way of a
 	// fresh cut. Where it was worked comes from the claim (mw@<host>) before the
 	// path's host key, which a person may have changed since (mw-gq6.364).
-	report.holder = detail.Assignee
+	report.holder, report.claimedAt = detail.Assignee, detail.ClaimedAt
 	keepBranch, err := r.continued(ctx, storyID)
 	if err != nil {
 		return report, fmt.Errorf("retrying %s: %w", storyID, err)
@@ -1016,11 +1021,11 @@ func (r Retry) release(ctx context.Context, report RetryReport) error {
 	}
 	if r.Hold {
 		return r.giveBackTo(ctx, report.StoryID, StatusHeld, func(ctx context.Context) error {
-			return r.Tracker.HoldClaimHeldBy(ctx, report.StoryID, report.holder)
+			return r.Tracker.HoldClaimHeldBy(ctx, report.StoryID, report.holder, report.claimedAt)
 		})
 	}
 	return r.giveBackTo(ctx, report.StoryID, StatusOpen, func(ctx context.Context) error {
-		return r.Tracker.ReleaseClaimHeldBy(ctx, report.StoryID, report.holder)
+		return r.Tracker.ReleaseClaimHeldBy(ctx, report.StoryID, report.holder, report.claimedAt)
 	})
 }
 

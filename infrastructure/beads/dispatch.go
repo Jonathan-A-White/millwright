@@ -592,22 +592,27 @@ func isPouredStep(id string) bool {
 // A Gateway with no actor of its own — the same case run guards with
 // --actor — has nothing to compare against and asks for none.
 func (g *Gateway) ReleaseClaim(ctx context.Context, id string) error {
-	return g.ReleaseClaimHeldBy(ctx, id, g.actor)
+	return g.ReleaseClaimHeldBy(ctx, id, g.actor, time.Time{})
 }
 
 // ReleaseClaimHeldBy implements application.WorkTracker: ReleaseClaim with
 // --if-assignee naming holder, the actor the story is assigned to, which for a
 // claim made on another host is that host's and not this Gateway's. An empty
 // holder is this Gateway's own actor.
-func (g *Gateway) ReleaseClaimHeldBy(ctx context.Context, id, holder string) error {
-	return g.giveClaimBack(ctx, id, holder, StatusOpen)
+//
+// claimedAt, when the claim the caller read was made (zero asks for no check),
+// is compared as ReleaseQueuedHeldBy does: bd guards on the assignee alone, so a
+// claim given back and taken again by the same actor is told apart by reading
+// the story back just before the update (mw-gq6.1751).
+func (g *Gateway) ReleaseClaimHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error {
+	return g.giveClaimBack(ctx, id, holder, StatusOpen, claimedAt)
 }
 
 // HoldClaimHeldBy implements application.WorkTracker: ReleaseClaimHeldBy that
 // leaves the story deferred (held) instead of open, in the one bd update, so no
 // dispatcher sees it open in between (mw-gq6.597).
-func (g *Gateway) HoldClaimHeldBy(ctx context.Context, id, holder string) error {
-	return g.giveClaimBack(ctx, id, holder, StatusDeferred)
+func (g *Gateway) HoldClaimHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error {
+	return g.giveClaimBack(ctx, id, holder, StatusDeferred, claimedAt)
 }
 
 // ClearRunState implements application.WorkTracker: the one `bd update` that
@@ -635,10 +640,8 @@ func (g *Gateway) ClearRunState(ctx context.Context, id string) error {
 // the claim the caller read was made, is compared with it. That leaves the span
 // of one read and one update, not the caller's whole run (mw-gq6.1743).
 func (g *Gateway) ReleaseQueuedHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error {
-	if !claimedAt.IsZero() {
-		if story, err := g.showOne(ctx, id); err == nil && story.Assignee == holder && !story.claimedAt().Equal(claimedAt) {
-			return fmt.Errorf("%s was claimed at %s, not %s, so nothing was written: %w", id, story.claimedAt().Format(time.RFC3339), claimedAt.Format(time.RFC3339), application.ErrStoryMovedOn)
-		}
+	if err := g.claimMovedOn(ctx, id, holder, claimedAt); err != nil {
+		return err
 	}
 	args := []string{"update", id, "--status", StatusOpen, "--assignee", ""}
 	for _, run := range application.RunStates {
@@ -655,10 +658,29 @@ func (g *Gateway) ReleaseQueuedHeldBy(ctx context.Context, id, holder string, cl
 	return err
 }
 
-// giveClaimBack clears the assignee and sets status, guarded on holder.
-func (g *Gateway) giveClaimBack(ctx context.Context, id, holder, status string) error {
+// claimMovedOn reads the story back and says, wrapping ErrStoryMovedOn, that the
+// claim holder holds was made at some other time than claimedAt: it was given
+// back and taken again by the same actor since the caller read it. A zero
+// claimedAt asks for no check, and a story that cannot be read is left to the
+// update's own guard.
+func (g *Gateway) claimMovedOn(ctx context.Context, id, holder string, claimedAt time.Time) error {
+	if claimedAt.IsZero() {
+		return nil
+	}
+	if story, err := g.showOne(ctx, id); err == nil && story.Assignee == holder && !story.claimedAt().Equal(claimedAt) {
+		return fmt.Errorf("%s was claimed at %s, not %s, so nothing was written: %w", id, story.claimedAt().Format(time.RFC3339), claimedAt.Format(time.RFC3339), application.ErrStoryMovedOn)
+	}
+	return nil
+}
+
+// giveClaimBack clears the assignee and sets status, guarded on holder and, when
+// claimedAt is not zero, on the claim made at that time.
+func (g *Gateway) giveClaimBack(ctx context.Context, id, holder, status string, claimedAt time.Time) error {
 	if holder == "" {
 		holder = g.actor
+	}
+	if err := g.claimMovedOn(ctx, id, holder, claimedAt); err != nil {
+		return err
 	}
 	args := []string{"update", id, "--status", status, "--assignee", ""}
 	if holder != "" {

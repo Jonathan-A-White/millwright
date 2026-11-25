@@ -198,7 +198,7 @@ type CloudStories interface {
 	StoriesSince(ctx context.Context, since time.Time) ([]StoryDetail, error)
 	SetStoryMetadata(ctx context.Context, id string, fields map[string]string) error
 	// ReleaseClaimHeldBy gives back a claim a box's dispatch made.
-	ReleaseClaimHeldBy(ctx context.Context, id, holder string) error
+	ReleaseClaimHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error
 	// ClearRunState takes a story's run state off it, for a claim given back
 	// whose session is gone with its box.
 	ClearRunState(ctx context.Context, id string) error
@@ -2054,7 +2054,7 @@ func (p *cloudPass) handBack(ctx context.Context, stories []StoryDetail, name, w
 				continue
 			}
 		}
-		if err := p.check.Stories.ReleaseClaimHeldBy(ctx, id, story.Assignee); err != nil {
+		if err := p.check.Stories.ReleaseClaimHeldBy(ctx, id, story.Assignee, story.ClaimedAt); err != nil {
 			stuck = append(stuck, id)
 			continue
 		}

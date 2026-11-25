@@ -3395,7 +3395,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		// Its work is done, so another attempt would redo it: the claim is
 		// given back and the story held for the Mayor (mw-gq6.1045). A hand-back
 		// is held the same way: another attempt meets the same dead end.
-		if err := n.holdOnStop(ctx, c.id, c.detail.Assignee, report); err != nil {
+		if err := n.holdOnStop(ctx, c.id, c.detail.Assignee, c.detail.ClaimedAt, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("%s could not be held: %v", c.id, err))
 		} else {
 			given = true
@@ -4005,8 +4005,8 @@ func (n Next) giveBackIfNeverStarted(ctx context.Context, detail StoryDetail, re
 			return false
 		}
 	}
-	holder := detail.Assignee
-	if err := giveBackClaim(ctx, n.Tracker, id, func(ctx context.Context) error { return n.Tracker.ReleaseClaimHeldBy(ctx, id, holder) },
+	holder, claimedAt := detail.Assignee, detail.ClaimedAt
+	if err := giveBackClaim(ctx, n.Tracker, id, func(ctx context.Context) error { return n.Tracker.ReleaseClaimHeldBy(ctx, id, holder, claimedAt) },
 		waitFor, n.PushWait); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: its session never started, but the claim could not be given back: %v", id, err))
 		return false
@@ -4035,9 +4035,9 @@ func (n Next) releaseOnStop(ctx context.Context, id string, report *NextReport) 
 // holdOnStop gives back the claim of a story stopped for a stub closing comment
 // and leaves it held, trying again as releaseOnStop does; a story the fault
 // left held and unclaimed is held all the same.
-func (n Next) holdOnStop(ctx context.Context, id, holder string, report *NextReport) error {
+func (n Next) holdOnStop(ctx context.Context, id, holder string, claimedAt time.Time, report *NextReport) error {
 	return writeRetrying(ctx, n, report, "the hold of "+id, func() error {
-		return givenBackAs(ctx, n.Tracker, id, StatusHeld, n.Tracker.HoldClaimHeldBy(ctx, id, holder))
+		return givenBackAs(ctx, n.Tracker, id, StatusHeld, n.Tracker.HoldClaimHeldBy(ctx, id, holder, claimedAt))
 	})
 }
 

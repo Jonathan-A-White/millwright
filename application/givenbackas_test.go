@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -40,7 +41,7 @@ func TestGivenBackAsJudgesTheGiveBackByTheStory(t *testing.T) {
 	})
 	t.Run("a held give-back is judged held", func(t *testing.T) {
 		tracker := claimed(t)
-		if err := application.GivenBackAs(ctx, tracker, "mw-gq6.1", application.StatusHeld, tracker.HoldClaimHeldBy(ctx, "mw-gq6.1", "")); err != nil {
+		if err := application.GivenBackAs(ctx, tracker, "mw-gq6.1", application.StatusHeld, tracker.HoldClaimHeldBy(ctx, "mw-gq6.1", "", time.Time{})); err != nil {
 			t.Fatalf("expected nil, got %v", err)
 		}
 		if err := application.GivenBackAs(ctx, tracker, "mw-gq6.1", application.StatusOpen, nil); err == nil {

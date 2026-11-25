@@ -400,7 +400,7 @@ func TestRetryHoldLeavesAHeldStoryWithNoClaimHeld(t *testing.T) {
 func aHeldUnclaimedRetryStory(t *testing.T, tracker *apptest.FakeTracker, id string) {
 	t.Helper()
 	aRetryStory(t, tracker, id)
-	if err := tracker.HoldClaimHeldBy(context.Background(), id, ""); err != nil {
+	if err := tracker.HoldClaimHeldBy(context.Background(), id, "", time.Time{}); err != nil {
 		t.Fatalf("holding %s: %v", id, err)
 	}
 }
@@ -1197,7 +1197,7 @@ func TestRetryOfAHeldStoryCarryingQueuedGoesOnWhileABatchOfItsRigRuns(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			tracker := apptest.NewFakeTracker()
 			aQueuedRetryStory(t, tracker, "mw-gq6.1", queuedAt)
-			if err := tracker.HoldClaimHeldBy(context.Background(), "mw-gq6.1", ""); err != nil {
+			if err := tracker.HoldClaimHeldBy(context.Background(), "mw-gq6.1", "", time.Time{}); err != nil {
 				t.Fatalf("holding the story: %v", err)
 			}
 			landing := &fakeRetryLanding{NoWorktree: true}
