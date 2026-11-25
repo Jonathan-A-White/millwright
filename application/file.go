@@ -391,10 +391,23 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	}
 
 	acceptances := make(map[string]string, len(plan.Stories))
+	descriptions := make(map[string]string, len(plan.Stories))
 	for _, story := range plan.Stories {
 		acceptances[story.Key] = story.Acceptance
+		descriptions[story.Key] = story.Description
 	}
 	for _, story := range filed.Stories {
+		// A web source crawled with no TERMS: line in its description stays held
+		// (terms_title, mw-gq6.1726): a story just filed has no comment to hold one.
+		line, err := termsRefusal(ctx, f.Rules, nil, story.ID, story.Path.Rig, story.Title, descriptions[story.Key], nil)
+		if err != nil {
+			return filed, err
+		}
+		if line != "" {
+			f.print(fmt.Sprintf("%s, skipped (put a line beginning %s in a comment on %s, then mw release %s)\n", line, TermsLinePrefix, story.ID, story.ID))
+			filed.Kept = append(filed.Kept, story.ID)
+			continue
+		}
 		// The criterion a Builder cannot meet before landing is what mw release and
 		// mw release-paced refuse too: the story stays held and is named.
 		if line := notRunnableRefusal(ctx, f.Rules, story.ID, story.Path.Rig, acceptances[story.Key]); line != "" {

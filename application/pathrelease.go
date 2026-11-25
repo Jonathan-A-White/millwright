@@ -195,6 +195,11 @@ func (s PathSet) whyStayHeld(ctx context.Context, id string, story, written Stor
 	if lines := dispatchRefusals(written); len(lines) > 0 {
 		return lines[0] + "; put that right in the story, then run mw path set " + id + " again", nil
 	}
+	// A web source crawled with no TERMS: line read (terms_title): never released,
+	// and --force does not say otherwise (mw-gq6.1726).
+	if line, err := termsRefusal(ctx, s.Rules, s.Tracker.StoryComments, id, merged.Rig, story.Story.Title, story.Description, comments[id]); err != nil || line != "" {
+		return line, err
+	}
 	// A criterion no Builder can meet before landing: not released unless --force
 	// says why (mw-gq6.1686); Release writes the why when it lets the story through.
 	if strings.TrimSpace(s.Force) == "" {

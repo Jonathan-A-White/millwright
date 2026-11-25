@@ -37,6 +37,7 @@ const (
 	HealthzURLKey          = "healthz_url"
 	FilesExpectedKey       = "files_expected"
 	ReleaseOnPathKey       = "release_on_path"
+	TermsTitleKey          = "terms_title"
 	NeedsLaptopKey         = "needs_laptop"
 	NightlySuiteKey        = "nightly_suite"
 	SuiteEpicKey           = "suite_epic"
@@ -155,7 +156,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
 	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, RegeneratedFilesKey: true, TimingTestsKey: true,
-	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, NeedsLaptopKey: true, NightlySuiteKey: true, SuiteEpicKey: true, SuiteEveryKey: true, SuiteHostKey: true, BuilderCallKey: true,
+	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, TermsTitleKey: true, NeedsLaptopKey: true, NightlySuiteKey: true, SuiteEpicKey: true, SuiteEveryKey: true, SuiteHostKey: true, BuilderCallKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
 	CapacityViewersKey: true, CapacitySSECapKey: true, CapacityNginxConnectionsKey: true, CapacityMemoryFreeKey: true,
@@ -273,6 +274,17 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			default:
 				return requirements, nil, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, FilesExpectedKey, FilesExpectedKey, lines[i])
 			}
+			continue
+		}
+		if found && key == TermsTitleKey {
+			title, err := quotedStrings(value)
+			if err == nil && len(title) == 1 {
+				_, err = regexp.Compile(title[0])
+			}
+			if err != nil || len(title) != 1 {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"<regular expression>\"`, got %q", i+1, TermsTitleKey, lines[i])
+			}
+			requirements.TermsTitle = title[0]
 			continue
 		}
 		if found && key == ReleaseOnPathKey {
@@ -407,8 +419,8 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, the %s tables, the feature keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, NeedsLaptopKey, NightlySuiteKey, SuiteEpicKey, SuiteEveryKey, SuiteHostKey, BuilderCallKey,
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, the %s tables, the feature keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, TermsTitleKey, NeedsLaptopKey, NightlySuiteKey, SuiteEpicKey, SuiteEveryKey, SuiteHostKey, BuilderCallKey,
 				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey, RegeneratedFilesKey,
 				FeatureShareKey, FeatureShareMinKey, FeatureShareMaxKey, FeatureFloorKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
