@@ -24,6 +24,7 @@ type sweepHost struct {
 	removedTrees []string
 	removedDirs  []string
 	failOn       string
+	showCalls    [][]string
 }
 
 func (h *sweepHost) Trees(context.Context) ([]application.HostSweepTree, error) {
@@ -67,6 +68,7 @@ func hostSweepWithout[T any](all []T, drop func(T) bool) []T {
 }
 
 func (h *sweepHost) ShowBeads(_ context.Context, ids []string) ([]application.StoryDetail, error) {
+	h.showCalls = append(h.showCalls, ids)
 	var found []application.StoryDetail
 	for _, id := range ids {
 		if detail, ok := h.stories[id]; ok {
@@ -310,5 +312,22 @@ func TestHostSweepRunsAreLeftToTheVaultsSync(t *testing.T) {
 	// An untracked run past its age still goes.
 	if got := strings.Join(host.removedDirs, ","); !strings.Contains(got, "/v/runs/old") {
 		t.Errorf("the untracked old run was not removed: %q", got)
+	}
+}
+
+// mw-gq6.1730: the sweep asks the tracker for the stories of all its worktrees
+// in one call, not one call a worktree.
+func TestHostSweepReadsTheStoriesOfThreeWorktreesInOneCall(t *testing.T) {
+	host := hostSweepFixture()
+	host.trees = append(host.trees, application.HostSweepTree{Story: "mw-third", Rig: "millwright", Dir: "/w/.mw-worktrees/mw-third", Branch: "mw/mw-third"})
+	host.stories["mw-third"] = hostSweepStory("mw-third", "in_progress", time.Time{})
+	if _, err := hostSweeper(host, true, nil, nil).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.showCalls) != 1 {
+		t.Fatalf("the sweep made %d reads of the tracker for 3 worktrees, want 1: %v", len(host.showCalls), host.showCalls)
+	}
+	if got := strings.Join(host.showCalls[0], ","); got != "mw-done,mw-live,mw-third" {
+		t.Errorf("the one read asked for %q", got)
 	}
 }

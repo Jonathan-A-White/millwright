@@ -34,4 +34,9 @@ TimeoutStartSec=30min
 
 # A squeeze on memory may kill it first, before the seat it shares the host with.
 OOMScoreAdjust=500
-MemoryMax=384M
+# 1G, not the 384M of the other short units: on the desktop (12 GB) the sweep
+# reads the story of each of 26 worktrees, bd apiece side by side against the
+# served database, and lists the vault's runs/, and peaked at 385M, so the
+# kernel killed it on 2026-11-22 and 2026-11-25 and that host's stale worktrees
+# were never swept (mw-gq6.1730).
+MemoryMax=1G
