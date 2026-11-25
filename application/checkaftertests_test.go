@@ -17,16 +17,25 @@ import (
 // tests too: the slot and gate lock the changed specs take again, and the second
 // wait for a calm host (mw-gq6.918).
 
-// slowChecks is the rig's tests, which take took to run and pass or fail.
+// slowChecks is the rig's tests, which take took to run and pass or fail. With a
+// clock they take it by moving that clock on, which is the clock the check reads
+// its deadline by (Check.CallNow): the deadline is then spent by the tests and by
+// nothing else, however slow the host is to make the calls before them. With no
+// clock they sleep took.
 type slowChecks struct {
-	took time.Duration
-	pass bool
-	runs int
+	took  time.Duration
+	pass  bool
+	runs  int
+	clock *callClock
 }
 
 func (s *slowChecks) Run(context.Context, string, string) (application.Checked, error) {
 	s.runs++
-	time.Sleep(s.took)
+	if s.clock != nil {
+		s.clock.Pass(s.took)
+	} else {
+		time.Sleep(s.took)
+	}
 	return application.Checked{Command: "make test", Passed: s.pass, Output: "ok\n"}, nil
 }
 
@@ -103,8 +112,12 @@ func aStoryOnTheLaptop() *apptest.FakeTracker {
 // another gate when the changed specs ask for it: it ends at once in the one
 // line, not after another nine minutes, and keeps that its tests passed.
 func TestAWholeChecksChangedSpecsMeetingAHeldGateLockAfterTheTestsEndTheCallInOneLine(t *testing.T) {
-	const deadline = 300 * time.Millisecond
-	checks := &slowChecks{took: 400 * time.Millisecond, pass: true}
+	// The deadline is read by the test's own clock, which only the tests move, and
+	// its real-time bound is far past the test: a loaded host cannot spend it
+	// before the lock is taken.
+	const deadline = 10 * time.Minute
+	clock := newCallClock()
+	checks := &slowChecks{took: 11 * time.Minute, pass: true, clock: clock}
 	w := newWholeCheckBesideTheGateLock(t, checks)
 	// Another gate takes the lock the moment the tests give it back.
 	var other application.GateTurn
@@ -118,7 +131,7 @@ func TestAWholeChecksChangedSpecsMeetingAHeldGateLockAfterTheTestsEndTheCallInOn
 		report, err := application.Check{
 			Tracker: aStoryOnTheLaptop(), Landing: landing, Checks: checks, SpecChecks: specs,
 			Slot: w.slots, GateLock: lock, Records: w.records, PartSlotWait: deadline,
-			GateNoticeEvery: 40 * time.Millisecond, Host: "laptop", Remote: "origin",
+			CallNow: clock.Now, GateNoticeEvery: 40 * time.Millisecond, Host: "laptop", Remote: "origin",
 			Rigs: map[string]string{"millwright": w.rigDir}, Out: writerOf(w.told),
 		}.Run(context.Background(), "mw-x.1")
 		return report, time.Since(started), err
@@ -192,12 +205,13 @@ func TestAKeptPassOfAWholeChecksTestsIsNotUsedForAnotherCommit(t *testing.T) {
 // host was busy) is under the deadline too: with it spent by the tests, the call
 // ends in the one line and the tests are not run on a busy host.
 func TestAWholeChecksSecondCalmWaitAfterTheTestsIsUnderTheDeadlineAndEndsInOneLine(t *testing.T) {
-	const deadline = 300 * time.Millisecond
-	checks := &slowChecks{took: 400 * time.Millisecond, pass: false}
+	const deadline = 10 * time.Minute
+	clock := newCallClock()
+	checks := &slowChecks{took: 11 * time.Minute, pass: false, clock: clock}
 	var calmWaited time.Duration
 	report, err := application.Check{
 		Tracker: aStoryOnTheLaptop(), Landing: &fakeRetryLanding{AheadCount: 1}, Checks: checks,
-		PartSlotWait: deadline, Records: &mapRecords{},
+		PartSlotWait: deadline, CallNow: clock.Now, Records: &mapRecords{},
 		Load:     &apptest.FakeHostLoad{Readings: []application.LoadReading{calm(), farOver()}},
 		LoadPoll: 30 * time.Second,
 		LoadWait: func(_ context.Context, d time.Duration) error { calmWaited += d; return nil },
