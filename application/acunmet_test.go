@@ -130,3 +130,81 @@ func TestAnUnmetACBugGetsItsOwnModelAndEffortNotTheFinders(t *testing.T) {
 		t.Errorf("expected the unmet-AC bug on sonnet at high, got %s at %s", got.Model, got.Effort)
 	}
 }
+
+// A criterion that is optional, 'Optional and preferred if small', is met by a
+// closing comment that says which was done, so saying one was NOT done is not a
+// refusal; the same words on a criterion that is not optional still are
+// (mw-gq6.1602).
+func TestAnOptionalCriterionSaidNotDoneIsNotUnmet(t *testing.T) {
+	acceptance := "1. The detector reads the comment. go test passes.\n" +
+		"2. Optional and preferred if small: the sweep is done; say in the closing comment which was done.\n" +
+		"3. Fix the wording too if small.\n" +
+		"4. make build passes, optional checks aside."
+	cases := []struct {
+		name    string
+		comment string
+		unmet   int
+	}{
+		{"optional criterion not done", "AC 2 (the sweep) was NOT done: it was bigger than small.", 0},
+		{"if small criterion not run", "AC3 was not run.", 0},
+		{"optional criterion, other phrases", "AC 2 not verified; AC 2 not met.", 0},
+		{"the same words on a required criterion", "AC 1 was NOT done: it was bigger than small.", 1},
+		{"a required and an optional one in one sentence", "AC 1 and AC 2 were NOT done.", 1},
+		{"an optional one and a required one in two lines", "AC 2 was NOT done.\nAC 1 was NOT done.", 1},
+		{"the optional word in a criterion that is not the one named", "AC 1 was NOT done, though AC 2 is optional.", 1},
+		{"a criterion the acceptance does not have", "AC 9 was NOT done.", 1},
+		{"no number to look up", "The acceptance criteria were not met.", 1},
+		{"the quoted number is not named", "AC 1 NOT done; the line 'AC 2 not done' is quoted.", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			unmet, _ := application.UnmetCriteriaAfterHandoff(c.comment, acceptance)
+			if len(unmet) != c.unmet {
+				t.Fatalf("unmet = %q, want %d of them", unmet, c.unmet)
+			}
+		})
+	}
+}
+
+// A landing files no bug for an optional criterion its closing comment says was
+// NOT done, and still files one for a criterion that is not optional
+// (mw-gq6.1602).
+func TestALandingFilesNoBugForAnOptionalCriterionNotDone(t *testing.T) {
+	for _, c := range []struct {
+		name, comment string
+		bugs          int
+	}{
+		{"optional", "Done.\nAC 2 was NOT done: bigger than small.\nFor the rig memory: nothing", 0},
+		{"required", "Done.\nAC 1 was NOT done.\nFor the rig memory: nothing", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			tracker := apptest.NewFakeTracker()
+			tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+			tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A landed story"})
+			mustDo(t, tracker.SetAcceptance("mw-x.1", "1. One.\n2. Optional and preferred if small: Two."))
+			mustDo(t, tracker.ClaimStory(ctx, "mw-x.1"))
+			mustDo(t, tracker.SetStoryState(ctx, "mw-x.1", application.RunState, application.RunLanded, "landed on main"))
+			mustDo(t, tracker.CommentOnStory(ctx, "mw-x.1", c.comment))
+			before := tracker.Stories()
+			lands := &fakeRetryLanding{}
+			_, err := application.Next{
+				Tracker: tracker, Vault: newFakeVault(), Worktrees: lands, Landing: lands,
+				Checks: checkStub{}, Slot: slotStub{}, Mailbox: apptest.NewFakeMailbox(),
+				Seat: "builder", Host: "laptop",
+				Rigs: map[string]string{"millwright": "/rigs/millwright"},
+				Out:  io.Discard, Err: io.Discard,
+			}.Run(ctx, "mw-x.1")
+			mustDo(t, err)
+			var bugs int
+			for _, d := range theTestersFiled(t, tracker, before) {
+				if strings.Contains(d.Story.Title, "landed without its AC") {
+					bugs++
+				}
+			}
+			if bugs != c.bugs {
+				t.Errorf("expected %d unmet-AC bugs filed, got %d", c.bugs, bugs)
+			}
+		})
+	}
+}
