@@ -520,7 +520,13 @@ type suitePhase struct {
 // cutTree cuts the throwaway worktree a run is made in: detached at the head of
 // the rig's origin, named for prefix and the rig. release takes it away again.
 func (s Suite) cutTree(ctx context.Context, rig, rigDir, prefix string) (dir string, head RigCommit, release func(), err error) {
-	head, err = s.Heads.Resolve(ctx, rigDir, "")
+	return s.cutTreeAt(ctx, rig, rigDir, prefix, "")
+}
+
+// cutTreeAt is cutTree at the commit rev names in the rig's checkout; an empty
+// rev is the head of the rig's origin.
+func (s Suite) cutTreeAt(ctx context.Context, rig, rigDir, prefix, rev string) (dir string, head RigCommit, release func(), err error) {
+	head, err = s.Heads.Resolve(ctx, rigDir, rev)
 	if err != nil {
 		return "", RigCommit{}, nil, fmt.Errorf("reading %s's origin: %w", rig, err)
 	}

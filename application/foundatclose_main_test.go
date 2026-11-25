@@ -21,6 +21,23 @@ type stubFindingChecks struct {
 	rig     string
 	command string
 	files   []application.FindingLine
+
+	// at is what the finder's own commit showed of the command (RecheckFindingAt);
+	// the zero value is a command that fails there, as a finding's does.
+	at        *application.FindingAnswer
+	atErr     error
+	atAsked   int
+	atRev     string
+	atCommand string
+}
+
+func (s *stubFindingChecks) RecheckFindingAt(_ context.Context, rig, rev, command string) (application.FindingAnswer, error) {
+	s.atAsked++
+	s.rig, s.atRev, s.atCommand = rig, rev, command
+	if s.at != nil {
+		return *s.at, s.atErr
+	}
+	return application.FindingAnswer{Sha: "0123456789ab", Ran: true, Passed: false, Tail: "FAIL"}, s.atErr
 }
 
 func (s *stubFindingChecks) RecheckFinding(_ context.Context, rig, command string, files []application.FindingLine) (application.FindingAnswer, error) {
@@ -479,5 +496,111 @@ func TestAFindingFixedOnMainIsWrittenInTheCloseOutsLog(t *testing.T) {
 	}
 	if strings.Count(log, "already fixed on main") != 1 {
 		t.Errorf("expected exactly one such line, got %q", log)
+	}
+}
+
+const reproFinding = "Every verse with a vocative stays kept in its old shape (src/data/diagrams.ts:20). " +
+	"AC: go test ./application -run TestDiagramsRedrawn passes. Sweep: none. Size: S. By design? no"
+
+// A finding whose command already passes at the finder's own commit reproduces
+// nothing, so its pass on main is no sign of a fix: the bug is filed, and the
+// report says the command does not reproduce the finding (mw-gq6.1733).
+func TestFindingOnMainFilesAFindingWhoseCommandPassedAtTheFindersCommitToo(t *testing.T) {
+	passes := application.FindingAnswer{Sha: "0123456789ab", Ran: true, Passed: true, Tail: "ok"}
+	main := &stubFindingChecks{
+		answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: "ok"},
+		at:     &passes,
+	}
+
+	filed, body, report := landedWithFindings(t, "Done.\nFound, not fixed:\n"+reproFinding+"\nFor the rig memory: nothing", main)
+
+	if len(filed) != 1 || !strings.Contains(body, "Filed: "+filed[0].Story.ID+", held.") || strings.Contains(body, "already fixed on main") {
+		t.Fatalf("expected one held bug filed and no already-fixed line, got %+v and:\n%s", filed, body)
+	}
+	notes := strings.Join(report.Notes, "\n")
+	if !strings.Contains(notes, "does not reproduce the finding") || !strings.Contains(notes, "go test ./application -run TestDiagramsRedrawn") {
+		t.Errorf("expected a note that the command does not reproduce the finding, got %q", report.Notes)
+	}
+	if main.atRev != "0123456789abcdef" || main.atCommand != "go test ./application -run TestDiagramsRedrawn" {
+		t.Errorf("expected the command run at the landed commit 0123456789abcdef, got %q at %q", main.atCommand, main.atRev)
+	}
+}
+
+// A command that fails at the finder's commit and passes on main is a fault
+// fixed since: no bug is filed (mw-gq6.1245 kept).
+func TestFindingOnMainStillDropsAFindingWhoseCommandFailedAtTheFindersCommit(t *testing.T) {
+	main := &stubFindingChecks{answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: "ok"}}
+
+	filed, body, _ := landedWithFindings(t, "Done.\nFound, not fixed:\n"+reproFinding+"\nFor the rig memory: nothing", main)
+
+	if len(filed) != 0 || !strings.Contains(body, "already fixed on main: Every verse with a vocative") {
+		t.Fatalf("expected nothing filed and the finding named as fixed on main, got %+v and:\n%s", filed, body)
+	}
+	if main.atAsked != 1 {
+		t.Errorf("expected the finder's commit read once, got %d", main.atAsked)
+	}
+}
+
+// A finding the finder's commit cannot be read for (the command did not run
+// there, or the read failed) is filed: nothing shows the command reproduces it.
+func TestFindingOnMainFilesAFindingWhoseFindersCommitCannotBeRead(t *testing.T) {
+	for name, c := range map[string]*stubFindingChecks{
+		"the read fails":               {answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true}, atErr: errors.New("no such commit")},
+		"the command is not run there": {answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true}, at: &application.FindingAnswer{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			filed, body, report := landedWithFindings(t, "Done.\nFound, not fixed:\n"+reproFinding+"\nFor the rig memory: nothing", c)
+			if len(filed) != 1 || strings.Contains(body, "already fixed on main") {
+				t.Errorf("expected the finding filed, got %+v and:\n%s", filed, body)
+			}
+			if !strings.Contains(strings.Join(report.Notes, "\n"), "finder") {
+				t.Errorf("expected a note about the finder's commit, got %q", report.Notes)
+			}
+		})
+	}
+}
+
+// A test the finder's commit had no run of (go test finds none) shows nothing
+// passing there, so a pass on main is a fix.
+func TestFindingOnMainDropsAFindingWhoseTestDidNotExistAtTheFindersCommit(t *testing.T) {
+	main := &stubFindingChecks{
+		answer: application.FindingAnswer{Sha: "21bc605c", Ran: true, Passed: true, Tail: "ok"},
+		at:     &application.FindingAnswer{Sha: "0123456789ab", Ran: true, Passed: true, Tail: "ok  \tx/a\t0.003s [no tests to run]"},
+	}
+	filed, _, _ := landedWithFindings(t, "Done.\nFound, not fixed:\n"+reproFinding+"\nFor the rig memory: nothing", main)
+	if len(filed) != 0 {
+		t.Errorf("expected a test absent at the finder's commit and passing on main to drop the finding, got %+v", filed)
+	}
+}
+
+// A suite runs a finding's command at the commit it is given, in one throwaway
+// worktree cut there, and takes the worktree away (mw-gq6.1733).
+func TestASuiteReadsAFindingsCommandAtTheFindersCommit(t *testing.T) {
+	runs := &apptest.FakeSuiteRunner{Respond: func(_, _ string) (application.Checked, error) {
+		return application.Checked{Passed: true, Output: "ok\n"}, nil
+	}}
+	suite, trees := recheckSuite(runs)
+	suite.Rigs["millwright"] = "/rigs/lampas"
+	suite.Heads.(*apptest.FakeRigHeads).AddCommit("/rigs/lampas", "0123456789abcdef")
+
+	got, err := suite.RecheckFindingAt(context.Background(), "millwright", "0123456789abcdef", "make lint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Ran || !got.Passed || got.Sha != "0123456789abcdef" {
+		t.Errorf("got %+v, want make lint passed at the finder's commit", got)
+	}
+	if ran := runs.Ran(); len(ran) != 1 || ran[0].Command != "make lint" {
+		t.Errorf("expected one run of make lint, ran %+v", ran)
+	}
+	if added := trees.Added(); len(added) != 1 || added[0].Commit != "0123456789abcdef" || trees.Live() != 0 {
+		t.Errorf("one worktree should be cut at the finder's commit and taken away, added %v live %d", trees.Added(), trees.Live())
+	}
+
+	if _, err := suite.RecheckFindingAt(context.Background(), "millwright", "feedface", "make lint"); err == nil {
+		t.Errorf("expected an error for a commit the rig does not have")
+	}
+	if _, err := suite.RecheckFindingAt(context.Background(), "nowhere", "0123456789abcdef", "make lint"); err == nil {
+		t.Errorf("expected an error for a rig this host does not have")
 	}
 }
