@@ -50,14 +50,15 @@ func namesAnySha(description string) bool {
 // may have had a check that already passed when it was filed (a finder's command
 // that was not read to fail at its own commit is filed all the same), so a pass
 // on main shows no story fixed it: it is held for the Mayor, not closed
-// (mw-gq6.1737).
+// (mw-gq6.1737). A Tester's bug (IsTesterFinding) carries no found-at-close
+// label but names a sha on the same terms, and is held the same (mw-gq6.1742).
 func (d Dispatch) settlePassedBug(ctx context.Context, detail StoryDetail, rig string, check BugCheck, found SpecRecheck, report *DispatchReport) (said string, fixed bool) {
 	id := detail.Story.ID
 	if namesSha(detail.Description, found.Sha) {
 		return d.holdFlakyBug(ctx, id, rig, check, found, report)
 	}
-	if slices.Contains(detail.Labels, LabelFoundAtClose) && !namesAnySha(detail.Description) {
-		return d.holdFoundBug(ctx, id, rig, check, found, report)
+	if finder := findingsFinder(detail); finder != "" && !namesAnySha(detail.Description) {
+		return d.holdFoundBug(ctx, id, rig, finder, check, found, report)
 	}
 	one := FixedOnMain{StoryID: id, Spec: check.String(), Sha: found.Sha, Tests: found.Tests}
 	if err := d.closeStory(ctx, "closing a bug found fixed on main", id, one.reason()); err != nil {
@@ -98,10 +99,10 @@ func (d Dispatch) holdFlakyBug(ctx context.Context, id, rig string, check BugChe
 // says so on it: nothing shows the check failed when the bug was filed, so no
 // story is known to have fixed it. A hold that fails leaves the bug ready, and it
 // is dispatched as a bug whose check passed but could not be settled.
-func (d Dispatch) holdFoundBug(ctx context.Context, id, rig string, check BugCheck, found SpecRecheck, report *DispatchReport) (said string, fixed bool) {
-	note := fmt.Sprintf("%s mw dispatch on %s ran %s (%s) on %s's main and it passes at %s, but this bug was filed from a Builder's finding and names no commit it failed at: "+
+func (d Dispatch) holdFoundBug(ctx context.Context, id, rig, finder string, check BugCheck, found SpecRecheck, report *DispatchReport) (said string, fixed bool) {
+	note := fmt.Sprintf("%s mw dispatch on %s ran %s (%s) on %s's main and it passes at %s, but this bug was filed from a %s finding and names no commit it failed at: "+
 		"nothing shows the check failed when the bug was filed, so no story is known to have fixed it. It is held for the Mayor, not closed as fixed.\n\nThe end of the run:\n%s",
-		HeldCommentPrefix, d.Host, check, check.Source, rig, found.Sha, strings.TrimSpace(found.Tail))
+		HeldCommentPrefix, d.Host, check, check.Source, rig, found.Sha, finder, strings.TrimSpace(found.Tail))
 	if err := d.Tracker.HoldStory(ctx, id); err != nil {
 		said := fmt.Sprintf("%s passes on main but the story could not be held: %v", check, oneLine(err.Error()))
 		d.noteRecheckSkip(ctx, report, id, said)
@@ -112,6 +113,19 @@ func (d Dispatch) holdFoundBug(ctx context.Context, id, rig string, check BugChe
 	}
 	report.Notes = append(report.Notes, fmt.Sprintf("%s: %s passes at %s, but the bug was filed from a finding and is not known to have failed: held, not closed", id, check, short(found.Sha)))
 	return "", true
+}
+
+// findingsFinder is whose finding a bug was filed from, as a held comment says
+// it: "Builder's" for one mw next filed (LabelFoundAtClose), "Tester's" for one
+// mw tester file filed (IsTesterFinding), or empty for any other bug.
+func findingsFinder(detail StoryDetail) string {
+	switch {
+	case slices.Contains(detail.Labels, LabelFoundAtClose):
+		return "Builder's"
+	case IsTesterFinding(detail.Description):
+		return "Tester's"
+	}
+	return ""
 }
 
 // recheckBug re-runs the check a bug names on its rig's main, before the story is
