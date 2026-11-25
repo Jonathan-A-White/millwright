@@ -93,3 +93,11 @@ func UnderOpenParent(ctx context.Context, tracker WorkTracker, story *NewStory) 
 	}
 	return why
 }
+
+// underOpenParent is UnderOpenParent with its words, if any, left in the
+// report's notes as what's filed.
+func (n Next) underOpenParent(ctx context.Context, report *NextReport, story *NewStory, what string) {
+	if why := UnderOpenParent(ctx, n.Tracker, story); why != "" {
+		report.Notes = append(report.Notes, what+" is filed "+why)
+	}
+}

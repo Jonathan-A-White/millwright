@@ -3269,7 +3269,6 @@ func (n Next) fileCodemapTrim(ctx context.Context, c *closeOut, report *NextRepo
 		report.Notes = append(report.Notes, fmt.Sprintf("%s, the open bug that asks for docs/codemap.md to be trimmed, now names %s", open.Story.ID, c.id))
 		return
 	}
-
 	// The landed story's size, bump, callers_ok, host_why and max_turns are its
 	// own, not the map's (mw-gq6.1195, mw-gq6.1249).
 	path := FiledPath(c.path, domain.SizeXS, TesterKindBug)
@@ -3289,9 +3288,7 @@ func (n Next) fileCodemapTrim(ctx context.Context, c *closeOut, report *NextRepo
 		Overrides: path,
 		Labels:    []string{LabelBug},
 	}
-	if why := UnderOpenParent(ctx, n.Tracker, &story); why != "" {
-		report.Notes = append(report.Notes, "the trim bug is filed "+why)
-	}
+	n.underOpenParent(ctx, report, &story, "the trim bug")
 	var id string
 	err := writeRetrying(ctx, n, report, "the trim bug", func() error {
 		var err error
