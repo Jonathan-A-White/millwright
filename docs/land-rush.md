@@ -18,6 +18,7 @@ instead of a fresh Builder session each.
 - [Where a story waits](#where-a-story-waits)
 - [The batch](#the-batch)
   - [A branch set aside does not hold the rest](#a-branch-set-aside-does-not-hold-the-rest)
+  - [A red story does not hold the rest](#a-red-story-does-not-hold-the-rest)
   - [Rigs land side by side](#rigs-land-side-by-side)
   - [After a batch is held red](#after-a-batch-is-held-red)
   - [When a batch is held](#when-a-batch-is-held)
@@ -124,6 +125,31 @@ Green with nothing set aside lands the batch: each story is closed
 mail; the after-landing command and the grist smoke run once. No fixer is
 started and no fuel is spent.
 
+### A red story does not hold the rest
+
+When the rig's tests are red on the merged batch and the batch can say which
+story made them red, that story is left out and the green rest lands first. It
+can say in two ways: one story's branch alone changed the files of the failing
+tests (read from the gate's output, as the batch's `suspect` is), or the batch's
+fixer ended badly and said, in its `CAUSE` or `TOUCHED` lines, that one story
+was the cause. The batch is then made again in a fresh landing worktree from the
+same base without that story, the version raised again, and the tests run on it
+as merged; green is pushed, so nothing is pushed that has not passed the whole
+gate as merged. The story left out stays queued (`run=queued`, open and claimed)
+with a note on it, "Set aside by batch N of the rig: its tests failed on the
+batch (failing: ...)", and the Mayor's "Set aside" mail names it. It is not counted
+as set aside for a conflict, which would hand it to a Builder to rebase: when it
+is queued alone and red again it is held red alone, as before.
+
+This is done once for a batch. A batch that cannot name one story (a failing
+test that names no file, a file two branches changed, two stories' tests red)
+is held as it was, and is landed in parts (below); so is one that is red again
+without the story left out, which then names no suspect. A red batch whose
+first run named its story is not given a fixer before the green rest lands. A
+fixer that failed on a red batch whose cause it did name gives its commits to
+`fixer.bundle` as always, and its word counts for nothing: the batch's line is
+green, not fixed.
+
 ### Rigs land side by side
 
 One rig has one landing at a time; different rigs do not wait for each other.
@@ -137,8 +163,9 @@ tests still run one after another (and under `contrib/mw-heavy`, as always).
 
 ### After a batch is held red
 
-A batch of several stories held red after its tests ran is landed again by the
-follower at once, not after `batch_every`, and in parts, not one story a batch
+A batch of several stories held red after its tests ran (one that could not name
+the one story whose tests failed, or that was red again without it: see above) is
+landed again by the follower at once, not after `batch_every`, and in parts, not one story a batch
 (28 one-story batches cost 26 gate-hours in 4.3 days, mw-6ww.119.11.1.2). The
 parts are read from the batch's line in `metrics/factory.jsonl`:
 
@@ -169,17 +196,21 @@ Every way a batch is held, who it holds and what frees them. "Held" means
 nothing was pushed and every story named stays queued (`run=queued`, open and
 claimed). The middle column says whether one story's trouble holds stories
 that are green: a batch that sets branches aside for conflicts lands the rest
-first (above); a red batch, or one whose fixer ends badly, still holds the green
-ones for one gate and then lands in parts (above), and one story's unreadable
-changelog entry holds the batch.
+first (above), and so does a red batch that can name the one story whose tests
+failed, also when its fixer fails (above); a red batch that cannot name one story
+still holds the green ones for one gate and then lands in parts (below), and one
+story's unreadable changelog entry holds the batch.
 
 | Case | Who is held | What frees it |
 |---|---|---|
 | Some branches merged, others set aside for conflicts or AI attribution | No one: the merged ones land; the set-aside ones stay queued with a note | The next batch takes them; when every branch of a batch conflicts it is given its one fixer |
 | Every branch set aside for conflicts, and no fixer is started (host gives way, no room, harness hold) | The stories set aside, which are all of that batch | The host calm again; the next batch, after `batch_every` |
 | Every branch set aside for conflicts, and the fixer fails (out of turns, error, killed, stopped by the harness) | The stories set aside, all of that batch; the fixer's uncommitted files are kept as `fixer-uncommitted.diff` | After a failure: the next batch gives them a fixer afresh, after `batch_every`; after a harness stop, once its hold has passed |
-| The rig's tests are red on the merged part | The whole merged part: one story's red holds the green ones for this one gate | The follower lands again at once, in parts: the suspect left out, else two halves, else one story at a time; the story held red alone is left out until the rig lands again |
-| The tests are red and the fixer ends badly (fails, leaves changes uncommitted, drops a merged story's change, or its re-gate is red) | The whole merged part, as above | The same parts rule; a fixer stopped by the harness is tried again once the stop has passed |
+| The rig's tests are red on the merged part, and one story's branch alone changed the failing tests' files | That story only: it is left out with a note naming its failing tests, and the green rest is tested as merged without it and lands in the same batch | The story is taken by the next batch; queued alone and red again it is held red alone |
+| The rig's tests are red on the merged part, and no one story can be named | The whole merged part: one story's red holds the green ones for this one gate | The follower lands again at once, in parts: two halves, else one story at a time; the story held red alone is left out until the rig lands again |
+| The tests are red and the fixer fails (out of turns, error, killed), and it or the failing tests' files name one story | That story only, as above: its fixer's commits are kept in `fixer.bundle`, the green rest lands without waiting for the drain | The story is taken by the next batch |
+| The tests are red and the fixer ends badly with no one story named (fails, leaves changes uncommitted, drops a merged story's change, or its re-gate is red) | The whole merged part, as above | The same parts rule, the suspect the fixer named left out when it named one; a fixer stopped by the harness is tried again once the stop has passed |
+| The tests are red again without the story left out | The whole merged part that was made again, the story left out among the stories queued | The parts rule, with no suspect: two halves |
 | The tests are red and no fixer can start (host gives way, no room, harness hold) | The whole merged part | The host calm again, then the parts rule |
 | Main is red: the failing tests fail on the target branch alone | The whole batch, not the stories' fault | The bead that carries main's red is fixed; the next batch |
 | The rig's tests could not be run (host busy, host gives way, command did not start) | The whole batch, not the stories' fault | The next landing, when the host is calm |
@@ -193,7 +224,8 @@ changelog entry holds the batch.
 
 A batch of which every branch was set aside for its conflicts, or whose tests
 are red, is given one fixer (a batch of which some branches merged lands them
-first, without a fixer: see above): a
+first, without a fixer, and so does a red batch whose failing tests name one
+story: see above): a
 Builder session (`SeatBoot.BatchFix`) in the batch's landing worktree, named
 `batch-<rig>-<n>`, on the rig's fixer model, effort and turn cap. Its boot file
 names every branch, which merged, git's conflict list and the tests' last

@@ -115,7 +115,9 @@ func (r BatchReport) Metric(at time.Time) BatchMetric {
 	}
 	if f := r.Fixer; f != nil && f.Started {
 		m.Fixer, m.FixerTokens = true, f.Result.Fuel.Total()
-		if r.Landed {
+		// A fixer that failed did not mend the batch that landed without the story
+		// that was red (mw-qqxlwm3.6).
+		if r.Landed && f.Failed == "" {
 			m.Outcome = BatchFixed
 		}
 	}

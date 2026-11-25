@@ -289,6 +289,11 @@ type BatchReport struct {
 	// failingOwner is the one story of the batch whose branch alone changed
 	// the files of the tests that failed (findFailingOwner); empty when none.
 	failingOwner string
+	// leftOutRed says a story was left out of the batch for the tests it failed
+	// and the rest made again without it (leaveRedStoryOut), which is done once;
+	// landing is then the worktree the batch was made again in.
+	leftOutRed bool
+	landing    string
 
 	Landed bool
 	// Held is why nothing of the batch landed, empty when it landed.
@@ -462,6 +467,11 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 		report.Held = fmt.Sprintf("a landing of %s at %s could not be opened: %v", rig, shortCommit(report.Base), err)
 	} else {
 		b.landIn(ctx, dir, rigDir, rules, &report, &nr)
+		// A batch made again without a story that was red is in a worktree of its
+		// own: the first was taken away when it was made.
+		if report.landing != "" {
+			dir = report.landing
+		}
 		if report.Held != "" {
 			b.bundleFixer(ctx, dir, &report)
 		}
@@ -707,43 +717,8 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		return
 	}
 
-	// A batch every branch of which was on the target already brings nothing
-	// new: no version is raised for it and no What's new line written.
-	if len(rules.VersionFiles) > 0 && !report.allOnTarget() {
-		bump := VersionBump{Files: rules.VersionFiles, Before: report.Base, Branch: "HEAD", StoryID: report.Label()}
-		for _, s := range report.Merged {
-			// One story of the batch asking for the minor raises it for all.
-			if s.path.Bump == domain.BumpMinor && !s.OnTarget {
-				bump.Minor = true
-			}
-		}
-		if len(rules.ChangelogFiles) > 0 {
-			bump.Changelog = rules.ChangelogFiles
-			for _, s := range report.Merged {
-				if s.OnTarget {
-					report.Notes = append(report.Notes, fmt.Sprintf("%s was on %s already, so its What's new line is not written again", s.ID, report.Target))
-					continue
-				}
-				entry, err := n.changelogEntry(ctx, b.storyCloseOut(s, rigDir), nr)
-				if err != nil {
-					report.Held = fmt.Sprintf("the changelog entry of %s could not be read: %v", s.ID, err)
-					return
-				}
-				if entry.Text != "" {
-					bump.Entries = append(bump.Entries, entry)
-				}
-			}
-		}
-		bumped, err := n.Landing.BumpVersion(ctx, dir, bump)
-		if err != nil {
-			report.Held = fmt.Sprintf("the version of %s could not be raised: %v", report.Rig, err)
-			return
-		}
-		report.Version = bumped.Version
-		report.versionCommit = bumped.Commit
-		report.changelogFiles, report.changelogWritten = bump.Changelog, bump.Notes()
-		report.writtenAfterFixer = report.Fixer != nil && report.Fixer.Started
-		report.Notes = append(report.Notes, bumped.Tidied...)
+	if !b.raiseVersion(ctx, dir, rigDir, rules, report, nr) {
+		return
 	}
 
 	gate := b.runGate(ctx, dir, rigDir, report, nr)
@@ -764,13 +739,34 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 			}
 		}
 	}
+	// A red batch of which one story's branch alone changed the files of the
+	// failing tests lands the rest first: that story is left out, queued with the
+	// tests it failed, and the others are tested as merged without it and pushed,
+	// not held for a fixer or for the drain to land them in parts
+	// (mw-qqxlwm3.6).
+	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && report.Fixer == nil {
+		b.findFailingOwner(ctx, rigDir, report)
+		if redo, remade := b.leaveRedStoryOut(ctx, &dir, rigDir, rules, report, nr, report.failingOwner); remade {
+			gate = redo
+		}
+	}
+	if report.Held != "" {
+		return
+	}
 	// A red batch is given its one fixer, unless it had it already; once the
 	// fixer has ended mw runs the tests again itself: its word is not the gate.
 	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && b.mayFix() && report.Fixer == nil {
 		if !b.fix(ctx, dir, rigDir, rules, report, fmt.Sprintf("%s failed: `%s`", gateOnTheBatch, gate.Checked.Command), nr) {
-			return
+			// A fixer that failed on a red batch holds the green part no longer, when
+			// the batch can say which story made it red (mw-qqxlwm3.6).
+			redo, remade := b.leaveRedStoryOutAfterFixer(ctx, &dir, rigDir, rules, report, nr)
+			if !remade || report.Held != "" {
+				return
+			}
+			gate = redo
+		} else {
+			gate = b.runGate(ctx, dir, rigDir, report, nr)
 		}
-		gate = b.runGate(ctx, dir, rigDir, report, nr)
 	}
 	after := ""
 	if report.Fixer != nil && report.Fixer.Started {
