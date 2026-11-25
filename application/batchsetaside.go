@@ -317,16 +317,16 @@ func conflictedFilesOrNone(s BatchStory) string {
 // carrying run:queued.
 func (b BatchLand) giveBack(ctx context.Context, s BatchStory, report *BatchReport) (why string, left bool) {
 	n := b.Next
-	holder := s.detail.Assignee
+	holder, claimedAt := s.detail.Assignee, s.detail.ClaimedAt
 	if detail, err := n.Tracker.ShowStory(ctx, s.ID); err == nil {
 		if !QueuedForBatch(detail) {
 			report.Notes = append(report.Notes, b.leftAloneNote(s.ID))
 			return "", true
 		}
-		holder = detail.Assignee
+		holder, claimedAt = detail.Assignee, detail.ClaimedAt
 	}
 	err := writeRetrying(ctx, n, nil, "the give-back of the claim on "+s.ID, func() error {
-		err := n.Tracker.ReleaseQueuedHeldBy(ctx, s.ID, holder)
+		err := n.Tracker.ReleaseQueuedHeldBy(ctx, s.ID, holder, claimedAt)
 		if errors.Is(err, ErrStoryMovedOn) {
 			left = true
 			return nil

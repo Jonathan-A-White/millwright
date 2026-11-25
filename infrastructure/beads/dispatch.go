@@ -628,7 +628,18 @@ func (g *Gateway) ClearRunState(ctx context.Context, id string) error {
 // value). A refusal is told apart from another failure by reading the story
 // back, as HoldStory does: one now held by someone else wraps
 // application.ErrStoryMovedOn.
-func (g *Gateway) ReleaseQueuedHeldBy(ctx context.Context, id, holder string) error {
+//
+// bd guards on the assignee and the status only, not on a claim's own record
+// (ClaimedAtField), so a claim given back and taken again by the same actor is
+// told apart by reading the story back just before the update: claimedAt, when
+// the claim the caller read was made, is compared with it. That leaves the span
+// of one read and one update, not the caller's whole run (mw-gq6.1743).
+func (g *Gateway) ReleaseQueuedHeldBy(ctx context.Context, id, holder string, claimedAt time.Time) error {
+	if !claimedAt.IsZero() {
+		if story, err := g.showOne(ctx, id); err == nil && story.Assignee == holder && !story.claimedAt().Equal(claimedAt) {
+			return fmt.Errorf("%s was claimed at %s, not %s, so nothing was written: %w", id, story.claimedAt().Format(time.RFC3339), claimedAt.Format(time.RFC3339), application.ErrStoryMovedOn)
+		}
+	}
 	args := []string{"update", id, "--status", StatusOpen, "--assignee", ""}
 	for _, run := range application.RunStates {
 		args = append(args, "--remove-label", application.RunState+":"+run)
