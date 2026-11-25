@@ -151,3 +151,47 @@ func TestAnUnfinishedMarkHandsItsBranchOnButGivesNoClaimBack(t *testing.T) {
 		t.Errorf("expected %s to continue its branch", application.ReasonUnfinishedMark)
 	}
 }
+
+// aCheckOfAFinishedFormulaWithAddedLines is mw check of a story whose formula
+// was poured and has no step left open, whose branch adds the lines given and
+// which carries no comment at all.
+func aCheckOfAFinishedFormulaWithAddedLines(t *testing.T, lines []application.AddedLine) (application.CheckReport, error, string) {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	tracker.AddFormula("tdd-feature")
+	poured, err := tracker.PourFormula(context.Background(), "tdd-feature", "mw-x.1", "A story", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetStoryMetadata(context.Background(), "mw-x.1", map[string]string{application.MoleculeField: poured.RootID}); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	report, err := application.Check{
+		Tracker: tracker, Landing: &fakeRetryLanding{AheadCount: 1}, Checks: &scriptedChecks{passes: []bool{true}},
+		AddedLines: someAddedLines{lines: lines},
+		Host:       "laptop", Remote: "origin",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.MultiWriter(io.Discard, &out),
+	}.Run(context.Background(), "mw-x.1")
+	return report, err, out.String()
+}
+
+// A Builder who has not yet written the closing comment is told of the marker
+// and of the missing comment in the one check, not of the marker first and the
+// comment on a later run (mw-gq6.1718).
+func TestAMarkedBranchWithNoClosingCommentIsToldOfBothInOneCheck(t *testing.T) {
+	report, err, out := aCheckOfAFinishedFormulaWithAddedLines(t, []application.AddedLine{theJohnLine()})
+	if err == nil || report.Passed() {
+		t.Fatalf("expected the check to fail, got err %v and %+v", err, report)
+	}
+	var reasons []application.Reason
+	for _, refusal := range report.Refusals {
+		reasons = append(reasons, refusal.Reason)
+	}
+	if len(reasons) != 2 || reasons[0] != application.ReasonUnfinishedMark || reasons[1] != application.ReasonNoClosingComment {
+		t.Fatalf("expected %s and %s, got %v\n%s", application.ReasonUnfinishedMark, application.ReasonNoClosingComment, reasons, out)
+	}
+}
