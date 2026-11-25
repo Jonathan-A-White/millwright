@@ -32,17 +32,10 @@ func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport,
 		report.Notes = appendNew(report.Notes, LeftOutTimingSpecs(run.LeftOut))
 	}
 	if err == nil && len(run.Specs) > 0 && !run.NotRun && !run.Passed {
-		busy, again, waitErr := n.waitToRunAgain(ctx, c, report, "the changed specs", "them", before, false)
+		var waitErr error
+		run, err, waitErr = n.specsRunAgain(ctx, c, report, dir, base, before, run)
 		if waitErr != nil {
 			return Refusal{ReasonTestsNotRun, fmt.Sprintf("the rig's changed specs failed %s and were not run again: %s", where, firstLine(waitErr.Error())), ""}, true
-		}
-		if again {
-			first := run.Checked
-			run, err = n.SpecChecks.RunSpecs(ctx, c.path.Rig, dir, base)
-			if len(run.LeftOut) > 0 {
-				report.Notes = appendNew(report.Notes, LeftOutTimingSpecs(run.LeftOut))
-			}
-			report.Notes = append(report.Notes, ranTwice("the changed specs", n.Host, busy, first, run.Checked, err))
 		}
 	}
 	named := strings.Join(run.Specs, ", ")
@@ -63,6 +56,27 @@ func (n Next) specsRefusal(ctx context.Context, c *closeOut, report *NextReport,
 		n.mainAlone(ctx, c, report, run.Checked, base)
 	}
 	return Refusal{fail, why, detail}, true
+}
+
+// specsRunAgain deals with a changed-specs run that failed (first), as every run of
+// tests that failed is dealt with first (waitToRunAgain): a failure read with the host
+// far over its cores waits for the host to calm and runs the specs once more, and
+// that run is the one returned; any other failure is returned as it was. before is
+// the load read before the first run. The run's own error is err, and waitErr is the
+// wait's, a host that did not calm by the bound, with first returned and the specs
+// not run again. It is the one rule of the foreground close-out (specsRefusal) and of
+// the detached part of mw check (Check.checkSpecsWorker, mw-gq6.1080).
+func (n Next) specsRunAgain(ctx context.Context, c *closeOut, report *NextReport, dir, base string, before LoadReading, first SpecsChecked) (run SpecsChecked, err, waitErr error) {
+	busy, again, waitErr := n.waitToRunAgain(ctx, c, report, "the changed specs", "them", before, false)
+	if waitErr != nil || !again {
+		return first, nil, waitErr
+	}
+	run, err = n.SpecChecks.RunSpecs(ctx, c.path.Rig, dir, base)
+	if len(run.LeftOut) > 0 {
+		report.Notes = appendNew(report.Notes, LeftOutTimingSpecs(run.LeftOut))
+	}
+	report.Notes = append(report.Notes, ranTwice("the changed specs", n.Host, busy, first.Checked, run.Checked, err))
+	return run, err, nil
 }
 
 // mergedSpecsRefusal is specsRefusal on the merged result in dir, merged from
