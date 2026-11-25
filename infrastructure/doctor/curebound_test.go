@@ -31,13 +31,10 @@ func curesSayCut(t *testing.T, err error) {
 // end is cut, and the cure's error says so rather than only "signal: killed".
 func TestMayorUpCutByTheRunIsSaidAndRetried(t *testing.T) {
 	r := newStaleRig(t)
-	mayorUp := filepath.Join(r.vault, "bin", "mayor-up")
-	r.write(mayorUp, "#!/bin/sh\nexec sleep 30\n")
-	r.chmod(mayorUp)
+	slowMayorUp(r)
 	r.run(0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
+	ctx := cutWhenMayorUpStarts(t, r)
 	began := time.Now()
 	err := r.check.Cure(ctx)
 	if took := time.Since(began); took > 5*time.Second {

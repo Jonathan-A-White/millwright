@@ -132,12 +132,19 @@ func TestCommandArgsPutTheSocketBeforeTheCommand(t *testing.T) {
 // some loaded boxes lose.
 func standInTmux(t *testing.T, printed ...string) *Runner {
 	t.Helper()
+	return standInTmuxAnsweringAfter(t, 0, printed...)
+}
+
+// standInTmuxAnsweringAfter is standInTmux whose every call takes delay to
+// answer, as tmux does on a host loaded past its cores (mw-gq6.1753).
+func standInTmuxAnsweringAfter(t *testing.T, delay time.Duration, printed ...string) *Runner {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in for tmux is a shell script")
 	}
 	dir := t.TempDir()
 	var script strings.Builder
-	fmt.Fprintf(&script, "#!/bin/sh\ncalls=%q\necho x >> \"$calls\"\nn=$(wc -l < \"$calls\")\ncase $n in\n", filepath.Join(dir, "calls"))
+	fmt.Fprintf(&script, "#!/bin/sh\ncalls=%q\necho x >> \"$calls\"\nn=$(wc -l < \"$calls\")\nsleep %f\ncase $n in\n", filepath.Join(dir, "calls"), delay.Seconds())
 	for i, line := range printed {
 		pattern := "*"
 		if i < len(printed)-1 {
@@ -177,7 +184,12 @@ func TestWaitGivesUpOnAPaneThatStaysDeadWithNoStatusAndSaysItsExitIsUnknown(t *t
 func TestWaitStillReadsTheStatusOfAPaneReapedAfterAGap(t *testing.T) {
 	// The original flake: dead, then a moment later dead with status 3. The
 	// grace is there for this, and the 3 must come back as 3.
-	runner := standInTmux(t, "1||", "1||", "1|3|")
+	// Each call takes longer than the grace the other tests give, as one does
+	// on a loaded host: what keeps the status from being read is the grace, so
+	// it is set to a bound no host overruns, and the wait ends on the 3, not
+	// on the clock.
+	runner := standInTmuxAnsweringAfter(t, 200*time.Millisecond, "1||", "1||", "1|3|")
+	runner.grace = time.Minute
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
