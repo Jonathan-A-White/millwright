@@ -776,3 +776,28 @@ func TestARigsFileReadsTermsTitleAndRefusesWhatIsNoRegularExpression(t *testing.
 		}
 	}
 }
+
+func TestARigsFileNamesTheChangelogCheckAsOneCommandLine(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", `changelog_check = 'npm ci && npx vitest run -t "shown, text" # not a comment'  # a comment`+"\n")
+
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	want := domain.EpicRequirements{ChangelogCheck: `npm ci && npx vitest run -t "shown, text" # not a comment`}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("requirements = %+v, want %+v", got, want)
+	}
+	if got.Any() {
+		t.Errorf("changelog_check is no requirement of an epic, but Any() = true")
+	}
+
+	for _, bad := range []string{`npm test`, `""`, `["npm test"]`, `"npm ci", "npm test"`} {
+		writeRigFile(t, dir, "lampas", "changelog_check = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "changelog_check") {
+			t.Errorf("changelog_check = %s: err = %v, want a refusal naming changelog_check", bad, err)
+		}
+	}
+}

@@ -2123,6 +2123,35 @@ Feature: Closing out a finished story and carrying on
     And the tip of "main" at the rig's origin changed no changelog file
     And "public/changelog.json" and "CHANGELOG.md" are absent from "main" at the rig's origin
 
+  # A rig whose file names a changelog_check has it run, before the story's own
+  # gate, on the story's branch with the What's new line written into the
+  # changelog as the landing will write it, so that a test of the shown text
+  # fails the story and not the batch (mw-gq6.1610).
+  Scenario: A What's new line the rig's changelog check refuses fails the story's own close-out
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the rig's file in the vault names the changelog check "! grep -qw maths public/changelog.json"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" carries the closing comment "Done.\nWhat's new: New: A maths topic"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" carries a comment quoting: with the story's What's new line written into public/changelog.json, CHANGELOG.md
+    And "public/changelog.json" and "CHANGELOG.md" are absent from "main" at the rig's origin
+
+  Scenario: A What's new line the rig's changelog check accepts lands as before
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the rig's file in the vault names the changelog check "! grep -qw maths public/changelog.json"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" carries the closing comment "Done.\nWhat's new: New: A math topic"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And "public/changelog.json" at the top of "main" at the rig's origin is the entry "0.1.3", "2026-09-18", "mw-gq6.1", "new", "A math topic"
+
   Scenario: A rig without changelog_files writes no changelog
     Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
     And the rig's file in the vault names the version files "package.json" and "package-lock.json"

@@ -55,6 +55,11 @@ type Check struct {
 	Landing Landing
 	Checks  Checks
 
+	// Rules reads the rig's file for its changelog_check, which a check runs on
+	// the story's What's new line written into the rig's changelog files, as mw
+	// next does (changelogcheck.go, mw-gq6.1610). Nil runs none.
+	Rules EpicRules
+
 	// SpecChecks runs the rig's changed-specs command after its tests, on the
 	// specs the branch added or changed (mw-gq6.366). Nil runs none.
 	SpecChecks SpecChecks
@@ -655,6 +660,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		GateRecords:   k.Records,
 		Changes:       k.Changes,
 		AddedLines:    k.AddedLines,
+		Rules:         k.Rules,
 		Remote:        k.Remote,
 		Load:          load,
 		Modes:         k.Modes,

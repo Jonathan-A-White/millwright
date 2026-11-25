@@ -10,9 +10,12 @@ import (
 	"time"
 )
 
-// killGrace is how long a git that has been told to stop is given to let go of
-// its output before mw stops waiting for it.
-const killGrace = time.Second
+// pipeGrace is how long a git that has ended, or been told to stop, is given for
+// its output to close and be read before mw cuts it off and fails the command.
+// On a busy host a git that succeeded can take more than a second over that
+// (mw-gq6.1610). A stop kills the whole process group, which closes the output
+// at once, so a stopped git does not wait this long.
+const pipeGrace = 10 * time.Second
 
 // lowSpeedLimit and lowSpeedTime bound how long a git network call may sit
 // transferring almost nothing before it gives up: below lowSpeedLimit
@@ -41,6 +44,6 @@ func Command(ctx context.Context, program, dir string, args ...string) *exec.Cmd
 		"GIT_HTTP_LOW_SPEED_LIMIT="+lowSpeedLimit, "GIT_HTTP_LOW_SPEED_TIME="+lowSpeedTime)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = killGrace
+	cmd.WaitDelay = pipeGrace
 	return cmd
 }

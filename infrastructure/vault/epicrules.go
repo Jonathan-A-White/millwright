@@ -32,6 +32,7 @@ const (
 	ChangelogFilesKey      = "changelog_files"
 	UnionMergeFilesKey     = "union_merge_files"
 	TimingTestsKey         = "timing_tests"
+	ChangelogCheckKey      = "changelog_check"
 	PublicURLKey           = "public_url"
 	SiteURLKey             = "site_url"
 	HealthzURLKey          = "healthz_url"
@@ -86,6 +87,7 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	guest                  = "Luke"
 //	version_files          = ["package.json", "package-lock.json"]
 //	changelog_files        = ["public/changelog.json", "CHANGELOG.md"]
+//	changelog_check        = "npm ci && npx vitest run tests/unit/shown-text.test.ts"
 //	union_merge_files      = ["ATTRIBUTION.md", "docs/*.md"]
 //	[[regenerated_files]]  # last in the file: its tables hold paths and run only
 //	paths = ["docs/lxx-align/gen.txt"]
@@ -155,7 +157,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
-	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true, RegeneratedFilesKey: true, TimingTestsKey: true,
+	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, ChangelogCheckKey: true, UnionMergeFilesKey: true, RegeneratedFilesKey: true, TimingTestsKey: true,
 	PublicURLKey: true, SiteURLKey: true, HealthzURLKey: true, FilesExpectedKey: true, ReleaseOnPathKey: true, TermsTitleKey: true, NeedsLaptopKey: true, NightlySuiteKey: true, SuiteEpicKey: true, SuiteEveryKey: true, SuiteHostKey: true, BuilderCallKey: true,
 	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
 	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
@@ -354,6 +356,14 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			requirements.SuiteHost = host[0]
 			continue
 		}
+		if found && key == ChangelogCheckKey {
+			command, err := quotedStrings(value)
+			if err != nil || len(command) != 1 {
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"<command line>\"`, got %q", i+1, ChangelogCheckKey, lines[i])
+			}
+			requirements.ChangelogCheck = command[0]
+			continue
+		}
 		if found && key == PublicURLKey {
 			url, err := quotedStrings(value)
 			if err != nil || len(url) != 1 || !strings.HasPrefix(url[0], "https://") {
@@ -419,8 +429,8 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, the %s tables, the feature keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, TermsTitleKey, NeedsLaptopKey, NightlySuiteKey, SuiteEpicKey, SuiteEveryKey, SuiteHostKey, BuilderCallKey,
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s the capacity keys %s, %s, %s and %s, the %s tables, the feature keys %s, %s, %s and %s, and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, ChangelogCheckKey, UnionMergeFilesKey, TimingTestsKey, PublicURLKey, SiteURLKey, HealthzURLKey, FilesExpectedKey, ReleaseOnPathKey, TermsTitleKey, NeedsLaptopKey, NightlySuiteKey, SuiteEpicKey, SuiteEveryKey, SuiteHostKey, BuilderCallKey,
 				CapacityViewersKey, CapacitySSECapKey, CapacityNginxConnectionsKey, CapacityMemoryFreeKey, RegeneratedFilesKey,
 				FeatureShareKey, FeatureShareMinKey, FeatureShareMaxKey, FeatureFloorKey,
 				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)

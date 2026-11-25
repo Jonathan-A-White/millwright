@@ -69,6 +69,25 @@ Feature: A rig that lands in batches queues each story that passes its close-out
     And the last ledger line says it was tested by mw check at the tip of "mw-gq6.1"
     And the last ledger line does not say "mw next re-ran the rig's tests"
 
+  # The line is written into the changelog only at landing, so no run of the
+  # rig's tests on the branch saw it: the story's own gate is where the rig's
+  # changelog check refuses it, a trusted pass or not (mw-gq6.1610).
+  Scenario: A What's new line the changelog check refuses stops the story at its own close-out, not in the batch, though mw check passed at the tip
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the rig's file in the vault names the changelog check "! grep -qw maths public/changelog.json"
+    And the rig's file in the vault also holds the line "landing = 'batch'"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When a session checks "mw-gq6.1"
+    Then the check passes
+    When the story "mw-gq6.1" is then given the closing comment "Done.\nWhat's new: New: A maths topic"
+    And mw closes out "mw-gq6.1"
+    Then the report says it stopped for "tests-fail"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" carries a comment quoting: with the story's What's new line written into public/changelog.json, CHANGELOG.md
+
   Scenario: The branch moved on after mw check passed, so the close-out runs the tests itself
     Given the rig lands its stories in batches
     And the session of "mw-gq6.1" reported a plain success

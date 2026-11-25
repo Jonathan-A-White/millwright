@@ -79,6 +79,10 @@ func newCheckCmd() *cobra.Command {
 			"until the session ends, and it does not try the merge, so a branch that passes here can still be\n" +
 			"stopped by a conflict or by the other host's work. The commits are counted against the target\n" +
 			"branch as the rig last saw the remote's.\n\n" +
+			"A rig whose file in the vault names changelog_check (a command line) also has it run, before the tests, in a\n" +
+			"throwaway worktree of the branch with the story's What's new line (its title when it has none yet) written\n" +
+			"into changelog_files as the landing writes it, so that a test of the shown text fails here and not in the\n" +
+			"batch (mw-gq6.1610); mw next runs it too, whatever earlier pass it trusts.\n\n" +
 			"A rig whose config file has a [data_parts.<rig>] table (paths and command, mw-gq6.1589) gates a story whose every\n" +
 			"changed file is inside its paths by the command alone, as one part named \"data scope\": the check says so in its\n" +
 			"first lines, mw check <story> --part 1 runs it, and mw next trusts its pass at the tip. One file outside\n" +
@@ -213,6 +217,7 @@ func newCheckCmd() *cobra.Command {
 				NamedChecks:    checks,
 				Changes:        worktrees,
 				AddedLines:     worktrees,
+				Rules:          mwVault(dir, host),
 				Slot:           slot,
 				GateLock:       gateLock,
 				Parts:          checks,

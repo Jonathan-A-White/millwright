@@ -32,6 +32,13 @@ type EpicRequirements struct {
 	// writes the story's What's new: note into them in the commit that carries
 	// the version. It is no requirement of an epic either, so Any does not count it.
 	ChangelogFiles []string
+	// ChangelogCheck, when it is not empty, is the command line of the rig's
+	// checks of the text it shows people (changelog_check). mw check and mw
+	// next run it, before the story's own gate, on the story's branch with its
+	// What's new: line written into ChangelogFiles as the landing will write it
+	// (mw-gq6.1610). It is no requirement of an epic either, so Any does not
+	// count it.
+	ChangelogCheck string
 	// UnionMergeFiles, when it is not empty, are the files of the rig, as paths
 	// relative to its root or path.Match globs, that every story appends to and
 	// no story cares to order: the docs that list notes, credits or module rows.

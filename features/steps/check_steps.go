@@ -278,6 +278,7 @@ func (c *nextContext) newCheck(worktrees *rig.Worktrees, slot application.MergeS
 	return application.Check{
 		Changes:    changes,
 		AddedLines: worktrees,
+		Rules:      vault.New(c.vault),
 		Tracker:    c.tracker,
 		Slot:       slot,
 		Landing:    worktrees,
