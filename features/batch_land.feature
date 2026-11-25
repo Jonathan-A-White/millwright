@@ -639,6 +639,29 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.3 |
     And "mw-gq6.2.md" is not on "main" at the rig's origin
 
+  # mw next runs the rig's changelog_check on a story's What's new line at its
+  # close-out (mw-gq6.1610), but a comment added after the story was queued is
+  # first read by mw land, which writes it into the batch: the batch runs the
+  # same check on it before merging the story, and sets it aside, named, when
+  # it refuses (mw-gq6.1745).
+  Scenario: A What's new comment added after the story was queued, that the changelog check refuses, sets the story aside and the others land
+    Given the rig's main holds a package.json and a package-lock.json at version "1.4.2"
+    And the rig's file in the vault also holds the line "version_files = ['package.json', 'package-lock.json']"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the rig's file in the vault names the changelog check "! grep -qw maths public/changelog.json"
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    When the story "mw-gq6.2" is then given the closing comment "Done.\nWhat's new: New: A maths topic"
+    And mw lands the batch of the rig
+    Then the batch set "mw-gq6.2" aside, naming the changelog check and its What's new line
+    And the story "mw-gq6.2" is still queued for batch landing
+    And the Mayor's mail names "mw-gq6.2" and says "the rig's changelog check fails"
+    And the batch landed on "main" in one push, forcing nothing
+    And "main" at the rig's origin holds version "1.4.3" in "package.json" and "package-lock.json"
+    And "public/changelog.json" at the rig's origin lists exactly 1 entry
+    And "mw-gq6.2.md" is not on "main" at the rig's origin
+
   Scenario: A fixer commit that signs the work as a machine's stops the batch before any push, naming the commit (mw-gq6.506)
     Given these stories are queued for batch landing:
       | mw-gq6.1 |

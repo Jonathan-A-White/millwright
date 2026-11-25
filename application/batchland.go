@@ -292,6 +292,11 @@ type BatchReport struct {
 	// failingOwner is the one story of the batch whose branch alone changed
 	// the files of the tests that failed (findFailingOwner); empty when none.
 	failingOwner string
+	// changelogChecked are the stories whose What's new line the rig's changelog
+	// check has been run on in this batch (changelogWhy), each with the why it was
+	// refused or empty, so a batch made again neither runs it twice nor merges
+	// a story it refused.
+	changelogChecked map[string]string
 	// leftOutRed says a story was left out of the batch for the tests it failed
 	// and the rest made again without it (leaveRedStoryOut), which is done once;
 	// landing is then the worktree the batch was made again in.
@@ -695,7 +700,7 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 	if b.mainStillRed(ctx, rigDir, report, nr) {
 		return
 	}
-	b.mergeAll(ctx, dir, rigDir, rules.MergeRules(), report)
+	b.mergeAll(ctx, dir, rigDir, rules, report, nr)
 	// A branch set aside for its conflicts is the fixer's to merge, before the
 	// version is raised and the tests are run: what it merges then gets its
 	// changelog entry, and the batch is tested once, after it. But only a batch
@@ -896,13 +901,15 @@ func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *Batc
 }
 
 // mergeAll merges the queue into the batch in order. A story whose branch is
-// not at the origin, whose commits are signed as a machine's, or that does not
+// not at the origin, whose commits are signed as a machine's, whose What's new
+// line the rig's changelog check refuses, or that does not
 // merge, is set aside and counted on the story, whatever the reason, so that one
 // the batches set aside again and again is handed back and not queued for ever
 // (mw-gq6.1631, mw-gq6.1632); the merge of the next is made on the batch as it
 // stood: a merge that conflicts is undone by the landing before it comes back.
-func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union domain.MergeRules, report *BatchReport) {
+func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, rules domain.EpicRequirements, report *BatchReport, nr *NextReport) {
 	n := b.Next
+	union := rules.MergeRules()
 	for _, s := range report.Queue {
 		if _, err := n.Landing.RefHead(ctx, rigDir, s.Branch); err != nil {
 			s.Why = fmt.Sprintf("its branch %s is not at the rig's origin", s.Branch)
@@ -916,6 +923,14 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union domai
 		// A branch whose commits sign the work as a machine's is refused here as
 		// mw next refuses it: it is never merged, whatever else is in the batch.
 		if why := b.signedWhy(ctx, rigDir, s.Branch, report.Base, "its branch "+s.Branch); why != "" {
+			s.Why = why
+			b.countSetAside(ctx, &s, report, nil)
+			report.SetAside = append(report.SetAside, s)
+			continue
+		}
+		// A What's new line the rig's changelog check refuses sets the story aside
+		// before it is merged, as it is refused at the story's own close-out.
+		if why := b.changelogWhy(ctx, rigDir, s, rules, report, nr); why != "" {
 			s.Why = why
 			b.countSetAside(ctx, &s, report, nil)
 			report.SetAside = append(report.SetAside, s)

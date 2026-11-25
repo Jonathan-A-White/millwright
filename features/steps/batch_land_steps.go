@@ -64,6 +64,8 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^"([^"]*)" is queued for batch landing, its branch then carrying a commit whose message says "([^"]*)"$`, c.aStoryIsQueuedThenSigned)
 	ctx.Then(`^the batch set "([^"]*)" aside, naming its signed commit and the line "([^"]*)"$`, c.theBatchSetAsideSigned)
 	ctx.Then(`^the Mayor's mail names "([^"]*)", its signed commit and the line "([^"]*)"$`, c.theMayorsMailNamesTheSignedCommit)
+	ctx.Then(`^the batch set "([^"]*)" aside, naming the changelog check and its What's new line$`, c.theBatchSetAsideChangelog)
+	ctx.Then(`^the Mayor's mail names "([^"]*)" and says "([^"]*)"$`, c.theMayorsMailNamesAndSays)
 	ctx.Then(`^"([^"]*)" is not on "([^"]*)" at the rig's origin$`, c.isNotOnTheTarget)
 	ctx.Given(`^the tracker acts as "([^"]*)", this host's mw$`, c.theTrackerActsAs)
 	ctx.Given(`^"([^"]*)" is claimed by "([^"]*)", on another host$`, c.claimedOnAnotherHost)
@@ -736,6 +738,32 @@ func (c *nextContext) theMayorsMailNamesTheSignedCommit(id, line string) error {
 		}
 	}
 	return fmt.Errorf("expected a mail to the Mayor naming %s, commit %s and %q, got %+v", id, hash, line, mail)
+}
+
+func (c *nextContext) theBatchSetAsideChangelog(id string) error {
+	for _, story := range c.batch.report.SetAside {
+		if story.ID != id {
+			continue
+		}
+		if !strings.Contains(story.Why, "the rig's changelog check fails") || !strings.Contains(story.Why, "What's new line") {
+			return fmt.Errorf("expected %s to be set aside naming the changelog check on its What's new line, got %q", id, story.Why)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected %s to be set aside, got %+v\n%s", id, c.batch.report.SetAside, c.said())
+}
+
+func (c *nextContext) theMayorsMailNamesAndSays(id, words string) error {
+	mail, err := c.batchMail()
+	if err != nil {
+		return err
+	}
+	for _, m := range mail {
+		if m.To == "mayor" && strings.Contains(m.Body, id) && strings.Contains(m.Body, words) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a mail to the Mayor naming %s and saying %q, got %+v", id, words, mail)
 }
 
 func (c *nextContext) isNotOnTheTarget(file, branch string) error {

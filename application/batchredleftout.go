@@ -76,7 +76,7 @@ func (b BatchLand) leaveRedStoryOut(ctx context.Context, dir *string, rigDir str
 	report.Merged = nil
 	queue := report.Queue
 	report.Queue = rest
-	b.mergeAll(ctx, fresh, rigDir, rules.MergeRules(), report)
+	b.mergeAll(ctx, fresh, rigDir, rules, report, nr)
 	report.Queue = queue
 	report.SetAside = append(report.SetAside, out)
 	report.Version, report.versionCommit, report.changelogFiles, report.changelogWritten = "", "", nil, nil
