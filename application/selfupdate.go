@@ -429,8 +429,27 @@ func (s SelfUpdate) deployRig(ctx context.Context, rig, dir string) []string {
 		return nil
 	}
 
+	// A rig whose after-landing slot a running deploy holds is passed over, not
+	// waited for: every rig after it would wait behind that deploy too, and the
+	// next tick, or the holder's own after-landing, deploys it (mw-gq6.1605).
+	slot, heldBy, giveBack := tryAfterLandingSlot(ctx, s.Slot, dir, afterLandingHolder(s.Host, rig))
+	defer giveBack()
+	if heldBy != nil {
+		note := fmt.Sprintf("%s at %s, not yet deployed: its after-landing slot is held by %s; the next tick tries again",
+			words, updatedRevision(head), heldBy.Words())
+		if deployed == "" {
+			// This tick moved the checkout and the rig has no deployed mark: left so,
+			// the next tick would find it level and set the mark without deploying.
+			// What the rig last ran at is where the checkout was before.
+			if err := s.Built.MarkBuilt(ctx, deployedMark(rig), before); err != nil {
+				note += " (the commit it was deployed at could not be remembered, so the next tick may only set its mark: " + firstLine(err.Error()) + ")"
+			}
+		}
+		return []string{note}
+	}
+
 	var out strings.Builder
-	run := AfterLandingRun{AfterLanding: s.After, Slot: s.Slot, Rigs: s.Rigs, Host: s.Host, Out: &out, Built: s.Built, Checkout: s.Checkout}
+	run := AfterLandingRun{AfterLanding: s.After, Slot: slot, Rigs: s.Rigs, Host: s.Host, Out: &out, Built: s.Built, Checkout: s.Checkout}
 	afterFailure, runErr := run.run(ctx, rig)
 	moved := fmt.Sprintf("%s %s → %s", words, updatedRevision(before), updatedRevision(head))
 	if !advanced.Moved {

@@ -41,8 +41,14 @@ type selfUpdateContext struct {
 
 	// A second rig the home names the build command for, checked out at the same
 	// old commit as the factory rig (mw-gq6.562); homeIs says which host is home.
-	second   string
-	homeIs   string
+	second string
+	homeIs string
+
+	// Two more rigs the home names the build command for (mw-gq6.1605), by name, and
+	// the host's after-landing slots, one of which another process may hold.
+	more     map[string]string
+	slots    *rig.Slots
+	holding  application.Holding
 	formulas bool
 }
 
@@ -72,6 +78,9 @@ func InitializeSelfUpdateScenario(ctx *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		if c.holding != nil {
+			_ = c.holding.Release(ctx)
+		}
 		if c.root != "" {
 			_ = os.RemoveAll(c.root)
 		}
@@ -90,6 +99,12 @@ func InitializeSelfUpdateScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the vault's uncommitted change is still there$`, c.theDirtIsStillThere)
 	ctx.Then(`^the tick's line says nothing of formulas$`, c.theLineSaysNothingOfFormulas)
 	ctx.Given(`^the host names that command for a second rig, "([^"]*)", checked out at the same old commit, and not for millwright$`, c.aSecondRig)
+	ctx.Given(`^the host names that command for two more rigs, "([^"]*)" and "([^"]*)", checked out at the same old commit, and not for millwright$`, c.twoMoreRigs)
+	ctx.Given(`^another process holds the after-landing slot of "([^"]*)"$`, c.anotherHoldsTheSlot)
+	ctx.Given(`^the other process gives the after-landing slot of "([^"]*)" back$`, c.theOtherGivesTheSlotBack)
+	ctx.Then(`^"([^"]*)" is at origin's main$`, func(name string) error { return c.rigIs(c.more[name], c.newHead) })
+	ctx.Then(`^the build ran once, in "([^"]*)", at origin's main$`, func(name string) error { return c.theBuildRanIn(map[string]int{name: 1}) })
+	ctx.Then(`^the build ran in "([^"]*)" and in "([^"]*)", each once, at origin's main$`, func(a, b string) error { return c.theBuildRanIn(map[string]int{a: 1, b: 1}) })
 	ctx.Given(`^the host is home$`, func() error { c.homeIs = "laptop"; return nil })
 	ctx.Given(`^the host is not home$`, func() error { c.homeIs = "desktop"; return nil })
 	ctx.Then(`^the second rig is at origin's main$`, func() error { return c.rigIs(c.second, c.newHead) })
@@ -251,7 +266,10 @@ func (c *selfUpdateContext) theTickLooks() error {
 		Now:        func() time.Time { return time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC) },
 		Out:        &out,
 	}
-	if _, err := tick.Run(context.Background()); err != nil {
+	// A tick that waits for a held slot would wait for hours: cut it off.
+	limit, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := tick.Run(limit); err != nil {
 		return fmt.Errorf("the tick failed: %w", err)
 	}
 	c.line = strings.TrimSpace(out.String())
@@ -561,9 +579,91 @@ func (c *selfUpdateContext) selfUpdate(worktrees *rig.Worktrees, host string) ap
 		Built:    rig.NewBuiltMarks(filepath.Join(c.root, "state")),
 	}
 	update.Formulas, update.Home, update.Host = c.formulaInstall()
+	for name, dir := range c.more {
+		update.Rigs[name] = dir
+		update.Home, update.Host = homeFile(c.homeIs+" 2026-10-01T00:00:00Z mayor\n"), "laptop"
+	}
+	if c.slots != nil {
+		update.Slot = c.slots
+	}
 	if c.second != "" {
 		update.Rigs[filepath.Base(c.second)] = c.second
 		update.Home, update.Host = homeFile(c.homeIs+" 2026-10-01T00:00:00Z mayor\n"), "laptop"
 	}
 	return update
+}
+
+// twoMoreRigs checks the factory rig's origin out under each name, at the old
+// commit, and names the build command for them both and not for millwright.
+func (c *selfUpdateContext) twoMoreRigs(first, second string) error {
+	command := c.commands[application.FactoryRig]
+	c.more, c.commands = map[string]string{}, map[string]string{}
+	for _, name := range []string{first, second} {
+		dir := filepath.Join(c.root, "rigs", name)
+		if err := c.git(c.root, "clone", "-q", c.origin, dir); err != nil {
+			return err
+		}
+		if err := gitIdentify(dir); err != nil {
+			return err
+		}
+		if err := c.git(dir, "reset", "-q", "--hard", c.oldHead); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+			return err
+		}
+		c.more[name], c.commands[name] = dir, command
+	}
+	c.slots = rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix))
+	return nil
+}
+
+// anotherHoldsTheSlot takes the rig's after-landing slot as a running deploy
+// would, and keeps it until the scenario gives it back or ends.
+func (c *selfUpdateContext) anotherHoldsTheSlot(name string) error {
+	holding, err := c.slots.Take(context.Background(), c.more[name], "mw dispatch running the after-landing command of "+name)
+	if err != nil {
+		return err
+	}
+	c.holding = holding
+	return nil
+}
+
+func (c *selfUpdateContext) theOtherGivesTheSlotBack(string) error {
+	return c.holding.Release(context.Background())
+}
+
+// theBuildRanIn says the build ran in each rig the given number of times, at
+// origin's main, and nowhere else.
+func (c *selfUpdateContext) theBuildRanIn(want map[string]int) error {
+	runs, err := c.buildLog()
+	if err != nil {
+		return err
+	}
+	got := map[string]int{}
+	for _, run := range runs {
+		fields := strings.Fields(run)
+		if len(fields) != 2 || fields[1] != c.newHead {
+			return fmt.Errorf("expected a directory and origin's main in the build's log, got %q", run)
+		}
+		dir, err := filepath.EvalSymlinks(fields[0])
+		if err != nil {
+			return err
+		}
+		got[dir]++
+	}
+	for name, n := range want {
+		dir, err := filepath.EvalSymlinks(c.more[name])
+		if err != nil {
+			return err
+		}
+		if got[dir] != n {
+			return fmt.Errorf("expected %d build(s) in %s, the log says %q", n, name, runs)
+		}
+		delete(got, dir)
+	}
+	if len(got) != 0 {
+		return fmt.Errorf("the build also ran elsewhere: %q", runs)
+	}
+	return nil
 }

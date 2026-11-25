@@ -92,7 +92,7 @@ func (a AfterLandingRun) run(ctx context.Context, rigName string) (afterFailure 
 		return "", fmt.Errorf("the checkout of %s, %s, is not there", rigName, dir)
 	}
 
-	release, err := takeAfterLandingSlot(ctx, a.Slot, dir, fmt.Sprintf("%s running the after-landing command of %s", SeatIdentity(MwSeat, a.Host), rigName))
+	release, err := takeAfterLandingSlot(ctx, a.Slot, dir, afterLandingHolder(a.Host, rigName))
 	if err != nil {
 		return "", err
 	}
