@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -209,10 +210,11 @@ func (b BatchLand) handBackRepeaters(ctx context.Context, report *BatchReport) {
 		if atOnce {
 			cause = fmt.Sprintf("in conflict with %s, not the batch", report.Target)
 		}
-		if b.leftToANewAttempt(ctx, s.ID, report) {
+		why, left := b.handBack(ctx, *s, report)
+		if left {
 			continue
 		}
-		if why := b.handBack(ctx, *s, report); why != "" {
+		if why != "" {
 			report.Notes = append(report.Notes, fmt.Sprintf("%s was %s, but it could not be handed back to a Builder to rebase, so it stays queued: %s", s.ID, cause, why))
 			continue
 		}
@@ -237,7 +239,7 @@ func (b BatchLand) leftToANewAttempt(ctx context.Context, id string, report *Bat
 	if !b.noLongerQueued(ctx, id) {
 		return false
 	}
-	report.Notes = append(report.Notes, fmt.Sprintf("%s was taken by this batch, but it is no longer queued for batch landing (a new attempt was given it since), so the batch left it alone", id))
+	report.Notes = append(report.Notes, b.leftAloneNote(id))
 	return true
 }
 
@@ -262,11 +264,12 @@ func (r BatchReport) waitsOnItsFixer() bool {
 }
 
 // handBack takes story s off the batch queue, gives its claim back and says on
-// it why; what it returns is why it could not, empty when it did.
-func (b BatchLand) handBack(ctx context.Context, s BatchStory, report *BatchReport) string {
+// it why; what it returns is why it could not, empty when it did, and whether
+// the batch left it alone, as giveBack does.
+func (b BatchLand) handBack(ctx context.Context, s BatchStory, report *BatchReport) (why string, left bool) {
 	n := b.Next
-	if why := b.giveBack(ctx, s); why != "" {
-		return why
+	if why, left := b.giveBack(ctx, s, report); why != "" || left {
+		return why, left
 	}
 	var comment string
 	switch {
@@ -289,7 +292,7 @@ func (b BatchLand) handBack(ctx context.Context, s BatchStory, report *BatchRepo
 	if err := writeRetrying(ctx, n, nil, "the hand-back note", func() error { return n.Tracker.CommentOnStory(ctx, s.ID, comment) }); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s was handed back, but the comment naming the conflicted files could not be written on it: %v", s.ID, err))
 	}
-	return ""
+	return "", false
 }
 
 // conflictedFilesOrNone is the line of a hand-back comment naming the files s
@@ -303,40 +306,51 @@ func conflictedFilesOrNone(s BatchStory) string {
 
 // giveBack takes story s off the batch queue: its run state is cleared and its
 // claim given back, so that the next dispatch tick takes it as a new attempt;
-// what it returns is why it could not, empty when it did.
-func (b BatchLand) giveBack(ctx context.Context, s BatchStory) string {
+// what it returns is why it could not, empty when it did, and whether the batch
+// left it alone because it is no longer the attempt the batch took.
+//
+// The story is read once, and what is read (that it is still queued, and who
+// holds it) is what the one write is conditional on: mw retry landing between
+// the read and the write leaves the story as the retry made it, and the batch
+// says so (mw-gq6.1738, mw-gq6.1735). The run state goes with the claim, in that
+// write, as it went first before (mw-gq6.1382): no open story is ever seen
+// carrying run:queued.
+func (b BatchLand) giveBack(ctx context.Context, s BatchStory, report *BatchReport) (why string, left bool) {
 	n := b.Next
-	// The run state first, as the harness-stop give-back does it (mw-gq6.1382):
-	// no open story is ever seen carrying run:queued.
-	if err := writeRetrying(ctx, n, nil, "the clearing of the run state", func() error { return n.Tracker.ClearRunState(ctx, s.ID) }); err != nil {
-		return fmt.Sprintf("its run state could not be cleared: %v", err)
-	}
 	holder := s.detail.Assignee
 	if detail, err := n.Tracker.ShowStory(ctx, s.ID); err == nil {
+		if !QueuedForBatch(detail) {
+			report.Notes = append(report.Notes, b.leftAloneNote(s.ID))
+			return "", true
+		}
 		holder = detail.Assignee
 	}
-	if err := writeRetrying(ctx, n, nil, "the give-back of the claim on "+s.ID, func() error {
-		return givenBackAs(ctx, n.Tracker, s.ID, StatusOpen, releaseQueued(ctx, n.Tracker, s.ID, holder))
-	}); err != nil {
+	err := writeRetrying(ctx, n, nil, "the give-back of the claim on "+s.ID, func() error {
+		err := n.Tracker.ReleaseQueuedHeldBy(ctx, s.ID, holder)
+		if errors.Is(err, ErrStoryMovedOn) {
+			left = true
+			return nil
+		}
+		return givenBackAs(ctx, n.Tracker, s.ID, StatusOpen, err)
+	})
+	if left {
+		report.Notes = append(report.Notes, b.leftAloneNote(s.ID))
+		return "", true
+	}
+	if err != nil {
 		// Queued again, so that it is not left claimed with no run state for the sweep to find.
 		if serr := n.Tracker.SetStoryState(ctx, s.ID, RunState, RunQueued, "handing it back failed: "+firstLine(err.Error())); serr != nil {
-			return fmt.Sprintf("its claim could not be given back: %v (and run=%s could not be written again: %v)", err, RunQueued, serr)
+			return fmt.Sprintf("its claim could not be given back: %v (and run=%s could not be written again: %v)", err, RunQueued, serr), false
 		}
-		return fmt.Sprintf("its claim could not be given back: %v", err)
+		return fmt.Sprintf("its claim could not be given back: %v", err), false
 	}
-	return ""
+	return "", false
 }
 
-// releaseQueued gives back the claim of story id held by holder, guarded on
-// holder. A story nobody holds has no claim to give back, and an empty holder
-// would be read as this host's actor, so bd would refuse (mw-gq6.1661): nothing
-// is written, and givenBackAs reads the story to say whether it is open and
-// unclaimed.
-func releaseQueued(ctx context.Context, tracker WorkTracker, id, holder string) error {
-	if holder == "" {
-		return nil
-	}
-	return tracker.ReleaseClaimHeldBy(ctx, id, holder)
+// leftAloneNote is the note that the batch left story id alone: it was taken by
+// this batch, but a new attempt was given it since.
+func (b BatchLand) leftAloneNote(id string) string {
+	return fmt.Sprintf("%s was taken by this batch, but it is no longer queued for batch landing (a new attempt was given it since), so the batch left it alone", id)
 }
 
 // ordinal says a count as a word: "second", "third", "4th".

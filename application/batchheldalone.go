@@ -25,10 +25,11 @@ func (b BatchLand) handBackRedAlone(ctx context.Context, report *BatchReport) {
 	if !again {
 		return
 	}
-	if b.leftToANewAttempt(ctx, s.ID, report) {
+	why, left := b.giveBack(ctx, s, report)
+	if left {
 		return
 	}
-	if why := b.giveBack(ctx, s); why != "" {
+	if why != "" {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s was held red alone for the second time, but it could not be handed back to a Builder, so it stays queued: %s", s.ID, why))
 		return
 	}

@@ -622,6 +622,28 @@ func (g *Gateway) ClearRunState(ctx context.Context, id string) error {
 	return err
 }
 
+// ReleaseQueuedHeldBy implements application.WorkTracker: ClearRunState and
+// ReleaseClaimHeldBy in the one `bd update`, guarded with --if-assignee on
+// holder, which an empty holder makes "nobody" (bd's own reading of an empty
+// value). A refusal is told apart from another failure by reading the story
+// back, as HoldStory does: one now held by someone else wraps
+// application.ErrStoryMovedOn.
+func (g *Gateway) ReleaseQueuedHeldBy(ctx context.Context, id, holder string) error {
+	args := []string{"update", id, "--status", StatusOpen, "--assignee", ""}
+	for _, run := range application.RunStates {
+		args = append(args, "--remove-label", application.RunState+":"+run)
+	}
+	args = append(args, "--if-assignee", holder)
+	_, err := g.call(ctx, args...)
+	if err == nil {
+		return nil
+	}
+	if story, readErr := g.showOne(ctx, id); readErr == nil && story.Assignee != holder {
+		return fmt.Errorf("%s is held by %q, not %q, so nothing was written: %w (%w)", id, story.Assignee, holder, application.ErrStoryMovedOn, err)
+	}
+	return err
+}
+
 // giveClaimBack clears the assignee and sets status, guarded on holder.
 func (g *Gateway) giveClaimBack(ctx context.Context, id, holder, status string) error {
 	if holder == "" {

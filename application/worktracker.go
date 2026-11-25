@@ -900,6 +900,14 @@ type WorkTracker interface {
 	// conditional on holder the same way.
 	HoldClaimHeldBy(ctx context.Context, id, holder string) error
 
+	// ReleaseQueuedHeldBy gives back the claim of a story a batch took, in the
+	// one write: every run:* label is cleared and the story goes open and
+	// unassigned, conditional on holder, the actor the story was read as assigned
+	// to (an empty holder asks for a story nobody holds). A story that has changed
+	// hands since the read, as mw retry gives a new attempt, is left exactly as it
+	// is and the error wraps ErrStoryMovedOn (mw-gq6.1738).
+	ReleaseQueuedHeldBy(ctx context.Context, id, holder string) error
+
 	// ClearRunState takes every run:* label (RunStates) and the run state they
 	// record off a story, in one write, as a claim does. A give-back keeps
 	// the label its caller set (a cancel's run:cancelled, a landed demo's
@@ -1028,6 +1036,11 @@ type ClaimHeldError struct {
 func (e *ClaimHeldError) Error() string {
 	return fmt.Sprintf("%s is already claimed by %s, so it was not taken", e.ID, e.Holder)
 }
+
+// ErrStoryMovedOn is what ReleaseQueuedHeldBy's error wraps when the story is no
+// longer held by the actor it was read as held by: nothing was written, and the
+// claim and run state on it are another attempt's (mw-gq6.1738).
+var ErrStoryMovedOn = errors.New("the story has changed hands since it was read")
 
 // claimHeld matches the words of a ClaimHeldError, for a refusal that reached
 // a caller as its text and not its type.

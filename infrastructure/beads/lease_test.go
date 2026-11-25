@@ -253,3 +253,30 @@ func TestClearRunStateAsksBdToRemoveEveryRunLabelAndNothingElse(t *testing.T) {
 		}
 	}
 }
+
+// ReleaseQueuedHeldBy is the run state's clearing and the claim's give-back in
+// the one update, guarded on the holder the batch read, so that a retry landing
+// after the read is not stripped of its new attempt (mw-gq6.1738).
+func TestReleaseQueuedHeldByClearsTheRunStateAndGivesTheClaimBackInOneGuardedUpdate(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"update": `[{"id": "t-1"}]`,
+	})
+	if err := gateway.ReleaseQueuedHeldBy(context.Background(), "t-1", "mw@laptop"); err != nil {
+		t.Fatalf("releasing: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading what bd was asked: %v", err)
+	}
+	if !strings.Contains(string(asked), "update t-1 --status open --assignee  --remove-label run:") {
+		t.Fatalf("expected one update opening t-1 and removing its run labels, got %q", asked)
+	}
+	if !strings.Contains(string(asked), "--if-assignee mw@laptop") {
+		t.Fatalf("expected the update guarded on the holder, got %q", asked)
+	}
+	for _, run := range application.RunStates {
+		if want := "--remove-label run:" + run; !strings.Contains(string(asked), want) {
+			t.Errorf("expected bd to be asked %q, got %q", want, asked)
+		}
+	}
+}
