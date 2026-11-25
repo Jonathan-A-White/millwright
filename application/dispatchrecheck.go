@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -38,10 +39,19 @@ func namesSha(description, sha string) bool {
 // has moved and the bug is closed as already fixed (mw-gq6.414, mw-gq6.993). It
 // returns what recheckBug does: fixed is true when the story is dealt with and
 // is not to be dispatched.
+//
+// A bug mw next filed from a Builder's finding (LabelFoundAtClose) names no sha,
+// and its check may already have passed when it was filed (a finder's command
+// that was not read to fail at its own commit is filed all the same), so a pass
+// on main shows no story fixed it: it is held for the Mayor, not closed
+// (mw-gq6.1737).
 func (d Dispatch) settlePassedBug(ctx context.Context, detail StoryDetail, rig string, check BugCheck, found SpecRecheck, report *DispatchReport) (said string, fixed bool) {
 	id := detail.Story.ID
 	if namesSha(detail.Description, found.Sha) {
 		return d.holdFlakyBug(ctx, id, rig, check, found, report)
+	}
+	if slices.Contains(detail.Labels, LabelFoundAtClose) {
+		return d.holdFoundBug(ctx, id, rig, check, found, report)
 	}
 	one := FixedOnMain{StoryID: id, Spec: check.String(), Sha: found.Sha, Tests: found.Tests}
 	if err := d.closeStory(ctx, "closing a bug found fixed on main", id, one.reason()); err != nil {
@@ -75,6 +85,26 @@ func (d Dispatch) holdFlakyBug(ctx context.Context, id, rig string, check BugChe
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: it was held as flaky at %s, but the comment could not be written: %v", id, short(found.Sha), err))
 	}
 	report.Notes = append(report.Notes, fmt.Sprintf("%s: %s passes at %s, the sha the bug names; flaky, not fixed: held", id, check, short(found.Sha)))
+	return "", true
+}
+
+// holdFoundBug holds a bug filed from a finding whose check passes on main, and
+// says so on it: nothing shows the check failed when the bug was filed, so no
+// story is known to have fixed it. A hold that fails leaves the bug ready, and it
+// is dispatched as a bug whose check passed but could not be settled.
+func (d Dispatch) holdFoundBug(ctx context.Context, id, rig string, check BugCheck, found SpecRecheck, report *DispatchReport) (said string, fixed bool) {
+	note := fmt.Sprintf("%s mw dispatch on %s ran %s (%s) on %s's main and it passes at %s, but this bug was filed from a Builder's finding and names no commit it failed at: "+
+		"nothing shows the check failed when the bug was filed, so no story is known to have fixed it. It is held for the Mayor, not closed as fixed.\n\nThe end of the run:\n%s",
+		HeldCommentPrefix, d.Host, check, check.Source, rig, found.Sha, strings.TrimSpace(found.Tail))
+	if err := d.Tracker.HoldStory(ctx, id); err != nil {
+		said := fmt.Sprintf("%s passes on main but the story could not be held: %v", check, oneLine(err.Error()))
+		d.noteRecheckSkip(ctx, report, id, said)
+		return said, false
+	}
+	if err := d.Tracker.CommentOnStory(ctx, id, note); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: it was held as a finding's bug that passes on main, but the comment could not be written: %v", id, err))
+	}
+	report.Notes = append(report.Notes, fmt.Sprintf("%s: %s passes at %s, but the bug was filed from a finding and is not known to have failed: held, not closed", id, check, short(found.Sha)))
 	return "", true
 }
 
