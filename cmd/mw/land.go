@@ -29,7 +29,11 @@ func newLandCmd() *cobra.Command {
 			"whose file says landing = \"batch\"), on any host, oldest queued first. In a landing worktree\n" +
 			"detached at the target branch as the origin has it, it merges each story's branch as the origin\n" +
 			"has it (mw/<story>) by the rig's union rules (union_merge_files); a branch that does not merge\n" +
-			"is set aside with git's conflict list and stays queued. It raises the version once for the batch\n" +
+			"is set aside with git's conflict list and stays queued, unless it does not merge into the target\n" +
+			"alone either (a trial merge without the other stories): that one conflicts with the target, not\n" +
+			"the batch, which no later batch can clear, so it is handed back to a Builder to rebase at once,\n" +
+			"unless nothing merged and the batch is given its fixer. One set aside a second time for any\n" +
+			"reason is handed back too. It raises the version once for the batch\n" +
 			"(version_files), with one changelog entry per story (changelog_files), and runs the rig's tests\n" +
 			"once on the batch, under this host's gate lock and after letting a busy host calm.\n\n" +
 			"Only when that run passes is the target branch pushed: a fast-forward, never forced. Each story\n" +
@@ -40,8 +44,8 @@ func newLandCmd() *cobra.Command {
 			"so the rig's next batch can land meanwhile; a failing smoke mails the Mayor from there. A\n" +
 			"set-aside story is mailed to the Mayor (Set aside) with its conflict.\n\n" +
 			"A red run, a batch of which nothing merged, or a push the origin refuses pushes nothing: the\n" +
-			"batch is held, every story in it stays queued, the Mayor is mailed (Held) each story and why,\n" +
-			"and land exits non-zero.\n\n" +
+			"batch is held, every story in it stays queued but one handed back as above, the Mayor is mailed\n" +
+			"(Held) each story and why, and land exits non-zero.\n\n" +
 			"A batch with a branch set aside for its conflicts (even when every branch was, so that nothing\n" +
 			"merged), or whose run is red, is first given one fixer:\n" +
 			"a Builder session (batch-<rig>-<n>) in the landing worktree, on the rig's\n" +

@@ -25,15 +25,33 @@ import (
 type aBranchConflictLanding struct {
 	fakeRetryLanding
 	conflicts map[string]bool
-	mu3       sync.Mutex
-	merged    []string
-	pushed    int
+	// besideMates are the conflicting branches that merge into the target alone.
+	besideMates map[string]bool
+	mu3         sync.Mutex
+	merged      []string
+	pushed      int
 }
 
-func (l *aBranchConflictLanding) Merge(_ context.Context, _, branch string) (application.Landed, error) {
+// trialDir is where the fake cuts a landing of its own, apart from the batch's:
+// where a branch is tried on the target branch alone.
+const trialDir = "/rigs/millwright/.landing-trial"
+
+func (l *aBranchConflictLanding) OpenLanding(context.Context, string, string) (string, error) {
+	return trialDir, nil
+}
+
+// onlyBesideMates makes story id's conflict one with the batch's other stories:
+// its branch merges into the target branch alone.
+func (l *aBranchConflictLanding) onlyBesideMates(id string) {
 	l.mu3.Lock()
 	defer l.mu3.Unlock()
-	if l.conflicts[branch] {
+	l.besideMates["origin/mw/"+id] = true
+}
+
+func (l *aBranchConflictLanding) Merge(_ context.Context, dir, branch string) (application.Landed, error) {
+	l.mu3.Lock()
+	defer l.mu3.Unlock()
+	if l.conflicts[branch] && !(dir == trialDir && l.besideMates[branch]) {
 		return application.Landed{}, fmt.Errorf("%w: CONFLICT (content): Merge conflict in a_test.go", application.ErrMergeConflict)
 	}
 	l.merged = append(l.merged, branch)
@@ -70,7 +88,7 @@ func aBatchOf(t *testing.T, n int, conflicting ...string) aSetAsideBatch {
 	tracker := apptest.NewFakeTracker()
 	tracker.AddEpic("mw-e", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
 		Model: domain.ModelOpus, Effort: domain.EffortHigh, Host: "vps"})
-	landing := &aBranchConflictLanding{conflicts: map[string]bool{}}
+	landing := &aBranchConflictLanding{conflicts: map[string]bool{}, besideMates: map[string]bool{}}
 	landing.AheadCount = 1 // each branch holds work beyond the base, and none is in a fixer's batch
 	report := &application.BatchReport{Rig: "millwright", Target: "main", Number: 595, Base: "base0123"}
 	for i := 1; i <= n; i++ {
@@ -102,6 +120,7 @@ func (a aSetAsideBatch) run(t *testing.T) {
 
 func TestABatchOfSixThatSetsOneAsideLandsTheFiveFirstAndLeavesTheOneQueuedWithANote(t *testing.T) {
 	a := aBatchOf(t, 6, "mw-e.4")
+	a.landing.onlyBesideMates("mw-e.4")
 	a.run(t)
 
 	r := a.report
