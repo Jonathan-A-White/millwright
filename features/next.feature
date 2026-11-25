@@ -456,6 +456,27 @@ Feature: Closing out a finished story and carrying on
     When mw closes out "mw-gq6.1"
     Then the work of "mw-gq6.1" is on "main" at the rig's origin
 
+  # mw-gq6.1713: mw-1l901so.2 landed one chapter under a marker that said so. A
+  # branch that adds such a line is not landed unless the closing comment has an
+  # 'Accepted gap:' line.
+  Scenario: A branch that adds a line saying the work is unfinished is not landed
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" adds the line "// <marker>: only John 3" to "grinds/enduringword.go"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" carries a comment quoting: grinds/enduringword.go:3
+    And the report says it stopped for "unfinished-mark"
+    And the rig's tests were run 0 times
+
+  Scenario: A branch that adds such a line lands when the closing comment accepts the gap
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" adds the line "// <marker>: only John 3" to "grinds/enduringword.go"
+    And a formula was poured for "mw-gq6.1" and every step, the closing-comment step too, is closed
+    And the comment "Built John 3 only.\nAccepted gap: the Mayor files the other chapters as .4.\nInternal: nothing for the Governor to look at\nFor the rig memory:\nnothing" was written on "mw-gq6.1" after its newest commit
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+
   Scenario: A formula step the session never closed stops the close-out
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and one of its steps is still open

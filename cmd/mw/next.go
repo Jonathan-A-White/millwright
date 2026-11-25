@@ -292,6 +292,7 @@ func newNextCmd() *cobra.Command {
 				Worktrees:  worktrees,
 				Landing:    worktrees,
 				Changes:    worktrees,
+				AddedLines: worktrees,
 				Errors:     files,
 				RigFacts:   files,
 				Checks:     checks,

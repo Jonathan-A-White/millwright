@@ -190,6 +190,10 @@ func newLandCmd() *cobra.Command {
 				Changes:   worktrees,
 				Checks:    checks,
 
+				// A batch's story whose own diff says it is unfinished is refused
+				// as mw next refuses it (mw-gq6.1713).
+				AddedLines: worktrees,
+
 				// The batch's gate runs the rig's related-tests line when it has
 				// one, on the union of its stories' files (mw-gq6.601), and the
 				// rig's changed-specs command after it on the union of its specs

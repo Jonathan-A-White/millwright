@@ -70,6 +70,11 @@ type Check struct {
 	// live (mw-gq6.800). Nil looks at none, as Next's own.
 	Changes BranchChanges
 
+	// AddedLines reads the lines the story's branch adds, so that a check
+	// refuses a branch whose own diff says it is unfinished, as mw next does
+	// (mw-gq6.1713). Nil looks at none.
+	AddedLines BranchAddedLines
+
 	// Slot is the merge slot of the rig, taken around the rig's tests: shared
 	// with the other stories' checks when it can be (SharedMergeSlot), so that
 	// they run side by side, and apart from a landing, which holds it alone.
@@ -649,6 +654,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		GateParts:     k.Parts,
 		GateRecords:   k.Records,
 		Changes:       k.Changes,
+		AddedLines:    k.AddedLines,
 		Remote:        k.Remote,
 		Load:          load,
 		Modes:         k.Modes,

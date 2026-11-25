@@ -262,6 +262,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextAfterLandingSteps(ctx, c)
 	registerNextDeployedCheckedSteps(ctx, c)
 	registerNextBackendSteps(ctx, c)
+	registerNextUnfinishedSteps(ctx, c)
 	registerNextRebaseSteps(ctx, c)
 	registerNextUnionSteps(ctx, c)
 	registerNextMergeFixSteps(ctx, c)
@@ -1160,6 +1161,7 @@ func (c *nextContext) nextUseCase() application.Next {
 		Worktrees:     worktrees,
 		Landing:       worktrees,
 		Changes:       worktrees,
+		AddedLines:    worktrees,
 		Errors:        files,
 		RigFacts:      files,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands), rig.WithTimingTests(c.timingTests)),
