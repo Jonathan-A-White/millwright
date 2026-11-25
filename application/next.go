@@ -3289,6 +3289,9 @@ func (n Next) fileCodemapTrim(ctx context.Context, c *closeOut, report *NextRepo
 		Overrides: path,
 		Labels:    []string{LabelBug},
 	}
+	if why := UnderOpenParent(ctx, n.Tracker, &story); why != "" {
+		report.Notes = append(report.Notes, "the trim bug is filed "+why)
+	}
 	var id string
 	err := writeRetrying(ctx, n, report, "the trim bug", func() error {
 		var err error

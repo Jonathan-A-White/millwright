@@ -1134,3 +1134,96 @@ func TestAFindingWhoseFaultAClosedBeadHoldsIsNotFiledAgain(t *testing.T) {
 		})
 	}
 }
+
+// aFindingOfStoryUnder lands mw-e.1 with one finding, in an epic the test
+// has already shaped, and reports the bugs filed and the notes.
+func aFindingOfStoryUnder(t *testing.T, tracker *apptest.FakeTracker) ([]application.StoryDetail, []string) {
+	t.Helper()
+	ctx := context.Background()
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("lampas", domain.EpicRequirements{LastStoryLabels: []string{"demo"}})
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-e.1", "Done.\nFound, not fixed:\nA is wrong (a.go:1)\nFor the rig memory: nothing"))
+	before := tracker.Stories()
+	report := aBatchLandedWithTesters(t, application.TesterTrial{}, tracker, rules, "mw-e.1")
+	filed := theTestersFiled(t, tracker, before)
+	// The filing note is on the bug itself, and in the landing's notes.
+	notes := append([]string(nil), report.Notes...)
+	for _, d := range filed {
+		comments, err := tracker.StoryComments(ctx, d.Story.ID)
+		mustDo(t, err)
+		for _, c := range comments {
+			notes = append(notes, c.Text)
+		}
+	}
+	return filed, notes
+}
+
+// A finder's bug goes under the open epic the closed parent's reason says its
+// work moved to, else under the nearest open ancestor, and the note says which
+// and why (mw-gq6.1720).
+func TestAFinderBugUnderAClosedEpicGoesToItsOpenSuccessor(t *testing.T) {
+	lampas := domain.Path{Rig: "lampas", Branch: "main"}
+	t.Run("the epic its close reason says the work moved to", func(t *testing.T) {
+		tracker := apptest.NewFakeTracker()
+		tracker.AddEpic("mw-e", lampas)
+		tracker.AddEpic("mw-new", lampas)
+		tracker.AddStory("mw-e", domain.Story{ID: "mw-e.1", Title: "Build the page"})
+		tracker.ShutEpic("mw-e", "first demo accepted, open work moved to mw-new")
+
+		filed, notes := aFindingOfStoryUnder(t, tracker)
+
+		if len(filed) != 1 || filed[0].EpicID != "mw-new" {
+			t.Fatalf("expected one bug under mw-new, got %+v", filed)
+		}
+		if !slices.ContainsFunc(notes, func(n string) bool {
+			return strings.Contains(n, "under mw-new, not under mw-e") && strings.Contains(n, "moved")
+		}) {
+			t.Errorf("expected a note naming mw-new as chosen over the closed mw-e and why, got %q", notes)
+		}
+	})
+	t.Run("the nearest open ancestor when the reason names none", func(t *testing.T) {
+		tracker := apptest.NewFakeTracker()
+		tracker.AddEpic("mw-top", lampas)
+		tracker.AddChildEpic("mw-top", "mw-e", "A wave")
+		tracker.AddStory("mw-e", domain.Story{ID: "mw-e.1", Title: "Build the page"})
+		tracker.ShutEpic("mw-e", "wave done")
+
+		filed, notes := aFindingOfStoryUnder(t, tracker)
+
+		if len(filed) != 1 || filed[0].EpicID != "mw-top" {
+			t.Fatalf("expected one bug under mw-top, got %+v", filed)
+		}
+		if !slices.ContainsFunc(notes, func(n string) bool {
+			return strings.Contains(n, "under mw-top, not under mw-e") && strings.Contains(n, "nearest open ancestor")
+		}) {
+			t.Errorf("expected a note naming mw-top as the nearest open ancestor, got %q", notes)
+		}
+	})
+	t.Run("an epic that is open keeps its bug", func(t *testing.T) {
+		tracker, _ := aBatchEpicToTest(t)
+		filed, notes := aFindingOfStoryUnder(t, tracker)
+		if len(filed) != 1 || filed[0].EpicID != "mw-e" {
+			t.Fatalf("expected one bug under mw-e, got %+v", filed)
+		}
+		for _, n := range notes {
+			if strings.Contains(n, "not under") {
+				t.Errorf("expected no parent note for an open epic, got %q", n)
+			}
+		}
+	})
+	t.Run("no parent when every epic above is closed", func(t *testing.T) {
+		tracker := apptest.NewFakeTracker()
+		tracker.AddEpic("mw-e", lampas)
+		tracker.AddStory("mw-e", domain.Story{ID: "mw-e.1", Title: "Build the page"})
+		tracker.ShutEpic("mw-e", "done")
+
+		filed, notes := aFindingOfStoryUnder(t, tracker)
+
+		if len(filed) != 1 || filed[0].EpicID != "" || filed[0].Story.Overrides.Rig != "lampas" {
+			t.Fatalf("expected one bug under no epic, still pathed to lampas, got %+v", filed)
+		}
+		if !slices.ContainsFunc(notes, func(n string) bool { return strings.Contains(n, "under no parent, not under mw-e") }) {
+			t.Errorf("expected a note naming that no open parent was found, got %q", notes)
+		}
+	})
+}

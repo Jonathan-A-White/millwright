@@ -590,6 +590,16 @@ func newDoctorCmd() *cobra.Command {
 				Tracker:  stuckGateway,
 				GiveWay:  application.GiveWayReader{Notes: stuckGateway, Stale: giveWayStaleSetting()},
 			}
+			// A closed epic with open children, off mw brief and the weighing by
+			// vision; the cure is one mail a day to the Mayor (mw-gq6.1720).
+			closedEpicsGateway := mwGateway(vault, host)
+			closedEpics := &application.ClosedEpicsCheck{
+				Host: host, Stories: closedEpicsGateway, Tracker: closedEpicsGateway,
+				Mail: func(ctx context.Context, message application.NewMessage) error {
+					_, err := mwGateway(vault, host).Send(ctx, message)
+					return err
+				},
+			}
 			// A rig of the vault with no kinds in the common-errors register; a
 			// warning only (mw-gq6.751).
 			rigKinds := &application.RigKindsCheck{
@@ -668,6 +678,7 @@ func newDoctorCmd() *cobra.Command {
 				tmpSize,
 				hostUpkeep,
 				stuckClaims,
+				closedEpics,
 				rigKinds,
 				rigOrigins,
 				kitLag,

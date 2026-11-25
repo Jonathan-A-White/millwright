@@ -760,7 +760,26 @@ func (f *FakeTracker) epicBead(id string, epic application.EpicDetail) applicati
 	bead.Story.Overrides = epic.Defaults
 	bead.Status = epic.Status
 	bead.Priority = epic.Priority
+	if epic.Status == StatusClosed && bead.CloseReason == "" {
+		bead.CloseReason = f.epicShut[id]
+	}
 	return bead
+}
+
+// ShutEpic closes an epic, root or child, with its reason, whatever stories
+// under it are still open: how a fixture makes the closed epic with open
+// children a real tracker lets stand (bd closes a parent whose children are
+// open when told to).
+func (f *FakeTracker) ShutEpic(id, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	says, described := f.epicSays[id]
+	if !described {
+		says = epicFacts{priority: application.DefaultPriority}
+	}
+	says.status = StatusClosed
+	f.epicSays[id] = says
+	f.epicShut[id] = reason
 }
 
 // ShowBeads implements application.WorkTracker: each id the fake holds, story

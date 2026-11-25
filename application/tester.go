@@ -370,7 +370,7 @@ func (n Next) springTester(ctx context.Context, c *closeOut, report *NextReport,
 	path := c.path.WithoutSourceKeys()
 	path.Files = ""
 	path.Model, path.Effort, path.Formula = n.Tester.Model, n.Tester.Effort, TesterFormula
-	id, err := n.Tracker.CreateStory(ctx, NewStory{
+	story := NewStory{
 		EpicID:     c.detail.EpicID,
 		Standalone: c.detail.EpicID == "",
 		Title:      TesterTitlePrefix + title,
@@ -385,7 +385,11 @@ func (n Next) springTester(ctx context.Context, c *closeOut, report *NextReport,
 			"or %q. Nothing committed.", c.id, TesterFindingsHeading, TesterFindingsHeading+": none"),
 		Overrides: path,
 		Labels:    []string{LabelTester},
-	})
+	}
+	if why := UnderOpenParent(ctx, n.Tracker, &story); why != "" {
+		report.Notes = append(report.Notes, "the Tester story of "+c.id+" is filed "+why)
+	}
+	id, err := n.Tracker.CreateStory(ctx, story)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("no Tester story was filed for %s: %v", c.id, err))
 		return
