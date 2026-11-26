@@ -39,6 +39,19 @@ const noUsageTab = `
   Model: opus
 `
 
+// loggedOutScreen is what /usage showed on the Laptop on 2026-11-26 when its
+// Claude login had lapsed: the session's cost, and no plan quota (mw-gq6.1760).
+const loggedOutScreen = `
+  Settings:  Status   Config   Usage   Stats
+
+  Estimated cost: $0.0000
+  Total duration (API): 0s
+  Total duration (wall): 12s
+  Usage: 0 input, 0 output, 0 cache read, 0 cache write
+
+  Esc to cancel
+`
+
 func newYork(t *testing.T) *time.Location {
 	t.Helper()
 	zone, err := time.LoadLocation("America/New_York")
@@ -293,6 +306,32 @@ func TestUsageReadOnAScreenItCannotReadChangesNothingAndKeepsTheCapture(t *testi
 	}
 	if len(r.term.closed) != 1 {
 		t.Errorf("the probe session was closed %d times, want once", len(r.term.closed))
+	}
+}
+
+func TestUsageReadNamesALapsedLogin(t *testing.T) {
+	r := newUsageReadRig(t, loggedOutScreen)
+	err := r.read.Run(context.Background())
+	if err == nil {
+		t.Fatal("a logged-out screen was not an error")
+	}
+	for _, want := range []string{"not logged in", "loggedIn false", "claude auth login", "/state/usage-read-capture.txt"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error %q does not say %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "not the Usage tab") {
+		t.Errorf("the error %q sends a reader to the wrong cause", err)
+	}
+	if all, _ := (application.UsageReadings{Notes: r.notes}).All(context.Background()); len(all) != 0 {
+		t.Errorf("readings %v were kept from a logged-out screen", all)
+	}
+}
+
+func TestAScreenThatIsNeitherTheQuotaNorTheCostViewStillSaysItIsNotTheUsageTab(t *testing.T) {
+	_, err := application.ParseUsageScreen(noUsageTab, time.Now(), newYork(t))
+	if err == nil || !strings.Contains(err.Error(), "not the Usage tab") {
+		t.Fatalf("got %v, want 'not the Usage tab'", err)
 	}
 }
 

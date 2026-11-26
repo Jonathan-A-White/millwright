@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +45,9 @@ var (
 	usageWeekRe    = regexp.MustCompile(`(?i)current week \(all models\)`)
 	usageFableRe   = regexp.MustCompile(`(?i)current week \(fable\)`)
 	usageLabelRe   = regexp.MustCompile(`(?i)\bcurrent (?:week|session)\b`)
+	// usageCostRe is the session-cost view /usage shows when Claude is logged
+	// out of the subscription: the cost of the session, and no plan quota.
+	usageCostRe = regexp.MustCompile(`(?i)\bestimated cost\b`)
 )
 
 // ParseUsageScreen reads the text of Claude's /usage screen. zone is where a
@@ -54,6 +58,9 @@ func ParseUsageScreen(text string, now time.Time, zone *time.Location) (UsageScr
 	lines := strings.Split(text, "\n")
 	week, ok := usageSection(lines, usageWeekRe)
 	if !ok {
+		if slices.ContainsFunc(lines, usageCostRe.MatchString) {
+			return UsageScreen{}, errors.New("Claude on this host is not logged in to the subscription (claude auth status: loggedIn false), so /usage shows only the session's cost and no quota; the Governor logs in: claude auth login")
+		}
 		return UsageScreen{}, errors.New("the screen shows no 'Current week (all models)': it is not the Usage tab")
 	}
 	percent, ok := usageSectionPercent(week)
