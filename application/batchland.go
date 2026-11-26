@@ -463,7 +463,7 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 	// The batch's stories are held while it runs: their leases lapsed while they
 	// queued, and a sweep must not take a story the batch has landed for stuck
 	// before the batch has closed it (mw-5r3p30.1206).
-	unhold := b.holdQueue(ctx, report.Queue)
+	unhold := b.holdQueue(ctx, report.Queue, report.Number)
 	defer unhold()
 
 	// The landing is cut at the very commit read as the base, never at the
@@ -558,6 +558,11 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport, 
 	}
 	for _, detail := range work.QueuedHeld() {
 		if path, err := detail.Path(); err == nil && path.Rig == rig {
+			if mark, taken := batchHolding(detail, n.now()); taken {
+				report.Notes = append(report.Notes, fmt.Sprintf("%s is in %s, landing on %s since %s: it was held after that batch took it, and the batch lands it, so it is not in this one",
+					detail.Story.ID, mark.inBatchWords(rig), mark.By, mark.Since.UTC().Format(QueuedClock)))
+				continue
+			}
 			report.Notes = append(report.Notes, fmt.Sprintf("%s is queued, but it is held, so it is left out: release it and the next batch takes it", detail.Story.ID))
 		}
 	}
@@ -2402,7 +2407,7 @@ func BatchFixerName(rig string, number int) string {
 // (mw-5r3p30.1206). The renewal is best effort and says nothing of a story
 // already closed: the batch closes them one by one while it holds the rest. The
 // release it returns stops both and clears the marks.
-func (b BatchLand) holdQueue(ctx context.Context, queue []BatchStory) (release func() []string) {
+func (b BatchLand) holdQueue(ctx context.Context, queue []BatchStory, number int) (release func() []string) {
 	n := b.Next
 	if n.Tracker == nil || len(queue) == 0 {
 		return func() []string { return nil }
@@ -2417,7 +2422,7 @@ func (b BatchLand) holdQueue(ctx context.Context, queue []BatchStory) (release f
 	beat()
 	var unmarks []func()
 	for _, s := range queue {
-		_, unmark := n.markClosingOut(ctx, s.ID)
+		_, unmark := n.markClosingOutOfBatch(ctx, s.ID, number)
 		unmarks = append(unmarks, unmark)
 	}
 	done := make(chan struct{})

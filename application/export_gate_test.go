@@ -91,7 +91,7 @@ func (b BatchLand) FixTheBatch(ctx context.Context, dir string, report *BatchRep
 // HoldQueue lets the tests of package application_test see the lease and the
 // closing-out mark a batch keeps on its queue while it runs.
 func (b BatchLand) HoldQueue(ctx context.Context, queue []BatchStory) func() {
-	unhold := b.holdQueue(ctx, queue)
+	unhold := b.holdQueue(ctx, queue, 730)
 	return func() { unhold() }
 }
 

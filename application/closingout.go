@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,17 +27,36 @@ type ClosingOut struct {
 	By    string
 	Since time.Time
 	Until time.Time
+	// Batch is the number of the batch of the story's rig that took the story,
+	// when a batch's mark it is (holdQueue); 0 for a single close-out's.
+	Batch int
 }
 
-// String is the mark as ClosingOutField keeps it: "<host> <since> <until>".
+// String is the mark as ClosingOutField keeps it: "<host> <since> <until>", and
+// " batch=<n>" after them when a batch made it.
 func (c ClosingOut) String() string {
-	return fmt.Sprintf("%s %s %s", c.By, c.Since.UTC().Format(time.RFC3339), c.Until.UTC().Format(time.RFC3339))
+	text := fmt.Sprintf("%s %s %s", c.By, c.Since.UTC().Format(time.RFC3339), c.Until.UTC().Format(time.RFC3339))
+	if c.Batch > 0 {
+		text += " " + closingOutBatchWord + strconv.Itoa(c.Batch)
+	}
+	return text
 }
+
+// closingOutBatchWord starts the optional fourth word of a mark: the batch's number.
+const closingOutBatchWord = "batch="
 
 // ParseClosingOut reads what ClosingOutField holds. Nothing, or words that are
 // not a host and two times, is no mark.
 func ParseClosingOut(text string) (ClosingOut, bool) {
 	words := strings.Fields(text)
+	batch := 0
+	if len(words) == 4 && strings.HasPrefix(words[3], closingOutBatchWord) {
+		n, err := strconv.Atoi(strings.TrimPrefix(words[3], closingOutBatchWord))
+		if err != nil || n < 1 {
+			return ClosingOut{}, false
+		}
+		batch, words = n, words[:3]
+	}
 	if len(words) != 3 {
 		return ClosingOut{}, false
 	}
@@ -48,7 +68,7 @@ func ParseClosingOut(text string) (ClosingOut, bool) {
 	if err != nil {
 		return ClosingOut{}, false
 	}
-	return ClosingOut{By: words[0], Since: since, Until: until}, true
+	return ClosingOut{By: words[0], Since: since, Until: until, Batch: batch}, true
 }
 
 // Live says the mark holds at now: there is one and its lease has not lapsed.
@@ -160,12 +180,18 @@ func closingMark(local map[string]CloseOutMark, detail StoryDetail, now time.Tim
 // close-out (the host's own file still says it runs). It returns ctx marked as
 // the close-out's own.
 func (n Next) markClosingOut(ctx context.Context, storyID string) (context.Context, func()) {
+	return n.markClosingOutOfBatch(ctx, storyID, 0)
+}
+
+// markClosingOutOfBatch is markClosingOut for a story batch number took, the
+// number written in the mark (0 for a close-out's own).
+func (n Next) markClosingOutOfBatch(ctx context.Context, storyID string, batch int) (context.Context, func()) {
 	if n.Tracker == nil || strings.TrimSpace(storyID) == "" {
 		return ctx, func() {}
 	}
 	began := n.now()
 	write := func(c context.Context, at time.Time) {
-		mark := ClosingOut{By: n.Host, Since: began, Until: at.Add(ClosingOutLease)}
+		mark := ClosingOut{By: n.Host, Since: began, Until: at.Add(ClosingOutLease), Batch: batch}
 		_ = n.Tracker.SetStoryMetadata(c, storyID, map[string]string{ClosingOutField: mark.String()})
 	}
 	write(ctx, began)

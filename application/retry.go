@@ -565,6 +565,13 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	if QueuedForBatch(detail) && !detail.Held() {
 		return r.refuse(report, r.queuedWhy(ctx, detail, path.Rig))
 	}
+	// A held story carrying run:queued is in no batch a batch is made of, but one
+	// held after a running batch took it is still that batch's: the batch lands it
+	// all the same, so a new attempt would be a second one (mw-gq6.1761).
+	if mark, taken := batchHolding(detail, r.now()); taken {
+		return r.refuse(report, fmt.Sprintf("%s, so a retry, with --force or without, would give a second attempt a story the batch lands: %s",
+			mark.inBatchWords(path.Rig), mark.refusedForBatch(path.Rig, storyID)))
+	}
 	// A story whose last run landed is finished but for its close: giving its
 	// claim back, --force or not, has the next dispatch tick work it a second
 	// time on top of its own landed commits (mw-gq6.954). A state that cannot be

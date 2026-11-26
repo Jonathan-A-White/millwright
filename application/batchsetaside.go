@@ -28,10 +28,12 @@ type SetAside struct {
 	Tracker WorkTracker
 	Host    string
 	Out     io.Writer
+	// Now is the clock a running batch's mark is read against; time.Now when nil.
+	Now func() time.Time
 }
 
 // Run sets story id of rig aside for why. A story of another rig, one not queued
-// for batch landing, or one with no why is refused and left as it was.
+// for batch landing, one a running batch has taken (mw-gq6.1761), or one with no why is refused and left as it was.
 func (s SetAside) Run(ctx context.Context, rig, id, why string) error {
 	why = strings.TrimSpace(why)
 	if why == "" {
@@ -50,6 +52,9 @@ func (s SetAside) Run(ctx context.Context, rig, id, why string) error {
 	if !QueuedForBatch(detail) {
 		return fmt.Errorf("setting %s aside: it is not queued for batch landing (status %s)", id, detail.Status)
 	}
+	if mark, taken := batchHolding(detail, s.now()); taken {
+		return fmt.Errorf("setting %s aside: %s", id, mark.refusedForBatch(rig, id))
+	}
 	if strings.EqualFold(strings.TrimSpace(detail.Status), StatusHeld) {
 		return fmt.Errorf("setting %s aside: it is held already: mw release %s puts it back in the queue", id, id)
 	}
@@ -65,6 +70,13 @@ func (s SetAside) Run(ctx context.Context, rig, id, why string) error {
 		fmt.Fprintf(s.Out, "%s is set aside: held, its branch %s kept; the next mw land %s makes its batch of the rest. mw release %s puts it back.\n", id, StoryBranch(id), rig, id)
 	}
 	return nil
+}
+
+func (s SetAside) now() time.Time {
+	if s.Now == nil {
+		return time.Now() //mw:realclock the default of the injected Now, used where none is set
+	}
+	return s.Now()
 }
 
 // holdQueued holds story id whoever holds its claim: a claim held by holder is
