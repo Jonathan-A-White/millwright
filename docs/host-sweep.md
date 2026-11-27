@@ -30,6 +30,9 @@ Its ages are PROVISIONAL, for the Governor to confirm (mw-gq6.1427).
   cannot read: listed as `kept: uncommitted changes`.
 * A branch with a commit that is neither on main nor pushed: `kept: 2 commits on
   mw/<story> are neither on main nor pushed`. Its `node_modules` still go (row 4).
+  A commit counts as on main when its landing wrote it again under a new hash: a
+  commit on main that names the story id (`(<story id>)`) saves the story's
+  branch and its `-attemptN` branches.
 * A story that is not closed (claimed, retried, waiting, blocked): not listed at
   all. A worktree whose story the tracker does not know: `kept: the tracker has
   no story <id>`. A story closed under an hour ago is kept: its close-out is
