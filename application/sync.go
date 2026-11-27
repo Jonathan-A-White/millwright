@@ -1011,6 +1011,12 @@ type Sync struct {
 	// fails leaves the note as it was.
 	AfterLanding func() (map[string]string, error)
 
+	// AfterLandingTables reads this host's per-rig [after_landing_limit] and
+	// [after_landing_deploy_step] values, by table then rig, to be fingerprinted
+	// in the same note (mw-gq6.1766). Nil leaves them out; a read that fails
+	// leaves the note as it was.
+	AfterLandingTables func() (map[string]map[string]string, error)
+
 	// BoostConfig is this host's ~/.config/mw/config.toml and BoostTarget the
 	// vault's hosts/boost-config.toml. On a host that is not the home, a sync
 	// whose vault half got level appends to BoostConfig any [tests],

@@ -45,8 +45,13 @@ type AfterLandingAgrees struct {
 	}
 	// Own is this host's [after_landing] lines, by rig; Hosts the other hosts to
 	// compare with.
-	Own   func() (map[string]string, error)
-	Hosts func(ctx context.Context) ([]string, error)
+	Own func() (map[string]string, error)
+	// OwnTables is this host's per-rig values of the tables beside the line, by
+	// table then rig (application.AfterLandingTableNames): a limit or a deploy
+	// step that differs stops or counts a deploy differently (mw-gq6.1766). Nil
+	// compares none.
+	OwnTables func() (map[string]map[string]string, error)
+	Hosts     func(ctx context.Context) ([]string, error)
 	// Book and Plan are the cloud's book and plan, which say whether a host's
 	// note is a box that is gone's, or older than the box now holding the name
 	// (application.CloudState.NoteOfAnOlderBox): such a note is not compared. A
@@ -80,7 +85,15 @@ func (a *AfterLandingAgrees) Probe(ctx context.Context) (application.Verdict, st
 		return application.DoctorCannotTell, fmt.Sprintf("this host's [after_landing] lines cannot be read: %v", err)
 	}
 	mine := application.ParseAfterLandingFingerprints(application.AfterLandingFingerprints(own))
-	if len(mine) == 0 {
+	var ownTables map[string]map[string]string
+	if a.OwnTables != nil {
+		tables, err := a.OwnTables()
+		if err != nil {
+			return application.DoctorCannotTell, fmt.Sprintf("this host's [after_landing_limit] or [after_landing_deploy_step] cannot be read: %v", err)
+		}
+		ownTables = application.ParseAfterLandingTableFingerprints(application.AfterLandingTableFingerprints(tables))
+	}
+	if len(mine) == 0 && len(ownTables) == 0 {
 		return application.DoctorOK, "n/a: this host has no [after_landing] line"
 	}
 	hosts, err := a.Hosts(ctx)
@@ -114,6 +127,7 @@ func (a *AfterLandingAgrees) Probe(ctx context.Context) (application.Verdict, st
 			continue
 		}
 		theirs := application.ParseAfterLandingFingerprints(said)
+		theirTables := application.ParseAfterLandingTableFingerprints(said)
 		rigs := make([]string, 0, len(mine))
 		for rig := range mine {
 			rigs = append(rigs, rig)
@@ -129,9 +143,26 @@ func (a *AfterLandingAgrees) Probe(ctx context.Context) (application.Verdict, st
 				differ = append(differ, fmt.Sprintf("%s: the [after_landing] line differs between %s (this host) and %s", rig, a.Host, host))
 			}
 		}
+		for _, table := range application.AfterLandingTableNames {
+			rigs := make([]string, 0, len(ownTables[table]))
+			for rig := range ownTables[table] {
+				rigs = append(rigs, rig)
+			}
+			sort.Strings(rigs)
+			for _, rig := range rigs {
+				fingerprint, has := theirTables[table][rig]
+				if !has {
+					continue
+				}
+				compared++
+				if fingerprint != ownTables[table][rig] {
+					differ = append(differ, fmt.Sprintf("%s: [%s] differs between %s (this host) and %s", rig, table, a.Host, host))
+				}
+			}
+		}
 	}
 	if len(differ) > 0 {
-		reason := strings.Join(append(differ, unread...), "; ") + "; see each host's line with `grep -A30 '^\\[after_landing\\]' ~/.config/mw/config.toml` and make them equal (docs/site-deploy.md)"
+		reason := strings.Join(append(differ, unread...), "; ") + "; see each host's with `grep -A30 '^\\[after_landing' ~/.config/mw/config.toml` and make them equal (docs/site-deploy.md)"
 		a.faulty = reason
 		return application.DoctorFaulty, reason
 	}

@@ -358,6 +358,7 @@ func newDoctorCmd() *cobra.Command {
 			// (mw-gq6.1765); it only reports.
 			afterLandingAgrees := doctor.NewAfterLandingAgrees(host, mwGateway(vault, host))
 			afterLandingAgrees.Own = config.AfterLanding
+			afterLandingAgrees.OwnTables = afterLandingTables
 			afterLandingAgrees.Book, afterLandingAgrees.Plan = cloudStatus(vault, host)
 			afterLandingAgrees.Hosts = func(ctx context.Context) ([]string, error) {
 				others, err := harnessHosts(ctx, mwVault(vault, host), host, retired)

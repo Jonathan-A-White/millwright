@@ -63,6 +63,13 @@ func (s Sync) noteAfterLanding(ctx context.Context) {
 		return
 	}
 	want := AfterLandingFingerprints(lines)
+	if s.AfterLandingTables != nil {
+		tables, terr := s.AfterLandingTables()
+		if terr != nil {
+			return
+		}
+		want += AfterLandingTableFingerprints(tables)
+	}
 	kept, err := s.Tracker.Note(ctx, AfterLandingKey(s.Host))
 	if err != nil || kept == want {
 		return

@@ -287,6 +287,9 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 		// after-landing-agrees check (mw-gq6.1765).
 		sync.AfterLanding = config.AfterLanding
 	}
+	if sync.AfterLandingTables == nil {
+		sync.AfterLandingTables = afterLandingTables
+	}
 	sync.Squash = squash
 	if sync.BoostConfig == nil && sync.BoostTarget == nil {
 		// A config or vault that cannot be placed levels nothing: the commands

@@ -94,8 +94,16 @@ other Builder host's, rig by rig. It is **faulty** when they differ for a rig,
 and its text names the rig and both hosts:
 
 ```
-lampas: the [after_landing] line differs between desktop (this host) and laptop; see each host's line with `grep -A30 '^\[after_landing\]' ~/.config/mw/config.toml` and make them equal (docs/site-deploy.md)
+lampas: the [after_landing] line differs between desktop (this host) and laptop; see each host's with `grep -A30 '^\[after_landing' ~/.config/mw/config.toml` and make them equal (docs/site-deploy.md)
 ```
+
+The same note holds `<table> <rig> <sha256>` lines for the per-rig
+`[after_landing_limit]` and `[after_landing_deploy_step]` tables, which the check
+compares the same way: a host stopping a rig's deploy at 5m where another allows
+20m, or counting it deployed at another step, is faulty, naming the table:
+`lampas: [after_landing_limit] differs between desktop (this host) and laptop`.
+A limit is compared as the duration it parses to (`20m` and `1200s` agree). A
+rig with no value in a table on one host is not compared for it.
 
 A host with no line for a rig is not compared for it, and a host that has left no
 note yet is not compared at all. The check only reports; it changes nothing.

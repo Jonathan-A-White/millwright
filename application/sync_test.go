@@ -1345,3 +1345,30 @@ func TestSyncThatKnowsNoAfterLandingLinesLeavesNoNoteOfThem(t *testing.T) {
 		t.Fatalf("expected no note, got %q", got)
 	}
 }
+
+func TestSyncLeavesAFingerprintOfEachAfterLandingLimitAndDeployStepNotTheValue(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	sync.AfterLanding = func() (map[string]string, error) { return map[string]string{"lampas": "x"}, nil }
+	sync.AfterLandingTables = func() (map[string]map[string]string, error) {
+		return map[string]map[string]string{
+			application.AfterLandingLimitTable:      {"lampas": "20m0s"},
+			application.AfterLandingDeployStepTable: {"lampas": "3"},
+		}, nil
+	}
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := note(t, tracker, application.AfterLandingKey("vps"))
+	tables := application.ParseAfterLandingTableFingerprints(got)
+	for _, table := range application.AfterLandingTableNames {
+		if len(tables[table]["lampas"]) != 64 {
+			t.Errorf("expected a sha256 for %s, got %q", table, got)
+		}
+	}
+	if strings.Contains(got, "20m") {
+		t.Errorf("the value itself must not be left: %q", got)
+	}
+	if application.ParseAfterLandingFingerprints(got)["lampas"] == "" {
+		t.Errorf("the line's fingerprint must stay: %q", got)
+	}
+}
