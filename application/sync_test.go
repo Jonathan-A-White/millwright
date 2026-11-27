@@ -1372,3 +1372,24 @@ func TestSyncLeavesAFingerprintOfEachAfterLandingLimitAndDeployStepNotTheValue(t
 		t.Errorf("the line's fingerprint must stay: %q", got)
 	}
 }
+
+func TestSyncLeavesAnExplicitNoneForARigNamedWithNoValueInATable(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	sync.AfterLanding = func() (map[string]string, error) { return map[string]string{"lampas": "x"}, nil }
+	sync.AfterLandingTables = func() (map[string]map[string]string, error) {
+		return map[string]map[string]string{
+			application.AfterLandingLimitTable:      {"lampas": ""},
+			application.AfterLandingDeployStepTable: {"lampas": "3"},
+		}, nil
+	}
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	tables := application.ParseAfterLandingTableFingerprints(note(t, tracker, application.AfterLandingKey("vps")))
+	if got := tables[application.AfterLandingLimitTable]["lampas"]; got != application.AfterLandingNoValue {
+		t.Errorf("expected the marker for a rig with no limit, got %q", got)
+	}
+	if got := tables[application.AfterLandingDeployStepTable]["lampas"]; len(got) != 64 {
+		t.Errorf("expected a sha256 for the step, got %q", got)
+	}
+}

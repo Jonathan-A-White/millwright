@@ -103,7 +103,11 @@ compares the same way: a host stopping a rig's deploy at 5m where another allows
 20m, or counting it deployed at another step, is faulty, naming the table:
 `lampas: [after_landing_limit] differs between desktop (this host) and laptop`.
 A limit is compared as the duration it parses to (`20m` and `1200s` agree). A
-rig with no value in a table on one host is not compared for it.
+host that has a line (or a value in either table) for a rig and none in a table
+says so outright, as `<table> <rig> none`, and that counts as a value: a host
+that never set `[after_landing_limit]` (the default 5m) is faulty against one
+that set `20m`. A host whose note says nothing of the rig in a table (an old
+note, or no line for the rig) is not compared for it.
 
 A host with no line for a rig is not compared for it, and a host that has left no
 note yet is not compared at all. The check only reports; it changes nothing.

@@ -263,3 +263,42 @@ func TestAfterLandingAgreesCannotTellWhenThisHostsTablesCannotBeRead(t *testing.
 		t.Fatalf("expected cannot-tell, got %s (%s)", verdict, reason)
 	}
 }
+
+// A host that says outright it has no value for a rig (the marker
+// AfterLandingTableFingerprints leaves for a rig with a line and no limit) is
+// not an old note: it is compared, so a host that never set [after_landing_limit]
+// (the default 5m) is flagged against one that set 20m (mw-gq6.1768).
+func TestAfterLandingAgreesIsFaultyWhenOneHostHasALimitAndTheOtherSaysItHasNone(t *testing.T) {
+	for _, table := range application.AfterLandingTableNames {
+		for name, c := range map[string]struct{ own, theirs string }{
+			"this host has the value, the other says none": {"20m0s", ""},
+			"the other has the value, this host says none": {"", "20m0s"},
+		} {
+			t.Run(table+" "+name, func(t *testing.T) {
+				check := alaTablesCheck(
+					map[string]map[string]string{table: {"lampas": c.own}},
+					map[string]map[string]string{table: {"lampas": c.theirs}},
+				)
+				verdict, reason := check.Probe(context.Background())
+				if verdict != application.DoctorFaulty {
+					t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+				}
+				for _, want := range []string{"lampas", "desktop", "laptop", "[" + table + "]"} {
+					if !strings.Contains(reason, want) {
+						t.Errorf("expected the reason to hold %q, got %q", want, reason)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAfterLandingAgreesIsOkWhenBothHostsSayTheyHaveNoLimit(t *testing.T) {
+	check := alaTablesCheck(
+		map[string]map[string]string{application.AfterLandingLimitTable: {"lampas": ""}},
+		map[string]map[string]string{application.AfterLandingLimitTable: {"lampas": ""}},
+	)
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK || !strings.Contains(reason, "2 compared") {
+		t.Fatalf("expected ok with one compared, got %s (%s)", verdict, reason)
+	}
+}

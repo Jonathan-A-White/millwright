@@ -24,10 +24,17 @@ const (
 // the order they are said.
 var AfterLandingTableNames = []string{AfterLandingLimitTable, AfterLandingDeployStepTable}
 
+// AfterLandingNoValue is what the note says for a rig a host has a line for and
+// no value in a table: an old note, written before the table was compared, and a
+// host that holds no limit look alike when the rig is left out, so a host that
+// never set [after_landing_limit] (the default 5m) was not flagged against one
+// that set 20m (mw-gq6.1768). It is not a sha256, so no value can be taken for it.
+const AfterLandingNoValue = "none"
+
 // AfterLandingTableFingerprints is the part of the note that says which value a
-// host holds for each rig in each table: the sha256 of each non-empty value, one
-// `<table> <rig> <hex>` line per rig, sorted by table then rig. No values at all
-// is "".
+// host holds for each rig in each table: the sha256 of each non-empty value, or
+// AfterLandingNoValue for a rig named with an empty one, one `<table> <rig> <hex>`
+// line per rig, sorted by table then rig. No rigs at all is "".
 func AfterLandingTableFingerprints(tables map[string]map[string]string) string {
 	names := make([]string, 0, len(tables))
 	for name := range tables {
@@ -37,14 +44,17 @@ func AfterLandingTableFingerprints(tables map[string]map[string]string) string {
 	var b strings.Builder
 	for _, name := range names {
 		rigs := make([]string, 0, len(tables[name]))
-		for rig, value := range tables[name] {
-			if strings.TrimSpace(value) != "" {
-				rigs = append(rigs, rig)
-			}
+		for rig := range tables[name] {
+			rigs = append(rigs, rig)
 		}
 		sort.Strings(rigs)
 		for _, rig := range rigs {
-			sum := sha256.Sum256([]byte(strings.TrimSpace(tables[name][rig])))
+			value := strings.TrimSpace(tables[name][rig])
+			if value == "" {
+				b.WriteString(name + " " + rig + " " + AfterLandingNoValue + "\n")
+				continue
+			}
+			sum := sha256.Sum256([]byte(value))
 			b.WriteString(name + " " + rig + " " + hex.EncodeToString(sum[:]) + "\n")
 		}
 	}
