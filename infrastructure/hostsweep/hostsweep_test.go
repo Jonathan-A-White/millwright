@@ -250,3 +250,139 @@ func TestAttemptBranchesAreJudgedByTheirStory(t *testing.T) {
 		}
 	}
 }
+
+// A story whose landing re-wrote its commit (a rebase, a re-worded subject) has
+// a branch whose hashes are on no main; its work is on main under the story's
+// id in the subject. The sweep takes that as saved, and the story's attempt
+// branches with it, while an uncommitted change, or a main with no commit naming
+// the story, still keeps it.
+func TestALandingThatRewroteTheCommitCountsAsSaved(t *testing.T) {
+	disk, trees := rigOnDisk(t)
+	rigDir := disk.Rigs["rig"]
+	ctx := context.Background()
+
+	// s-landed and s-landed-dirty each commit work on their branch.
+	for _, story := range []string{"s-landed", "s-landed-dirty"} {
+		git(t, rigDir, "worktree", "add", "-b", "mw/"+story, filepath.Join(trees, story), "main")
+		write(t, filepath.Join(trees, story, story+".txt"), story)
+		git(t, filepath.Join(trees, story), "add", "-A")
+		git(t, filepath.Join(trees, story), "commit", "-m", "work on the story ("+story+")")
+	}
+	write(t, filepath.Join(trees, "s-landed-dirty", "later.txt"), "uncommitted")
+	// Attempt branches a retry set aside, each with a commit of its own.
+	for _, branch := range []string{"mw/s-landed-attempt1", "mw/s-landed-attempt2-2"} {
+		git(t, rigDir, "branch", branch, "mw/s-landed")
+		git(t, rigDir, "checkout", "-q", branch)
+		write(t, filepath.Join(rigDir, branch[3:]+".txt"), "attempt")
+		git(t, rigDir, "add", "-A")
+		git(t, rigDir, "commit", "-m", "an attempt")
+		git(t, rigDir, "checkout", "-q", "main")
+	}
+	// A story whose commit is not landed, and one whose id only starts like another's.
+	git(t, rigDir, "worktree", "add", "-b", "mw/s-near", filepath.Join(trees, "s-near"), "main")
+	write(t, filepath.Join(trees, "s-near", "near.txt"), "near")
+	git(t, filepath.Join(trees, "s-near"), "add", "-A")
+	git(t, filepath.Join(trees, "s-near"), "commit", "-m", "work (s-near)")
+
+	// The landing writes the work again, under new hashes, naming each story.
+	for _, story := range []string{"s-landed", "s-landed-dirty", "s-landed-other"} {
+		write(t, filepath.Join(rigDir, "landed-"+story+".txt"), story)
+		git(t, rigDir, "add", "-A")
+		git(t, rigDir, "commit", "-m", "Re-worded subject of the work ("+story+")")
+	}
+	git(t, rigDir, "push", "origin", "main")
+
+	found, err := disk.Trees(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]application.HostSweepTree{}
+	for _, tree := range found {
+		key := tree.Branch
+		if key == "" {
+			key = tree.Story
+		}
+		by[key] = tree
+	}
+	for _, branch := range []string{"mw/s-landed", "mw/s-landed-attempt1", "mw/s-landed-attempt2-2"} {
+		tree, ok := by[branch]
+		if !ok {
+			t.Fatalf("%s is not listed: %v", branch, by)
+		}
+		if tree.Unsaved != "" {
+			t.Errorf("%s landed under a new hash and is called unsaved: %q", branch, tree.Unsaved)
+		}
+	}
+	if tree := by["mw/s-landed-dirty"]; tree.Unsaved != "" || !tree.Uncommitted {
+		t.Errorf("a landed story with an uncommitted change must still be kept by the change: %+v", tree)
+	}
+	if tree := by["mw/s-near"]; !strings.Contains(tree.Unsaved, "1 commit on mw/s-near is neither on main nor pushed") {
+		t.Errorf("a story no main commit names is called saved: %q", tree.Unsaved)
+	}
+	// Main names s-landed, s-landed-dirty and s-landed-other; a story whose id is
+	// only the start of those (s-land) is named by none of them, so it is kept.
+	git(t, rigDir, "branch", "mw/s-land", "mw/s-landed")
+	found, _ = disk.Trees(ctx)
+	for _, tree := range found {
+		if tree.Branch == "mw/s-land" && tree.Unsaved == "" {
+			t.Error("mw/s-land is called saved by a main commit that names s-landed")
+		}
+	}
+}
+
+type closedStories struct{ closed map[string]bool }
+
+func (c closedStories) ShowBeads(_ context.Context, ids []string) ([]application.StoryDetail, error) {
+	var out []application.StoryDetail
+	for _, id := range ids {
+		var detail application.StoryDetail
+		detail.Story.ID = id
+		detail.Status = "open"
+		if c.closed[id] {
+			detail.Status = application.StateClosed
+		}
+		out = append(out, detail)
+	}
+	return out, nil
+}
+
+// The whole pass on a real rig: a closed story whose commit landed under a new
+// hash goes, worktree, branch and attempt branches; one with an uncommitted
+// change, and one no main commit names, stay.
+func TestSweepTakesAClosedStoryWhoseLandingRewroteItsCommit(t *testing.T) {
+	disk, trees := rigOnDisk(t)
+	rigDir := disk.Rigs["rig"]
+	for _, story := range []string{"s-gone", "s-gone-dirty"} {
+		git(t, rigDir, "worktree", "add", "-b", "mw/"+story, filepath.Join(trees, story), "main")
+		write(t, filepath.Join(trees, story, story+".txt"), story)
+		git(t, filepath.Join(trees, story), "add", "-A")
+		git(t, filepath.Join(trees, story), "commit", "-m", "work ("+story+")")
+	}
+	write(t, filepath.Join(trees, "s-gone-dirty", "later.txt"), "uncommitted")
+	git(t, rigDir, "branch", "mw/s-gone-attempt1", "mw/s-gone")
+	for _, story := range []string{"s-gone", "s-gone-dirty"} {
+		write(t, filepath.Join(rigDir, "landed-"+story+".txt"), story)
+		git(t, rigDir, "add", "-A")
+		git(t, rigDir, "commit", "-m", "Re-worded ("+story+")")
+	}
+
+	closed := closedStories{closed: map[string]bool{"s-gone": true, "s-gone-dirty": true, "s-ahead": true}}
+	sweep := application.HostSweep{Files: disk, Stories: closed, Now: func() time.Time { return time.Now().Add(48 * time.Hour) }}
+	if _, err := sweep.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{"s-gone"} {
+		if _, err := os.Stat(filepath.Join(trees, gone)); !os.IsNotExist(err) {
+			t.Errorf("the worktree of %s is still there", gone)
+		}
+	}
+	if out := git(t, rigDir, "branch", "--list", "mw/s-gone", "mw/s-gone-attempt1"); out != "" {
+		t.Errorf("branches left: %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(trees, "s-gone-dirty", "later.txt")); err != nil {
+		t.Errorf("the uncommitted file is gone: %v", err)
+	}
+	if out := git(t, rigDir, "branch", "--list", "mw/s-ahead"); out == "" {
+		t.Error("a closed story no main commit names lost its branch")
+	}
+}

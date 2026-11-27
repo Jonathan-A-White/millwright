@@ -238,6 +238,11 @@ func (d Disk) unsaved(ctx context.Context, tree application.HostSweepTree) strin
 	if n == 0 {
 		return ""
 	}
+	// A landing may have written the commits again under new hashes (a rebase, a
+	// re-worded subject): a commit on main that names the story is its landing.
+	if d.landedByName(ctx, rigDir, tree.Story, have) {
+		return ""
+	}
 	name := tree.Branch
 	if name == "" {
 		name = "its HEAD"
@@ -246,6 +251,30 @@ func (d Disk) unsaved(ctx context.Context, tree application.HostSweepTree) strin
 		return fmt.Sprintf("1 commit on %s is neither on main nor pushed", name)
 	}
 	return fmt.Sprintf("%d commits on %s are neither on main nor pushed", n, name)
+}
+
+// landedByName is true when a commit on the rig's main names the story, as a
+// landing writes it ("(<story id>)" in the subject). The id must stand alone:
+// mw-x-1 is not named by a commit that names mw-x-12, nor mw-x by mw-x.1. A
+// story with no id names nothing.
+func (d Disk) landedByName(ctx context.Context, rigDir, story string, have func(string) bool) bool {
+	if story == "" {
+		return false
+	}
+	args := []string{"log", "-1", "--format=%H", "-E",
+		"--grep=(^|[^[:alnum:]_.-])" + regexp.QuoteMeta(story) + `($|[^[:alnum:]_.-]|\.($|[^[:alnum:]_-]))`}
+	refs := 0
+	for _, ref := range mainRefs {
+		if have(ref) {
+			args = append(args, ref)
+			refs++
+		}
+	}
+	if refs == 0 {
+		return false
+	}
+	out, err := d.git(ctx, rigDir, args...)
+	return err == nil && out != ""
 }
 
 // caches finds the node_modules and Playwright directories of a worktree, at
