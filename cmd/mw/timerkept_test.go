@@ -104,26 +104,37 @@ func TestKeptReportSendReadsOverTheKeptConnection(t *testing.T) {
 	startsNoBd(t, said, asked, server)
 }
 
-// aUsageScreen is the /usage screen a probe terminal shows.
-const aUsageScreen = `
+// aUsageScreen is the /usage screen a probe terminal shows. Its resets are two
+// days after the clock, built from it, so they stay in the future whatever day
+// the test runs (mw-gq6.1774).
+func aUsageScreen(now time.Time) string {
+	zone, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		zone = time.UTC
+	}
+	reset := now.In(zone).AddDate(0, 0, 2).Format("Jan 2, 3:04pm")
+	return `
   Settings:  Status   Config   Usage   Stats
 
   Current week (all models)
   ██████                                             13% used
-  Resets Nov 27, 8:59am (America/New_York)
+  Resets ` + reset + ` (America/New_York)
 
   Current week (Fable)
   █████████████████████████                          50% used
-  Resets Nov 27, 8:59am (America/New_York)
+  Resets ` + reset + ` (America/New_York)
 `
+}
 
 type aUsageProbe struct{}
 
 func (aUsageProbe) Open(context.Context, string, string, int, int) error { return nil }
 func (aUsageProbe) Type(context.Context, string, string) error           { return nil }
 func (aUsageProbe) Press(context.Context, string, string) error          { return nil }
-func (aUsageProbe) Capture(context.Context, string) (string, error)      { return aUsageScreen, nil }
-func (aUsageProbe) Close(context.Context, string) error                  { return nil }
+func (aUsageProbe) Capture(context.Context, string) (string, error) {
+	return aUsageScreen(time.Now()), nil
+}
+func (aUsageProbe) Close(context.Context, string) error { return nil }
 func (aUsageProbe) Probes(context.Context) ([]application.UsageProbe, error) {
 	return nil, nil
 }
