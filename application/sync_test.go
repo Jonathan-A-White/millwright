@@ -1274,3 +1274,74 @@ func TestASyncWhoseDamageCannotBeReadGoesOnToPull(t *testing.T) {
 		t.Fatalf("expected a pull, got %+v / %v", report, err)
 	}
 }
+
+func TestSyncLeavesAFingerprintOfEachAfterLandingLineNotTheLine(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	sync.AfterLanding = func() (map[string]string, error) {
+		return map[string]string{"lampas": "npm ci && npm run build", "postern": "", "millwright": "make build"}, nil
+	}
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	got := note(t, tracker, application.AfterLandingKey("vps"))
+	if key := application.AfterLandingKey("vps"); key != "host.vps.after_landing" {
+		t.Fatalf("unexpected key %q", key)
+	}
+	fingerprints := application.ParseAfterLandingFingerprints(got)
+	if len(fingerprints) != 2 || fingerprints["lampas"] == "" || fingerprints["millwright"] == "" {
+		t.Fatalf("expected fingerprints for lampas and millwright only, got %q", got)
+	}
+	if strings.Contains(got, "npm") || strings.Contains(got, "make build") {
+		t.Fatalf("the line itself must never be published, got %q", got)
+	}
+}
+
+func TestAHostThatKeepsTheOneDatabaseLeavesTheFingerprintsOnEverySync(t *testing.T) {
+	sync, _, tracker := keeping(t)
+	backedUpAgo(t, tracker, 10*time.Minute)
+	sync.AfterLanding = func() (map[string]string, error) { return map[string]string{"lampas": "x"}, nil }
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := application.ParseAfterLandingFingerprints(note(t, tracker, application.AfterLandingKey("vps"))); got["lampas"] == "" {
+		t.Fatalf("expected a fingerprint for lampas, got %v", got)
+	}
+}
+
+func TestSyncTakesBackTheFingerprintsOfAHostThatNowHasNoAfterLandingLine(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if err := tracker.SetNote(context.Background(), application.AfterLandingKey("vps"), "lampas abc\n"); err != nil {
+		t.Fatal(err)
+	}
+	sync.AfterLanding = func() (map[string]string, error) { return map[string]string{}, nil }
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.AfterLandingKey("vps")); got != "" {
+		t.Fatalf("expected the old fingerprints gone, got %q", got)
+	}
+}
+
+func TestSyncLeavesTheFingerprintsAloneWhenTheConfigCannotBeRead(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if err := tracker.SetNote(context.Background(), application.AfterLandingKey("vps"), "lampas abc\n"); err != nil {
+		t.Fatal(err)
+	}
+	sync.AfterLanding = func() (map[string]string, error) { return nil, errors.New("bad toml") }
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.AfterLandingKey("vps")); got != "lampas abc\n" {
+		t.Fatalf("expected the old fingerprints kept, got %q", got)
+	}
+}
+
+func TestSyncThatKnowsNoAfterLandingLinesLeavesNoNoteOfThem(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.AfterLandingKey("vps")); got != "" {
+		t.Fatalf("expected no note, got %q", got)
+	}
+}

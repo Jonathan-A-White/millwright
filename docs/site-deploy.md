@@ -77,3 +77,42 @@ This replaces the old `ssh vps 'rsync -a --delete /var/www/postern/ /var/www/pos
 host after this lands; a story does not edit host config.
 `contrib/sitedeploy_test.go` holds the cases: a good copy, a copy killed midway,
 a page naming a missing asset, a first deploy, and a remote host through ssh.
+
+## Two hosts, two lines: `after-landing-agrees`
+
+An `[after_landing]` line is per-host config, so a host that lands a rig runs
+*its* line, not the Laptop's. On 2026-11-27 the Laptop's lampas line gained
+`npm run lxx:ship -- --out dist/data-lxx` and the desktop's never did; the
+desktop then landed a batch of lampas, deployed it without that step and the
+live site lost its Septuagint. Nothing had said the two lines had parted.
+
+`mw doctor after-landing-agrees` says it. On every sync a host leaves a note,
+`host.<name>.after_landing`, holding one `<rig> <sha256>` line per rig it has an
+`[after_landing]` line for: the fingerprint of the line, never the line (a line
+may name a host or a path). The check compares this host's fingerprints with each
+other Builder host's, rig by rig. It is **faulty** when they differ for a rig,
+and its text names the rig and both hosts:
+
+```
+lampas: the [after_landing] line differs between desktop (this host) and laptop; see each host's line with `grep -A30 '^\[after_landing\]' ~/.config/mw/config.toml` and make them equal (docs/site-deploy.md)
+```
+
+A host with no line for a rig is not compared for it, and a host that has left no
+note yet is not compared at all. The check only reports; it changes nothing.
+
+**When it fires:**
+
+1. On each host named, run the `grep` the text gives and compare the rig's two
+   lines.
+2. Decide which is right (usually the one that gained a step) and put that line
+   in the other host's `~/.config/mw/config.toml`, under `[after_landing]`. The
+   Mayor or the Millhand does this on the host; a story does not edit host
+   config.
+3. The next `mw sync` on that host leaves the new fingerprint, and the next
+   `mw doctor` reads ok. There is no switch to turn the check off for one rig:
+   if two hosts' lines are meant to differ, say so to the Mayor rather than
+   leave the alarm up.
+
+The factory rig's `millwright` line counts too: a host with no `millwright` key
+runs `make build` (`config.DefaultMillwrightAfterLanding`), and that is the line
+fingerprinted.

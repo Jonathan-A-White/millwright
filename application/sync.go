@@ -1004,6 +1004,13 @@ type Sync struct {
 	// will not say, leaves the other hosts to say it is unread.
 	Harness string
 
+	// AfterLanding reads this host's [after_landing] lines, by rig. Every sync
+	// that gets level leaves a fingerprint of each as AfterLandingKey, so that
+	// mw doctor's after-landing-agrees check can say when two hosts hold
+	// different lines for one rig (mw-gq6.1765). Nil leaves no note; a read that
+	// fails leaves the note as it was.
+	AfterLanding func() (map[string]string, error)
+
 	// BoostConfig is this host's ~/.config/mw/config.toml and BoostTarget the
 	// vault's hosts/boost-config.toml. On a host that is not the home, a sync
 	// whose vault half got level appends to BoostConfig any [tests],
@@ -1455,6 +1462,7 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 	s.noteTicks(ctx)
 	s.noteMwCommit(ctx)
 	s.noteHarness(ctx)
+	s.noteAfterLanding(ctx)
 
 	if report.Mode == BeadsSyncShared {
 		ClearSyncHalt(ctx, s.SyncHalts)
@@ -1588,6 +1596,7 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 	s.noteTicks(ctx)
 	s.noteMwCommit(ctx)
 	s.noteHarness(ctx)
+	s.noteAfterLanding(ctx)
 
 	retried, err := s.syncTrackerMarking(ctx, &report)
 	// A cycle that halted still went through the database, which keeps growing

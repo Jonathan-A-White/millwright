@@ -282,6 +282,11 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 			sync.Harness = application.HarnessNumber(printed)
 		}
 	}
+	if sync.AfterLanding == nil {
+		// Only a fingerprint of each line is left, for mw doctor's
+		// after-landing-agrees check (mw-gq6.1765).
+		sync.AfterLanding = config.AfterLanding
+	}
 	sync.Squash = squash
 	if sync.BoostConfig == nil && sync.BoostTarget == nil {
 		// A config or vault that cannot be placed levels nothing: the commands

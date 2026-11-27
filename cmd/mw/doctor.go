@@ -353,6 +353,20 @@ func newDoctorCmd() *cobra.Command {
 			harnessLevel.Hosts = func(ctx context.Context) ([]doctor.HarnessHost, error) {
 				return harnessHosts(ctx, mwVault(vault, host), host, retired)
 			}
+			// Another host's fingerprint of a rig's [after_landing] line that is not
+			// this host's: a landing there would deploy a different thing
+			// (mw-gq6.1765); it only reports.
+			afterLandingAgrees := doctor.NewAfterLandingAgrees(host, mwGateway(vault, host))
+			afterLandingAgrees.Own = config.AfterLanding
+			afterLandingAgrees.Book, afterLandingAgrees.Plan = cloudStatus(vault, host)
+			afterLandingAgrees.Hosts = func(ctx context.Context) ([]string, error) {
+				others, err := harnessHosts(ctx, mwVault(vault, host), host, retired)
+				names := make([]string, 0, len(others))
+				for _, other := range others {
+					names = append(names, other.Name)
+				}
+				return names, err
+			}
 			// A host [cloud.caps] names that retired_hosts retires (mw-gq6.1111); it
 			// warns only.
 			cloudCapsRetired := &doctor.CloudCapsRetired{
@@ -691,6 +705,7 @@ func newDoctorCmd() *cobra.Command {
 				unitEnv,
 				unitDrift,
 				harnessLevel,
+				afterLandingAgrees,
 				cloudCapsRetired,
 				clockSteps,
 			}, churn...), checks...)
